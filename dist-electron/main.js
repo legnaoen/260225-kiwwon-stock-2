@@ -6,6 +6,7 @@ const electron = require("electron");
 const path = require("node:path");
 const Store = require("electron-store");
 const axios = require("axios");
+const WebSocket = require("ws");
 const store$1 = new Store();
 const _KiwoomTokenManager = class _KiwoomTokenManager {
   constructor() {
@@ -100,28 +101,29 @@ class KiwoomWebSocketManager {
     if (this.isConnected) return;
     this.accessToken = token;
     this.ws = new WebSocket(SOCKET_URL);
-    this.ws.onopen = () => {
+    this.ws.on("open", () => {
       console.log("WebSocket Connected to Kiwoom");
       this.isConnected = true;
       this.login();
       this.startPing();
-    };
-    this.ws.onmessage = (event) => {
+    });
+    this.ws.on("message", (data) => {
       try {
-        const data = JSON.parse(event.data);
-        this.handleMessage(data);
+        const msgStr = data.toString();
+        const parsed = JSON.parse(msgStr);
+        this.handleMessage(parsed, msgStr);
       } catch (error) {
         console.error("WS Message Parse Error:", error);
       }
-    };
-    this.ws.onclose = () => {
+    });
+    this.ws.on("close", () => {
       console.log("WebSocket Disconnected");
       this.isConnected = false;
       this.stopPing();
-    };
-    this.ws.onerror = (error) => {
+    });
+    this.ws.on("error", (error) => {
       console.error("WebSocket Error:", error);
-    };
+    });
   }
   login() {
     if (!this.ws || !this.accessToken) return;
@@ -129,7 +131,8 @@ class KiwoomWebSocketManager {
       trnm: "LOGIN",
       token: this.accessToken
     };
-    this.ws.send(JSON.stringify(loginPacket));
+    const msg = JSON.stringify(loginPacket);
+    this.ws.send(msg);
   }
   startPing() {
     this.stopPing();
@@ -149,24 +152,29 @@ class KiwoomWebSocketManager {
       console.log("WS not connected yet. Symbols added to queue:", symbols);
       return;
     }
-    const allSymbols = Array.from(this.registeredItems);
+    let allSymbols = Array.from(this.registeredItems).map((sym) => sym.replace(/[^0-9]/g, "")).filter((sym) => sym.length === 6);
+    if (!allSymbols.includes("005930")) {
+      allSymbols.push("005930");
+    }
+    if (allSymbols.length === 0) return;
     const regPacket = {
       trnm: "REG",
       grp_no: "1",
       refresh: "1",
       data: [{
+        // <- List format
         item: allSymbols,
         type: ["0B"]
-        // 실시간 체결 데이터
+        // 주식체결 (현재가 실시간)
       }]
     };
-    this.ws.send(JSON.stringify(regPacket));
-    console.log("WS Registered All Items:", allSymbols);
+    const msg = JSON.stringify(regPacket);
+    this.ws.send(msg);
   }
-  handleMessage(data) {
+  handleMessage(data, rawStr) {
     var _a;
     if (data.trnm === "LOGIN") {
-      if (data.return_code !== 0) {
+      if (data.return_code !== "0" && data.return_code !== 0) {
         console.error("WS Login Failed:", data.return_msg);
       } else {
         console.log("WS Login Success");
@@ -177,11 +185,42 @@ class KiwoomWebSocketManager {
       return;
     }
     if (data.trnm === "PING") {
-      (_a = this.ws) == null ? void 0 : _a.send(JSON.stringify(data));
+      (_a = this.ws) == null ? void 0 : _a.send(rawStr);
       return;
     }
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("kiwoom:real-time-data", data);
+    if (data.trnm === "REAL") {
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        const realData = data.data;
+        if (Array.isArray(realData)) {
+          realData.forEach((d) => {
+            if (d.item && d.values) {
+              const originalSymbol = Array.from(this.registeredItems).find((s) => s.replace(/[^0-9]/g, "") === d.item) || d.item;
+              const mappedData = {
+                stk_cd: originalSymbol,
+                cur_prc: d.values["10"],
+                // 현재가
+                prdy_vrss: d.values["11"],
+                // 전일대비
+                prdy_ctrt: d.values["12"],
+                // 등락율
+                acml_vol: d.values["13"]
+                // 누적거래량
+              };
+              this.mainWindow.webContents.send("kiwoom:real-time-data", mappedData);
+            } else {
+              this.mainWindow.webContents.send("kiwoom:real-time-data", d);
+            }
+          });
+        } else if (realData) {
+          this.mainWindow.webContents.send("kiwoom:real-time-data", realData);
+        } else {
+          this.mainWindow.webContents.send("kiwoom:real-time-data", data);
+        }
+      }
+    } else if (data.stk_cd) {
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send("kiwoom:real-time-data", data);
+      }
     }
   }
   disconnect() {

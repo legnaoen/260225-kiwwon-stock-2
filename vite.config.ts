@@ -14,7 +14,7 @@ export default defineConfig({
         vite: {
           build: {
             rollupOptions: {
-              external: ['axios', 'electron-store'],
+              external: ['axios', 'electron-store', 'ws', 'bufferutil', 'utf-8-validate'],
             },
           },
         },

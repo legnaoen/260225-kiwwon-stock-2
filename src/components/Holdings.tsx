@@ -74,7 +74,7 @@ export default function Holdings() {
             // kt00016 provides deposit (entr_to) and other summary metrics
             const dResult = await window.electronAPI.getDeposit({ accountNo })
 
-            setDebugData(prev => ({ ...prev, holdings: hResult.data, deposit: dResult.data }))
+            setDebugData((prev: any) => ({ ...prev, holdings: hResult.data, deposit: dResult.data }))
 
             if (hResult.success && dResult.success) {
                 console.log('Holdings Result:', hResult.data);

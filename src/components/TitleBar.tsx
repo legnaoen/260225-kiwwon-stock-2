@@ -18,7 +18,11 @@ export default function TitleBar({ isDarkMode, onToggleTheme }: TitleBarProps) {
                 if (window.electronAPI?.getAccountList) {
                     const result = await window.electronAPI.getAccountList()
                     if (result.success) {
-                        const rawData = result.data?.Body || result.data
+                        let rawData = result.data?.Body || result.data
+                        if (typeof rawData === 'string') {
+                            try { rawData = JSON.parse(rawData); } catch (e) { }
+                        }
+
                         let list: string[] = []
                         if (Array.isArray(rawData)) list = rawData
                         else if (Array.isArray(rawData?.acctNo)) list = rawData.acctNo
@@ -26,7 +30,25 @@ export default function TitleBar({ isDarkMode, onToggleTheme }: TitleBarProps) {
                         else if (Array.isArray(rawData?.acct_no)) list = rawData.acct_no
                         else if (typeof rawData?.acct_no === 'string') list = [rawData.acct_no]
 
-                        const cleaned = list.map(a => String(a).trim()).filter(Boolean)
+                        let cleaned: string[] = []
+                        list.forEach(a => {
+                            const val = String(a).trim()
+                            if (val.includes(';')) {
+                                cleaned.push(...val.split(';').map(v => v.trim()).filter(Boolean))
+                            } else if (val) {
+                                cleaned.push(val)
+                            }
+                        })
+                        // Remove duplicates and keep only numbers
+                        cleaned = [...new Set(cleaned)].map(a => a.replace(/[^0-9]/g, '')).filter(Boolean)
+
+                        if (cleaned.length === 0) {
+                            // Ultimate fallback: Just scan the raw response for account-like numbers (8 or 10 digits)
+                            const strData = typeof result.data === 'string' ? result.data : JSON.stringify(result.data || {})
+                            const matches = (strData.match(/[0-9]{8,10}/g) || []) as string[]
+                            cleaned = Array.from(new Set(matches)).filter(a => a.length === 8 || a.length === 10)
+                        }
+
                         setAccountList(cleaned)
                         if (cleaned.length > 0 && !selectedAccount) {
                             setSelectedAccount(cleaned[0])

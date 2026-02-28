@@ -167,9 +167,9 @@ function AppContent() {
                     <div className="flex items-center gap-1.5 font-medium">
                         <div className={cn(
                             "w-2 h-2 rounded-full",
-                            status.connected ? "bg-rise animate-pulse" : "bg-muted-foreground"
+                            status.connected ? "bg-green-500 shadow-[0_0_5px_rgba(34,197,94,0.5)]" : "bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]"
                         )} />
-                        <span>{status.connected ? '키움 API 서비스 정상 (실전)' : 'API 연결 필요'}</span>
+                        <span>{status.connected ? '키움 API 서비스 정상 (실전)' : 'API 서비스 연결오류 또는 대기중'}</span>
                     </div>
                 </div>
                 <div>

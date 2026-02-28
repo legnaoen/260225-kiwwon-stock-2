@@ -100,20 +100,49 @@ ipcMain.handle('kiwoom:get-keys', () => {
     return store.get('kiwoom_keys') || null
 })
 
+// Retry wrapper for API calls to handle token expiration (8005 errors)
+async function makeApiRequestWithRetry(apiCallFunc: (token: string) => Promise<any>): Promise<any> {
+    try {
+        let token = await tokenManager.getAccessToken()
+        let response = await apiCallFunc(token)
+
+        // Check for Kiwoom specific token errors in HTTP 200 responses
+        if (response.data && response.data.return_code === 3 &&
+            (JSON.stringify(response.data).includes('8005') || JSON.stringify(response.data).includes('Token'))) {
+            throw new Error('TOKEN_EXPIRED')
+        }
+        return response
+    } catch (err: any) {
+        if (err.message === 'TOKEN_EXPIRED' || err.response?.status === 401 || JSON.stringify(err.response?.data || '').includes('Token') || JSON.stringify(err.response?.data || '').includes('8005')) {
+            console.log('Token invalid or expired (8005). Forcing refresh and retrying once...')
+            tokenManager.clearTokens()
+            let newToken = await tokenManager.getAccessToken(true)
+
+            let retryResponse = await apiCallFunc(newToken)
+
+            if (retryResponse.data && retryResponse.data.return_code === 3 &&
+                (JSON.stringify(retryResponse.data).includes('8005') || JSON.stringify(retryResponse.data).includes('Token'))) {
+                throw new Error('토큰 재발급 후에도 인증에 실패했습니다. 설정 탭에서 API 키(appkey/secretkey)를 다시 확인하고 등록해주세요.')
+            }
+            return retryResponse
+        }
+        throw err
+    }
+}
+
 // Kiwoom Data Fetching (REAL ONLY)
 ipcMain.handle('kiwoom:get-accounts', async () => {
     try {
-        const token = await tokenManager.getAccessToken()
         const url = `${BASE_URL}/api/dostk/acnt`
 
-        const response = await axios.post(url, {}, {
+        const response = await makeApiRequestWithRetry((t) => axios.post(url, {}, {
             headers: {
                 'Content-Type': 'application/json;charset=UTF-8',
-                'authorization': `Bearer ${token}`,
+                'authorization': `Bearer ${t}`,
                 'api-id': 'ka00001'
             }
-        })
-        console.log('IPC get-accounts: Success', response.data ? 'Data length: ' + JSON.stringify(response.data).length : 'No data');
+        }))
+        console.log('IPC get-accounts: Success', response.data ? JSON.stringify(response.data) : 'No data');
         return { success: true, data: response.data }
     } catch (error: any) {
         console.error('IPC get-accounts error:', error?.response?.data || error.message)
@@ -126,10 +155,9 @@ ipcMain.handle('kiwoom:get-accounts', async () => {
 
 ipcMain.handle('kiwoom:get-holdings', async (_event, { accountNo, nextKey = "" }: { accountNo: string, nextKey?: string }) => {
     try {
-        let token = await tokenManager.getAccessToken()
         const url = `${BASE_URL}/api/dostk/acnt`
 
-        const makeRequest = (t: string) => axios.post(url, {
+        const response = await makeApiRequestWithRetry((t: string) => axios.post(url, {
             account_no: accountNo,
             qry_tp: "1",
             dmst_stex_tp: "KRX",
@@ -141,22 +169,10 @@ ipcMain.handle('kiwoom:get-holdings', async (_event, { accountNo, nextKey = "" }
                 'cont-yn': nextKey ? 'Y' : 'N',
                 'next-key': nextKey || ""
             }
-        })
-
-        let response: any
-        try {
-            response = await makeRequest(token)
-        } catch (err: any) {
-            // If unauthorized, attempt one force refresh
-            if (err.response?.status === 401 || JSON.stringify(err.response?.data).includes('Token')) {
-                token = await tokenManager.getAccessToken(true)
-                response = await makeRequest(token)
-            } else {
-                throw err
-            }
-        }
+        }))
 
         // WebSocket 연결 시도
+        let token = await tokenManager.getAccessToken() // get current token for ws
         if (wsManager) wsManager.connect(token)
 
         console.log(`IPC get-holdings: Success for ${accountNo}`);
@@ -176,7 +192,6 @@ ipcMain.handle('kiwoom:get-holdings', async (_event, { accountNo, nextKey = "" }
 
 ipcMain.handle('kiwoom:get-deposit', async (_event, { accountNo }: { accountNo: string }) => {
     try {
-        const token = await tokenManager.getAccessToken()
         const url = `${BASE_URL}/api/dostk/acnt`
         const todayDate = new Date()
         const today = todayDate.toISOString().split('T')[0].replace(/-/g, '')
@@ -186,17 +201,17 @@ ipcMain.handle('kiwoom:get-deposit', async (_event, { accountNo }: { accountNo: 
 
         // kt00016 (일별계좌수익률상세현황요청) 사용
         // fr_dt: 시작일자, to_dt: 종료일자
-        const response = await axios.post(url, {
+        const response = await makeApiRequestWithRetry((t) => axios.post(url, {
             account_no: accountNo,
             fr_dt: sevenDaysAgo,
             to_dt: today
         }, {
             headers: {
                 'Content-Type': 'application/json;charset=UTF-8',
-                'authorization': `Bearer ${token}`,
+                'authorization': `Bearer ${t}`,
                 'api-id': 'kt00016'
             }
-        })
+        }))
         console.log(`IPC get-deposit (kt00016): Success for ${accountNo}`);
         return { success: true, data: response.data }
     } catch (error: any) {
@@ -219,24 +234,23 @@ ipcMain.handle('kiwoom:get-connection-status', async () => {
 
 ipcMain.handle('kiwoom:get-all-stocks', async (_event, { marketType }: { marketType: string }) => {
     try {
-        const token = await tokenManager.getAccessToken()
         const url = `${BASE_URL}/api/dostk/stkinfo`
         let allStocks: any[] = []
         let hasMore = true
         let nextKey = ''
 
         while (hasMore) {
-            const response = await axios.post(url, {
+            const response = await makeApiRequestWithRetry((t) => axios.post(url, {
                 mrkt_tp: marketType
             }, {
                 headers: {
                     'Content-Type': 'application/json;charset=UTF-8',
-                    'authorization': `Bearer ${token}`,
+                    'authorization': `Bearer ${t}`,
                     'api-id': 'ka10099',
                     'cont-yn': nextKey ? 'Y' : 'N',
                     'next-key': nextKey
                 }
-            })
+            }))
 
             const data = response.data
             const list = data?.Body || data?.list || []
@@ -270,19 +284,18 @@ ipcMain.handle('kiwoom:get-watchlist-symbols', () => {
 
 ipcMain.handle('kiwoom:get-watchlist', async (_event, { symbols }: { symbols: string[] }) => {
     try {
-        const token = await tokenManager.getAccessToken()
         const url = `${BASE_URL}/api/dostk/stkinfo`
 
         // ka10095: stk_cd 파라미터에 종목코드를 |로 구분하여 전달
-        const response = await axios.post(url, {
+        const response = await makeApiRequestWithRetry((t) => axios.post(url, {
             stk_cd: symbols.join('|')
         }, {
             headers: {
                 'Content-Type': 'application/json;charset=UTF-8',
-                'authorization': `Bearer ${token}`,
+                'authorization': `Bearer ${t}`,
                 'api-id': 'ka10095'
             }
-        })
+        }))
         return { success: true, data: response.data }
     } catch (error: any) {
         console.error('IPC get-watchlist error:', error?.response?.data || error.message)
@@ -295,23 +308,22 @@ ipcMain.handle('kiwoom:get-watchlist', async (_event, { symbols }: { symbols: st
 
 ipcMain.handle('kiwoom:get-chart-data', async (_event, { stk_cd, base_dt }: { stk_cd: string, base_dt?: string }) => {
     try {
-        const token = await tokenManager.getAccessToken()
         const url = `${BASE_URL}/api/dostk/chart`
 
         // base_dt가 없으면 오늘 날짜로 시뮬레이션 (API 사양에 따라 다름)
         const today = new Date().toISOString().split('T')[0].replace(/-/g, '')
 
-        const response = await axios.post(url, {
+        const response = await makeApiRequestWithRetry((t) => axios.post(url, {
             stk_cd,
             base_dt: base_dt || today,
             upd_stkpc_tp: '1' // 수정주가 구분 (1: 수정주가)
         }, {
             headers: {
                 'Content-Type': 'application/json;charset=UTF-8',
-                'authorization': `Bearer ${token}`,
+                'authorization': `Bearer ${t}`,
                 'api-id': 'ka10081'
             }
-        })
+        }))
         return { success: true, data: response.data }
     } catch (error: any) {
         console.error('IPC get-chart-data error:', error?.response?.data || error.message)

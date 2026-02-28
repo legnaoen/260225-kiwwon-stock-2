@@ -55,15 +55,6 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                     </button>
                 ))}
             </nav>
-
-            <div className="py-6 w-full flex flex-col items-center mt-auto">
-                <div title={status.connected ? '키움증권 연결됨 (실전)' : '연결 끊김'} className="p-2">
-                    <div className={cn(
-                        "w-2.5 h-2.5 rounded-full ring-4 shadow-sm",
-                        status.connected ? "bg-rise ring-rise/20 animate-pulse" : "bg-muted-foreground ring-muted-foreground/20"
-                    )} />
-                </div>
-            </div>
         </aside>
     )
 }

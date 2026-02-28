@@ -3,7 +3,10 @@ import { Search, Plus, X, RefreshCw, AlertCircle, TrendingUp, TrendingDown } fro
 import { cn } from '../utils'
 import { matchChoseong } from '../utils/hangul'
 import { useLayoutStore } from '../store/useLayoutStore'
+import { useSignalStore } from '../store/useSignalStore'
+import { useBackgroundSignalFetcher } from '../hooks/useBackgroundSignalFetcher'
 import { StockChart } from './StockChart'
+import { StockNotes } from './StockNotes'
 
 interface WatchlistItem {
     code: string
@@ -21,6 +24,9 @@ interface MasterStock {
 }
 
 export default function Watchlist() {
+    const { previous19DaysSum } = useSignalStore()
+    const { enqueueSymbols } = useBackgroundSignalFetcher()
+
     const [masterList, setMasterList] = useState<MasterStock[]>([])
     const [watchlist, setWatchlist] = useState<WatchlistItem[]>([])
     const [isLoadingMaster, setIsLoadingMaster] = useState(false)
@@ -95,7 +101,11 @@ export default function Watchlist() {
             const result = await window.electronAPI.getWatchlist(targetSymbols)
             if (result.success) {
                 console.log('Watchlist Result:', result.data);
-                const body = result.data?.Body || result.data
+
+                let rawData = result.data;
+                if (typeof rawData === 'string') try { rawData = JSON.parse(rawData); } catch (e) { }
+
+                const body = rawData?.Body || rawData
 
                 // Try various field names for watchlist list
                 let rawList = body?.atn_stk_infr || body?.output1 || body?.list || []
@@ -105,8 +115,8 @@ export default function Watchlist() {
                     code: item.stk_cd || item.pdno || '',
                     name: item.stk_nm || item.prdt_nm || '',
                     price: Math.abs(Number(item.cur_prc || item.prpr || 0)),
-                    change: String(item.prdy_vrss || item.prdy_vrss || '0'),
-                    changeRate: Number(item.prdy_ctrt || item.prdy_ctrt || 0),
+                    change: String(item.pred_pre || item.prdy_vrss || '0'),
+                    changeRate: Number(item.flu_rt || item.prdy_ctrt || 0),
                     volume: Number(item.trde_qty || item.acml_vol || 0)
                 }))
 
@@ -115,6 +125,7 @@ export default function Watchlist() {
                     setSelectedStock({ code: mapped[0].code, name: mapped[0].name })
                 }
                 window.electronAPI.wsRegister(targetSymbols)
+                enqueueSymbols(targetSymbols)
             } else {
                 setError(result.error?.message || result.error || '관심종목 데이터를 가져오지 못했습니다.');
             }
@@ -133,7 +144,10 @@ export default function Watchlist() {
         const cleanup = window.electronAPI.onRealTimeData((wsData: any) => {
             if (wsData.stk_cd) {
                 setWatchlist(prev => prev.map(item => {
-                    if (item.code === wsData.stk_cd) {
+                    const itemNumericCode = item.code.replace(/[^0-9]/g, '')
+                    const wsNumericCode = wsData.stk_cd.replace(/[^0-9]/g, '')
+
+                    if (itemNumericCode === wsNumericCode) {
                         return {
                             ...item,
                             price: wsData.cur_prc ? Math.abs(Number(wsData.cur_prc)) : item.price,
@@ -255,51 +269,66 @@ export default function Watchlist() {
                 {/* Left side: Watchlist List */}
                 <div className="flex-1 w-[45%] flex flex-col border-r border-border overflow-hidden bg-background shrink-0 min-w-[350px] relative">
                     <div className="overflow-auto flex-1">
-                        <table className="w-full text-left text-sm border-collapse">
+                        <table className="w-full table-fixed text-left text-sm border-collapse tabular-nums">
                             <thead className="bg-muted/30 border-b border-border sticky top-0 z-10">
                                 <tr>
                                     <th className="px-4 py-3 font-semibold text-xs text-muted-foreground w-auto">종목명</th>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[100px]">현재가</th>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[80px]">등락률</th>
+                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[120px]">현재가</th>
+                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[100px]">등락률</th>
                                     <th className="px-4 py-3 w-10"></th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
-                                {watchlist.map((stock) => (
-                                    <tr
-                                        key={stock.code}
-                                        className={cn(
-                                            "hover:bg-muted/40 transition-colors cursor-pointer group",
-                                            selectedStock?.code === stock.code && "bg-primary/5"
-                                        )}
-                                        onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
-                                    >
-                                        <td className="px-4 py-2.5">
-                                            <div className="flex flex-col">
-                                                <span className={cn("font-bold text-[13px]", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
-                                                <span className="text-[10px] text-muted-foreground font-mono">{stock.code}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-2.5 text-right font-mono font-bold text-[13px]">₩ {stock.price.toLocaleString()}</td>
-                                        <td className="px-4 py-2.5 text-right">
-                                            <div className={cn(
-                                                "inline-flex items-center gap-1 font-bold text-[13px]",
-                                                stock.changeRate > 0 ? "text-rise" : stock.changeRate < 0 ? "text-fall" : "text-muted-foreground"
-                                            )}>
-                                                {stock.changeRate > 0 ? <TrendingUp size={14} /> : stock.changeRate < 0 ? <TrendingDown size={14} /> : null}
-                                                <span>{stock.changeRate > 0 ? '+' : ''}{stock.changeRate}%</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-2 py-2.5 text-right">
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); removeStock(stock.code) }}
-                                                className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
-                                            >
-                                                <X size={14} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
+                                {watchlist.map((stock) => {
+                                    const numericCode = stock.code.replace(/[^0-9]/g, '')
+                                    const sum19 = previous19DaysSum[numericCode]
+                                    let isDepressed = false
+                                    if (sum19 !== undefined && sum19 > 0) {
+                                        const ma20 = (sum19 + stock.price) / 20
+                                        if ((stock.price / ma20) * 100 < 95) isDepressed = true
+                                    }
+
+                                    return (
+                                        <tr
+                                            key={stock.code}
+                                            className={cn(
+                                                "hover:bg-muted/40 transition-colors cursor-pointer group",
+                                                selectedStock?.code === stock.code && "bg-primary/5"
+                                            )}
+                                            onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
+                                        >
+                                            <td className="px-4 py-2.5">
+                                                <div className="flex flex-col gap-0.5">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className={cn("font-bold text-[13px] leading-none", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
+                                                        {isDepressed && <span className="text-[10px] font-bold bg-[#a855f7] text-white px-1 py-0.5 rounded shadow-sm leading-none">침체</span>}
+                                                    </div>
+                                                    <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right font-mono font-bold text-[13px] whitespace-nowrap overflow-hidden">
+                                                ₩ {stock.price.toLocaleString()}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right whitespace-nowrap overflow-hidden">
+                                                <div className={cn(
+                                                    "inline-flex items-center gap-1 font-bold text-[13px]",
+                                                    stock.changeRate > 0 ? "text-rise" : stock.changeRate < 0 ? "text-fall" : "text-muted-foreground"
+                                                )}>
+                                                    {stock.changeRate > 0 ? <TrendingUp size={14} /> : stock.changeRate < 0 ? <TrendingDown size={14} /> : null}
+                                                    <span>{stock.changeRate > 0 ? '+' : ''}{stock.changeRate}%</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-2 py-2.5 text-right">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); removeStock(stock.code) }}
+                                                    className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
                                 {watchlist.length === 0 && !isLoadingData && (
                                     <tr>
                                         <td colSpan={4} className="px-4 py-12 text-center text-muted-foreground">등록된 관심종목이 없습니다.</td>
@@ -340,14 +369,7 @@ export default function Watchlist() {
                             <button className="text-[13px] font-bold text-muted-foreground/60 hover:text-foreground pb-3 -mb-[1.5px] transition-colors">예비 2</button>
                         </div>
                         <div className="flex-1 flex flex-col p-4 bg-muted/10 relative">
-                            <div className="absolute top-4 right-4">
-                                <button className="bg-blue-500 hover:bg-blue-600 text-white text-[13px] font-bold px-4 py-1.5 rounded-md shadow-sm transition-colors">
-                                    + 노트 추가
-                                </button>
-                            </div>
-                            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/70 text-[13px] min-h-[150px]">
-                                <p>아직 노트가 없습니다.</p>
-                            </div>
+                            <StockNotes stockCode={selectedStock?.code || ''} />
                         </div>
                     </div>
                 </div>

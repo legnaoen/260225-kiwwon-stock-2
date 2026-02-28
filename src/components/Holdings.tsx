@@ -3,7 +3,10 @@ import { AlertCircle, RefreshCw } from 'lucide-react'
 import { cn, parseNumber } from '../utils'
 import { useAccountStore } from '../store/useAccountStore'
 import { useLayoutStore } from '../store/useLayoutStore'
+import { useSignalStore } from '../store/useSignalStore'
+import { useBackgroundSignalFetcher } from '../hooks/useBackgroundSignalFetcher'
 import { StockChart } from './StockChart'
+import { StockNotes } from './StockNotes'
 
 interface Stock {
     code: string
@@ -25,6 +28,9 @@ interface Summary {
 
 export default function Holdings() {
     const { selectedAccount, setSelectedAccount, accountList, setAccountList } = useAccountStore()
+    const { previous19DaysSum } = useSignalStore()
+    const { enqueueSymbols } = useBackgroundSignalFetcher()
+
     const [data, setData] = useState<{ holdings: Stock[], summary: Summary }>({
         holdings: [],
         summary: { totalPurchase: 0, totalEvaluation: 0, totalProfit: 0, profitRate: 0, deposit: 0 }
@@ -64,9 +70,9 @@ export default function Holdings() {
         document.body.style.cursor = 'row-resize'
     }
 
-    const fetchData = async (accountNo: string) => {
+    const fetchData = async (accountNo: string, showLoading = true) => {
         if (!accountNo || !window.electronAPI?.getHoldings) return
-        setIsLoading(true)
+        if (showLoading) setIsLoading(true)
         setError(null)
         try {
             console.log('Holdings: Fetching data for account:', accountNo)
@@ -80,16 +86,21 @@ export default function Holdings() {
                 console.log('Holdings Result:', hResult.data);
                 console.log('Deposit Result:', dResult.data);
 
-                const hBody = hResult.data?.Body || hResult.data
-                const dBody = dResult.data?.Body || dResult.data
+                let hData = hResult.data;
+                let dData = dResult.data;
+                if (typeof hData === 'string') try { hData = JSON.parse(hData); } catch (e) { }
+                if (typeof dData === 'string') try { dData = JSON.parse(dData); } catch (e) { }
+
+                const hBody = hData?.Body || hData
+                const dBody = dData?.Body || dData
 
                 // Use the key from the Python reference for holdings list
-                const listData = hBody.acnt_evlt_remn_indv_tot || hBody.output1 || hBody.list || hBody.grid || []
+                const listData = hBody?.acnt_evlt_remn_indv_tot || hBody?.output1 || hBody?.list || hBody?.grid || []
                 const list = Array.isArray(listData) ? listData : [listData].filter(Boolean)
 
                 // Pick the most recent record from kt00016 for current deposit
-                const dList = dBody.daily_acnt_prft_tot || dBody.list || dBody.output1 || []
-                const dRecord = Array.isArray(dList) && dList.length > 0 ? dList[dList.length - 1] : dBody
+                const dList = dBody?.daily_acnt_prft_tot || dBody?.list || dBody?.output1 || []
+                const dRecord = Array.isArray(dList) && dList.length > 0 ? dList[dList.length - 1] : (Object.keys(dBody || {}).length > 0 ? dBody : dData)
 
                 const deposit = parseNumber(dRecord?.entr_to || dBody?.entr_to || dBody?.d2_entra || 0)
 
@@ -118,10 +129,11 @@ export default function Holdings() {
                     setSelectedStock({ code: holdings[0].code, name: holdings[0].name })
                 }
 
-                // Register for real-time
+                // Register for real-time and background signal check
                 const symbols = holdings.map((h: any) => h.code).filter((c: any) => !!c)
                 if (symbols.length > 0) {
                     window.electronAPI.wsRegister(symbols)
+                    enqueueSymbols(symbols)
                 }
             } else {
                 const hError = hResult.error?.message || JSON.stringify(hResult.error) || '보유종목 조회 실패'
@@ -132,7 +144,7 @@ export default function Holdings() {
             console.error('FetchData error:', err)
             setError('데이터를 가져오는 중 오류가 발생했습니다: ' + err.message)
         } finally {
-            setIsLoading(false)
+            if (showLoading) setIsLoading(false)
         }
     }
 
@@ -141,32 +153,27 @@ export default function Holdings() {
         const cleanup = window.electronAPI.onRealTimeData((wsData: any) => {
             if (wsData.stk_cd) {
                 setData(prev => {
+                    let hasChanged = false
                     const newHoldings = prev.holdings.map(item => {
-                        if (item.code === wsData.stk_cd) {
+                        // Compare numeric codes to avoid issues with 'A' prefixes
+                        const itemNumericCode = item.code.replace(/[^0-9]/g, '')
+                        const wsNumericCode = wsData.stk_cd.replace(/[^0-9]/g, '')
+
+                        if (itemNumericCode === wsNumericCode) {
                             const newPrice = wsData.cur_prc ? Math.abs(Number(wsData.cur_prc)) : item.price
-                            const newValue = newPrice * item.qty
-                            let newProfit = item.profit
-                            if (item.avgPrice > 0) {
-                                const rate = ((newPrice - item.avgPrice) / item.avgPrice) * 100
-                                newProfit = (rate >= 0 ? '+' : '') + rate.toFixed(2)
+                            if (newPrice !== item.price) {
+                                hasChanged = true
+                                // 수동 계산 폐기: 평가금액(value)과 수익률(profit)은 
+                                // 10초마다 도는 kt00018 백그라운드 API가 훨씬 더 정확하게 채워주므로 건드리지 않음.
+                                return { ...item, price: newPrice }
                             }
-                            return { ...item, price: newPrice, value: newValue, profit: newProfit }
                         }
                         return item
                     })
-                    const totalEval = newHoldings.reduce((sum, h) => sum + h.value, 0)
-                    const totalProfit = totalEval - prev.summary.totalPurchase
-                    const totalRate = prev.summary.totalPurchase > 0 ? (totalProfit / prev.summary.totalPurchase) * 100 : 0
-                    return {
-                        ...prev,
-                        holdings: newHoldings,
-                        summary: {
-                            ...prev.summary,
-                            totalEvaluation: totalEval,
-                            totalProfit: totalProfit,
-                            profitRate: Number(totalRate.toFixed(2))
-                        }
-                    }
+
+                    if (!hasChanged) return prev
+
+                    return { ...prev, holdings: newHoldings }
                 })
             }
         })
@@ -189,11 +196,20 @@ export default function Holdings() {
         return () => window.removeEventListener('kiwoom:refresh-data', handleRefresh)
     }, [selectedAccount])
 
-    // React to global account changes
+    // React to global account changes and setup robust background polling
     useEffect(() => {
         if (selectedAccount) {
-            console.log('Holdings: Account changed/initialized to:', selectedAccount)
-            fetchData(selectedAccount)
+            console.log('Holdings: Account selected. Fetching exact kt00018 data...')
+            fetchData(selectedAccount, true)
+
+            // 10-second automatic polling timer
+            const intervalId = setInterval(() => {
+                // Fetch exact evaluations and profits SILENTLY in the background
+                fetchData(selectedAccount, false)
+            }, 10000)
+
+            // Clean up the timer immediately if user leaves Holdings screen or changes account
+            return () => clearInterval(intervalId)
         }
     }, [selectedAccount])
 
@@ -211,24 +227,26 @@ export default function Holdings() {
                     {/* 계좌 정보 등의 요약 카드화 */}
                     <div className="bg-background border border-border rounded-xl px-5 py-4 flex flex-col gap-2 min-w-[200px] shadow-sm">
                         <span className="text-muted-foreground text-xs font-medium">평가금액</span>
-                        <span className="text-lg font-bold">₩ {data.summary.totalEvaluation.toLocaleString()}</span>
+                        <span className="text-lg font-bold text-right">₩ {data.summary.totalEvaluation.toLocaleString()}</span>
                     </div>
 
                     <div className="bg-background border border-border rounded-xl px-5 py-4 flex flex-col gap-2 min-w-[200px] shadow-sm">
-                        <span className="text-muted-foreground text-xs font-medium">평가손익</span>
-                        <div className="flex items-center gap-2">
-                            <span className={cn("text-lg font-bold", data.summary.totalProfit >= 0 ? "text-rise" : "text-fall")}>
-                                {data.summary.totalProfit >= 0 ? '+' : ''}₩ {data.summary.totalProfit.toLocaleString()}
-                            </span>
+                        <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground text-xs font-medium">평가손익</span>
                             <span className={cn("text-xs font-bold px-1.5 py-0.5 rounded", data.summary.profitRate >= 0 ? "bg-rise/10 text-rise" : "bg-fall/10 text-fall")}>
                                 {data.summary.profitRate >= 0 ? '+' : ''}{data.summary.profitRate}%
+                            </span>
+                        </div>
+                        <div className="flex justify-end">
+                            <span className={cn("text-lg font-bold", data.summary.totalProfit >= 0 ? "text-rise" : "text-fall")}>
+                                {data.summary.totalProfit >= 0 ? '+' : ''}₩ {data.summary.totalProfit.toLocaleString()}
                             </span>
                         </div>
                     </div>
 
                     <div className="bg-background border border-border rounded-xl px-5 py-4 flex flex-col gap-2 min-w-[200px] shadow-sm">
                         <span className="text-muted-foreground text-xs font-medium">예수금</span>
-                        <span className="text-lg font-bold text-primary">₩ {data.summary.deposit.toLocaleString()}</span>
+                        <span className="text-lg font-bold text-primary text-right">₩ {data.summary.deposit.toLocaleString()}</span>
                     </div>
                 </div>
             </div>
@@ -252,40 +270,59 @@ export default function Holdings() {
                 {/* Left side: Holdings List */}
                 <div className="flex-1 w-[45%] flex flex-col border-r border-border overflow-hidden bg-background shrink-0 min-w-[350px]">
                     <div className="overflow-auto flex-1">
-                        <table className="w-full text-left text-sm border-collapse">
+                        <table className="w-full table-fixed text-left text-sm border-collapse tabular-nums">
                             <thead className="bg-muted/30 border-b border-border sticky top-0 z-10">
                                 <tr>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground">종목명</th>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[100px]">현재가</th>
+                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground w-auto">종목명</th>
+                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[120px]">현재가</th>
                                     <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[80px]">수량</th>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[100px]">평가금액</th>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[80px]">수익률</th>
+                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[120px]">평가금액</th>
+                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[90px]">수익률</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
-                                {data.holdings.map((stock) => (
-                                    <tr
-                                        key={stock.code}
-                                        className={cn(
-                                            "hover:bg-muted/40 transition-colors cursor-pointer group",
-                                            selectedStock?.code === stock.code && "bg-primary/5"
-                                        )}
-                                        onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
-                                    >
-                                        <td className="px-4 py-2.5">
-                                            <div className="flex flex-col">
-                                                <span className={cn("font-bold text-[13px]", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
-                                                <span className="text-[10px] text-muted-foreground font-mono">{stock.code}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-2.5 text-right font-mono font-semibold text-[13px]">₩ {stock.price.toLocaleString()}</td>
-                                        <td className="px-4 py-2.5 text-right text-muted-foreground text-[13px]">{stock.qty.toLocaleString()}</td>
-                                        <td className="px-4 py-2.5 text-right font-medium text-[13px]">₩ {stock.value.toLocaleString()}</td>
-                                        <td className={cn("px-4 py-2.5 text-right font-bold text-[13px]", stock.profit.startsWith('+') ? "text-rise" : "text-fall")}>
-                                            {stock.profit}%
-                                        </td>
-                                    </tr>
-                                ))}
+                                {data.holdings.map((stock) => {
+                                    const numericCode = stock.code.replace(/[^0-9]/g, '')
+                                    const sum19 = previous19DaysSum[numericCode]
+                                    let isDepressed = false
+                                    if (sum19 !== undefined && sum19 > 0) {
+                                        const ma20 = (sum19 + stock.price) / 20
+                                        if ((stock.price / ma20) * 100 < 95) isDepressed = true
+                                    }
+
+                                    return (
+                                        <tr
+                                            key={stock.code}
+                                            className={cn(
+                                                "hover:bg-muted/40 transition-colors cursor-pointer group",
+                                                selectedStock?.code === stock.code && "bg-primary/5"
+                                            )}
+                                            onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
+                                        >
+                                            <td className="px-4 py-2.5">
+                                                <div className="flex flex-col gap-0.5">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className={cn("font-bold text-[13px] leading-none", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
+                                                        {isDepressed && <span className="text-[10px] font-bold bg-[#a855f7] text-white px-1 py-0.5 rounded shadow-sm leading-none">침체</span>}
+                                                    </div>
+                                                    <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right font-mono font-semibold text-[13px] whitespace-nowrap overflow-hidden text-clip">
+                                                ₩ {stock.price.toLocaleString()}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right text-muted-foreground text-[13px] whitespace-nowrap overflow-hidden text-clip">
+                                                {stock.qty.toLocaleString()}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right font-medium text-[13px] whitespace-nowrap overflow-hidden text-clip">
+                                                ₩ {stock.value.toLocaleString()}
+                                            </td>
+                                            <td className={cn("px-4 py-2.5 text-right font-bold text-[13px] whitespace-nowrap overflow-hidden text-clip", stock.profit.startsWith('+') ? "text-rise" : "text-fall")}>
+                                                {stock.profit}%
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
                                 {data.holdings.length === 0 && !isLoading && (
                                     <tr>
                                         <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">보유 종목이 없습니다.</td>
@@ -323,14 +360,7 @@ export default function Holdings() {
                             <button className="text-[13px] font-bold text-muted-foreground/60 hover:text-foreground pb-3 -mb-[1.5px] transition-colors">예비 2</button>
                         </div>
                         <div className="flex-1 flex flex-col p-4 bg-muted/10 relative">
-                            <div className="absolute top-4 right-4">
-                                <button className="bg-blue-500 hover:bg-blue-600 text-white text-[13px] font-bold px-4 py-1.5 rounded-md shadow-sm transition-colors">
-                                    + 노트 추가
-                                </button>
-                            </div>
-                            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/70 text-[13px] min-h-[150px]">
-                                <p>아직 노트가 없습니다.</p>
-                            </div>
+                            <StockNotes stockCode={selectedStock?.code || ''} />
                         </div>
                     </div>
                 </div>

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react'
-import { createChart, IChartApi, ISeriesApi, Time, CandlestickSeries, LineSeries } from 'lightweight-charts'
+import { createChart, IChartApi, ISeriesApi, Time, CandlestickSeries, SeriesMarker, createSeriesMarkers } from 'lightweight-charts'
 import { RefreshCw, AlertCircle } from 'lucide-react'
 import { cn } from '../utils'
+import { useSignalStore } from '../store/useSignalStore'
 
 interface ChartDataPoint {
     time: Time
@@ -24,6 +25,7 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
 
     const chartRef = useRef<IChartApi | null>(null)
     const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
+    const markersPluginRef = useRef<any>(null)
 
     const chartDataRef = useRef<ChartDataPoint[]>([])
 
@@ -131,6 +133,44 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
                 if (uniqueData.length > 0) {
                     chartDataRef.current = uniqueData
                     candleSeriesRef.current.setData(uniqueData)
+
+                    // Calculate Disparity and assign Depression Markers
+                    const markers: SeriesMarker<Time>[] = []
+                    for (let i = 0; i < uniqueData.length; i++) {
+                        if (i < 19) continue
+                        let sum = 0
+                        for (let j = 0; j < 20; j++) {
+                            sum += uniqueData[i - j].close
+                        }
+                        const ma20 = sum / 20
+                        const disparity = (uniqueData[i].close / ma20) * 100
+
+                        if (disparity < 95) {
+                            markers.push({
+                                time: uniqueData[i].time,
+                                position: 'belowBar',
+                                color: '#a855f7',
+                                shape: 'arrowUp',
+                                size: 1
+                            })
+                        }
+                    }
+                    if (!markersPluginRef.current) {
+                        markersPluginRef.current = createSeriesMarkers(candleSeriesRef.current, markers)
+                    } else {
+                        markersPluginRef.current.setMarkers(markers)
+                    }
+
+                    // Store the sum of the last 19 complete days for other components
+                    if (uniqueData.length >= 20) {
+                        let sum = 0
+                        // Since uniqueData is sorted oldest to newest, the last one is today (index: length - 1)
+                        // So the previous 19 days are from (length - 20) to (length - 2)
+                        for (let j = uniqueData.length - 20; j < uniqueData.length - 1; j++) {
+                            sum += uniqueData[j].close
+                        }
+                        useSignalStore.getState().setPrevious19DaysSum(stockCode, sum)
+                    }
 
                     const totalPoints = uniqueData.length
                     if (totalPoints > 80) {

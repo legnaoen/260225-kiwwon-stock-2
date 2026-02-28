@@ -7,6 +7,9 @@ import { useSignalStore } from '../store/useSignalStore'
 import { useBackgroundSignalFetcher } from '../hooks/useBackgroundSignalFetcher'
 import { StockChart } from './StockChart'
 import { StockNotes } from './StockNotes'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './ui/Table'
+import { Card, CardContent } from './ui/Card'
+import { ProfitBadge, ProfitText } from './ui/ProfitDisplay'
 
 interface Stock {
     code: string
@@ -225,29 +228,31 @@ export default function Holdings() {
                     )}
 
                     {/* 계좌 정보 등의 요약 카드화 */}
-                    <div className="bg-background border border-border rounded-xl px-5 py-4 flex flex-col gap-2 min-w-[200px] shadow-sm">
-                        <span className="text-muted-foreground text-xs font-medium">평가금액</span>
-                        <span className="text-lg font-bold text-right">₩ {data.summary.totalEvaluation.toLocaleString()}</span>
-                    </div>
+                    <Card className="min-w-[200px]">
+                        <CardContent>
+                            <span className="text-muted-foreground text-xs font-medium">평가금액</span>
+                            <span className="text-lg font-bold text-right">₩ {data.summary.totalEvaluation.toLocaleString()}</span>
+                        </CardContent>
+                    </Card>
 
-                    <div className="bg-background border border-border rounded-xl px-5 py-4 flex flex-col gap-2 min-w-[200px] shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground text-xs font-medium">평가손익</span>
-                            <span className={cn("text-xs font-bold px-1.5 py-0.5 rounded", data.summary.profitRate >= 0 ? "bg-rise/10 text-rise" : "bg-fall/10 text-fall")}>
-                                {data.summary.profitRate >= 0 ? '+' : ''}{data.summary.profitRate}%
-                            </span>
-                        </div>
-                        <div className="flex justify-end">
-                            <span className={cn("text-lg font-bold", data.summary.totalProfit >= 0 ? "text-rise" : "text-fall")}>
-                                {data.summary.totalProfit >= 0 ? '+' : ''}₩ {data.summary.totalProfit.toLocaleString()}
-                            </span>
-                        </div>
-                    </div>
+                    <Card className="min-w-[200px]">
+                        <CardContent>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted-foreground text-xs font-medium">평가손익</span>
+                                <ProfitBadge value={data.summary.profitRate} suffix="%" />
+                            </div>
+                            <div className="flex justify-end">
+                                <ProfitText value={data.summary.totalProfit} prefix="₩ " className="text-lg" />
+                            </div>
+                        </CardContent>
+                    </Card>
 
-                    <div className="bg-background border border-border rounded-xl px-5 py-4 flex flex-col gap-2 min-w-[200px] shadow-sm">
-                        <span className="text-muted-foreground text-xs font-medium">예수금</span>
-                        <span className="text-lg font-bold text-primary text-right">₩ {data.summary.deposit.toLocaleString()}</span>
-                    </div>
+                    <Card className="min-w-[200px]">
+                        <CardContent>
+                            <span className="text-muted-foreground text-xs font-medium">예수금</span>
+                            <span className="text-lg font-bold text-primary text-right">₩ {data.summary.deposit.toLocaleString()}</span>
+                        </CardContent>
+                    </Card>
                 </div>
             </div>
 
@@ -269,68 +274,66 @@ export default function Holdings() {
             <div className="flex-1 min-h-0 flex bg-background border-t border-border overflow-hidden">
                 {/* Left side: Holdings List */}
                 <div className="flex-1 w-[45%] flex flex-col border-r border-border overflow-hidden bg-background shrink-0 min-w-[350px]">
-                    <div className="overflow-auto flex-1">
-                        <table className="w-full table-fixed text-left text-sm border-collapse tabular-nums">
-                            <thead className="bg-muted/30 border-b border-border sticky top-0 z-10">
-                                <tr>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground w-auto">종목명</th>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[120px]">현재가</th>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[80px]">수량</th>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[120px]">평가금액</th>
-                                    <th className="px-4 py-3 font-semibold text-xs text-muted-foreground text-right w-[90px]">수익률</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border">
-                                {data.holdings.map((stock) => {
-                                    const numericCode = stock.code.replace(/[^0-9]/g, '')
-                                    const sum19 = previous19DaysSum[numericCode]
-                                    let isDepressed = false
-                                    if (sum19 !== undefined && sum19 > 0) {
-                                        const ma20 = (sum19 + stock.price) / 20
-                                        if ((stock.price / ma20) * 100 < 95) isDepressed = true
-                                    }
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="w-auto">종목명</TableHead>
+                                <TableHead className="text-right w-[120px]">현재가</TableHead>
+                                <TableHead className="text-right w-[80px]">수량</TableHead>
+                                <TableHead className="text-right w-[120px]">평가금액</TableHead>
+                                <TableHead className="text-right w-[90px]">수익률</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {data.holdings.map((stock) => {
+                                const numericCode = stock.code.replace(/[^0-9]/g, '')
+                                const sum19 = previous19DaysSum[numericCode]
+                                let isDepressed = false
+                                if (sum19 !== undefined && sum19 > 0) {
+                                    const ma20 = (sum19 + stock.price) / 20
+                                    if ((stock.price / ma20) * 100 < 95) isDepressed = true
+                                }
 
-                                    return (
-                                        <tr
-                                            key={stock.code}
-                                            className={cn(
-                                                "hover:bg-muted/40 transition-colors cursor-pointer group",
-                                                selectedStock?.code === stock.code && "bg-primary/5"
-                                            )}
-                                            onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
-                                        >
-                                            <td className="px-4 py-2.5">
-                                                <div className="flex flex-col gap-0.5">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <span className={cn("font-bold text-[13px] leading-none", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
-                                                        {isDepressed && <span className="text-[10px] font-bold bg-[#a855f7] text-white px-1 py-0.5 rounded shadow-sm leading-none">침체</span>}
-                                                    </div>
-                                                    <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
+                                return (
+                                    <tr
+                                        key={stock.code}
+                                        className={cn(
+                                            "hover:bg-muted/40 transition-colors cursor-pointer group",
+                                            selectedStock?.code === stock.code && "bg-primary/5"
+                                        )}
+                                        onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
+                                    >
+                                        <TableCell>
+                                            <div className="flex flex-col gap-0.5">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className={cn("font-bold text-[13px] leading-none", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
+                                                    {isDepressed && <span className="text-[10px] font-bold bg-[#a855f7] text-white px-1 py-0.5 rounded shadow-sm leading-none">침체</span>}
                                                 </div>
-                                            </td>
-                                            <td className="px-4 py-2.5 text-right font-mono font-semibold text-[13px] whitespace-nowrap overflow-hidden text-clip">
-                                                ₩ {stock.price.toLocaleString()}
-                                            </td>
-                                            <td className="px-4 py-2.5 text-right text-muted-foreground text-[13px] whitespace-nowrap overflow-hidden text-clip">
-                                                {stock.qty.toLocaleString()}
-                                            </td>
-                                            <td className="px-4 py-2.5 text-right font-medium text-[13px] whitespace-nowrap overflow-hidden text-clip">
-                                                ₩ {stock.value.toLocaleString()}
-                                            </td>
-                                            <td className={cn("px-4 py-2.5 text-right font-bold text-[13px] whitespace-nowrap overflow-hidden text-clip", stock.profit.startsWith('+') ? "text-rise" : "text-fall")}>
-                                                {stock.profit}%
-                                            </td>
-                                        </tr>
-                                    )
-                                })}
-                                {data.holdings.length === 0 && !isLoading && (
-                                    <tr>
-                                        <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">보유 종목이 없습니다.</td>
+                                                <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="text-right font-mono font-semibold text-[13px] whitespace-nowrap overflow-hidden text-clip">
+                                            ₩ {stock.price.toLocaleString()}
+                                        </TableCell>
+                                        <TableCell className="text-right text-muted-foreground text-[13px] whitespace-nowrap overflow-hidden text-clip">
+                                            {stock.qty.toLocaleString()}
+                                        </TableCell>
+                                        <TableCell className="text-right font-medium text-[13px] whitespace-nowrap overflow-hidden text-clip">
+                                            ₩ {stock.value.toLocaleString()}
+                                        </TableCell>
+                                        <TableCell className="text-right whitespace-nowrap overflow-hidden text-clip">
+                                            <ProfitText value={stock.profit} suffix="%" className="text-[13px] font-bold" />
+                                        </TableCell>
                                     </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                                )
+                            })}
+                            {data.holdings.length === 0 && !isLoading && (
+                                <TableRow>
+                                    <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">보유 종목이 없습니다.</TableCell>
+                                </TableRow>
+                            )}
+                        </TableBody>
+                    </Table>
                 </div>
 
                 {/* Right side: Chart and Notes */}
@@ -365,6 +368,6 @@ export default function Holdings() {
                     </div>
                 </div>
             </div>
-        </div>
+        </div >
     )
 }

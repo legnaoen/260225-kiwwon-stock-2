@@ -3,11 +3,13 @@ import path from 'node:path'
 import Store from 'electron-store'
 import { KiwoomService } from './services/KiwoomService'
 import { AutoTradeService } from './services/AutoTradeService'
+import { TelegramService } from './services/TelegramService'
 import { eventBus, SystemEvent } from './utils/EventBus'
 
 const store = new Store()
 const kiwoomService = KiwoomService.getInstance()
 const autoTradeService = AutoTradeService.getInstance()
+const telegramService = TelegramService.getInstance()
 
 // Load initial settings to the service
 const initialSettings = store.get('autotrade_settings')
@@ -225,4 +227,24 @@ ipcMain.handle('kiwoom:get-condition-list', () => {
 
 ipcMain.handle('kiwoom:start-condition-search', (_event, seq: string) => {
     return kiwoomService.startConditionSearch(seq)
+})
+
+// === Telegram Settings IPC Handlers ===
+ipcMain.handle('telegram:save-settings', (_event, settings: { botToken: string, chatId: string }) => {
+    store.set('telegram_settings', settings)
+    telegramService.reloadConfig()
+    return { success: true }
+})
+
+ipcMain.handle('telegram:get-settings', () => {
+    return store.get('telegram_settings') || null
+})
+
+ipcMain.handle('telegram:test-message', async () => {
+    try {
+        await telegramService.sendMessage('✅ [테스트 메시지] 안티그래비티 PC앱과 텔레그램 연동이 정상적으로 완료되었습니다!');
+        return { success: true };
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
 })

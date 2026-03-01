@@ -19,6 +19,15 @@ export class AutoTradeService {
     private modifyQueueProcessorTimer: NodeJS.Timeout | null = null;
     private condSellStepMap = new Map<string, number>();
 
+    // 매수 세션 집계용 변수
+    private buySessionStats = {
+        totalTarget: 0,
+        pending: 0,
+        successCount: 0,
+        successAmount: 0,
+        failCount: 0
+    };
+
     private constructor() {
         // 조건검색 결과 수신 이벤트 리스너
         eventBus.on(SystemEvent.CONDITION_MATCHED, this.handleConditionMatched.bind(this));
@@ -215,24 +224,42 @@ export class AutoTradeService {
 
         this.broadcastLog(`${this.orderQueue.length} 건 매수 큐 투입 (스로틀링 처리 준비)`, 'INFO');
         if (this.orderQueue.length > 0) {
+            // 새로운 매수 세션 시작
+            this.buySessionStats = {
+                totalTarget: this.orderQueue.length,
+                pending: this.orderQueue.length,
+                successCount: 0,
+                successAmount: 0,
+                failCount: 0
+            };
             this.processOrderQueue();
         }
     }
 
-    /**
-     * 3. 로봇 배달부: 초당 N건씩 주문 큐 딜레이 처리 (Throttling)
-     */
     private processOrderQueue() {
         if (this.queueProcessorTimer) return; // 이미 돌고 있으면 패스
 
         this.queueProcessorTimer = setInterval(() => {
-            if (this.orderQueue.length === 0) {
+            if (this.orderQueue.length === 0 && this.buySessionStats.pending === 0) {
+                // 매수 세션 종료 시 리포트 발송
+                if (this.buySessionStats.totalTarget > 0) {
+                    eventBus.emit(SystemEvent.AUTO_BUY_COMPLETED, {
+                        success: this.buySessionStats.successCount > 0,
+                        count: this.buySessionStats.successCount,
+                        totalAmount: this.buySessionStats.successAmount,
+                        fails: this.buySessionStats.failCount
+                    });
+                    this.buySessionStats.totalTarget = 0; // 초기화
+                }
+
                 if (this.queueProcessorTimer) {
                     clearInterval(this.queueProcessorTimer);
                     this.queueProcessorTimer = null;
                 }
                 return;
             }
+
+            if (this.orderQueue.length === 0) return; // Wait for pending tasks
 
             const throttleLimitStr = String(this.config.throttleLimit || '3');
             const throttleLimit = parseInt(throttleLimitStr, 10);
@@ -244,6 +271,8 @@ export class AutoTradeService {
                 const accountNo = this.config.selectedAccount;
                 if (!accountNo) {
                     this.broadcastLog(`계좌가 선택되지 않아 매수 실패: ${order.name}`, 'ERROR');
+                    this.buySessionStats.failCount++;
+                    this.buySessionStats.pending--;
                     return;
                 }
 
@@ -257,10 +286,29 @@ export class AutoTradeService {
 
                     // 키움서버 정상 응답이더라도 '예수금 부족' 등이 msg1로 올 수 있음
                     const rspMsg = result?.msg1 || result?.message || result?.msg_cd || JSON.stringify(result?.Body || result || "OK");
+
+                    // msg1이 에러 성격인지 체크 (단순히 "정상처리"가 아닌 경우)
+                    if (String(rspMsg).includes('부족') || String(rspMsg).includes('불가') || String(rspMsg).includes('초과')) {
+                        throw new Error(rspMsg);
+                    }
+
                     this.broadcastLog(`${msgBase} -> 거래소 응답: ${rspMsg}`, 'SUCCESS');
+                    this.buySessionStats.successCount++;
+                    this.buySessionStats.successAmount += (order.orderPrice * order.orderQty);
                 } catch (err: any) {
                     const errMsg = err?.response?.data?.msg1 || err?.response?.data?.message || err.message || err;
                     this.broadcastLog(`${msgBase} -> 발송 실패: ${errMsg}`, 'ERROR');
+
+                    this.buySessionStats.failCount++;
+
+                    // 주문 실패 이벤트(텔레그램용) Emit
+                    eventBus.emit(SystemEvent.ORDER_FAILED, {
+                        reason: String(errMsg),
+                        name: order.name,
+                        time: new Date().toLocaleTimeString()
+                    });
+                } finally {
+                    this.buySessionStats.pending--;
                 }
             });
 

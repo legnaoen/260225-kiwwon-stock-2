@@ -17,6 +17,10 @@ export interface IElectronAPI {
     saveWatchlistSymbols: (symbols: string[]) => Promise<any>
     getWatchlistSymbols: () => Promise<string[]>
     getConnectionStatus: () => Promise<{ connected: boolean, mockConnected: boolean, realConnected: boolean }>
+    // Telegram
+    saveTelegramSettings: (settings: { botToken: string, chatId: string }) => Promise<{ success: boolean, message?: string, error?: string }>
+    getTelegramSettings: () => Promise<{ botToken: string, chatId: string } | null>
+    sendTelegramTestMessage: () => Promise<{ success: boolean, error?: string }>
 }
 
 declare global {

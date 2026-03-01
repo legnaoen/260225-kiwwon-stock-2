@@ -43,6 +43,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return () => ipcRenderer.removeListener('kiwoom:auto-trade-log', listener)
     },
 
+    // Telegram
+    saveTelegramSettings: (settings: { botToken: string, chatId: string }) => ipcRenderer.invoke('telegram:save-settings', settings),
+    getTelegramSettings: () => ipcRenderer.invoke('telegram:get-settings'),
+    sendTelegramTestMessage: () => ipcRenderer.invoke('telegram:test-message'),
+
     // Condition Search
     connectConditionWs: () => ipcRenderer.invoke('kiwoom:connect-condition-ws'),
     getConditionList: () => ipcRenderer.invoke('kiwoom:get-condition-list'),

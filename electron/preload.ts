@@ -45,7 +45,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // Telegram
-    saveTelegramSettings: (settings: { botToken: string, chatId: string }) => ipcRenderer.invoke('telegram:save-settings', settings),
+    saveTelegramSettings: (settings: { botToken: string, chatId: string, chartTheme?: string }) => ipcRenderer.invoke('telegram:save-settings', settings),
+    saveTelegramTheme: (theme: string) => ipcRenderer.invoke('telegram:save-theme', theme),
     getTelegramSettings: () => ipcRenderer.invoke('telegram:get-settings'),
     sendTelegramTestMessage: () => ipcRenderer.invoke('telegram:test-message'),
 

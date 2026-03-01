@@ -3,12 +3,12 @@ import path from 'node:path';
 
 export class ChartRenderService {
     private static win: BrowserWindow | null = null;
-    private static queue: { code: string, name: string, resolve: (buf: Buffer) => void, reject: (err: Error) => void }[] = [];
+    private static queue: { code: string, name: string, theme: string, resolve: (buf: Buffer) => void, reject: (err: Error) => void }[] = [];
     private static isCapturing = false;
 
-    public static async captureChart(code: string, name: string): Promise<Buffer> {
+    public static async captureChart(code: string, name: string, theme: string = 'dark'): Promise<Buffer> {
         return new Promise((resolve, reject) => {
-            this.queue.push({ code, name, resolve, reject });
+            this.queue.push({ code, name, theme, resolve, reject });
             this.processQueue();
         });
     }
@@ -17,7 +17,7 @@ export class ChartRenderService {
         if (this.isCapturing || this.queue.length === 0) return;
         this.isCapturing = true;
 
-        const { code, name, resolve, reject } = this.queue.shift()!;
+        const { code, name, theme, resolve, reject } = this.queue.shift()!;
 
         let timeout: NodeJS.Timeout;
 
@@ -82,7 +82,7 @@ export class ChartRenderService {
                 },
             });
 
-            const urlHash = `#/capture/${code}/${encodeURIComponent(name)}`;
+            const urlHash = `#/capture/${code}/${encodeURIComponent(name)}?theme=${theme}`;
             const baseUrl = process.env.VITE_DEV_SERVER_URL
                 ? (process.env.VITE_DEV_SERVER_URL.endsWith('/') ? process.env.VITE_DEV_SERVER_URL.slice(0, -1) : process.env.VITE_DEV_SERVER_URL)
                 : `file://${path.join(process.env.DIST as string, 'index.html')}`;

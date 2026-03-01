@@ -79,17 +79,19 @@ function AppContent() {
         return () => mediaQuery.removeEventListener('change', handleChange)
     }, [])
 
-    const [captureMode, setCaptureMode] = useState<{ code: string, name: string } | null>(null)
+    const [captureMode, setCaptureMode] = useState<{ code: string, name: string, theme: string } | null>(null)
 
     useEffect(() => {
         // Simple hash-based router for offscreen capture mode
         const hash = window.location.hash
         if (hash.startsWith('#/capture/')) {
-            const parts = hash.split('/')
+            const [pathPart, queryPart] = hash.split('?')
+            const parts = pathPart.split('/')
             if (parts.length >= 3) {
                 const code = parts[2]
                 const name = decodeURIComponent(parts[3] || code)
-                setCaptureMode({ code, name })
+                const theme = queryPart && queryPart.includes('theme=light') ? 'light' : 'dark'
+                setCaptureMode({ code, name, theme })
             }
         }
     }, [])
@@ -147,7 +149,7 @@ function AppContent() {
     }, [isDarkMode])
 
     if (captureMode) {
-        return <CapturePage code={captureMode.code} name={captureMode.name} />
+        return <CapturePage code={captureMode.code} name={captureMode.name} theme={captureMode.theme} />
     }
 
     return (

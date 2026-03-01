@@ -16,9 +16,10 @@ interface StockChartProps {
     stockCode: string
     stockName: string
     className?: string
+    theme?: string
 }
 
-export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, className }) => {
+export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, className, theme }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -42,20 +43,25 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
             }
         }
 
+        const isDark = theme === 'dark' || (theme === undefined && document.documentElement.classList.contains('dark'))
+        const chartColor = isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)';
+        const gridColor = isDark ? 'rgba(197, 203, 206, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+        const borderColor = isDark ? 'rgba(197, 203, 206, 0.2)' : 'rgba(0, 0, 0, 0.2)';
+
         const chart = createChart(chartContainerRef.current, {
             layout: {
                 background: { color: 'transparent' },
-                textColor: 'rgba(255, 255, 255, 0.9)',
+                textColor: chartColor,
             },
             grid: {
-                vertLines: { color: 'rgba(197, 203, 206, 0.1)' },
-                horzLines: { color: 'rgba(197, 203, 206, 0.1)' },
+                vertLines: { color: gridColor },
+                horzLines: { color: gridColor },
             },
             rightPriceScale: {
-                borderColor: 'rgba(197, 203, 206, 0.2)',
+                borderColor: borderColor,
             },
             timeScale: {
-                borderColor: 'rgba(197, 203, 206, 0.2)',
+                borderColor: borderColor,
                 timeVisible: true,
                 fixLeftEdge: true,
             },
@@ -80,15 +86,14 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
         }
     }, [])
 
-    // Add Theme Toggle listener for chart text colors
     useEffect(() => {
-        const isDark = document.documentElement.classList.contains('dark')
         if (chartRef.current) {
+            const isDark = theme === 'dark' || (theme === undefined && document.documentElement.classList.contains('dark'))
             chartRef.current.applyOptions({
                 layout: { textColor: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)' }
             })
         }
-    }, [])
+    }, [theme])
 
     const fetchChartData = async () => {
         if (!stockCode || !chartRef.current || !candleSeriesRef.current) return

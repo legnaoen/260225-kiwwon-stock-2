@@ -7,7 +7,7 @@ export default function Settings() {
     const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
     const [message, setMessage] = useState('')
 
-    const [telegramKeys, setTelegramKeys] = useState({ botToken: '', chatId: '' })
+    const [telegramKeys, setTelegramKeys] = useState({ botToken: '', chatId: '', chartTheme: 'dark' })
     const [isSavingTg, setIsSavingTg] = useState(false)
     const [statusTg, setStatusTg] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageTg, setMessageTg] = useState('')
@@ -22,7 +22,11 @@ export default function Settings() {
 
             const savedTgKeys = await window.electronAPI.getTelegramSettings()
             if (savedTgKeys) {
-                setTelegramKeys(savedTgKeys)
+                setTelegramKeys({
+                    botToken: savedTgKeys.botToken || '',
+                    chatId: savedTgKeys.chatId || '',
+                    chartTheme: savedTgKeys.chartTheme || 'dark'
+                })
             }
         }
         loadKeys()
@@ -84,7 +88,8 @@ export default function Settings() {
         try {
             const trimmedKeys = {
                 botToken: telegramKeys.botToken.trim(),
-                chatId: telegramKeys.chatId.trim()
+                chatId: telegramKeys.chatId.trim(),
+                chartTheme: telegramKeys.chartTheme || 'dark'
             }
             const result = await window.electronAPI.saveTelegramSettings(trimmedKeys)
 
@@ -234,6 +239,40 @@ export default function Settings() {
                                 placeholder="메시지를 받을 사용자/그룹 Chat ID"
                                 className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                             />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-muted-foreground">차트 배경 테마</label>
+                            <div className="flex gap-4">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="chartTheme"
+                                        value="dark"
+                                        checked={telegramKeys.chartTheme !== 'light'}
+                                        onChange={async () => {
+                                            setTelegramKeys({ ...telegramKeys, chartTheme: 'dark' })
+                                            await window.electronAPI.saveTelegramTheme('dark')
+                                        }}
+                                        className="text-blue-500 focus:ring-blue-500"
+                                    />
+                                    <span className="text-sm">어두운 테마 (Dark)</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="chartTheme"
+                                        value="light"
+                                        checked={telegramKeys.chartTheme === 'light'}
+                                        onChange={async () => {
+                                            setTelegramKeys({ ...telegramKeys, chartTheme: 'light' })
+                                            await window.electronAPI.saveTelegramTheme('light')
+                                        }}
+                                        className="text-blue-500 focus:ring-blue-500"
+                                    />
+                                    <span className="text-sm">밝은 테마 (Light)</span>
+                                </label>
+                            </div>
                         </div>
 
                         <div className="pt-4 flex items-center justify-between">

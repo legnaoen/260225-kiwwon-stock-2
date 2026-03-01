@@ -230,9 +230,16 @@ ipcMain.handle('kiwoom:start-condition-search', (_event, seq: string) => {
 })
 
 // === Telegram Settings IPC Handlers ===
-ipcMain.handle('telegram:save-settings', (_event, settings: { botToken: string, chatId: string }) => {
+ipcMain.handle('telegram:save-settings', (_event, settings: { botToken: string, chatId: string, chartTheme?: string }) => {
     store.set('telegram_settings', settings)
     telegramService.reloadConfig()
+    return { success: true }
+})
+
+ipcMain.handle('telegram:save-theme', (_event, theme: string) => {
+    const settings: any = store.get('telegram_settings') || {}
+    settings.chartTheme = theme
+    store.set('telegram_settings', settings)
     return { success: true }
 })
 

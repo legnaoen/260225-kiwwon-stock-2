@@ -13,6 +13,7 @@ const store = new Store();
 export class TelegramService {
     private static instance: TelegramService;
     private bot: Telegraf | null = null;
+    private botToken: string | null = null;
     private chatId: string | null = null;
     private disparityCache: Map<string, string> = new Map();
     private stockSearchCache: Array<{ code: string, name: string }> = [];
@@ -34,6 +35,7 @@ export class TelegramService {
     private initializeBot() {
         const settings: any = store.get('telegram_settings');
         if (settings && settings.botToken) {
+            this.botToken = settings.botToken;
             try {
                 this.bot = new Telegraf(settings.botToken);
                 this.chatId = settings.chatId || null;
@@ -50,7 +52,8 @@ export class TelegramService {
                     // Auto-save the chat ID for private chats
                     if (this.chatId !== receivedChatId) {
                         this.chatId = receivedChatId;
-                        store.set('telegram_settings', { botToken: settings.botToken, chatId: receivedChatId });
+                        const currentSettings: any = store.get('telegram_settings') || {};
+                        store.set('telegram_settings', { ...currentSettings, botToken: settings.botToken, chatId: receivedChatId });
                         console.log(`[TelegramService] Auto-registered Private Chat ID: ${receivedChatId}`);
                     }
 
@@ -117,11 +120,81 @@ export class TelegramService {
                     }
 
                     // 4. 종목 식별 성공, 차트 준비 알림
-                    const loadingMsg = await ctx.reply(`📷 [${targetName}] 차트를 준비 중입니다. 잠시만 기다려주세요...`);
+                    const loadingMsg = await ctx.reply(`📷 [${targetName}] 차트와 재무 정보를 준비 중입니다. 잠시만 기다려주세요...`);
 
                     try {
-                        const buffer = await ChartRenderService.captureChart(targetCode, targetName);
-                        await ctx.replyWithPhoto({ source: buffer }, { caption: `📊 [${targetName}] (${targetCode}) 일봉 차트입니다.` });
+                        let basicInfoMsg = '';
+                        try {
+                            const kiwoom = KiwoomService.getInstance();
+                            const infoRes = await kiwoom.getStockBasicInfo(targetCode);
+                            console.log(`[TelegramService] ka10001 응답 데이터:`, JSON.stringify(infoRes).substring(0, 300));
+
+                            // 키움 API는 Body, body, output, 혹은 최상단에 직접 데이터를 내려줄 수 있음
+                            const body = infoRes?.body || infoRes?.Body || infoRes?.output || infoRes;
+
+                            if (body && (body.per || body.mac || Object.keys(body).length > 2)) {
+                                const per = body.per || 'N/A';
+                                const pbr = body.pbr || 'N/A';
+                                const roe = body.roe || 'N/A';
+                                let cap = body.mac || 'N/A';
+                                const st = body.orderWarning || '정상';
+
+                                if (cap !== 'N/A' && !isNaN(Number(cap))) {
+                                    const numCap = Number(cap);
+                                    const jo = numCap / 10000;
+                                    cap = `${jo.toFixed(2)}조`;
+                                }
+
+                                const stStr = st !== '정상' ? `\n⚠️ 상태: ${st}` : '';
+                                basicInfoMsg = `\n\n💰 시가총액: ${cap}\n📊 PER: ${per} | PBR: ${pbr} | ROE: ${roe}%${stStr}`;
+                            } else {
+                                console.warn('[TelegramService] 응답에 재무 필드가 부족합니다.', Object.keys(body));
+                            }
+                        } catch (infoErr) {
+                            console.error('[TelegramService] 종목기본정보 조회 실패', infoErr);
+                        }
+
+                        // 차트 데이터 (최근 약 80봉) 가져와서 최고/최저가 대비 하락/상승률 계산
+                        try {
+                            const kiwoom = KiwoomService.getInstance();
+                            const chartRes = await kiwoom.getChartData(targetCode);
+                            // 다양한 API 응답 구조 대응
+                            const rawData = chartRes?.stk_dt_pole_chart_qry || chartRes?.output2 || chartRes?.list || chartRes?.output || chartRes?.Output || chartRes?.Body || chartRes?.body || [];
+
+                            if (Array.isArray(rawData) && rawData.length > 0) {
+                                // 1. 일봉 데이터를 쓸만한 숫자로 파싱 (뒤집어서 오래된 순 -> 최신 순 정렬)
+                                const processed = [...rawData].reverse().map((day: any) => {
+                                    const close = Number(day.cur_prc || day.stck_clpr || day.clpr || day.stck_clsprc || day.cls_prc || day.close || day.cur_juka || 0);
+                                    let low = Number(day.low_pric || day.stck_lwprc || day.low_prc || day.low || day.low_juka || 0);
+                                    let high = Number(day.high_pric || day.stck_hgprc || day.hg_prc || day.high || day.high_juka || 0);
+                                    return { close, low: low || close, high: high || close };
+                                }).filter((d: any) => d.close > 0);
+
+                                // 2. 최근 80개만 추출
+                                const recent80 = processed.slice(-80);
+
+                                if (recent80.length > 0) {
+                                    const currentPrice = recent80[recent80.length - 1].close;
+                                    const highestPrice = Math.max(...recent80.map((d: any) => d.high));
+                                    const lowestPrice = Math.min(...recent80.map((d: any) => d.low));
+
+                                    const upFromLow = ((currentPrice - lowestPrice) / lowestPrice) * 100;
+                                    const downFromHigh = ((currentPrice - highestPrice) / highestPrice) * 100;
+
+                                    basicInfoMsg += `\n\n저가대비 +${upFromLow.toFixed(2)}%  |  고가대비 ${downFromHigh.toFixed(2)}%`;
+                                }
+                            }
+                        } catch (chartErr) {
+                            console.error('[TelegramService] 차트 데이터 분석 실패', chartErr);
+                        }
+                        const tgSettings: any = store.get('telegram_settings') || {};
+                        const theme = tgSettings.chartTheme || 'dark';
+
+                        const buffer = await ChartRenderService.captureChart(targetCode, targetName, theme);
+
+                        const finalCaption = `https://stock.naver.com/domestic/stock/${targetCode}` + basicInfoMsg;
+
+                        await ctx.replyWithPhoto({ source: buffer }, { caption: finalCaption });
                         // 성공 시 로딩 메시지 삭제 시도 (실패해도 무시)
                         try { await ctx.deleteMessage(loadingMsg.message_id); } catch (e) { }
                     } catch (err: any) {
@@ -216,10 +289,22 @@ export class TelegramService {
     }
 
     public reloadConfig() {
+        const settings: any = store.get('telegram_settings');
+        if (this.bot && this.botToken === settings?.botToken) {
+            // 토큰이 같으면 봇을 아예 재시작하지 않고 내부 데이터만 업데이트
+            this.chatId = settings?.chatId || null;
+            return;
+        }
+
         if (this.bot) {
             try { this.bot.stop(); } catch (e) { }
+            this.bot = null;
         }
-        this.initializeBot();
+
+        // 텔레그램 API 충돌(409 Conflict) 방지를 위해 기존 봇 종료 후 약간의 딜레이
+        setTimeout(() => {
+            this.initializeBot();
+        }, 1500);
     }
 
     private async buildStockSearchCache() {

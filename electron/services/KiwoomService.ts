@@ -200,6 +200,21 @@ export class KiwoomService {
         return response.data;
     }
 
+    public async getStockBasicInfo(stk_cd: string) {
+        const url = `${BASE_URL}/api/dostk/stkinfo`
+        const response = await this.makeApiRequestWithRetry((t) => axios.post(url, {
+            stk_cd
+        }, {
+            headers: {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${t}`,
+                'cont-yn': 'N',
+                'api-id': 'ka10001'
+            }
+        }))
+        return response.data;
+    }
+
     public wsRegister(symbols: string[]) {
         if (this.wsManager) {
             this.wsManager.registerItems(symbols)

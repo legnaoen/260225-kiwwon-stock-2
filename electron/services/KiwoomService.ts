@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { KiwoomTokenManager } from '../kiwoomApi'
 import { KiwoomWebSocketManager } from '../websocket'
+import { KiwoomConditionWebSocketManager } from '../conditionWebSocket'
 import { BrowserWindow } from 'electron'
 import { eventBus, SystemEvent } from '../utils/EventBus'
 
@@ -10,6 +11,7 @@ export class KiwoomService {
     private static instance: KiwoomService;
     private tokenManager = KiwoomTokenManager.getInstance();
     private wsManager: KiwoomWebSocketManager | null = null;
+    private conditionWsManager: KiwoomConditionWebSocketManager | null = null;
 
     private constructor() { }
 
@@ -22,12 +24,17 @@ export class KiwoomService {
 
     public initWebSocket(win: BrowserWindow) {
         this.wsManager = new KiwoomWebSocketManager(win);
+        this.conditionWsManager = new KiwoomConditionWebSocketManager(win);
     }
 
     public disconnectWebSocket() {
         if (this.wsManager) {
             this.wsManager.disconnect();
             this.wsManager = null;
+        }
+        if (this.conditionWsManager) {
+            this.conditionWsManager.disconnect();
+            this.conditionWsManager = null;
         }
     }
 
@@ -199,5 +206,87 @@ export class KiwoomService {
             return true;
         }
         return false;
+    }
+
+    public getConditionList() {
+        if (this.conditionWsManager) {
+            return this.conditionWsManager.getConditions()
+        }
+        return []
+    }
+
+    public async connectConditionWs() {
+        let token = await this.tokenManager.getAccessToken()
+        if (this.conditionWsManager) this.conditionWsManager.connect(token)
+    }
+
+    public startConditionSearch(seq: string) {
+        if (!this.conditionWsManager) throw new Error("Condition WebSocket Manager is not initialized");
+        this.conditionWsManager.requestConditionSearch(seq);
+    }
+
+    /**
+     * 국내주식 매수 주문
+     */
+    public async sendBuyOrder(accountNo: string, stk_cd: string, qty: number, price: number): Promise<any> {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/ordr`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'kt10000', // 매수
+            }
+            const body = {
+                acnt_no: accountNo,
+                dmst_stex_tp: 'KRX',
+                stk_cd: stk_cd,
+                ord_qty: String(qty),
+                ord_uv: String(price),
+                trde_tp: '00', // 지정가 (보통)
+                cond_uv: ''
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data
+        })
+    }
+
+    /**
+     * 국내주식 정정 주문
+     */
+    public async modifyOrder(accountNo: string, orig_ord_no: string, stk_cd: string, mdfy_qty: number, mdfy_uv: number): Promise<any> {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/ordr`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'kt10002', // 정정
+            }
+            const body = {
+                acnt_no: accountNo,
+                dmst_stex_tp: 'KRX',
+                stk_cd: stk_cd,
+                orig_ord_no: orig_ord_no,
+                mdfy_qty: String(mdfy_qty),
+                mdfy_uv: String(mdfy_uv),
+                trde_tp: '00', // 지정가 (보통)
+                cond_uv: ''
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data
+        })
+    }
+
+    /**
+     * 미체결 주문 내역 조회 (TODO: 정확한 TR명 반영 필요)
+     */
+    public async getUnexecutedOrders(accountNo: string): Promise<any> {
+        return this.makeApiRequestWithRetry(async (token) => {
+            // TODO: 실제 키움증권의 국내주식 미체결조회 TR 주소 및 ID (예: vt00021 또는 별도 api-id) 적용 필요.
+            // 일단 임시로 에러를 방지하기 위해 빈 배열의 골격만 리턴합니다.
+            console.warn("[KiwoomService] getUnexecutedOrders is barely implemented. TR details needed.");
+            return {
+                output: []
+            }
+        })
     }
 }

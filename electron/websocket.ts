@@ -16,7 +16,7 @@ export class KiwoomWebSocketManager {
     }
 
     public async connect(token: string) {
-        if (this.isConnected) return
+        if (this.isConnected || (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN))) return
 
         this.accessToken = token
         this.ws = new WebSocket(SOCKET_URL)
@@ -50,7 +50,7 @@ export class KiwoomWebSocketManager {
     }
 
     private login() {
-        if (!this.ws || !this.accessToken) return
+        if (!this.ws || !this.accessToken || this.ws.readyState !== WebSocket.OPEN) return
 
         const loginPacket = {
             trnm: 'LOGIN',
@@ -109,7 +109,9 @@ export class KiwoomWebSocketManager {
             }]
         }
         const msg = JSON.stringify(regPacket)
-        this.ws.send(msg)
+        if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(msg)
+        }
     }
 
     private handleMessage(data: any, rawStr: string) {

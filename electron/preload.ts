@@ -31,4 +31,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveWatchlistSymbols: (symbols: string[]) => ipcRenderer.invoke('kiwoom:save-watchlist-symbols', symbols),
     getWatchlistSymbols: () => ipcRenderer.invoke('kiwoom:get-watchlist-symbols'),
     getConnectionStatus: () => ipcRenderer.invoke('kiwoom:get-connection-status'),
+
+    // Auto Trade
+    saveAutoTradeSettings: (settings: any) => ipcRenderer.invoke('kiwoom:save-autotrade-settings', settings),
+    getAutoTradeSettings: () => ipcRenderer.invoke('kiwoom:get-autotrade-settings'),
+    getAutoTradeStatus: () => ipcRenderer.invoke('kiwoom:get-autotrade-status'),
+    setAutoTradeStatus: (status: boolean) => ipcRenderer.invoke('kiwoom:set-autotrade-status', status),
+    onAutoTradeLog: (callback: (log: any) => void) => {
+        const listener = (_event: any, log: any) => callback(log)
+        ipcRenderer.on('kiwoom:auto-trade-log', listener)
+        return () => ipcRenderer.removeListener('kiwoom:auto-trade-log', listener)
+    },
+
+    // Condition Search
+    connectConditionWs: () => ipcRenderer.invoke('kiwoom:connect-condition-ws'),
+    getConditionList: () => ipcRenderer.invoke('kiwoom:get-condition-list'),
+    startConditionSearch: (seq: string) => ipcRenderer.invoke('kiwoom:start-condition-search', seq),
+    onConditionList: (callback: (conditions: any[]) => void) => {
+        const listener = (_event: any, data: any[]) => callback(data)
+        ipcRenderer.on('kiwoom:condition-list', listener)
+        return () => ipcRenderer.removeListener('kiwoom:condition-list', listener)
+    }
 })

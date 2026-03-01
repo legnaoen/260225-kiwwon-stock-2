@@ -2,9 +2,22 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
 import Store from 'electron-store'
 import { KiwoomService } from './services/KiwoomService'
+import { AutoTradeService } from './services/AutoTradeService'
+import { eventBus, SystemEvent } from './utils/EventBus'
 
 const store = new Store()
 const kiwoomService = KiwoomService.getInstance()
+const autoTradeService = AutoTradeService.getInstance()
+
+// Load initial settings to the service
+const initialSettings = store.get('autotrade_settings')
+if (initialSettings) {
+    autoTradeService.updateConfig(initialSettings)
+}
+const initialStatus = store.get('autotrade_status') || false
+if (initialStatus) {
+    autoTradeService.setRunning(initialStatus as boolean)
+}
 
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(process.env.DIST, '../public')
@@ -22,6 +35,13 @@ function createWindow() {
     })
 
     kiwoomService.initWebSocket(win)
+
+    // Forward AutoTrade logs to renderer
+    eventBus.on(SystemEvent.AUTO_TRADE_LOG, (logInfo) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('kiwoom:auto-trade-log', logInfo)
+        }
+    })
 
     win.webContents.on('did-finish-load', () => {
         win?.webContents.send('main-process-message', (new Date).toLocaleString())
@@ -166,4 +186,43 @@ ipcMain.handle('kiwoom:ws-register', async (_event, symbols: string[]) => {
         return { success: true }
     }
     return { success: false, error: 'WebSocket not initialized' }
+})
+
+// === Condition Search IPC Handlers ===
+ipcMain.handle('kiwoom:save-autotrade-settings', (_event, settings: any) => {
+    store.set('autotrade_settings', settings)
+    autoTradeService.updateConfig(settings) // Update service memory
+    return { success: true }
+})
+
+ipcMain.handle('kiwoom:get-autotrade-settings', () => {
+    return store.get('autotrade_settings') || null
+})
+
+ipcMain.handle('kiwoom:get-autotrade-status', () => {
+    // Temporary status store, later integrated with AutoTradeService
+    return store.get('autotrade_status') || false
+})
+
+ipcMain.handle('kiwoom:set-autotrade-status', (_event, status: boolean) => {
+    store.set('autotrade_status', status)
+    autoTradeService.setRunning(status) // Update service memory
+    return { success: true }
+})
+
+ipcMain.handle('kiwoom:connect-condition-ws', async () => {
+    try {
+        await kiwoomService.connectConditionWs()
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('kiwoom:get-condition-list', () => {
+    return kiwoomService.getConditionList()
+})
+
+ipcMain.handle('kiwoom:start-condition-search', (_event, seq: string) => {
+    return kiwoomService.startConditionSearch(seq)
 })

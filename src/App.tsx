@@ -7,6 +7,7 @@ import Sidebar, { menuItems } from './components/Sidebar'
 import Holdings from './components/Holdings'
 import Watchlist from './components/Watchlist'
 import Settings from './components/Settings'
+import AutoTrade from './components/AutoTrade'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
     constructor(props: { children: ReactNode }) {
@@ -146,9 +147,10 @@ function AppContent() {
                     <div className="w-full h-full flex flex-col min-h-0">
                         {activeTab === 'holdings' && <Holdings />}
                         {activeTab === 'watchlist' && <Watchlist />}
+                        {activeTab === 'auto-trade' && <AutoTrade />}
                         {activeTab === 'settings' && <Settings />}
 
-                        {(activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'settings') && (
+                        {(activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'settings' && activeTab !== 'auto-trade') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

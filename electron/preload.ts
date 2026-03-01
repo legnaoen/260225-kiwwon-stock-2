@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     send: (channel: string, ...args: any[]) => {
         ipcRenderer.send(channel, ...args)
     },
+    sendChartRenderComplete: (code: string) => ipcRenderer.send('chart-render-complete', code),
     // Window controls
     minimize: () => ipcRenderer.send('window-controls:minimize'),
     maximize: () => ipcRenderer.send('window-controls:maximize'),

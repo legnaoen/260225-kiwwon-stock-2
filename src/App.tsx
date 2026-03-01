@@ -8,6 +8,7 @@ import Holdings from './components/Holdings'
 import Watchlist from './components/Watchlist'
 import Settings from './components/Settings'
 import AutoTrade from './components/AutoTrade'
+import CapturePage from './components/CapturePage'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
     constructor(props: { children: ReactNode }) {
@@ -72,11 +73,27 @@ function AppContent() {
     useEffect(() => {
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
         const handleChange = (e: MediaQueryListEvent) => {
-            setIsDarkMode(e.matches)
+            setIsDarkMode(!e.matches)
         }
         mediaQuery.addEventListener('change', handleChange)
         return () => mediaQuery.removeEventListener('change', handleChange)
     }, [])
+
+    const [captureMode, setCaptureMode] = useState<{ code: string, name: string } | null>(null)
+
+    useEffect(() => {
+        // Simple hash-based router for offscreen capture mode
+        const hash = window.location.hash
+        if (hash.startsWith('#/capture/')) {
+            const parts = hash.split('/')
+            if (parts.length >= 3) {
+                const code = parts[2]
+                const name = decodeURIComponent(parts[3] || code)
+                setCaptureMode({ code, name })
+            }
+        }
+    }, [])
+
     const [status, setStatus] = useState({ connected: false, mockConnected: false, realConnected: false })
 
     useEffect(() => {
@@ -129,6 +146,10 @@ function AppContent() {
         }
     }, [isDarkMode])
 
+    if (captureMode) {
+        return <CapturePage code={captureMode.code} name={captureMode.name} />
+    }
+
     return (
         <div className="flex flex-col h-screen bg-background text-foreground transition-colors duration-300">
             <TitleBar
@@ -137,6 +158,7 @@ function AppContent() {
             />
 
             <div className="flex flex-1 overflow-hidden">
+                {/* Sidebar */}
                 <Sidebar
                     activeTab={activeTab}
                     onTabChange={setActiveTab}

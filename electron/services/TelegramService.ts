@@ -5,6 +5,8 @@ import Store from 'electron-store';
 import { Telegraf } from 'telegraf';
 import cron from 'node-cron';
 import { AutoTradeService } from './AutoTradeService';
+import { KiwoomService } from './KiwoomService';
+import { ChartRenderService } from './ChartRenderService';
 
 const store = new Store();
 
@@ -13,11 +15,13 @@ export class TelegramService {
     private bot: Telegraf | null = null;
     private chatId: string | null = null;
     private disparityCache: Map<string, string> = new Map();
+    private stockSearchCache: Array<{ code: string, name: string }> = [];
 
     private constructor() {
         this.initializeBot();
         this.setupListeners();
         this.setupCronJobs();
+        this.buildStockSearchCache();
     }
 
     public static getInstance(): TelegramService {
@@ -36,33 +40,92 @@ export class TelegramService {
 
                 this.bot.start((ctx) => {
                     const receivedChatId = ctx.chat.id.toString();
+                    const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
 
-                    // Auto-save the chat ID if it wasn't set or differs
+                    if (isGroup) {
+                        ctx.reply('✅ 키움 트레이더 봇이 단톡방에 활성화되었습니다.\n이 방에서는 멘션을 통한 종목 차트 검색 기능만 제한적으로 수행합니다. (시스템 알림 수신 불가)');
+                        return;
+                    }
+
+                    // Auto-save the chat ID for private chats
                     if (this.chatId !== receivedChatId) {
                         this.chatId = receivedChatId;
                         store.set('telegram_settings', { botToken: settings.botToken, chatId: receivedChatId });
-                        console.log(`[TelegramService] Auto-registered Chat ID: ${receivedChatId}`);
+                        console.log(`[TelegramService] Auto-registered Private Chat ID: ${receivedChatId}`);
                     }
 
-                    ctx.reply('✅ 키움 트레이더 안티그래비티 봇이 활성화되었습니다.\n이 방으로 모든 알림이 전송됩니다.');
+                    ctx.reply('✅ 키움 트레이더 안티그래비티 봇이 활성화되었습니다.\n이 1:1 대화방으로는 모든 시스템 알림이 정상적으로 전송됩니다.');
                 });
 
                 // 커맨드: 종목명 입력 시 차트 캡처
                 this.bot.on('text', async (ctx) => {
-                    const text = ctx.message.text.trim();
-                    if (text.startsWith('/')) return; // ignore commands like /start
+                    let text = ctx.message.text.trim();
+                    if (text.startsWith('/')) return;
 
-                    // Simple flow: notify we are loading
-                    const loadingMsg = await ctx.reply(`[${text}] 차트를 조회 중입니다... 잠시만 기다려주세요.`);
+                    const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+                    const botUsername = ctx.botInfo.username;
+
+                    if (isGroup) {
+                        // 단톡방인 경우, 봇을 명시적으로 호출했을 때만 동작 ("@봇이름 종목명")
+                        const mention = `@${botUsername}`;
+                        if (!text.toLowerCase().startsWith(mention.toLowerCase())) {
+                            return; // 봇을 부르지 않은 일반 대화는 무시
+                        }
+                        // 멘션 부분 제거하고 알맹이 종목명만 추출
+                        text = text.substring(mention.length).trim();
+                    } else {
+                        // 개인 톡방인 경우: 혹시 실수로 멘션을 붙였을 수 있으니 골뱅이 제거
+                        text = text.replace(/^@[a-zA-Z0-9_]+\s*/, '').trim();
+                    }
+
+                    if (!text) return; // 멘션만 하고 종목명을 안 쓴 경우 ము시
+
+
+                    // 1. 매핑 캐시가 비어있다면 대기
+                    if (this.stockSearchCache.length === 0) {
+                        return ctx.reply('⚠️ 주식 종목 데이터를 안전하게 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
+                    }
+
+                    // 2. 완전 일치 (Exact Match) 검색
+                    let exactMatch = this.stockSearchCache.find(s => s.name.toLowerCase() === text.toLowerCase());
+                    let targetCode = '';
+                    let targetName = '';
+
+                    if (exactMatch) {
+                        targetCode = exactMatch.code;
+                        targetName = exactMatch.name;
+                    } else {
+                        // 3. 부분 일치 (Fuzzy Match) 검색
+                        const partialMatches = this.stockSearchCache.filter(s => s.name.toLowerCase().includes(text.toLowerCase()));
+
+                        if (partialMatches.length === 0) {
+                            return ctx.reply(`🚫 [종목 검색 실패] '${text}' 에 해당하는 종목을 찾을 수 없습니다.`);
+                        }
+
+                        if (partialMatches.length === 1) {
+                            // 딱 하나만 매칭되면 그걸로 진행
+                            targetCode = partialMatches[0].code;
+                            targetName = partialMatches[0].name;
+                        } else {
+                            // 여러 개 매칭되면 선택 유도
+                            const maxResults = 10;
+                            const optionsList = partialMatches.slice(0, maxResults).map((s, idx) => `${idx + 1}. ${s.name} (${s.code})`).join('\n');
+                            const moreTxt = partialMatches.length > maxResults ? `\n...외 ${partialMatches.length - maxResults}개 더 있음` : '';
+
+                            return ctx.reply(`🕵️ [유사 종목 검색 결과]\n'${text}' 에 해당하는 종목이 여러 개 발견되었습니다. 정확한 이름을 입력해주세요.\n\n${optionsList}${moreTxt}`);
+                        }
+                    }
+
+                    // 4. 종목 식별 성공, 차트 준비 알림
+                    const loadingMsg = await ctx.reply(`📷 [${targetName}] 차트를 준비 중입니다. 잠시만 기다려주세요...`);
 
                     try {
-                        // TODO: Implement actual offscreen window capture using KiwoomService to get data
-                        // For now, this is a placeholder or simulation for the image capture logic
-                        await ctx.reply(`[안내] '${text}' 차트 캡처 기능이 준비중입니다. (Offscreen Window 렌더링 파이프라인 연동 필요)`);
+                        const buffer = await ChartRenderService.captureChart(targetCode, targetName);
+                        await ctx.replyWithPhoto({ source: buffer }, { caption: `📊 [${targetName}] (${targetCode}) 일봉 차트입니다.` });
+                        // 성공 시 로딩 메시지 삭제 시도 (실패해도 무시)
+                        try { await ctx.deleteMessage(loadingMsg.message_id); } catch (e) { }
                     } catch (err: any) {
-                        ctx.reply(`조회 실패: ${err.message}`);
-                    } finally {
-                        // ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
+                        ctx.reply(`[오류] 차트 캡처 실패: ${err.message}`);
                     }
                 });
 
@@ -136,8 +199,14 @@ export class TelegramService {
         }
         if (!this.chatId) {
             console.log(`[Telegram 발송 대기 (Chat ID 미설정)]\n${message}`);
-            throw new Error("Chat ID가 설정되지 않았습니다. 텔레그램에서 봇에게 /start 를 먼저 입력해주세요.");
+            throw new Error("Chat ID가 설정되지 않았습니다. 텔레그램 개인 톡방에서 봇에게 /start 를 먼저 입력해주세요.");
         }
+        // 단톡방(음수 Chat ID)으로는 시스템 알림 발송 제한
+        if (this.chatId.startsWith('-')) {
+            console.log(`[Telegram 발송 차단] 단톡방으로는 시스템 알림을 발송하지 않습니다.`);
+            throw new Error("현재 등록된 Chat ID가 단톡방입니다. 알림을 받으시려면 개인 톡방에서 봇에게 /start 를 입력해주세요.");
+        }
+
         try {
             await this.bot.telegram.sendMessage(this.chatId, message);
         } catch (error: any) {
@@ -151,5 +220,31 @@ export class TelegramService {
             try { this.bot.stop(); } catch (e) { }
         }
         this.initializeBot();
+    }
+
+    private async buildStockSearchCache() {
+        try {
+            const kiwoom = KiwoomService.getInstance();
+            // Wait briefly to ensure KiwoomService has token
+            setTimeout(async () => {
+                try {
+                    console.log('[TelegramService] 주식 종목 검색 캐시 구축 시작...');
+                    const kospi = await kiwoom.getAllStocks('0');
+                    const kosdaq = await kiwoom.getAllStocks('10');
+                    if (kospi && Array.isArray(kospi)) {
+                        this.stockSearchCache.push(...kospi);
+                    }
+                    if (kosdaq && Array.isArray(kosdaq)) {
+                        this.stockSearchCache.push(...kosdaq);
+                    }
+                    console.log(`[TelegramService] 검색 캐시 완료. 총 ${this.stockSearchCache.length} 종목 대상`);
+                } catch (err) {
+                    console.error('[TelegramService] 종목 검색 캐시 생성 실패:', err);
+                }
+            }, 5000); // 5 seconds after startup to let login finish
+
+        } catch (error) {
+            console.error('[TelegramService] buildStockCache setup failed:', error);
+        }
     }
 }

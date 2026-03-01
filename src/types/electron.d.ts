@@ -21,6 +21,9 @@ export interface IElectronAPI {
     saveTelegramSettings: (settings: { botToken: string, chatId: string }) => Promise<{ success: boolean, message?: string, error?: string }>
     getTelegramSettings: () => Promise<{ botToken: string, chatId: string } | null>
     sendTelegramTestMessage: () => Promise<{ success: boolean, error?: string }>
+
+    // Capture
+    sendChartRenderComplete: (code: string) => void
 }
 
 declare global {

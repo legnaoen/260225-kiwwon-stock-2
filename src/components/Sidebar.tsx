@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, ListOrdered, History, Settings, Bot } from 'lucide-react'
+import { LayoutDashboard, ListOrdered, History, Settings, Bot, Calendar } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -10,6 +10,7 @@ function cn(...inputs: ClassValue[]) {
 export const menuItems = [
     { id: 'holdings', name: '보유종목', icon: LayoutDashboard },
     { id: 'watchlist', name: '관심종목', icon: ListOrdered },
+    { id: 'schedule', name: '일정', icon: Calendar },
     { id: 'orders', name: '주문내역', icon: History },
     { id: 'auto-trade', name: '자동매매', icon: Bot },
     { id: 'settings', name: '설정', icon: Settings },

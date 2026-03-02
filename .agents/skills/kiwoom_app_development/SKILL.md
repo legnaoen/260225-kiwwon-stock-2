@@ -61,5 +61,19 @@ description: Instructions and guidelines for cleanly scaling the Kiwoom REST API
 3. **설계 공유 및 승인**:
    * 리서치 결과를 바탕으로 어떻게 코드를 모듈화(`electron/services/XxxService.ts`)할 것인지, 어떤 이벤트 버스 채널을 사용할 것인지 설계안을 먼저 작성합니다.
    * 사용자(User)에게 설계안을 제시하고 **승인(Confirm)을 받은 후**에만 실제 파일 쓰기(Coding)에 돌입합니다.
-4. **점진적 구현 및 검증**:
+6. **점진적 구현 및 검증**:
    * 코드를 한 번에 수백 줄 작성하지 않고, 모듈별 단위로 구현한 후 서버 실행 또는 테스트를 통해 정상 작동(특히 API 인증, 호출 제한 등)을 확인하며 다음 단계로 넘어갑니다.
+
+## 6. 배포(Build) 및 .exe 파일 생성 시 주의사항 (Troubleshooting)
+Electron 애플리케이션을 배포용 설치 파일(`.exe`)로 빌드할 때(`npm run build`) 빈번하게 발생하는 에러와 해결책(Best Practice)입니다.
+
+* **winCodeSign 심볼릭 링크(Symbolic link) 생성 권한 오류**:
+  * `electron-builder`가 윈도우용 서명 툴을 다운로드/압축 해제할 때 권한 문제가 발생할 수 있습니다.
+  * **해결책**: 터미널(VS Code, cmd, PowerShell)을 반드시 **'관리자 권한'으로 실행**한 뒤 `npm run build`를 수행하거나, 윈도우 설정에서 '개발자 모드(Developer Mode)'를 켜야 합니다.
+* **설치 후 실행 시 하얀 화면(White Screen)이 나오는 문제**:
+  * 빌드 도구가 Vite의 라우팅 경로나 로컬 파일 경로를 찾지 못할 때 발생합니다.
+  * **해결책 1**: 프로젝트 폴더의 `vite.config.ts` 파일 내 `defineConfig`에 `base: './'` 옵션이 반드시 포함되어야 합니다.
+  * **해결책 2**: 배포 시 불필요한 파일이 없도록 `.gitignore`에 `dist` 폴더가 등록되어 있을 텐데, `package.json`의 `build.files` 배열에 `"dist/**/*"`, `"dist-electron/**/*"` 폴더를 명시적으로 반드시 포함시켜야 빌드 결과물에 화면 구성 파일이 누락되지 않습니다.
+* **백그라운드 창(offscreen) 로드 타임아웃 오류**:
+  * 텔레그램 차트 캡처 등을 위해 사용하는 보이지 않는 `BrowserWindow`가 배포 환경에서 작동하지 않는 경우가 있습니다.
+  * **해결책**: `loadURL`과 `loadFile`의 분기 처리를 명확히 해야 합니다. 배포 환경(`!process.env.VITE_DEV_SERVER_URL`)에서는 URL 문자열을 직접 조합하지 말고, `win.loadFile(targetPath, { hash: urlHash })` 형식으로 Electron 기본 API를 안전하게 사용해야 리소스를 정상적으로 로드할 수 있습니다.

@@ -7,6 +7,7 @@ import cron from 'node-cron';
 import { AutoTradeService } from './AutoTradeService';
 import { KiwoomService } from './KiwoomService';
 import { ChartRenderService } from './ChartRenderService';
+import { DatabaseService } from './DatabaseService';
 
 const store = new Store();
 
@@ -22,7 +23,11 @@ export class TelegramService {
         this.initializeBot();
         this.setupListeners();
         this.setupCronJobs();
+        this.setupScheduleCron();
         this.buildStockSearchCache();
+
+        // Startup check for missed schedule summary
+        setTimeout(() => this.checkMissedScheduleSummary(), 10000);
     }
 
     public static getInstance(): TelegramService {
@@ -45,19 +50,22 @@ export class TelegramService {
                     const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
 
                     if (isGroup) {
-                        ctx.reply('✅ 키움 트레이더 봇이 단톡방에 활성화되었습니다.\n이 방에서는 멘션을 통한 종목 차트 검색 기능만 제한적으로 수행합니다. (시스템 알림 수신 불가)');
+                        ctx.reply('⚠️ [단체방 활성화]\n이 방은 종목 검색 전용으로만 사용됩니다.\n일정 및 시스템 알림을 받으시려면 봇과의 1:1 대화방에서 /start 를 입력해주세요.');
                         return;
                     }
 
-                    // Auto-save the chat ID for private chats
-                    if (this.chatId !== receivedChatId) {
-                        this.chatId = receivedChatId;
-                        const currentSettings: any = store.get('telegram_settings') || {};
-                        store.set('telegram_settings', { ...currentSettings, botToken: settings.botToken, chatId: receivedChatId });
-                        console.log(`[TelegramService] Auto-registered Private Chat ID: ${receivedChatId}`);
-                    }
+                    // Auto-save the chat ID ONLY for private chats
+                    this.chatId = receivedChatId;
+                    const currentSettings: any = store.get('telegram_settings') || {};
+                    store.set('telegram_settings', {
+                        ...currentSettings,
+                        botToken: settings.botToken,
+                        chatId: receivedChatId,
+                        chatType: 'private'
+                    });
 
-                    ctx.reply('✅ 키움 트레이더 안티그래비티 봇이 활성화되었습니다.\n이 1:1 대화방으로는 모든 시스템 알림이 정상적으로 전송됩니다.');
+                    console.log(`[TelegramService] Registered Private Chat ID: ${receivedChatId}`);
+                    ctx.reply('✅ [알림 수신 등록 완료]\n이제부터 이 1:1 대화방으로 모든 일정을 안내해 드립니다.');
                 });
 
                 // 커맨드: 종목명 입력 시 차트 캡처
@@ -220,6 +228,149 @@ export class TelegramService {
         }
     }
 
+    private setupScheduleCron() { // Added
+        if (this.scheduleSummaryJob) {
+            this.scheduleSummaryJob.stop();
+            this.scheduleSummaryJob = null;
+        }
+
+        const settings: any = store.get('schedule_settings') || { notificationTime: '08:30', globalDailyNotify: false };
+        const [hour, minute] = settings.notificationTime.split(':').map(Number);
+
+        if (!isNaN(hour) && !isNaN(minute)) {
+            const cronTime = `${minute} ${hour} * * *`;
+            this.scheduleSummaryJob = cron.schedule(cronTime, () => {
+                this.checkAndSendScheduleSummary();
+            }, { timezone: 'Asia/Seoul' });
+            console.log(`[TelegramService] Schedule Cron set for ${settings.notificationTime}`);
+        }
+    }
+
+    public async triggerScheduleSummaryTest() {
+        console.log('[TelegramService] Manual schedule summary test triggered.');
+        await this.checkAndSendScheduleSummary();
+    }
+
+    public reloadScheduleCron() { // Added
+        console.log('[TelegramService] Reloading schedule cron with new settings...');
+        this.setupScheduleCron();
+    }
+
+    private async checkMissedScheduleSummary() { // Added
+        const savedSettings: any = store.get('schedule_settings') || {};
+        const settings = {
+            notificationTime: savedSettings.notificationTime || '08:30',
+            globalDailyNotify: savedSettings.globalDailyNotify ?? false,
+            sendMissedOnStartup: savedSettings.sendMissedOnStartup ?? true
+        };
+
+        console.log(`[TelegramService] [Debug] Startup missed notification check: enabled=${settings.sendMissedOnStartup}`);
+
+        if (!settings.sendMissedOnStartup) {
+            console.log('[TelegramService] [Debug] Startup notification is disabled in settings.');
+            return;
+        }
+
+        const now = new Date();
+        const todayStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+
+        const lastNotified = store.get('last_schedule_notify_date');
+        console.log(`[TelegramService] [Debug] Today: ${todayStr}, Last notified: ${lastNotified}`);
+
+        if (lastNotified === todayStr) {
+            console.log(`[TelegramService] [Debug] Already notified today (${todayStr}). Skipping.`);
+            return;
+        }
+
+        const [hour, minute] = settings.notificationTime.split(':').map(Number);
+        const notifyTimeToday = new Date(now);
+        notifyTimeToday.setHours(hour, minute, 0, 0);
+
+        console.log(`[TelegramService] [Debug] Current time: ${now.toLocaleTimeString()}, Threshold: ${settings.notificationTime}`);
+
+        if (now > notifyTimeToday) {
+            console.log('[TelegramService] [Debug] Threshold passed. Checking for schedules to notify...');
+            await this.checkAndSendScheduleSummary();
+        } else {
+            console.log('[TelegramService] [Debug] Threshold not yet reached. Cron will handle it.');
+        }
+    }
+
+    private async checkAndSendScheduleSummary() { // Added
+        try {
+            const allSchedules = DatabaseService.getInstance().getAllSchedules();
+            const settings: any = store.get('schedule_settings') || { notificationTime: '08:30', globalDailyNotify: false };
+
+            const now = new Date();
+            const todayStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+
+            console.log(`[TelegramService] [Debug] 알림 체크 시작 - 오늘날짜: ${todayStr}, 전체 일정수: ${allSchedules.length}`);
+            console.log(`[TelegramService] [Debug] 설정: dailyNotify=${settings.globalDailyNotify}, time=${settings.notificationTime}`);
+
+            // Filter for today's schedules
+            const todaySchedules = allSchedules.filter((s: any) => {
+                const isToday = s.target_date === todayStr;
+                const needsNotify = s.reminder_type === 'same_day' || settings.globalDailyNotify;
+                const notYetNotified = s.is_notified === 0;
+
+                if (isToday) {
+                    console.log(`[TelegramService] [Debug] 오늘 일정 발견: ${s.title}, needsNotify=${needsNotify}, isNotified=${s.is_notified}`);
+                }
+
+                return isToday && needsNotify && notYetNotified;
+            });
+
+            console.log(`[TelegramService] [Debug] 최종 발송 대상 일정수: ${todaySchedules.length}`);
+
+            if (todaySchedules.length === 0) {
+                return;
+            }
+
+            let message = `📅 [${todayStr}] 오늘의 일정 안내\n\n`;
+            todaySchedules.forEach((s: any, idx: number) => {
+                message += `${idx + 1}. ${s.title}\n`;
+                if (s.description) {
+                    // Simple markdown stripping logic
+                    const plainText = (s.description as string)
+                        .replace(/^[*-]{3,}\s*$/gm, '') // Remove horizontal rules (---, ***)
+                        .replace(/[#*`_~]/g, '') // Remove formatting chars
+                        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1') // [text](url) -> text
+                        .replace(/\n{3,}/g, '\n\n') // Limit to max 2 newlines (keep paragraph breaks)
+                        .trim();
+                    message += `${plainText}\n`;
+                }
+                message += `\n`;
+            });
+
+            console.log(`[TelegramService] [Debug] 텔레그램 메시지 발송 시도... 대상 일정수: ${todaySchedules.length}`);
+            await this.sendMessage(message);
+
+            // Mark as notified in DB
+            const db = DatabaseService.getInstance().getDb();
+            const stmt = db.prepare('UPDATE schedules SET is_notified = 1 WHERE id = ?');
+            const notifiedIds: string[] = [];
+            todaySchedules.forEach((s: any) => {
+                stmt.run(s.id);
+                notifiedIds.push(s.id);
+            });
+
+            // Notify renderer to update its state (Mark as notified in UI stores)
+            const windows = BrowserWindow.getAllWindows();
+            windows.forEach(win => {
+                if (!win.isDestroyed()) {
+                    win.webContents.send('schedule:notified', { ids: notifiedIds });
+                }
+            });
+
+            // Record that we notified today
+            store.set('last_schedule_notify_date', todayStr);
+            console.log(`[TelegramService] [Debug] 알림 발송 완료 및 렌더러 동기화 요청 (IDs: ${notifiedIds.join(', ')})`);
+
+        } catch (error) {
+            console.error('[TelegramService] Failed to send schedule summary:', error);
+        }
+    }
+
     private setupListeners() {
         // [1] 매매 체결 시 자동 알림 발송
         eventBus.on(SystemEvent.TRADE_EXECUTED, (data) => {
@@ -256,7 +407,7 @@ export class TelegramService {
     private setupCronJobs() {
         // [6] 자동매매 동작 상태 스케줄 알림 (08:50, 15:10)
         const sendStatus = () => {
-            const isRunning = AutoTradeService.getInstance().isRunning();
+            const isRunning = AutoTradeService.getInstance().getIsRunning();
             const statusTxt = isRunning ? '🟢 실행 중' : '🔴 중지 상태';
             this.sendMessage(`⏰ [자동매매 상태 알림]\n현재 자동매매 봇이 [${statusTxt}] 입니다.`);
         };
@@ -266,24 +417,29 @@ export class TelegramService {
     }
 
     public async sendMessage(message: string) {
+        console.log(`[TelegramService] [Debug] sendMessage called. Message length: ${message.length}, ChatID: ${this.chatId}`);
         if (!this.bot) {
+            console.log(`[TelegramService] [Debug] Bot not initialized.`);
             console.log(`[Telegram 발송 대기 (Token 미설정)]\n${message}`);
             throw new Error("텔레그램 봇 토큰이 설정되지 않았거나 초기화되지 않았습니다.");
         }
         if (!this.chatId) {
+            console.log(`[TelegramService] [Debug] Chat ID missing.`);
             console.log(`[Telegram 발송 대기 (Chat ID 미설정)]\n${message}`);
             throw new Error("Chat ID가 설정되지 않았습니다. 텔레그램 개인 톡방에서 봇에게 /start 를 먼저 입력해주세요.");
         }
         // 단톡방(음수 Chat ID)으로는 시스템 알림 발송 제한
         if (this.chatId.startsWith('-')) {
+            console.log(`[TelegramService] [Debug] Blocked for group chat.`);
             console.log(`[Telegram 발송 차단] 단톡방으로는 시스템 알림을 발송하지 않습니다.`);
             throw new Error("현재 등록된 Chat ID가 단톡방입니다. 알림을 받으시려면 개인 톡방에서 봇에게 /start 를 입력해주세요.");
         }
 
         try {
             await this.bot.telegram.sendMessage(this.chatId, message);
+            console.log(`[TelegramService] [Debug] Message sent successfully.`);
         } catch (error: any) {
-            console.error('[Telegram 발송 실패]', error);
+            console.error('[TelegramService] [Debug] Telegram delivery failed:', error);
             throw new Error(`텔레그램 발송 실패: ${error.message}`);
         }
     }

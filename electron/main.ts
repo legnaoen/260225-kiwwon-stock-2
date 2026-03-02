@@ -4,6 +4,7 @@ import Store from 'electron-store'
 import { KiwoomService } from './services/KiwoomService'
 import { AutoTradeService } from './services/AutoTradeService'
 import { TelegramService } from './services/TelegramService'
+import { DatabaseService } from './services/DatabaseService'
 import { eventBus, SystemEvent } from './utils/EventBus'
 
 const store = new Store()
@@ -254,4 +255,64 @@ ipcMain.handle('telegram:test-message', async () => {
     } catch (error: any) {
         return { success: false, error: error.message };
     }
+})
+
+ipcMain.handle('telegram:send-message', async (_event, message: string) => {
+    try {
+        await telegramService.sendMessage(message);
+        return { success: true };
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
+})
+
+// === DART API Handlers ===
+ipcMain.handle('dart:sync-corp-codes', async () => {
+    const { DartApiService } = require('./services/DartApiService')
+    try {
+        await DartApiService.getInstance().syncCorpCodes()
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('dart:fetch-disclosures', async (_event, { corpCodes, bgnDe, endDe }) => {
+    const { DartApiService } = require('./services/DartApiService')
+    try {
+        const disclosures = await DartApiService.getInstance().fetchDisclosures(corpCodes, bgnDe, endDe)
+        return { success: true, data: disclosures }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+// === Schedule Settings Handlers ===
+ipcMain.handle('schedule:save-settings', (_event, settings: { notificationTime: string, globalDailyNotify: boolean, sendMissedOnStartup?: boolean }) => {
+    store.set('schedule_settings', settings)
+    TelegramService.getInstance().reloadScheduleCron()
+    return { success: true }
+})
+
+ipcMain.handle('schedule:get-settings', () => {
+    return store.get('schedule_settings') || { notificationTime: '08:30', globalDailyNotify: false, sendMissedOnStartup: true }
+})
+
+ipcMain.handle('schedule:sync', (_event, schedules: any[]) => {
+    DatabaseService.getInstance().upsertSchedules(schedules)
+    return { success: true }
+})
+
+ipcMain.handle('schedule:delete', (_event, id: string) => {
+    DatabaseService.getInstance().deleteSchedule(id)
+    return { success: true }
+})
+
+ipcMain.handle('schedule:get-all', () => {
+    return DatabaseService.getInstance().getAllSchedules()
+})
+
+ipcMain.handle('schedule:test-summary', async () => {
+    await TelegramService.getInstance().triggerScheduleSummaryTest()
+    return { success: true }
 })

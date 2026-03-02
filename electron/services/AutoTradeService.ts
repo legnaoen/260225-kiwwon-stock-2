@@ -52,6 +52,10 @@ export class AutoTradeService {
         this.broadcastLog(`시스템 가동 상태 변경: ${this.isRunning ? 'RUNNING' : 'STOPPED'}`, 'INFO');
     }
 
+    public getIsRunning() {
+        return this.isRunning;
+    }
+
     private broadcastLog(message: string, level: 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS' = 'INFO') {
         if (level === 'ERROR') console.error(`[AutoTrade] ${message}`);
         else console.log(`[AutoTrade] ${message}`);

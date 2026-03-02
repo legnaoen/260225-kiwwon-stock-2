@@ -10,6 +10,15 @@
     "typecheck": "tsc --noEmit",
     "dev:web": "vite"
   },
+  "build": {
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    }
+  },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
     "axios": "^1.6.7",

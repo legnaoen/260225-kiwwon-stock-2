@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle } from 'lucide-react'
+import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock } from 'lucide-react'
 
 export default function Settings() {
     const [keys, setKeys] = useState({ appkey: '', secretkey: '' })
@@ -7,11 +7,20 @@ export default function Settings() {
     const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
     const [message, setMessage] = useState('')
 
-    const [telegramKeys, setTelegramKeys] = useState({ botToken: '', chatId: '', chartTheme: 'dark' })
+    const [telegramKeys, setTelegramKeys] = useState({ botToken: '', chatId: '', chartTheme: 'dark', chatType: '' })
     const [isSavingTg, setIsSavingTg] = useState(false)
     const [statusTg, setStatusTg] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageTg, setMessageTg] = useState('')
     const [isTestingTg, setIsTestingTg] = useState(false)
+
+    const [scheduleSettings, setScheduleSettings] = useState({
+        notificationTime: '08:30',
+        globalDailyNotify: false,
+        sendMissedOnStartup: true
+    })
+    const [isSavingSchedule, setIsSavingSchedule] = useState(false)
+    const [statusSchedule, setStatusSchedule] = useState<'idle' | 'success' | 'error'>('idle')
+    const [messageSchedule, setMessageSchedule] = useState('')
 
     useEffect(() => {
         const loadKeys = async () => {
@@ -25,8 +34,14 @@ export default function Settings() {
                 setTelegramKeys({
                     botToken: savedTgKeys.botToken || '',
                     chatId: savedTgKeys.chatId || '',
-                    chartTheme: savedTgKeys.chartTheme || 'dark'
+                    chartTheme: savedTgKeys.chartTheme || 'dark',
+                    chatType: savedTgKeys.chatType || ''
                 })
+            }
+
+            const savedScheduleSettings = await window.electronAPI.getScheduleSettings()
+            if (savedScheduleSettings) {
+                setScheduleSettings(savedScheduleSettings)
             }
         }
         loadKeys()
@@ -107,6 +122,30 @@ export default function Settings() {
             setMessageTg('저장 중 오류가 발생했습니다.')
         } finally {
             setIsSavingTg(false)
+        }
+    }
+
+    const handleSaveSchedule = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setIsSavingSchedule(true)
+        setStatusSchedule('idle')
+        setMessageSchedule('일정 설정 저장 중...')
+
+        try {
+            const result = await window.electronAPI.saveScheduleSettings(scheduleSettings)
+            if (result.success) {
+                setStatusSchedule('success')
+                setMessageSchedule('일정 알림 설정이 저장되었습니다.')
+                setTimeout(() => setStatusSchedule('idle'), 3000)
+            } else {
+                setStatusSchedule('error')
+                setMessageSchedule('저장 실패')
+            }
+        } catch (error: any) {
+            setStatusSchedule('error')
+            setMessageSchedule('저장 중 오류가 발생했습니다.')
+        } finally {
+            setIsSavingSchedule(false)
         }
     }
 
@@ -231,14 +270,33 @@ export default function Settings() {
                         </div>
 
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-muted-foreground">Chat ID</label>
-                            <input
-                                type="password"
-                                value={telegramKeys.chatId}
-                                onChange={(e) => setTelegramKeys({ ...telegramKeys, chatId: e.target.value })}
-                                placeholder="메시지를 받을 사용자/그룹 Chat ID"
-                                className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                            />
+                            <label className="text-sm font-medium text-muted-foreground flex items-center justify-between">
+                                <span>Chat ID</span>
+                                {telegramKeys.chatId && (
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${telegramKeys.chatType === 'private' ? 'bg-green-500/10 text-green-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                                        {telegramKeys.chatType === 'private' ? '● 1:1 개인방 등록됨' : '● 그룹/기타 등록됨'}
+                                    </span>
+                                )}
+                            </label>
+                            <div className="relative group">
+                                <input
+                                    type="text"
+                                    value={telegramKeys.chatId}
+                                    onChange={(e) => setTelegramKeys({ ...telegramKeys, chatId: e.target.value })}
+                                    placeholder="봇에게 /start 를 보내면 자동 등록됩니다"
+                                    className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all pr-12"
+                                />
+                                {telegramKeys.chatId && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setTelegramKeys({ ...telegramKeys, chatId: '', chatType: '' })}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-muted-foreground hover:text-destructive transition-colors"
+                                        title="ID 초기화"
+                                    >
+                                        <RefreshCw size={14} />
+                                    </button>
+                                )}
+                            </div>
                         </div>
 
                         <div className="space-y-2">
@@ -325,6 +383,117 @@ export default function Settings() {
                             </p>
                         </div>
                     </div>
+                </div>
+
+                {/* Schedule Settings Block */}
+                <div className="bg-card border rounded-2xl p-6 shadow-sm space-y-6">
+                    <div className="flex items-center gap-2 pb-4 border-b border-border">
+                        <Bell className="text-amber-500" size={20} />
+                        <h2 className="text-lg font-semibold">일정 알림 설정</h2>
+                    </div>
+
+                    <form onSubmit={handleSaveSchedule} className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                                    <Clock size={14} /> 알림 발송 시간
+                                </label>
+                                <input
+                                    type="time"
+                                    value={scheduleSettings.notificationTime}
+                                    onChange={(e) => setScheduleSettings({ ...scheduleSettings, notificationTime: e.target.value })}
+                                    className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition-all"
+                                />
+                                <p className="text-[10px] text-muted-foreground">매일 지정된 시간에 텔레그램으로 일정을 요약 발송합니다.</p>
+                            </div>
+
+                            <div className="space-y-4">
+                                <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                                    <Bell size={14} /> 추가 알림 옵션
+                                </label>
+                                <div className="flex items-center gap-3 bg-muted/30 p-3 rounded-xl border border-border/50">
+                                    <input
+                                        type="checkbox"
+                                        id="globalDailyNotify"
+                                        checked={scheduleSettings.globalDailyNotify}
+                                        onChange={(e) => setScheduleSettings({ ...scheduleSettings, globalDailyNotify: e.target.checked })}
+                                        className="w-4 h-4 text-amber-500 rounded focus:ring-amber-500"
+                                    />
+                                    <label htmlFor="globalDailyNotify" className="text-sm cursor-pointer select-none font-medium">
+                                        모든 일정 당일 알림 제공
+                                        <span className="block text-[10px] text-muted-foreground font-normal mt-0.5">
+                                            개별 설정과 관계없이 모든 일정에 대해 당일 알림을 보냅니다. (중복 방지 포함)
+                                        </span>
+                                    </label>
+                                </div>
+
+                                <div className="flex items-center gap-3 bg-muted/30 p-3 rounded-xl border border-border/50">
+                                    <input
+                                        type="checkbox"
+                                        id="sendMissedOnStartup"
+                                        checked={scheduleSettings.sendMissedOnStartup}
+                                        onChange={(e) => setScheduleSettings({ ...scheduleSettings, sendMissedOnStartup: e.target.checked })}
+                                        className="w-4 h-4 text-amber-500 rounded focus:ring-amber-500"
+                                    />
+                                    <label htmlFor="sendMissedOnStartup" className="text-sm cursor-pointer select-none font-medium">
+                                        기동 시 미발송 알림 즉시 전송
+                                        <span className="block text-[10px] text-muted-foreground font-normal mt-0.5">
+                                            프로그램 시작 시 알림 시간이 지났다면 즉시 요약 메시지를 보냅니다.
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="pt-2 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        setIsSavingSchedule(true)
+                                        setMessageSchedule('테스트 알림 발송 중...')
+                                        const res = await window.electronAPI.testScheduleSummary()
+                                        if (res.success) {
+                                            setStatusSchedule('success')
+                                            setMessageSchedule('테스트 알림이 텔레그램으로 전송되었습니다.')
+                                        } else {
+                                            setStatusSchedule('error')
+                                            setMessageSchedule('발송 실패: 설정을 확인해주세요.')
+                                        }
+                                        setIsSavingSchedule(false)
+                                        setTimeout(() => setStatusSchedule('idle'), 3000)
+                                    }}
+                                    className="flex items-center gap-2 text-xs text-amber-600 hover:text-amber-700 font-medium px-3 py-1.5 rounded-lg border border-amber-200 hover:bg-amber-50 transition-colors"
+                                >
+                                    <Send size={12} /> 알림 즉시 테스트
+                                </button>
+                                {isSavingSchedule && (
+                                    <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
+                                        <RefreshCw size={14} className="animate-spin" /> {messageSchedule}
+                                    </span>
+                                )}
+                                {statusSchedule === 'success' && (
+                                    <span className="text-xs text-green-500 font-medium flex items-center gap-1">
+                                        <ShieldCheck size={14} /> {messageSchedule}
+                                    </span>
+                                )}
+                                {statusSchedule === 'error' && (
+                                    <span className="text-xs text-destructive font-medium flex items-center gap-1">
+                                        <AlertCircle size={14} /> {messageSchedule}
+                                    </span>
+                                )}
+                            </div>
+
+                            <button
+                                type="submit"
+                                disabled={isSavingSchedule}
+                                className="flex items-center gap-2 bg-amber-500 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-amber-600 disabled:opacity-50 transition-all shadow-lg shadow-amber-500/20"
+                            >
+                                {isSavingSchedule ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
+                                일정 설정 저장
+                            </button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>

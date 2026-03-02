@@ -23,6 +23,17 @@ export interface IElectronAPI {
     getTelegramSettings: () => Promise<{ botToken: string, chatId: string, chartTheme?: string } | null>
     sendTelegramTestMessage: () => Promise<{ success: boolean, error?: string }>
 
+    // Auto Trade & Condition Search
+    saveAutoTradeSettings: (settings: any) => Promise<any>
+    getAutoTradeSettings: () => Promise<any>
+    getAutoTradeStatus: () => Promise<boolean>
+    setAutoTradeStatus: (status: boolean) => Promise<any>
+    connectConditionWs: () => Promise<any>
+    getConditionList: () => Promise<any>
+    startConditionSearch: (seq: string) => Promise<any>
+    onConditionList: (callback: (data: any[]) => void) => () => void
+    onAutoTradeLog: (callback: (log: any) => void) => () => void
+
     // Capture
     sendChartRenderComplete: (code: string) => void
 }

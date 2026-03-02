@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveTelegramTheme: (theme: string) => ipcRenderer.invoke('telegram:save-theme', theme),
     getTelegramSettings: () => ipcRenderer.invoke('telegram:get-settings'),
     sendTelegramTestMessage: () => ipcRenderer.invoke('telegram:test-message'),
+    sendTelegramMessage: (message: string) => ipcRenderer.invoke('telegram:send-message', message),
 
     // Condition Search
     connectConditionWs: () => ipcRenderer.invoke('kiwoom:connect-condition-ws'),
@@ -58,5 +59,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const listener = (_event: any, data: any[]) => callback(data)
         ipcRenderer.on('kiwoom:condition-list', listener)
         return () => ipcRenderer.removeListener('kiwoom:condition-list', listener)
-    }
+    },
+
+    // DART API & SQLite Scheduling
+    syncDartCorpCodes: () => ipcRenderer.invoke('dart:sync-corp-codes'),
+    fetchDartDisclosures: (options: { corpCodes: string[], bgnDe: string, endDe: string }) =>
+        ipcRenderer.invoke('dart:fetch-disclosures', options),
+
+    // Schedule Settings
+    saveScheduleSettings: (settings: { notificationTime: string, globalDailyNotify: boolean, sendMissedOnStartup?: boolean }) =>
+        ipcRenderer.invoke('schedule:save-settings', settings),
+    getScheduleSettings: () => ipcRenderer.invoke('schedule:get-settings'),
+    syncSchedules: (schedules: any[]) => ipcRenderer.invoke('schedule:sync', schedules),
+    deleteSchedule: (id: string) => ipcRenderer.invoke('schedule:delete', id),
+    getSchedules: () => ipcRenderer.invoke('schedule:get-all'),
+    onScheduleNotified: (callback: any) => ipcRenderer.on('schedule:notified', callback),
+    testScheduleSummary: () => ipcRenderer.invoke('schedule:test-summary'),
 })

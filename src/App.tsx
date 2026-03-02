@@ -9,6 +9,10 @@ import Watchlist from './components/Watchlist'
 import Settings from './components/Settings'
 import AutoTrade from './components/AutoTrade'
 import CapturePage from './components/CapturePage'
+import Schedule from './components/Schedule'
+import { useScheduleNotifier } from './hooks/useScheduleNotifier'
+import { useNoteStore } from './store/useNoteStore'
+import { useScheduleStore } from './store/useScheduleStore'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
     constructor(props: { children: ReactNode }) {
@@ -64,6 +68,32 @@ export default function App() {
 }
 
 function AppContent() {
+    useScheduleNotifier()
+
+    useEffect(() => {
+        const handleNotified = (_event: any, { ids }: { ids: string[] }) => {
+            console.log('[App] Received schedule notification sync for IDs:', ids);
+            const { notes, updateNote } = useNoteStore.getState();
+            const { events, updateEvent } = useScheduleStore.getState();
+
+            ids.forEach(id => {
+                const note = notes.find(n => n.id === id);
+                if (note) {
+                    updateNote(id, note.content, note.targetDate, note.reminderType, true);
+                }
+
+                const event = events.find(e => e.id === id);
+                if (event) {
+                    updateEvent(id, { isNotified: true });
+                }
+            });
+        };
+
+        if (window.electronAPI?.onScheduleNotified) {
+            window.electronAPI.onScheduleNotified(handleNotified);
+        }
+    }, [])
+
     const [activeTab, setActiveTab] = useState('holdings')
     const [isDarkMode, setIsDarkMode] = useState(() => {
         // Use system theme by default
@@ -172,9 +202,10 @@ function AppContent() {
                         {activeTab === 'holdings' && <Holdings />}
                         {activeTab === 'watchlist' && <Watchlist />}
                         {activeTab === 'auto-trade' && <AutoTrade />}
+                        {activeTab === 'schedule' && <Schedule />}
                         {activeTab === 'settings' && <Settings />}
 
-                        {(activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'settings' && activeTab !== 'auto-trade') && (
+                        {(activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

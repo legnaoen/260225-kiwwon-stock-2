@@ -210,7 +210,7 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
 
         const cleanup = window.electronAPI.onRealTimeData((wsData: any) => {
             // Ensure data is for the currently selected stock
-            if (wsData.stk_cd === stockCode || wsData.stk_cd === stockCode.replace(/[^0-9]/g, '')) {
+            if (wsData.stk_cd === stockCode || wsData.stk_cd === stockCode.replace(/[^a-zA-Z0-9]/g, '')) {
                 const currentPrice = Math.abs(Number(wsData.cur_prc || 0))
                 if (currentPrice === 0 || !candleSeriesRef.current || chartDataRef.current.length === 0) return
 

@@ -82,19 +82,22 @@ export class ChartRenderService {
                 },
             });
 
-            const urlHash = `#/capture/${code}/${encodeURIComponent(name)}?theme=${theme}`;
-            const baseUrl = process.env.VITE_DEV_SERVER_URL
-                ? (process.env.VITE_DEV_SERVER_URL.endsWith('/') ? process.env.VITE_DEV_SERVER_URL.slice(0, -1) : process.env.VITE_DEV_SERVER_URL)
-                : `file://${path.join(process.env.DIST as string, 'index.html')}`;
-
-            const targetUrl = `${baseUrl}/${urlHash}`;
-            console.log(`[ChartRenderService] 캡처 창 로드 시도: ${targetUrl}`);
+            const urlHash = `/capture/${code}/${encodeURIComponent(name)}?theme=${theme}`;
 
             this.win.webContents.on('console-message', (e, level, message) => {
                 console.log(`[Offscreen-Console] ${message}`);
             });
 
-            await this.win.loadURL(targetUrl);
+            if (process.env.VITE_DEV_SERVER_URL) {
+                const baseUrl = process.env.VITE_DEV_SERVER_URL.endsWith('/') ? process.env.VITE_DEV_SERVER_URL.slice(0, -1) : process.env.VITE_DEV_SERVER_URL;
+                const targetUrl = `${baseUrl}/#${urlHash}`;
+                console.log(`[ChartRenderService] 캡처 창 로드 시도: ${targetUrl}`);
+                await this.win.loadURL(targetUrl);
+            } else {
+                const targetPath = path.join(process.env.DIST as string, 'index.html');
+                console.log(`[ChartRenderService] 캡처 창 로드 시도: ${targetPath}#${urlHash}`);
+                await this.win.loadFile(targetPath, { hash: urlHash });
+            }
         } catch (err) {
             cleanup();
             reject(err as Error);

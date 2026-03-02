@@ -369,7 +369,7 @@ export default function Watchlist() {
                             <button className="text-[13px] font-bold text-muted-foreground/60 hover:text-foreground pb-3 -mb-[1.5px] transition-colors">예비 2</button>
                         </div>
                         <div className="flex-1 flex flex-col p-4 bg-muted/10 relative">
-                            <StockNotes stockCode={selectedStock?.code || ''} />
+                            <StockNotes stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />
                         </div>
                     </div>
                 </div>

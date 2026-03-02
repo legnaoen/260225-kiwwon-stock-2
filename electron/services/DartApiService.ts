@@ -1,11 +1,6 @@
 import axios from 'axios'
-import fs from 'fs'
-import path from 'path'
-import { app } from 'electron'
-import unzipper from 'unzipper' // Ensure you have this or use an alternative if unzipper is not installed
-import { DatabaseService } from './DatabaseService'
-import { eventBus, SystemEvent } from '../utils/EventBus'
 import Store from 'electron-store'
+import { DatabaseService } from './DatabaseService'
 
 const store = new Store()
 const DART_BASE_URL = 'https://opendart.fss.or.kr/api'
@@ -55,6 +50,7 @@ export class DartApiService {
                 responseType: 'arraybuffer'
             })
 
+            // Dynamic require for build-time safety with Vite/Rollup
             const unzipper = require('unzipper')
             const { XMLParser } = require('fast-xml-parser')
 
@@ -68,8 +64,15 @@ export class DartApiService {
                 const jsonObj = parser.parse(xmlBuffer.toString())
 
                 let list = jsonObj?.result?.list || []
-                if (!Array.isArray(list)) list = [list].filter(Boolean)
 
+                // If list is not an array (single item), wrap it
+                if (!Array.isArray(list)) {
+                    list = [list]
+                }
+
+                console.log(`[DartApiService] Found ${list.length} raw records. Filtering listed companies...`)
+
+                // Mapping and filtering (Only companies with stock_code are listed companies)
                 const validCodes = list
                     .filter((item: any) => item.stock_code && String(item.stock_code).trim() !== '')
                     .map((item: any) => ({
@@ -80,11 +83,10 @@ export class DartApiService {
                     }))
 
                 DatabaseService.getInstance().insertCorpCodes(validCodes)
-                console.log(`[DartApiService] Successfully downloaded and mapped ${validCodes.length} listed corp codes.`)
+                console.log(`[DartApiService] Successfully synced ${validCodes.length} listed corp codes to DB.`)
             }
-
         } catch (err: any) {
-            console.error('[DartApiService] Error syncing mapping:', err.message)
+            console.error('[DartApiService] Failed to sync corp codes:', err.message)
         } finally {
             this.isSyncing = false
         }
@@ -93,7 +95,7 @@ export class DartApiService {
     /**
      * Fetch upcoming earnings or dividend disclosures for given symbols
      */
-    public async fetchDisclosures(corpCodes: string[], bgn_de: string, end_de: string) {
+    public async fetchDisclosures(corpCodes: string[], bgnDe: string, endDe: string) {
         const apiKey = this.getApiKey()
         if (!apiKey) return []
 
@@ -103,7 +105,7 @@ export class DartApiService {
                 // Throttle requests strictly: 1 per 2 seconds to not get banned. (Limit is 10k/day)
                 await new Promise(resolve => setTimeout(resolve, 2000))
 
-                const url = `${DART_BASE_URL}/list.json?crtfc_key=${apiKey}&corp_code=${code}&bgn_de=${bgn_de}&end_de=${end_de}&pblntf_ty=A` // A: 정기공시, F: 주총, I: 배당
+                const url = `${DART_BASE_URL}/list.json?crtfc_key=${apiKey}&corp_code=${code}&bgn_de=${bgnDe}&end_de=${endDe}&pblntf_ty=A` // A: 정기공시
                 const res = await axios.get(url)
 
                 if (res.data.status === '013') {

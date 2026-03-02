@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // DART API & SQLite Scheduling
+    saveDartApiKey: (key: string) => ipcRenderer.invoke('dart:save-key', key),
+    getDartApiKey: () => ipcRenderer.invoke('dart:get-key'),
     syncDartCorpCodes: () => ipcRenderer.invoke('dart:sync-corp-codes'),
     fetchDartDisclosures: (options: { corpCodes: string[], bgnDe: string, endDe: string }) =>
         ipcRenderer.invoke('dart:fetch-disclosures', options),

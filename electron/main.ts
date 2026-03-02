@@ -5,6 +5,7 @@ import { KiwoomService } from './services/KiwoomService'
 import { AutoTradeService } from './services/AutoTradeService'
 import { TelegramService } from './services/TelegramService'
 import { DatabaseService } from './services/DatabaseService'
+import { DartApiService } from './services/DartApiService'
 import { eventBus, SystemEvent } from './utils/EventBus'
 
 const store = new Store()
@@ -267,8 +268,16 @@ ipcMain.handle('telegram:send-message', async (_event, message: string) => {
 })
 
 // === DART API Handlers ===
+ipcMain.handle('dart:save-key', (_event, key: string) => {
+    store.set('dart_api_key', key)
+    return { success: true }
+})
+
+ipcMain.handle('dart:get-key', () => {
+    return store.get('dart_api_key') || ''
+})
+
 ipcMain.handle('dart:sync-corp-codes', async () => {
-    const { DartApiService } = require('./services/DartApiService')
     try {
         await DartApiService.getInstance().syncCorpCodes()
         return { success: true }
@@ -278,7 +287,6 @@ ipcMain.handle('dart:sync-corp-codes', async () => {
 })
 
 ipcMain.handle('dart:fetch-disclosures', async (_event, { corpCodes, bgnDe, endDe }) => {
-    const { DartApiService } = require('./services/DartApiService')
     try {
         const disclosures = await DartApiService.getInstance().fetchDisclosures(corpCodes, bgnDe, endDe)
         return { success: true, data: disclosures }

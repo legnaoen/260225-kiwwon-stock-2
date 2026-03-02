@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useScheduleStore, ScheduleEvent } from '../../store/useScheduleStore'
 import { useNoteStore } from '../../store/useNoteStore'
-import { Plus, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, X, ExternalLink } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -321,6 +321,14 @@ export default function CalendarView() {
                                             {selectedEvent.code && !selectedEvent.isMemo && <span className="bg-primary/10 text-primary px-2 py-1 rounded-md border border-primary/20">종목코드: {selectedEvent.code}</span>}
                                             {selectedEvent.reminderType && selectedEvent.reminderType !== '없음' && (
                                                 <span className="bg-secondary/20 text-secondary-foreground px-2 py-1 rounded-md border border-border">🔔 알림: {selectedEvent.reminderType}</span>
+                                            )}
+                                            {selectedEvent.source === 'DART' && selectedEvent.originId && (
+                                                <button
+                                                    onClick={() => window.open(`https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${selectedEvent.originId}`, '_blank', 'width=1200,height=1000')}
+                                                    className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-green-500/10 text-green-600 text-[11px] font-bold border border-green-500/20 hover:bg-green-500/20 transition-colors"
+                                                >
+                                                    <ExternalLink size={12} /> DART 원문보기
+                                                </button>
                                             )}
                                         </div>
                                     </div>

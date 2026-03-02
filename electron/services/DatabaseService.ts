@@ -45,12 +45,27 @@ export class DatabaseService {
                 stock_code TEXT,
                 reminder_type TEXT,
                 is_notified INTEGER DEFAULT 0,
-                is_market_event INTEGER DEFAULT 0
+                is_market_event INTEGER DEFAULT 0,
+                source TEXT DEFAULT 'MANUAL',
+                origin_id TEXT
             );
         `
 
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
+
+        // Ensure columns exist for migration
+        try {
+            this.db.exec("ALTER TABLE schedules ADD COLUMN source TEXT DEFAULT 'MANUAL'")
+        } catch (e) { }
+        try {
+            this.db.exec("ALTER TABLE schedules ADD COLUMN origin_id TEXT")
+        } catch (e) { }
+
+        // Add index on origin_id for fast lookup
+        try {
+            this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_schedules_origin_id ON schedules(origin_id) WHERE origin_id IS NOT NULL")
+        } catch (e) { }
     }
 
     public insertCorpCodes(codes: { corp_code: string, corp_name: string, stock_code: string, modify_date: string }[]) {
@@ -72,7 +87,7 @@ export class DatabaseService {
         if (stockCodes.length === 0) return {}
         const placeholders = stockCodes.map(() => '?').join(',')
         const stmt = this.db.prepare(`SELECT stock_code, corp_code FROM dart_corp_code WHERE stock_code IN (${placeholders})`)
-        const rows = stmt.all(stockCodes) as any[]
+        const rows = stmt.all(...stockCodes) as any[]
 
         const map: Record<string, string> = {}
         rows.forEach(r => {
@@ -87,12 +102,23 @@ export class DatabaseService {
 
     public upsertSchedules(schedules: any[]) {
         const stmt = this.db.prepare(`
-            INSERT OR REPLACE INTO schedules (id, title, description, target_date, stock_code, reminder_type, is_notified, is_market_event)
-            VALUES (@id, @title, @description, @target_date, @stock_code, @reminder_type, @is_notified, @is_market_event)
+            INSERT OR REPLACE INTO schedules (id, title, description, target_date, stock_code, reminder_type, is_notified, is_market_event, source, origin_id)
+            VALUES (@id, @title, @description, @target_date, @stock_code, @reminder_type, @is_notified, @is_market_event, @source, @origin_id)
         `)
         const insertMany = this.db.transaction((items) => {
             for (const item of items) {
-                stmt.run(item)
+                stmt.run({
+                    id: item.id,
+                    title: item.title,
+                    description: item.description || '',
+                    target_date: item.target_date,
+                    stock_code: item.stock_code || '',
+                    reminder_type: item.reminder_type || '없음',
+                    is_notified: item.is_notified || 0,
+                    is_market_event: item.is_market_event || 0,
+                    source: item.source || 'MANUAL',
+                    origin_id: item.origin_id || null
+                })
             }
         })
         insertMany(schedules)

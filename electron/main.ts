@@ -72,7 +72,20 @@ app.on('activate', () => {
     }
 })
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+    createWindow()
+
+    // Startup DART Sync after 5 seconds
+    setTimeout(async () => {
+        try {
+            console.log('[Main] Starting startup DART sync...')
+            await DartApiService.getInstance().syncWatchlistSchedules()
+            console.log('[Main] Startup DART sync completed.')
+        } catch (err) {
+            console.error('[Main] Startup DART sync failed:', err)
+        }
+    }, 5000)
+})
 
 // IPC Handlers: Window Controls
 ipcMain.on('window-controls:minimize', () => {
@@ -277,9 +290,27 @@ ipcMain.handle('dart:get-key', () => {
     return store.get('dart_api_key') || ''
 })
 
+ipcMain.handle('dart:save-settings', (_event, settings: any) => {
+    store.set('dart_settings', settings)
+    return { success: true }
+})
+
+ipcMain.handle('dart:get-settings', () => {
+    return store.get('dart_settings') || {}
+})
+
 ipcMain.handle('dart:sync-corp-codes', async () => {
     try {
         await DartApiService.getInstance().syncCorpCodes()
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('dart:sync-watchlist-schedules', async () => {
+    try {
+        await DartApiService.getInstance().syncWatchlistSchedules()
         return { success: true }
     } catch (err: any) {
         return { success: false, error: err.message }
@@ -290,6 +321,16 @@ ipcMain.handle('dart:fetch-disclosures', async (_event, { corpCodes, bgnDe, endD
     try {
         const disclosures = await DartApiService.getInstance().fetchDisclosures(corpCodes, bgnDe, endDe)
         return { success: true, data: disclosures }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('schedule:get-by-stock', async (_event, stockCode: string) => {
+    try {
+        const db = DatabaseService.getInstance().getDb()
+        const rows = db.prepare('SELECT * FROM schedules WHERE stock_code = ? ORDER BY target_date DESC').all(stockCode)
+        return { success: true, data: rows }
     } catch (err: any) {
         return { success: false, error: err.message }
     }

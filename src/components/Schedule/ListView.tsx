@@ -1,4 +1,10 @@
-import { Calendar, Trash2, Edit2, Plus, X } from 'lucide-react'
+import React, { useState, useMemo, useEffect } from 'react'
+import { Calendar, Trash2, Edit2, Plus, X, ExternalLink, Info } from 'lucide-react'
+import { useScheduleStore } from '../../store/useScheduleStore'
+import { useNoteStore } from '../../store/useNoteStore'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { cn } from '../../utils'
 
 export default function ListView() {
     const { events: scheduleEvents, deleteEvent, updateEvent, addEvent } = useScheduleStore()
@@ -315,6 +321,14 @@ export default function ListView() {
                                 </div>
 
                                 <div className="px-6 py-4 border-t border-border bg-muted/5 flex justify-end gap-3 shrink-0">
+                                    {selectedEvent.source === 'DART' && selectedEvent.originId && (
+                                        <button
+                                            onClick={() => window.open(`https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${selectedEvent.originId}`, '_blank', 'width=1200,height=1000')}
+                                            className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold bg-green-500/10 hover:bg-green-500/20 text-green-600 border border-green-500/20 rounded-md transition-colors mr-auto"
+                                        >
+                                            <ExternalLink size={14} /> DART 원문보기
+                                        </button>
+                                    )}
                                     <button
                                         onClick={handleStartEdit}
                                         className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold bg-muted hover:bg-primary/10 text-primary border border-border rounded-md transition-colors"
@@ -323,7 +337,7 @@ export default function ListView() {
                                     </button>
                                     <button
                                         onClick={() => {
-                                            if (confirm('이 일정을 삭제하시겠습니까?')) {
+                                            if (window.confirm('이 일정을 삭제하시겠습니까?')) {
                                                 if (selectedEvent.isMemo) {
                                                     deleteNote(selectedEvent.originalId!);
                                                 } else {

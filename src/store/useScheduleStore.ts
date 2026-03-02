@@ -12,6 +12,8 @@ export interface ScheduleEvent {
     reminderType: ReminderType
     isNotified: boolean
     isMarketEvent?: boolean // True for DART/Market common events
+    source?: string
+    originId?: string
 }
 
 interface ScheduleState {
@@ -21,22 +23,13 @@ interface ScheduleState {
     deleteEvent: (id: string) => void
     getEventsByDate: (date: string) => ScheduleEvent[]
     syncAllSchedules: () => void
+    pullSchedules: () => void
 }
 
 export const useScheduleStore = create<ScheduleState>()(
     persist(
         (set, get) => ({
-            events: [
-                {
-                    id: '1',
-                    title: '삼성전자 실적발표 (예상)',
-                    date: new Date().toISOString().split('T')[0],
-                    code: '005930',
-                    reminderType: '1일 전',
-                    isNotified: false,
-                    isMarketEvent: true
-                }
-            ],
+            events: [],
             addEvent: (event) => set((state) => {
                 const newEvents = [...state.events, { ...event, id: Math.random().toString(36).substr(2, 9), isNotified: false }]
                 setTimeout(() => get().syncAllSchedules(), 0)
@@ -49,7 +42,6 @@ export const useScheduleStore = create<ScheduleState>()(
             }),
             deleteEvent: (id) => set((state) => {
                 const newEvents = state.events.filter(event => event.id !== id)
-                // Need an explicit IPC for delete to remove from DB if we don't clear DB every time
                 if (window.electronAPI?.deleteSchedule) {
                     window.electronAPI.deleteSchedule(id)
                 }
@@ -57,6 +49,26 @@ export const useScheduleStore = create<ScheduleState>()(
             }),
             getEventsByDate: (date) => {
                 return get().events.filter(e => e.date === date)
+            },
+            pullSchedules: async () => {
+                if (window.electronAPI?.getSchedules) {
+                    const res = await window.electronAPI.getSchedules()
+                    if (res) {
+                        const mapped = res.map((row: any) => ({
+                            id: row.id,
+                            title: row.title,
+                            description: row.description,
+                            date: row.target_date,
+                            code: row.stock_code,
+                            reminderType: row.reminder_type,
+                            isNotified: !!row.is_notified,
+                            isMarketEvent: !!row.is_market_event,
+                            source: row.source,
+                            originId: row.origin_id
+                        }))
+                        set({ events: mapped })
+                    }
+                }
             },
             syncAllSchedules: () => {
                 const { events } = get()
@@ -67,9 +79,11 @@ export const useScheduleStore = create<ScheduleState>()(
                         description: e.description || '',
                         target_date: e.date,
                         stock_code: e.code || '',
-                        reminder_type: e.reminderType === '당일' ? 'same_day' : e.reminderType,
+                        reminder_type: e.reminderType,
                         is_notified: e.isNotified ? 1 : 0,
-                        is_market_event: e.isMarketEvent ? 1 : 0
+                        is_market_event: e.isMarketEvent ? 1 : 0,
+                        source: e.source || 'MANUAL',
+                        origin_id: e.originId || null
                     }))
                     window.electronAPI.syncSchedules(schedules)
                 }
@@ -79,7 +93,7 @@ export const useScheduleStore = create<ScheduleState>()(
             name: 'kiwoom-trader-schedules',
             onRehydrateStorage: () => (state) => {
                 if (state) {
-                    state.syncAllSchedules()
+                    state.pullSchedules()
                 }
             }
         }

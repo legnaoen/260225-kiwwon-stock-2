@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database } from 'lucide-react'
+import { useScheduleStore } from '../store/useScheduleStore'
 
 export default function Settings() {
     const [keys, setKeys] = useState({ appkey: '', secretkey: '' })
@@ -25,8 +26,17 @@ export default function Settings() {
     const [dartKey, setDartKey] = useState('')
     const [isSavingDart, setIsSavingDart] = useState(false)
     const [isSyncingDart, setIsSyncingDart] = useState(false)
+    const [isSyncingDisclosures, setIsSyncingDisclosures] = useState(false)
+    const [dartOptions, setDartOptions] = useState({
+        regular: true,      // 정기공시 (실적발표 등)
+        major: true,        // 주요사항보고 (배당, 증자 등)
+        exchange: true,     // 거래소공시 (잠정실적 등)
+        issue: false        // 발행공시
+    })
     const [statusDart, setStatusDart] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageDart, setMessageDart] = useState('')
+    const [statusDisclosures, setStatusDisclosures] = useState<'idle' | 'success' | 'error'>('idle')
+    const [messageDisclosures, setMessageDisclosures] = useState('')
 
     const [activeTab, setActiveTab] = useState<'kiwoom' | 'telegram' | 'schedule' | 'dart'>('kiwoom')
 
@@ -55,6 +65,11 @@ export default function Settings() {
             // DART 설정 로드
             const savedDartKey = await window.electronAPI.getDartApiKey()
             setDartKey(savedDartKey)
+
+            const savedDartSettings = await window.electronAPI.getDartSettings()
+            if (savedDartSettings?.options) {
+                setDartOptions(savedDartSettings.options)
+            }
         }
         loadKeys()
     }, [])
@@ -65,10 +80,13 @@ export default function Settings() {
         setStatusDart('idle')
         setMessageDart('DART API 키 저장 중...')
         try {
-            const result = await window.electronAPI.saveDartApiKey(dartKey.trim())
+            await window.electronAPI.saveDartApiKey(dartKey.trim())
+            const result = await window.electronAPI.saveDartSettings({
+                options: dartOptions
+            })
             if (result.success) {
                 setStatusDart('success')
-                setMessageDart('DART API 키가 저장되었습니다.')
+                setMessageDart('DART 설정이 저장되었습니다.')
                 setTimeout(() => setStatusDart('idle'), 3000)
             }
         } catch (error: any) {
@@ -106,6 +124,29 @@ export default function Settings() {
         } finally {
             setIsSyncingDart(false)
             setTimeout(() => setStatusDart('idle'), 5000)
+        }
+    }
+
+    const handleSyncDisclosures = async () => {
+        setIsSyncingDisclosures(true)
+        setStatusDisclosures('idle')
+        setMessageDisclosures('관심종목 공시 일정 동기화 중...')
+        try {
+            const result = await window.electronAPI.syncDartWatchlistSchedules()
+            if (result.success) {
+                setStatusDisclosures('success')
+                setMessageDisclosures('공시 일정 동기화 완료!')
+                // Refresh local store from DB
+                useScheduleStore.getState().pullSchedules()
+            } else {
+                setStatusDisclosures('error')
+                setMessageDisclosures(result.error || '동기화 실패')
+            }
+        } catch (err: any) {
+            setStatusDisclosures('error')
+            setMessageDisclosures(err.message)
+        } finally {
+            setIsSyncingDisclosures(false)
         }
     }
 
@@ -589,6 +630,38 @@ export default function Settings() {
                                         />
                                     </div>
 
+                                    <div className="space-y-4">
+                                        <label className="text-sm font-semibold ml-1 text-muted-foreground">수집할 공시 항목</label>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            {[
+                                                { id: 'regular', label: '정기공시', desc: '사업/분기보고서 (실적발표 등)' },
+                                                { id: 'major', label: '주요사항보고', desc: '배당/증자/감자/납입 결정 등' },
+                                                { id: 'exchange', label: '거래소공시', desc: '영업실적 잠정치/수주 등' },
+                                                { id: 'issue', label: '발행공시', desc: '증권신고서/투자설명서' }
+                                            ].map((opt) => (
+                                                <div
+                                                    key={opt.id}
+                                                    onClick={() => setDartOptions({ ...dartOptions, [opt.id]: !dartOptions[opt.id as keyof typeof dartOptions] })}
+                                                    className={`flex items-start gap-3 p-4 rounded-2xl border transition-all cursor-pointer ${dartOptions[opt.id as keyof typeof dartOptions]
+                                                        ? 'bg-green-500/10 border-green-500/30'
+                                                        : 'bg-muted/30 border-border/40 hover:bg-muted/50'
+                                                        }`}
+                                                >
+                                                    <div className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center border transition-all ${dartOptions[opt.id as keyof typeof dartOptions]
+                                                        ? 'bg-green-600 border-green-600 text-white'
+                                                        : 'bg-background border-border shadow-inner'
+                                                        }`}>
+                                                        {dartOptions[opt.id as keyof typeof dartOptions] && <Save size={12} />}
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <p className="text-sm font-bold">{opt.label}</p>
+                                                        <p className="text-[10px] text-muted-foreground leading-tight">{opt.desc}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
                                     <div className="pt-4 flex items-center justify-between">
                                         <div className="flex items-center gap-2">
                                             {(isSavingDart || isSyncingDart) && (
@@ -630,13 +703,44 @@ export default function Settings() {
                                     </div>
                                 </form>
 
-                                <div className="bg-muted/30 rounded-2xl p-6 flex gap-4 items-start border border-border/40">
-                                    <Database className="text-muted-foreground/60 mt-0.5" size={18} />
-                                    <div className="space-y-1">
-                                        <p className="text-xs font-bold">동기화 안내</p>
-                                        <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                            최초 1회 '코드 동기화'를 권장합니다. 약 10~20초 후 SQLite DB에 구축됩니다.
-                                        </p>
+                                <div className="bg-muted/30 rounded-2xl p-6 flex flex-col gap-4 border border-border/40">
+                                    <div className="flex gap-4 items-start">
+                                        <Database className="text-muted-foreground/60 mt-0.5" size={18} />
+                                        <div className="space-y-1">
+                                            <p className="text-xs font-bold">동기화 안내</p>
+                                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                                최초 1회 '코드 동기화'가 필요합니다. 이후 '공시 일정 동기화'를 통해 관심종목의 최신 일정을 가져올 수 있습니다. (앱 시작 시 자동 실행됨)
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-2 border-t border-border/20 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            {isSyncingDisclosures && (
+                                                <span className="text-[11px] text-muted-foreground animate-pulse flex items-center gap-2">
+                                                    <RefreshCw size={12} className="animate-spin" /> {messageDisclosures}
+                                                </span>
+                                            )}
+                                            {statusDisclosures === 'success' && (
+                                                <span className="text-[11px] text-green-500 font-medium bg-green-500/10 px-2 py-1 rounded-full border border-green-500/20">
+                                                    {messageDisclosures}
+                                                </span>
+                                            )}
+                                            {statusDisclosures === 'error' && (
+                                                <span className="text-[11px] text-destructive font-medium bg-destructive/10 px-2 py-1 rounded-full border border-destructive/20">
+                                                    {messageDisclosures}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleSyncDisclosures}
+                                            disabled={isSyncingDisclosures || !dartKey}
+                                            className="flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/20 disabled:opacity-50 transition-all border border-primary/20"
+                                        >
+                                            <RefreshCw size={14} className={isSyncingDisclosures ? 'animate-spin' : ''} />
+                                            공시 일정 동기화
+                                        </button>
                                     </div>
                                 </div>
                             </div>

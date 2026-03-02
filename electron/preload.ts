@@ -64,7 +64,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // DART API & SQLite Scheduling
     saveDartApiKey: (key: string) => ipcRenderer.invoke('dart:save-key', key),
     getDartApiKey: () => ipcRenderer.invoke('dart:get-key'),
+    saveDartSettings: (settings: any) => ipcRenderer.invoke('dart:save-settings', settings),
+    getDartSettings: () => ipcRenderer.invoke('dart:get-settings'),
     syncDartCorpCodes: () => ipcRenderer.invoke('dart:sync-corp-codes'),
+    syncDartWatchlistSchedules: () => ipcRenderer.invoke('dart:sync-watchlist-schedules'),
     fetchDartDisclosures: (options: { corpCodes: string[], bgnDe: string, endDe: string }) =>
         ipcRenderer.invoke('dart:fetch-disclosures', options),
 
@@ -75,6 +78,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncSchedules: (schedules: any[]) => ipcRenderer.invoke('schedule:sync', schedules),
     deleteSchedule: (id: string) => ipcRenderer.invoke('schedule:delete', id),
     getSchedules: () => ipcRenderer.invoke('schedule:get-all'),
+    getSchedulesByStock: (stockCode: string) => ipcRenderer.invoke('schedule:get-by-stock', stockCode),
     onScheduleNotified: (callback: any) => ipcRenderer.on('schedule:notified', callback),
     testScheduleSummary: () => ipcRenderer.invoke('schedule:test-summary'),
 })

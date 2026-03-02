@@ -7,6 +7,7 @@ import { useSignalStore } from '../store/useSignalStore'
 import { useBackgroundSignalFetcher } from '../hooks/useBackgroundSignalFetcher'
 import { StockChart } from './StockChart'
 import { StockNotes } from './StockNotes'
+import { StockSchedules } from './StockSchedules'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './ui/Table'
 import { Card, CardContent } from './ui/Card'
 import { ProfitBadge, ProfitText } from './ui/ProfitDisplay'
@@ -41,6 +42,7 @@ export default function Holdings() {
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [selectedStock, setSelectedStock] = useState<{ code: string, name: string } | null>(null)
+    const [activeInfoTab, setActiveInfoTab] = useState<'notes' | 'schedules'>('notes')
     const [debugData, setDebugData] = useState<any>(null)
     const [showDebug, setShowDebug] = useState(false)
 
@@ -358,12 +360,32 @@ export default function Holdings() {
                     {/* 하단 스크롤 영역: 부가 정보 */}
                     <div className="flex flex-col flex-1 overflow-y-auto min-h-0 bg-background">
                         <div className="flex gap-6 border-b border-border/50 px-4 pt-4 sticky top-0 z-10 bg-background">
-                            <button className="text-[13px] font-bold text-primary border-b-[3px] border-primary pb-3 -mb-[1.5px]">노트</button>
-                            <button className="text-[13px] font-bold text-muted-foreground/60 hover:text-foreground pb-3 -mb-[1.5px] transition-colors">예비 1</button>
-                            <button className="text-[13px] font-bold text-muted-foreground/60 hover:text-foreground pb-3 -mb-[1.5px] transition-colors">예비 2</button>
+                            <button
+                                onClick={() => setActiveInfoTab('notes')}
+                                className={cn(
+                                    "text-[13px] font-bold pb-3 -mb-[1.5px] transition-all",
+                                    activeInfoTab === 'notes' ? "text-primary border-b-[3px] border-primary" : "text-muted-foreground/60 hover:text-foreground"
+                                )}
+                            >
+                                노트
+                            </button>
+                            <button
+                                onClick={() => setActiveInfoTab('schedules')}
+                                className={cn(
+                                    "text-[13px] font-bold pb-3 -mb-[1.5px] transition-all flex items-center gap-1.5",
+                                    activeInfoTab === 'schedules' ? "text-primary border-b-[3px] border-primary" : "text-muted-foreground/60 hover:text-foreground"
+                                )}
+                            >
+                                DART
+                            </button>
+                            <button className="text-[13px] font-bold text-muted-foreground/60 hover:text-foreground pb-3 -mb-[1.5px] transition-colors">예비</button>
                         </div>
                         <div className="flex-1 flex flex-col p-4 bg-muted/10 relative">
-                            <StockNotes stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />
+                            {activeInfoTab === 'notes' ? (
+                                <StockNotes stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />
+                            ) : (
+                                <StockSchedules stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />
+                            )}
                         </div>
                     </div>
                 </div>

@@ -3,6 +3,7 @@ import Store from 'electron-store'
 import { DatabaseService } from './DatabaseService'
 import * as unzipper from 'unzipper'
 import { XMLParser } from 'fast-xml-parser'
+import { eventBus, SystemEvent } from '../utils/EventBus'
 
 const store = new Store()
 const DART_BASE_URL = 'https://opendart.fss.or.kr/api'
@@ -92,13 +93,36 @@ export class DartApiService {
 
     /**
      * Sync disclosures for watchlist stocks and register as schedules
+     * @param force - If true, bypass cooldown checks
      */
-    public async syncWatchlistSchedules() {
+    public async syncWatchlistSchedules(force: boolean = false) {
         const apiKey = this.getApiKey()
         if (!apiKey) {
             console.error('[DartApiService] No API key found. Aborting schedule sync.')
             return
         }
+
+        // --- Optimization: Cooldown Logic ---
+        const now = Date.now()
+        const lastSyncTime = store.get('dart_last_watchlist_sync') as number || 0
+        const diffMin = (now - lastSyncTime) / (1000 * 60)
+
+        if (!force) {
+            const kstDay = new Date(now + (9 * 60 * 60 * 1000)).getUTCDay() // 0: Sun, 6: Sat
+            const kstHour = new Date(now + (9 * 60 * 60 * 1000)).getUTCHours()
+            const isWeekend = kstDay === 0 || kstDay === 6
+            const isMarketTime = !isWeekend && kstHour >= 8 && kstHour <= 17 // 8 AM to 5 PM approx
+
+            if (isMarketTime && diffMin < 15) {
+                console.log(`[DartApiService] Cooldown active (Market: 15min). Last sync was ${Math.round(diffMin)}m ago. Skipping.`)
+                return
+            }
+            if (!isMarketTime && diffMin < 120) {
+                console.log(`[DartApiService] Cooldown active (Night/Weekend: 2h). Last sync was ${Math.round(diffMin)}m ago. Skipping.`)
+                return
+            }
+        }
+        // ------------------------------------
 
         const symbols = store.get('watchlist_symbols') as string[] || []
         console.log(`[DartApiService] Watchlist symbols: ${symbols.join(', ')}`)
@@ -134,9 +158,23 @@ export class DartApiService {
             return
         }
 
-        // Fetch last 14 days of disclosures to catch new ones
-        const endDe = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-        const bgnDe = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '')
+        // --- Optimization: Incremental Sync Range ---
+        // Fetch last 14 days by default, or since last sync (-1 day overlap)
+        const lastSyncDateStr = store.get('dart_last_sync_date') as string // YYYYMMDD
+        const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+
+        let bgnDe = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '')
+        if (lastSyncDateStr && !force) {
+            // Use last record date as starting point (with 1 day safety overlap)
+            const lastDate = new Date(lastSyncDateStr.slice(0, 4) + '-' + lastSyncDateStr.slice(4, 6) + '-' + lastSyncDateStr.slice(6, 8))
+            const safetyDate = new Date(lastDate.getTime() - 1 * 24 * 60 * 60 * 1000)
+            const safetyStr = safetyDate.toISOString().slice(0, 10).replace(/-/g, '')
+            if (safetyStr > bgnDe) {
+                bgnDe = safetyStr
+            }
+        }
+        const endDe = todayStr
+        // --------------------------------------------
 
         console.log(`[DartApiService] Starting sync: ${bgnDe} ~ ${endDe} for ${corpCodes.length} stocks`)
 
@@ -176,6 +214,9 @@ export class DartApiService {
                 }
             }
         }
+
+        store.set('dart_last_watchlist_sync', now)
+        store.set('dart_last_sync_date', endDe)
         console.log('[DartApiService] Sync watchlist schedules completed.')
     }
 
@@ -238,5 +279,109 @@ export class DartApiService {
         }
 
         return results
+    }
+
+    /**
+     * @param force - Bypass check for existing data or cooldown
+     */
+    public async syncBatchFinancials(stockCodes: string[], force: boolean = false) {
+        const apiKey = this.getApiKey()
+        if (!apiKey) return
+
+        // Per-stock cooldown check: only sync once per day for the same stock if not forced
+        const todayKey = new Date().toISOString().slice(0, 10)
+        const financialSyncLog = store.get('financial_sync_log') as Record<string, string> || {}
+
+        const stockCodesToProcess = force ? stockCodes : stockCodes.filter(code => {
+            if (financialSyncLog[code] === todayKey) {
+                console.log(`[DartApiService] ${code} was already synced today. Skipping. (Force=${force})`)
+                return false
+            }
+            return true
+        })
+
+        if (stockCodesToProcess.length === 0) {
+            console.log('[DartApiService] All stocks in batch were already synced today. Skipping.')
+            return
+        }
+
+        const stockCorpMap = DatabaseService.getInstance().getCorpCodesByStockCodes(stockCodesToProcess)
+        const currentYear = new Date().getFullYear()
+
+        let processedCount = 0
+        const totalCount = stockCodesToProcess.length
+
+        for (const stockCode of stockCodesToProcess) {
+            const corpCode = stockCorpMap[stockCode]
+            if (!corpCode) {
+                processedCount++
+                continue
+            }
+
+            eventBus.emit(SystemEvent.AUTO_TRADE_LOG, {
+                type: 'info',
+                message: `[DART] ${stockCode} 10년 재무 데이터 수집 중... (${processedCount + 1}/${totalCount})`
+            })
+
+            // Fetch last 10 years
+            for (let i = 0; i <= 10; i++) {
+                const year = (currentYear - i).toString()
+
+                // For the most recent 2 years, fetch ALL available quarters (1Q, Half, 3Q, Annual)
+                // For other years, only Annual (11011)
+                const reportCodes = (i <= 2) ? ['11011', '11014', '11012', '11013'] : ['11011']
+
+                for (const rCode of reportCodes) {
+                    try {
+                        // Optimization: Check if we already have this data in DB
+                        // We check if ANY records exist for this stock/year/reportCode
+                        const existing = DatabaseService.getInstance().getDb().prepare(
+                            'SELECT count(*) as cnt FROM financial_data WHERE stock_code = ? AND year = ? AND reprt_code = ?'
+                        ).get(stockCode, year, rCode) as any
+
+                        if (existing && existing.cnt > 0) {
+                            // Already have data, skip DART call
+                            continue
+                        }
+
+                        // DART API Throttling
+                        await new Promise(resolve => setTimeout(resolve, 800))
+
+                        // Use fnlttSinglAcnt (Single account) or fnlttSinglAcntAll (All accounts)
+                        // We need basic items: Revenue, Op Income, Net Income, Assets, Liabilities, Equity, FCF (from cash flow stmt)
+                        // reprt_code: 11011 (Annual)
+                        const url = `${DART_BASE_URL}/fnlttSinglAcntAll.json?crtfc_key=${apiKey}&corp_code=${corpCode}&bsns_year=${year}&reprt_code=${rCode}&fs_div=CFS`
+                        const res = await axios.get(url)
+
+                        if (res.data.status === '000' && res.data.list) {
+                            const financialItems = res.data.list.map((item: any) => ({
+                                stock_code: stockCode,
+                                year: year,
+                                reprt_code: rCode,
+                                account_id: item.account_id || item.account_nm,
+                                account_nm: item.account_nm,
+                                fs_div: 'CFS',
+                                amount: parseFloat(item.thstrm_amount.replace(/,/g, '')) || 0
+                            }))
+                            DatabaseService.getInstance().insertFinancialData(financialItems)
+                        } else if (res.data.status === '013') {
+                            // No data, just continue
+                        }
+                    } catch (err: any) {
+                        console.error(`[DartApiService] Error fetching ${year} (${rCode}) for ${stockCode}:`, err.message)
+                    }
+                }
+            }
+
+            processedCount++
+            // Record last sync for this stock
+            financialSyncLog[stockCode] = todayKey
+            store.set('financial_sync_log', financialSyncLog)
+        }
+
+        eventBus.emit(SystemEvent.AUTO_TRADE_LOG, {
+            type: 'success',
+            message: `[DART] ${totalCount}개 종목의 10년 재무 데이터 수집이 완료되었습니다.`
+        })
     }
 }

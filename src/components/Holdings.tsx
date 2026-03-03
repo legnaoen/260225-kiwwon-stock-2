@@ -8,6 +8,7 @@ import { useBackgroundSignalFetcher } from '../hooks/useBackgroundSignalFetcher'
 import { StockChart } from './StockChart'
 import { StockNotes } from './StockNotes'
 import { StockSchedules } from './StockSchedules'
+import { StockFinancials } from './StockFinancials'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './ui/Table'
 import { Card, CardContent } from './ui/Card'
 import { ProfitBadge, ProfitText } from './ui/ProfitDisplay'
@@ -42,9 +43,10 @@ export default function Holdings() {
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [selectedStock, setSelectedStock] = useState<{ code: string, name: string } | null>(null)
-    const [activeInfoTab, setActiveInfoTab] = useState<'notes' | 'schedules'>('notes')
+    const [activeInfoTab, setActiveInfoTab] = useState<'notes' | 'schedules' | 'financials'>('notes')
     const [debugData, setDebugData] = useState<any>(null)
     const [showDebug, setShowDebug] = useState(false)
+    const notifiedSlumpRef = useRef<Set<string>>(new Set())
 
     const { chartHeight, setChartHeight } = useLayoutStore()
     const isDragging = useRef(false)
@@ -275,15 +277,15 @@ export default function Holdings() {
             {/* Split Layout */}
             <div className="flex-1 min-h-0 flex bg-background border-t border-border overflow-hidden">
                 {/* Left side: Holdings List */}
-                <div className="flex-1 w-[45%] flex flex-col border-r border-border overflow-hidden bg-background shrink-0 min-w-[350px]">
+                <div className="flex-1 w-[45%] flex flex-col border-r border-border overflow-hidden bg-background shrink-0 min-w-[350px] [&>div.overflow-auto]:overflow-x-hidden">
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead className="w-auto">종목명</TableHead>
-                                <TableHead className="text-right w-[120px]">현재가</TableHead>
-                                <TableHead className="text-right w-[80px]">수량</TableHead>
-                                <TableHead className="text-right w-[120px]">평가금액</TableHead>
-                                <TableHead className="text-right w-[90px]">수익률</TableHead>
+                                <TableHead className="w-auto px-2">종목명</TableHead>
+                                <TableHead className="text-right w-[75px] px-2">현재가</TableHead>
+                                <TableHead className="text-right w-[45px] px-2">수량</TableHead>
+                                <TableHead className="text-right w-[85px] px-2">평가금액</TableHead>
+                                <TableHead className="text-right w-[60px] px-2">수익률</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -293,7 +295,14 @@ export default function Holdings() {
                                 let isDepressed = false
                                 if (sum19 !== undefined && sum19 > 0) {
                                     const ma20 = (sum19 + stock.price) / 20
-                                    if ((stock.price / ma20) * 100 < 95) isDepressed = true
+                                    if ((stock.price / ma20) * 100 < 95) {
+                                        isDepressed = true
+                                        const disparity = Number(((stock.price / ma20) * 100).toFixed(2))
+                                        if (!notifiedSlumpRef.current.has(stock.code)) {
+                                            notifiedSlumpRef.current.add(stock.code)
+                                            window.electronAPI?.notifyDisparitySlump?.({ code: stock.code, name: stock.name, disparity })
+                                        }
+                                    }
                                 }
 
                                 return (
@@ -305,7 +314,7 @@ export default function Holdings() {
                                         )}
                                         onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
                                     >
-                                        <TableCell>
+                                        <TableCell className="px-2">
                                             <div className="flex flex-col gap-0.5">
                                                 <div className="flex items-center gap-1.5">
                                                     <span className={cn("font-bold text-[13px] leading-none", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
@@ -314,16 +323,16 @@ export default function Holdings() {
                                                 <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
                                             </div>
                                         </TableCell>
-                                        <TableCell className="text-right font-mono font-semibold text-[13px] whitespace-nowrap overflow-hidden text-clip">
+                                        <TableCell className="text-right font-mono font-semibold text-[13px] whitespace-nowrap overflow-hidden text-clip px-2">
                                             ₩ {stock.price.toLocaleString()}
                                         </TableCell>
-                                        <TableCell className="text-right text-muted-foreground text-[13px] whitespace-nowrap overflow-hidden text-clip">
+                                        <TableCell className="text-right text-muted-foreground text-[13px] whitespace-nowrap overflow-hidden text-clip px-2">
                                             {stock.qty.toLocaleString()}
                                         </TableCell>
-                                        <TableCell className="text-right font-medium text-[13px] whitespace-nowrap overflow-hidden text-clip">
+                                        <TableCell className="text-right font-medium text-[13px] whitespace-nowrap overflow-hidden text-clip px-2">
                                             ₩ {stock.value.toLocaleString()}
                                         </TableCell>
-                                        <TableCell className="text-right whitespace-nowrap overflow-hidden text-clip">
+                                        <TableCell className="text-right whitespace-nowrap overflow-hidden text-clip px-2">
                                             <ProfitText value={stock.profit} suffix="%" className="text-[13px] font-bold" />
                                         </TableCell>
                                     </tr>
@@ -378,14 +387,21 @@ export default function Holdings() {
                             >
                                 DART
                             </button>
+                            <button
+                                onClick={() => setActiveInfoTab('financials')}
+                                className={cn(
+                                    "text-[13px] font-bold pb-3 -mb-[1.5px] transition-all flex items-center gap-1.5",
+                                    activeInfoTab === 'financials' ? "text-primary border-b-[3px] border-primary" : "text-muted-foreground/60 hover:text-foreground"
+                                )}
+                            >
+                                재무
+                            </button>
                             <button className="text-[13px] font-bold text-muted-foreground/60 hover:text-foreground pb-3 -mb-[1.5px] transition-colors">예비</button>
                         </div>
                         <div className="flex-1 flex flex-col p-4 bg-muted/10 relative">
-                            {activeInfoTab === 'notes' ? (
-                                <StockNotes stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />
-                            ) : (
-                                <StockSchedules stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />
-                            )}
+                            {activeInfoTab === 'notes' && <StockNotes stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />}
+                            {activeInfoTab === 'schedules' && <StockSchedules stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />}
+                            {activeInfoTab === 'financials' && <StockFinancials stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />}
                         </div>
                     </div>
                 </div>

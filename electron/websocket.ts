@@ -1,5 +1,7 @@
 import { BrowserWindow } from 'electron'
 import WebSocket from 'ws'
+import { PriceStore } from './services/PriceStore'
+import { eventBus, SystemEvent } from './utils/EventBus'
 
 const SOCKET_URL = 'wss://api.kiwoom.com:10000/api/dostk/websocket'
 
@@ -103,10 +105,20 @@ export class KiwoomWebSocketManager {
             trnm: 'REG',
             grp_no: '1',
             refresh: '1',
-            data: [{ // <- List format
-                item: allSymbols,
-                type: ['0B'] // 주식체결 (현재가 실시간)
-            }]
+            data: [
+                {
+                    item: allSymbols,
+                    type: ['0B'] // 주식체결 (현재가 실시간)
+                },
+                {
+                    item: [''], // 장시작시간은 item이 공백이거나 없어도 됨
+                    type: ['0s'] // 장시작시간 (시장 상태)
+                },
+                {
+                    item: [''], // 주문·체결 실시간 (미체결)
+                    type: ['00'] // 주문·체결 (미체결)
+                }
+            ]
         }
         const msg = JSON.stringify(regPacket)
         if (this.ws.readyState === WebSocket.OPEN) {
@@ -122,10 +134,8 @@ export class KiwoomWebSocketManager {
                 console.error('WS Login Failed:', data.return_msg)
             } else {
                 console.log('WS Login Success')
-                // Re-register items if any
-                if (this.registeredItems.size > 0) {
-                    this.registerItems(Array.from(this.registeredItems))
-                }
+                // Always register items to ensure 0s (market status) is active
+                this.registerItems(Array.from(this.registeredItems))
             }
             return
         }
@@ -141,7 +151,40 @@ export class KiwoomWebSocketManager {
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 const realData = data.data
                 if (Array.isArray(realData)) {
-                    realData.forEach(d => {
+                    realData.forEach((d: any) => {
+                        // Handle Market Status (0s)
+                        if (d.type === '0s' && d.values) {
+                            const marketStatus = d.values["215"]; // 장운영구분
+                            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                                this.mainWindow.webContents.send('kiwoom:market-status', {
+                                    code: marketStatus,
+                                    time: d.values["20"] || new Date().toLocaleTimeString()
+                                });
+                            }
+                            return;
+                        }
+
+                        // ----- 주문·체결 (00) -----
+                        if (d.type === '00' && d.values) {
+                            const orderInfo = {
+                                order_no: d.values['1'] ?? '', // 주문번호
+                                stk_cd: d.values['2'] ?? '',
+                                status: d.values['3'] ?? '', // 수정: ord_stt와 동일
+                                price: Number(d.values['4'] ?? 0), // 주문가격
+                                qty: Number(d.values['5'] ?? 0), // 주문수량
+                                remain_qty: Number(d.values['6'] ?? 0), // 미체결수량
+                                sum_qty: Number(d.values['7'] ?? 0), // 체결누계금액, 혹시 타입 다를 수 있음
+                                time: d.values['20'] ?? new Date().toLocaleTimeString() // 주문시간
+                            };
+
+                            eventBus.emit(SystemEvent.ORDER_REALTIME_UPDATE, orderInfo);
+
+                            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                                this.mainWindow.webContents.send('kiwoom:order-realtime', orderInfo);
+                            }
+                            return;
+                        }
+
                         // Map the raw websocket FID format to our UI's expected format
                         if (d.item && d.values) {
                             // Find the original registered symbol (e.g. "A005930") that matches the numeric item ("005930")
@@ -154,6 +197,14 @@ export class KiwoomWebSocketManager {
                                 prdy_ctrt: d.values["12"], // 등락율
                                 acml_vol: d.values["13"]   // 누적거래량
                             }
+
+                            // Centralized price store update
+                            const cleanCode = (originalSymbol || '').replace(/[^0-9]/g, '')
+                            const priceNum = Math.abs(parseInt(d.values["10"]?.replace(/[^0-9-]/g, '') || '0'))
+                            if (cleanCode.length === 6 && priceNum > 0) {
+                                PriceStore.getInstance().setPrice(cleanCode, priceNum)
+                            }
+
                             this.mainWindow!.webContents.send('kiwoom:real-time-data', mappedData)
                         } else {
                             this.mainWindow!.webContents.send('kiwoom:real-time-data', d)
@@ -165,7 +216,8 @@ export class KiwoomWebSocketManager {
                     this.mainWindow.webContents.send('kiwoom:real-time-data', data) // fallback
                 }
             }
-        } else if (data.stk_cd) { // fallback
+        }
+        else if (data.stk_cd) { // fallback
             if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 this.mainWindow.webContents.send('kiwoom:real-time-data', data)
             }

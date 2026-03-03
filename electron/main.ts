@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'node:path'
 import Store from 'electron-store'
 import { KiwoomService } from './services/KiwoomService'
@@ -6,6 +6,7 @@ import { AutoTradeService } from './services/AutoTradeService'
 import { TelegramService } from './services/TelegramService'
 import { DatabaseService } from './services/DatabaseService'
 import { DartApiService } from './services/DartApiService'
+import { CompanyAnalysisService } from './services/CompanyAnalysisService'
 import { eventBus, SystemEvent } from './utils/EventBus'
 
 const store = new Store()
@@ -44,6 +45,12 @@ function createWindow() {
     eventBus.on(SystemEvent.AUTO_TRADE_LOG, (logInfo) => {
         if (win && !win.isDestroyed()) {
             win.webContents.send('kiwoom:auto-trade-log', logInfo)
+        }
+    })
+
+    eventBus.on(SystemEvent.AUTO_TRADE_STATUS_CHANGED, (running) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('kiwoom:auto-trade-status-changed', running)
         }
     })
 
@@ -104,6 +111,10 @@ ipcMain.on('window-controls:close', () => {
     win?.close()
 })
 
+ipcMain.on('kiwoom:notify-disparity-slump', (_event, data: { code: string, name: string, disparity: number }) => {
+    eventBus.emit(SystemEvent.DISPARITY_SLUMP_DETECTED, data)
+})
+
 // IPC Handlers: Features mapped to KiwoomService
 ipcMain.handle('kiwoom:save-keys', async (_event, keys: { appkey: string, secretkey: string }) => {
     try {
@@ -155,6 +166,15 @@ ipcMain.handle('kiwoom:get-holdings', async (_event, { accountNo, nextKey = "" }
 ipcMain.handle('kiwoom:get-deposit', async (_event, { accountNo }) => {
     try {
         const data = await kiwoomService.getDeposit(accountNo)
+        return { success: true, data }
+    } catch (error: any) {
+        return { success: false, error: error?.response?.data || { message: error.message } }
+    }
+})
+
+ipcMain.handle('kiwoom:get-unexecuted-orders', async (_event, { accountNo }) => {
+    try {
+        const data = await kiwoomService.getUnexecutedOrders(accountNo)
         return { success: true, data }
     } catch (error: any) {
         return { success: false, error: error?.response?.data || { message: error.message } }
@@ -264,7 +284,7 @@ ipcMain.handle('telegram:get-settings', () => {
 
 ipcMain.handle('telegram:test-message', async () => {
     try {
-        await telegramService.sendMessage('✅ [테스트 메시지] 안티그래비티 PC앱과 텔레그램 연동이 정상적으로 완료되었습니다!');
+        await telegramService.sendAutoTradeStatusMessage(true);
         return { success: true };
     } catch (error: any) {
         return { success: false, error: error.message };
@@ -326,6 +346,33 @@ ipcMain.handle('dart:fetch-disclosures', async (_event, { corpCodes, bgnDe, endD
     }
 })
 
+ipcMain.handle('dart:get-financial-data', async (_event, stockCode: string) => {
+    try {
+        const data = DatabaseService.getInstance().getFinancialData(stockCode)
+        return { success: true, data }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('dart:sync-batch-financials', async (_event, stockCodes: string[]) => {
+    try {
+        await DartApiService.getInstance().syncBatchFinancials(stockCodes)
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('kiwoom:analyze-stock', async (_event, stockCode: string) => {
+    try {
+        const result = await CompanyAnalysisService.getInstance().analyzeStock(stockCode)
+        return { success: true, data: result }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
 ipcMain.handle('schedule:get-by-stock', async (_event, stockCode: string) => {
     try {
         const db = DatabaseService.getInstance().getDb()
@@ -364,4 +411,12 @@ ipcMain.handle('schedule:get-all', () => {
 ipcMain.handle('schedule:test-summary', async () => {
     await TelegramService.getInstance().triggerScheduleSummaryTest()
     return { success: true }
+})
+ipcMain.handle('open-external', async (_event, url: string) => {
+    try {
+        await shell.openExternal(url)
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
 })

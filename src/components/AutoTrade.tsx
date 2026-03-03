@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/Table'
 import { Play, Square, RefreshCw, Settings2, Clock, ShieldCheck, ListOrdered } from 'lucide-react'
 import { useAccountStore } from '../store/useAccountStore'
+import { useAutoTradeStore } from '../store/useAutoTradeStore'
 
 // types
 interface Condition {
@@ -13,8 +14,8 @@ export default function AutoTrade() {
     const [conditions, setConditions] = useState<Condition[]>([])
     const [selectedSeq, setSelectedSeq] = useState<string>('')
     const { accountList: accounts } = useAccountStore()
+    const { isRunning: isActive, setIsRunning, orders, setOrders, addOrUpdateOrder } = useAutoTradeStore()
     const [selectedAccount, setSelectedAccount] = useState<string>('')
-    const [isActive, setIsActive] = useState<boolean>(false)
     const [logs, setLogs] = useState<{ time: string, message: string, level: string }[]>([])
 
     // Settings State
@@ -59,7 +60,7 @@ export default function AutoTrade() {
 
             // Get active status from backend
             const activeStatus = await window.electronAPI.getAutoTradeStatus()
-            setIsActive(activeStatus)
+            setIsRunning(activeStatus)
 
             setTimeout(() => { isLoaded.current = true }, 500) // Delay to avoid saving initial render states
         }
@@ -73,6 +74,7 @@ export default function AutoTrade() {
         window.electronAPI.saveAutoTradeSettings({
             selectedAccount,
             selectedSeq,
+            selectedSeqName: conditions.find(c => c.seq === selectedSeq)?.name || '',
             timeHours,
             timeMinutes,
             dailyBudget,
@@ -85,10 +87,10 @@ export default function AutoTrade() {
             condSellInterval,
             autoModify
         })
-    }, [selectedAccount, selectedSeq, timeHours, timeMinutes, dailyBudget, buyLimit, buyPremium, maxPriceLimit, throttleLimit, condSellTimeHours, condSellTimeMinutes, condSellInterval, autoModify])
+    }, [selectedAccount, selectedSeq, conditions, timeHours, timeMinutes, dailyBudget, buyLimit, buyPremium, maxPriceLimit, throttleLimit, condSellTimeHours, condSellTimeMinutes, condSellInterval, autoModify])
 
     const toggleActive = async (newStatus: boolean) => {
-        setIsActive(newStatus)
+        setIsRunning(newStatus)
         await window.electronAPI.setAutoTradeStatus(newStatus)
     }
 
@@ -120,9 +122,77 @@ export default function AutoTrade() {
     // Synchronize selectedAccount from store if blank
     useEffect(() => {
         if (!selectedAccount && accounts && accounts.length > 0) {
-            setSelectedAccount(accounts[0])
+            setSelectedAccount(accounts[0].acc_no || accounts[0])
         }
     }, [accounts, selectedAccount])
+
+    // Fetch initial unexecuted orders when account changes
+    const fetchOrders = async () => {
+        if (!selectedAccount) return
+        try {
+            const data = await window.electronAPI.getUnexecutedOrders({ accountNo: selectedAccount })
+            const oso = data?.data?.oso || data?.data?.output || data?.data?.Body?.out1 || [];
+            if (Array.isArray(oso)) {
+                const mappedOrders = oso.map((o: any) => ({
+                    order_no: String(o.ord_no || o.order_no || ''),
+                    stk_cd: String(o.stk_cd || '').replace(/^A/i, '').trim(),
+                    stk_nm: o.stk_nm || o.name || '',
+                    status: o.ord_stt || o.status || '',
+                    price: Number(o.ord_pric || o.ord_prc || o.price || 0),
+                    qty: Number(o.qty || o.ord_qty || 0),
+                    remain_qty: Number(o.oso_qty || o.unexec_qty || o.remain_qty || 0),
+                    time: (() => {
+                        let t = o.tm || o.time || o.ord_tmd || '';
+                        if (t && t.length === 6 && !t.includes(':')) {
+                            return `${t.substring(0, 2)}:${t.substring(2, 4)}:${t.substring(4, 6)}`;
+                        }
+                        return t || new Date().toLocaleTimeString();
+                    })(),
+                    type: String(o.io_tp_nm || o.sll_buy_tp || o.type || '알수없음').replace(/[^가-힣0-9a-zA-Z]/g, ''),
+                    order_type: o.trde_tp || ''
+                }))
+                setOrders(mappedOrders)
+            }
+        } catch (err) {
+            console.error('Failed to load unexecuted orders:', err)
+        }
+    }
+
+    useEffect(() => {
+        fetchOrders()
+        // 5초 주기로 자동 새로고침 폴링
+        const intervalId = setInterval(() => {
+            fetchOrders()
+        }, 5000)
+        return () => clearInterval(intervalId)
+    }, [selectedAccount])
+
+    // Subscribe to real-time orders
+    useEffect(() => {
+        if (!window.electronAPI.onOrderRealtime) return;
+        const removeOrderListener = window.electronAPI.onOrderRealtime((order: any) => {
+            const mapped = {
+                order_no: String(order.order_no || order.ord_no || ''),
+                stk_cd: String(order.stk_cd || '').replace(/^A/i, '').trim(),
+                stk_nm: order.stk_nm || order.name || '',
+                status: String(order.ord_stt || order.status || ''),
+                price: Number(order.cur_prc || order.price || 0),
+                qty: Number(order.qty || order.unexec_qty || 0),
+                remain_qty: Number(order.unexec_qty || order.remain_qty || 0),
+                time: (() => {
+                    let t = String(order.time || order.ord_tmd || new Date().toLocaleTimeString());
+                    if (t.length === 6 && !t.includes(':')) {
+                        return `${t.substring(0, 2)}:${t.substring(2, 4)}:${t.substring(4, 6)}`;
+                    }
+                    return t;
+                })(),
+                type: String(order.io_tp_nm || order.sll_buy_tp || order.type || '알수없음').replace(/[^가-힣0-9a-zA-Z]/g, ''),
+                order_type: String(order.trde_tp || '')
+            };
+            addOrUpdateOrder(mapped)
+        })
+        return () => removeOrderListener()
+    }, [])
 
     // Subscribe to logs
     useEffect(() => {
@@ -175,9 +245,9 @@ export default function AutoTrade() {
             </div>
 
             {/* Split Layout */}
-            <div className="flex-1 flex min-h-0">
+            <div className="flex-1 flex min-h-0 overflow-hidden">
                 {/* Left Panel: Settings */}
-                <div className="w-[300px] overflow-y-auto border-r border-border/50 flex flex-col">
+                <div className="w-[300px] shrink-0 overflow-y-auto border-r border-border/50 flex flex-col">
 
                     {/* Account Selection */}
                     <div className="p-4 border-b border-border/50 space-y-3">
@@ -362,7 +432,7 @@ export default function AutoTrade() {
                 </div>
 
                 {/* Right Panel: Status Dashboard */}
-                <div className="flex-1 flex flex-col overflow-hidden bg-background">
+                <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
 
                     {/* Unexecuted Orders (미체결) */}
                     <div className="flex-1 flex flex-col min-h-[50%] border-b border-border/50">
@@ -381,13 +451,37 @@ export default function AutoTrade() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    <TableRow className="border-0 hover:bg-transparent">
-                                        <TableCell colSpan={5} className="text-center h-40 text-muted-foreground text-xs">
-                                            현재 당일 미체결 내역이 없습니다.
-                                        </TableCell>
-                                    </TableRow>
+                                    {orders.filter(o => o.remain_qty > 0).length === 0 ? (
+                                        <TableRow className="border-0 hover:bg-transparent">
+                                            <TableCell colSpan={5} className="text-center h-40 text-muted-foreground text-xs">
+                                                현재 당일 미체결 내역이 없습니다.
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        orders
+                                            .filter(o => o.remain_qty > 0)
+                                            .map((order, i) => (
+                                                <TableRow key={i} className="border-b border-border/50">
+                                                    <TableCell className="w-[80px] py-2 h-8 text-[10px] text-muted-foreground">{order.time}</TableCell>
+                                                    <TableCell className="w-[120px] py-2 h-8 font-medium">{order.stk_nm || order.stk_cd}</TableCell>
+                                                    <TableCell className="w-[100px] py-2 h-8 text-xs font-bold leading-tight">
+                                                        <span className={`px-1.5 py-0.5 rounded mr-1 ${order.type?.includes('매수') || order.type === '2' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                                                            {order.type === '2' ? '매수' : order.type === '1' ? '매도' : order.type}
+                                                        </span>
+                                                        <span className="text-[10px] text-muted-foreground ml-1 font-normal block mt-1">{order.order_type}</span>
+                                                    </TableCell>
+                                                    <TableCell className="py-2 h-8 text-right font-mono text-xs">{order.price.toLocaleString()}</TableCell>
+                                                    <TableCell className="py-2 h-8 text-right font-mono text-xs text-yellow-500">{order.remain_qty.toLocaleString()}</TableCell>
+                                                </TableRow>
+                                            ))
+                                    )}
                                 </TableBody>
                             </Table>
+                        </div>
+                        <div className="flex justify-end pt-1 pr-2 bg-muted/5">
+                            <button onClick={fetchOrders} className="text-[10px] text-muted-foreground hover:text-white flex items-center gap-1 p-1 transition-colors">
+                                <RefreshCw size={10} /> 내역 새로고침
+                            </button>
                         </div>
                     </div>
 
@@ -396,13 +490,13 @@ export default function AutoTrade() {
                         <div className="p-3 shrink-0 bg-muted/5">
                             <h3 className="text-xs font-bold flex items-center gap-2"><Clock size={14} className="text-muted-foreground" /> 당일 자동매매 로그 이력</h3>
                         </div>
-                        <div className="flex-1 overflow-auto bg-black/5">
-                            <Table className="border-0">
+                        <div className="flex-1 overflow-y-auto overflow-x-hidden bg-black/5">
+                            <Table className="border-0 table-fixed w-full">
                                 <TableHeader className="sticky top-0 bg-background/95 backdrop-blur z-10 border-b border-border/50 hidden">
                                     <TableRow>
-                                        <TableHead className="w-[100px]">시간</TableHead>
-                                        <TableHead>이벤트 내용</TableHead>
-                                        <TableHead className="w-[80px]">상태</TableHead>
+                                        <TableHead className="w-[80px]">시간</TableHead>
+                                        <TableHead className="">이벤트 내용</TableHead>
+                                        <TableHead className="w-[60px]">상태</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -415,11 +509,11 @@ export default function AutoTrade() {
                                     ) : (
                                         logs.map((log, i) => (
                                             <TableRow key={i} className="border-border/30">
-                                                <TableCell className="text-[10px] text-muted-foreground w-[80px] py-2">{log.time}</TableCell>
-                                                <TableCell className="text-xs py-2 font-mono text-muted-foreground">
+                                                <TableCell className="text-[10px] text-muted-foreground w-[80px] py-1 border-0">{log.time}</TableCell>
+                                                <TableCell className="text-[11px] py-1 font-mono text-muted-foreground break-all border-0">
                                                     {log.message}
                                                 </TableCell>
-                                                <TableCell className="w-[60px] py-2">
+                                                <TableCell className="w-[60px] py-1 text-right border-0">
                                                     <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${log.level === 'ERROR' ? 'bg-red-500/10 text-red-500' :
                                                         log.level === 'SUCCESS' ? 'bg-green-500/10 text-green-500' :
                                                             log.level === 'WARN' ? 'bg-yellow-500/10 text-yellow-500' :

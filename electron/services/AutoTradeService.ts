@@ -19,6 +19,9 @@ export class AutoTradeService {
     private modifyQueueProcessorTimer: NodeJS.Timeout | null = null;
     private condSellStepMap = new Map<string, number>();
 
+    private activeOrders: Map<string, any> = new Map();
+    private lastUnexecutedSyncTime: number = 0;
+
     // 매수 세션 집계용 변수
     private buySessionStats = {
         totalTarget: 0,
@@ -31,6 +34,8 @@ export class AutoTradeService {
     private constructor() {
         // 조건검색 결과 수신 이벤트 리스너
         eventBus.on(SystemEvent.CONDITION_MATCHED, this.handleConditionMatched.bind(this));
+        // 실시간 주문체결 내역 처리
+        eventBus.on(SystemEvent.ORDER_REALTIME_UPDATE, (d) => this.handleOrderRealtimeUpdate(d))
     }
 
     public static getInstance(): AutoTradeService {
@@ -50,6 +55,7 @@ export class AutoTradeService {
     public setRunning(status: boolean) {
         this.isRunning = status;
         this.broadcastLog(`시스템 가동 상태 변경: ${this.isRunning ? 'RUNNING' : 'STOPPED'}`, 'INFO');
+        eventBus.emit(SystemEvent.AUTO_TRADE_STATUS_CHANGED, this.isRunning);
     }
 
     public getIsRunning() {
@@ -65,6 +71,23 @@ export class AutoTradeService {
             message,
             level
         });
+    }
+
+    private handleOrderRealtimeUpdate(orderInfo: any) {
+        if (!this.isRunning) return;
+        const ordNo = orderInfo.order_no;
+        if (!ordNo) return;
+
+        let existing = this.activeOrders.get(ordNo);
+        if (existing) {
+            existing.unexec_qty = String(orderInfo.remain_qty);
+            if (orderInfo.remain_qty <= 0 || orderInfo.status === '체결') {
+                this.activeOrders.delete(ordNo);
+            }
+        } else if (orderInfo.remain_qty > 0) {
+            // 우리가 모르는 신규 주문 발생. 다음 모니터링 주기 때 즉시 REST API 강제 동기화 유도
+            this.lastUnexecutedSyncTime = 0;
+        }
     }
 
     /**
@@ -356,11 +379,26 @@ export class AutoTradeService {
             }
 
             try {
-                // 미체결 주문 목록
-                const response = await this.kiwoomService.getUnexecutedOrders(accountNo);
-                const orders = response?.output || response?.data || response?.Body?.out1 || [];
+                const timeSinceLastSync = Date.now() - this.lastUnexecutedSyncTime;
 
-                if (!Array.isArray(orders)) return;
+                // 1분에 1번만 REST API 호출하여 캐시 동기화 (또는 실시간 이벤트로 인해 강제 동기화가 필요한 경우)
+                if (timeSinceLastSync > 60000) {
+                    const response = await this.kiwoomService.getUnexecutedOrders(accountNo);
+                    const orders = response?.oso || response?.output || response?.data || response?.Body?.out1 || [];
+
+                    if (Array.isArray(orders)) {
+                        this.activeOrders.clear();
+                        for (const order of orders) {
+                            if (parseInt(order.unexec_qty || order.oso_qty || order.qty || '0', 10) > 0) {
+                                this.activeOrders.set(order.ord_no, order);
+                            }
+                        }
+                        this.lastUnexecutedSyncTime = Date.now();
+                        console.log(`[AutoTrade] 미체결 목록 REST API 동기화 완료 (건수: ${this.activeOrders.size}건)`);
+                    }
+                }
+
+                const orders = Array.from(this.activeOrders.values());
 
                 // 조건부 설정 (기본값 설정)
                 const condHours = parseInt(String(this.config.condSellTimeHours || '15'), 10);
@@ -369,7 +407,7 @@ export class AutoTradeService {
 
                 for (const order of orders) {
                     // 매도 주문 확인
-                    const isSellOrder = order.sll_buy_tp === '1' || order.trde_tp === '1' || String(order.sll_buy_tp || '').includes('매도');
+                    const isSellOrder = order.sll_buy_tp === '1' || order.trde_tp === '1' || String(order.io_tp_nm || order.sll_buy_tp || '').includes('매도');
                     if (!isSellOrder) continue;
 
                     let stk_cd = String(order.stk_cd).replace(/^A/i, '').trim();
@@ -386,14 +424,32 @@ export class AutoTradeService {
                     const trdeType = String(order.ord_tp || order.trde_tp || '00');
 
                     // 1시간환산 초 계산 (정확도 확보)
-                    const ordTimeStr = order.ord_time || order.ord_hm || order.ord_tm || "";
+                    const rawTimeStr = String(order.tm || order.time || order.ord_time || order.ord_hm || order.ord_tm || "").replace(/[^0-9]/g, '');
                     let diffSeconds = 0;
-                    if (ordTimeStr.length >= 4) {
-                        const ordHour = parseInt(ordTimeStr.substring(0, 2), 10);
-                        const ordMin = parseInt(ordTimeStr.substring(2, 4), 10);
-                        const ordSec = ordTimeStr.length >= 6 ? parseInt(ordTimeStr.substring(4, 6), 10) : 0;
+                    if (rawTimeStr.length >= 4) {
+                        const ordHour = parseInt(rawTimeStr.substring(0, 2), 10);
+                        const ordMin = parseInt(rawTimeStr.substring(2, 4), 10);
+                        const ordSec = rawTimeStr.length >= 6 ? parseInt(rawTimeStr.substring(4, 6), 10) : 0;
                         diffSeconds = (currentHour * 3600 + currentMin * 60 + currentSec) - (ordHour * 3600 + ordMin * 60 + ordSec);
                     }
+
+                    console.log(`[AutoTrade Debug] ${stk_cd}: current=${currentTimeStr}, rawTimeStr=${rawTimeStr}, diffSeconds=${diffSeconds}, trdeType=${trdeType}`);
+
+                    // 큐 삽입 헬퍼
+                    const enqueueModify = (typeStr: string, tStep?: number) => {
+                        if (!this.modifyQueue.find(q => q.orig_ord_no === orig_ord_no)) {
+                            this.modifyQueue.push({
+                                type: typeStr,
+                                accountNo,
+                                orig_ord_no,
+                                stk_cd,
+                                qty: tStep ? Math.floor(totalQty / (4 - tStep)) || 1 : totalQty, // 1단계: 1/3, 2단계: 1/2, 3단계: 전체
+                                modifyType: '00', // 지정가(현재가)
+                                step: tStep,
+                                curPrc: Math.abs(parseInt(String(order.cur_prc || order.price || '0').replace(/[^0-9-]/g, ''), 10))
+                            });
+                        }
+                    };
 
                     // --- [로직 A] 조건부지정가 (05) 분할 청산 로직 ---
                     if (trdeType === '05' || trdeType.includes('조건부')) {
@@ -408,21 +464,7 @@ export class AutoTradeService {
 
                             // 단계가 진행되어 아직 처리를 안한 스텝일 경우
                             if (currentTargetStep > recordedStep) {
-                                let orderQty = 0;
-                                if (currentTargetStep === 1) orderQty = Math.floor(totalQty / 3) || 1;
-                                else if (currentTargetStep === 2) orderQty = Math.floor(totalQty / 2) || 1;
-                                else orderQty = totalQty; // 3차엔 전량
-
-                                // 큐에 삽입
-                                this.modifyQueue.push({
-                                    type: 'CONDITIONAL',
-                                    accountNo,
-                                    orig_ord_no,
-                                    stk_cd,
-                                    qty: orderQty,
-                                    modifyType: '00', // 지정가(현재가)
-                                    step: currentTargetStep
-                                });
+                                enqueueModify('CONDITIONAL', currentTargetStep);
                                 this.condSellStepMap.set(orig_ord_no, currentTargetStep);
                             }
                         }
@@ -433,17 +475,7 @@ export class AutoTradeService {
                         const requireSeconds = currentHour >= 15 ? 10 : 60;
 
                         if (diffSeconds >= requireSeconds) {
-                            // 큐 이미 들어가있는지 중복검사 (비효율 방지)
-                            if (!this.modifyQueue.find(q => q.orig_ord_no === orig_ord_no)) {
-                                this.modifyQueue.push({
-                                    type: 'NORMAL',
-                                    accountNo,
-                                    orig_ord_no,
-                                    stk_cd,
-                                    qty: totalQty,
-                                    modifyType: '00', // 지정가(현재가)
-                                });
-                            }
+                            enqueueModify('NORMAL');
                         }
                     }
                 }
@@ -465,11 +497,11 @@ export class AutoTradeService {
     private async executeMarketSweep(accountNo: string) {
         try {
             const response = await this.kiwoomService.getUnexecutedOrders(accountNo);
-            const orders = response?.output || response?.data || response?.Body?.out1 || [];
+            const orders = response?.oso || response?.output || response?.data || response?.Body?.out1 || [];
             if (!Array.isArray(orders)) return;
 
             for (const order of orders) {
-                const isSellOrder = order.sll_buy_tp === '1' || order.trde_tp === '1' || String(order.sll_buy_tp || '').includes('매도');
+                const isSellOrder = order.sll_buy_tp === '1' || order.trde_tp === '1' || String(order.io_tp_nm || order.sll_buy_tp || '').includes('매도');
                 if (!isSellOrder) continue;
 
                 let stk_cd = String(order.stk_cd).replace(/^A/i, '').trim();
@@ -517,21 +549,24 @@ export class AutoTradeService {
             const batch = this.modifyQueue.splice(0, throttleLimit);
 
             batch.forEach(async (task) => {
-                const { type, accountNo, orig_ord_no, stk_cd, qty, step } = task;
+                const { type, accountNo, orig_ord_no, stk_cd, qty, step, curPrc } = task;
 
-                // 현재가 조회
-                let currentPrice = 0;
-                try {
-                    const priceInfo = await this.kiwoomService.getCurrentPrice(stk_cd);
-                    let rawStr = '';
-                    if (priceInfo?.currentPrice) rawStr = priceInfo.currentPrice;
-                    else if (priceInfo?.Body?.currentPrice) rawStr = priceInfo.Body.currentPrice;
-                    else if (priceInfo?.Body?.out1?.currentPrice) rawStr = priceInfo.Body.out1.currentPrice;
+                // 현재가 조회 - 이미 API가 주면 그걸 먼저 씀
+                let currentPrice = curPrc || 0;
 
-                    const matchStr = String(rawStr).replace(/[^0-9]/g, '');
-                    if (matchStr) currentPrice = parseInt(matchStr, 10);
-                } catch (e) {
-                    this.broadcastLog(`[AutoTrade] Failed to get price for modify: ${stk_cd}`, 'WARN');
+                if (!currentPrice || isNaN(currentPrice)) {
+                    try {
+                        const priceInfo = await this.kiwoomService.getCurrentPrice(stk_cd);
+                        let rawStr = '';
+                        if (priceInfo?.currentPrice) rawStr = priceInfo.currentPrice;
+                        else if (priceInfo?.Body?.currentPrice) rawStr = priceInfo.Body.currentPrice;
+                        else if (priceInfo?.Body?.out1?.currentPrice) rawStr = priceInfo.Body.out1.currentPrice;
+
+                        const matchStr = String(rawStr).replace(/[^0-9]/g, '');
+                        if (matchStr) currentPrice = parseInt(matchStr, 10);
+                    } catch (e) {
+                        this.broadcastLog(`[AutoTrade] Failed to get price for modify: ${stk_cd}`, 'WARN');
+                    }
                 }
 
                 if (currentPrice > 0) {

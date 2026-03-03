@@ -8,6 +8,7 @@ import { useBackgroundSignalFetcher } from '../hooks/useBackgroundSignalFetcher'
 import { StockChart } from './StockChart'
 import { StockNotes } from './StockNotes'
 import { StockSchedules } from './StockSchedules'
+import { StockFinancials } from './StockFinancials'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './ui/Table'
 import { ProfitText } from './ui/ProfitDisplay'
 
@@ -38,8 +39,9 @@ export default function Watchlist() {
     const [searchQuery, setSearchQuery] = useState('')
     const [isSearching, setIsSearching] = useState(false)
     const [selectedStock, setSelectedStock] = useState<{ code: string, name: string } | null>(null)
-    const [activeInfoTab, setActiveInfoTab] = useState<'notes' | 'schedules'>('notes')
+    const [activeInfoTab, setActiveInfoTab] = useState<'notes' | 'schedules' | 'financials'>('notes')
     const searchRef = useRef<HTMLDivElement>(null)
+    const notifiedSlumpRef = useRef<Set<string>>(new Set())
 
     const { chartHeight, setChartHeight } = useLayoutStore()
     const isDragging = useRef(false)
@@ -271,14 +273,14 @@ export default function Watchlist() {
             {/* Split Layout */}
             <div className="flex-1 min-h-0 flex bg-background border-t border-border overflow-hidden">
                 {/* Left side: Watchlist List */}
-                <div className="flex-1 w-[45%] flex flex-col border-r border-border overflow-hidden bg-background shrink-0 min-w-[350px] relative">
+                <div className="flex-1 w-[45%] flex flex-col border-r border-border overflow-hidden bg-background shrink-0 min-w-[350px] relative [&>div.overflow-auto]:overflow-x-hidden">
                     <Table>
                         <TableHeader>
                             <TableRow>
                                 <TableHead className="w-auto">종목명</TableHead>
-                                <TableHead className="text-right w-[120px]">현재가</TableHead>
-                                <TableHead className="text-right w-[100px]">등락률</TableHead>
-                                <TableHead className="w-10"></TableHead>
+                                <TableHead className="text-right w-[85px] px-2">현재가</TableHead>
+                                <TableHead className="text-right w-[80px] px-2">등락률</TableHead>
+                                <TableHead className="w-8 px-1"></TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -288,7 +290,14 @@ export default function Watchlist() {
                                 let isDepressed = false
                                 if (sum19 !== undefined && sum19 > 0) {
                                     const ma20 = (sum19 + stock.price) / 20
-                                    if ((stock.price / ma20) * 100 < 95) isDepressed = true
+                                    if ((stock.price / ma20) * 100 < 95) {
+                                        isDepressed = true
+                                        const disparity = Number(((stock.price / ma20) * 100).toFixed(2))
+                                        if (!notifiedSlumpRef.current.has(stock.code)) {
+                                            notifiedSlumpRef.current.add(stock.code)
+                                            window.electronAPI?.notifyDisparitySlump?.({ code: stock.code, name: stock.name, disparity })
+                                        }
+                                    }
                                 }
 
                                 return (
@@ -309,10 +318,10 @@ export default function Watchlist() {
                                                 <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
                                             </div>
                                         </TableCell>
-                                        <TableCell className="text-right font-mono font-bold text-[13px] whitespace-nowrap overflow-hidden">
+                                        <TableCell className="text-right font-mono font-bold text-[13px] whitespace-nowrap overflow-hidden px-2">
                                             ₩ {stock.price.toLocaleString()}
                                         </TableCell>
-                                        <TableCell className="text-right whitespace-nowrap overflow-hidden">
+                                        <TableCell className="text-right whitespace-nowrap overflow-hidden px-2">
                                             <div className={cn(
                                                 "inline-flex items-center gap-1 font-bold text-[13px]",
                                                 stock.changeRate > 0 ? "text-rise" : stock.changeRate < 0 ? "text-fall" : "text-muted-foreground"
@@ -321,7 +330,7 @@ export default function Watchlist() {
                                                 <ProfitText value={stock.changeRate} suffix="%" colorful={false} />
                                             </div>
                                         </TableCell>
-                                        <TableCell className="text-right">
+                                        <TableCell className="text-right px-1">
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); removeStock(stock.code) }}
                                                 className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
@@ -384,14 +393,21 @@ export default function Watchlist() {
                             >
                                 DART
                             </button>
+                            <button
+                                onClick={() => setActiveInfoTab('financials')}
+                                className={cn(
+                                    "text-[13px] font-bold pb-3 -mb-[1.5px] transition-all flex items-center gap-1.5",
+                                    activeInfoTab === 'financials' ? "text-primary border-b-[3px] border-primary" : "text-muted-foreground/60 hover:text-foreground"
+                                )}
+                            >
+                                재무
+                            </button>
                             <button className="text-[13px] font-bold text-muted-foreground/60 hover:text-foreground pb-3 -mb-[1.5px] transition-colors">예비</button>
                         </div>
                         <div className="flex-1 flex flex-col p-4 bg-muted/10 relative">
-                            {activeInfoTab === 'notes' ? (
-                                <StockNotes stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />
-                            ) : (
-                                <StockSchedules stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />
-                            )}
+                            {activeInfoTab === 'notes' && <StockNotes stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />}
+                            {activeInfoTab === 'schedules' && <StockSchedules stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />}
+                            {activeInfoTab === 'financials' && <StockFinancials stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />}
                         </div>
                     </div>
                 </div>

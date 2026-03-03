@@ -4,7 +4,7 @@ import { useScheduleStore } from '../../store/useScheduleStore'
 import { useNoteStore } from '../../store/useNoteStore'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { cn } from '../../utils'
+import { cn, getLocalDateStr } from '../../utils'
 
 export default function ListView() {
     const { events: scheduleEvents, deleteEvent, updateEvent, addEvent } = useScheduleStore()
@@ -16,7 +16,7 @@ export default function ListView() {
     const [addForm, setAddForm] = useState({
         title: '',
         description: '',
-        date: new Date().toISOString().split('T')[0],
+        date: getLocalDateStr(),
         reminderType: '없음' as any,
         code: ''
     })
@@ -88,7 +88,7 @@ export default function ListView() {
         setAddForm({
             title: '',
             description: '',
-            date: new Date().toISOString().split('T')[0],
+            date: getLocalDateStr(),
             reminderType: '없음',
             code: ''
         });

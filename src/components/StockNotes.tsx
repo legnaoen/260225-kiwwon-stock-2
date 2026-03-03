@@ -107,6 +107,29 @@ export function StockNotes({ stockCode, stockName }: StockNotesProps) {
                 </button>
             </div>
 
+            <div className="flex items-center gap-2 mb-3">
+                <button
+                    onClick={() => {
+                        const code = numericStockCode.replace(/^A/, '');
+                        window.electronAPI.openExternal(`https://stock.naver.com/domestic/stock/${code}/`);
+                    }}
+                    className="px-2.5 py-0.5 rounded bg-[#03C75A]/10 text-[#03C75A] hover:bg-[#03C75A]/20 transition-colors text-[11px] font-bold border border-[#03C75A]/20 flex items-center gap-1"
+                >
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#03C75A]" />
+                    NAVER
+                </button>
+                <button
+                    onClick={() => {
+                        const code = numericStockCode.replace(/^A/, '');
+                        window.electronAPI.openExternal(`https://www.tossinvest.com/stocks/A${code}/`);
+                    }}
+                    className="px-2.5 py-0.5 rounded bg-[#3182F6]/10 text-[#3182F6] hover:bg-[#3182F6]/20 transition-colors text-[11px] font-bold border border-[#3182F6]/20 flex items-center gap-1"
+                >
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#3182F6]" />
+                    TOSS
+                </button>
+            </div>
+
             {stockNotes.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/70 text-[13px] min-h-[150px] mt-8 bg-background border border-border/50 rounded-xl border-dashed">
                     <p>작성된 노트가 없습니다. 새 노트를 추가해보세요.</p>

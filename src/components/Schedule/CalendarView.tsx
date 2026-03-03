@@ -4,6 +4,7 @@ import { useNoteStore } from '../../store/useNoteStore'
 import { Plus, ChevronLeft, ChevronRight, X, ExternalLink } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { getLocalDateStr } from '../../utils'
 
 export default function CalendarView() {
     const { events: scheduleEvents, updateEvent, deleteEvent, addEvent } = useScheduleStore()
@@ -19,7 +20,7 @@ export default function CalendarView() {
     const [addForm, setAddForm] = useState({
         title: '',
         description: '',
-        date: new Date().toISOString().split('T')[0],
+        date: getLocalDateStr(),
         reminderType: '없음' as any,
         code: ''
     })
@@ -96,7 +97,7 @@ export default function CalendarView() {
         setAddForm({
             title: '',
             description: '',
-            date: new Date().toISOString().split('T')[0],
+            date: getLocalDateStr(),
             reminderType: '없음',
             code: ''
         });
@@ -127,7 +128,7 @@ export default function CalendarView() {
                 </div>
                 <button
                     onClick={() => {
-                        setAddForm({ ...addForm, date: new Date().toISOString().split('T')[0] });
+                        setAddForm({ ...addForm, date: getLocalDateStr() });
                         setShowAddModal(true);
                     }}
                     className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-xl font-bold hover:bg-primary/90 transition-colors shadow-sm"
@@ -147,7 +148,7 @@ export default function CalendarView() {
 
                     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
                     const dayEvents = events.filter(e => e.date === dateStr)
-                    const isToday = new Date().toISOString().split('T')[0] === dateStr
+                    const isToday = getLocalDateStr() === dateStr
 
                     return (
                         <div

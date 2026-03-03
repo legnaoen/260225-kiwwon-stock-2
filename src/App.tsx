@@ -13,6 +13,9 @@ import Schedule from './components/Schedule'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useNoteStore } from './store/useNoteStore'
 import { useScheduleStore } from './store/useScheduleStore'
+import { useMarketStore } from './store/useMarketStore'
+import { useAutoTradeStore } from './store/useAutoTradeStore'
+import { Clock, Play, Square } from 'lucide-react'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
     constructor(props: { children: ReactNode }) {
@@ -91,6 +94,31 @@ function AppContent() {
 
         if (window.electronAPI?.onScheduleNotified) {
             window.electronAPI.onScheduleNotified(handleNotified);
+        }
+    }, [])
+
+    const { marketStatus, currentTime, setMarketStatus, updateTime } = useMarketStore()
+    const { isRunning: isAutoTradeRunning, setIsRunning: setIsAutoTradeRunning } = useAutoTradeStore()
+
+    // Clock and Market Status listener
+    useEffect(() => {
+        const timer = setInterval(() => updateTime(), 1000)
+
+        const unsubscribeMarket = window.electronAPI.onMarketStatus?.((data) => {
+            setMarketStatus({ code: data.code, time: data.time })
+        })
+
+        const unsubscribeAutoTrade = window.electronAPI.onAutoTradeStatusChanged?.((running) => {
+            setIsAutoTradeRunning(running)
+        })
+
+        // Initial fetch
+        window.electronAPI.getAutoTradeStatus?.().then(setIsAutoTradeRunning)
+
+        return () => {
+            clearInterval(timer)
+            if (unsubscribeMarket) unsubscribeMarket()
+            if (unsubscribeAutoTrade) unsubscribeAutoTrade()
         }
     }, [])
 
@@ -219,7 +247,7 @@ function AppContent() {
             </div>
 
             {/* Status Bar */}
-            <footer className="h-6 px-4 bg-muted/80 border-t border-border flex items-center justify-between text-[10px] text-muted-foreground">
+            <footer className="h-6 px-4 bg-muted/80 border-t border-border flex items-center justify-between text-[10px] text-muted-foreground shrink-0">
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-1.5 font-medium">
                         <div className={cn(
@@ -228,9 +256,45 @@ function AppContent() {
                         )} />
                         <span>{status.connected ? '키움 API 서비스 정상 (실전)' : 'API 서비스 연결오류 또는 대기중'}</span>
                     </div>
+
+                    {status.connected && isAutoTradeRunning && (
+                        <>
+                            <div className="w-px h-2.5 bg-border mx-1" />
+                            <div className="flex items-center gap-1.5 font-bold text-green-500 animate-pulse">
+                                <Play size={10} fill="currentColor" />
+                                <span>자동매매 Running</span>
+                            </div>
+                        </>
+                    )}
+
+                    {status.connected && (
+                        <>
+                            <div className="w-px h-2.5 bg-border mx-1" />
+                            <div className="flex items-center gap-1.5">
+                                <div className={cn(
+                                    "px-1.5 py-0.5 rounded text-[9px] font-bold border",
+                                    marketStatus.code === '3' ? "bg-green-500/10 text-green-600 border-green-500/20" :
+                                        (marketStatus.code === '0' || marketStatus.code === '2' || marketStatus.code.match(/[a-d]/)) ? "bg-amber-500/10 text-amber-600 border-amber-500/20" :
+                                            "bg-muted text-muted-foreground border-border"
+                                )}>
+                                    {marketStatus.text}
+                                </div>
+                                {marketStatus.time !== '--:--:--' && (
+                                    <span className="font-mono opacity-70">[{marketStatus.time}]</span>
+                                )}
+                            </div>
+                        </>
+                    )}
                 </div>
-                <div>
-                    마지막 동기화: {new Date().toLocaleTimeString()}
+
+                <div className="flex items-center gap-3 font-mono">
+                    <div className="flex items-center gap-1 opacity-80">
+                        <Clock size={10} />
+                        {currentTime.toLocaleTimeString('ko-KR', { hour12: false })}
+                    </div>
+                    {status.connected && (
+                        <span className="opacity-50">v1.2.0</span>
+                    )}
                 </div>
             </footer>
         </div>

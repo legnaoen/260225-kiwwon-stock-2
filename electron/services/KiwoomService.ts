@@ -309,14 +309,50 @@ export class KiwoomService {
     /**
      * 미체결 주문 내역 조회 (TODO: 정확한 TR명 반영 필요)
      */
-    public async getUnexecutedOrders(accountNo: string): Promise<any> {
+    public async getUnexecutedOrders(
+        accountNo: string,
+        options: {
+            all_stk_tp?: string;
+            trde_tp?: string;
+            stk_cd?: string;
+            stex_tp?: string;
+            cont_yn?: string;
+            next_key?: string;
+        } = {}
+    ): Promise<any> {
+        const {
+            all_stk_tp = '1', // 전체 종목 조회
+            trde_tp = '0', // 전체 매매구분
+            stk_cd = '', // 특정 종목코드 없으면 전체
+            stex_tp = '0', // 통합 거래소
+            cont_yn = 'N',
+            next_key = ''
+        } = options;
+
         return this.makeApiRequestWithRetry(async (token) => {
-            // TODO: 실제 키움증권의 국내주식 미체결조회 TR 주소 및 ID (예: vt00021 또는 별도 api-id) 적용 필요.
-            // 일단 임시로 에러를 방지하기 위해 빈 배열의 골격만 리턴합니다.
-            console.warn("[KiwoomService] getUnexecutedOrders is barely implemented. TR details needed.");
-            return {
-                output: []
+            const url = `${BASE_URL}/api/dostk/acnt`;
+            const headers: any = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                authorization: `Bearer ${token}`,
+                'api-id': 'ka10075',
+                'cont-yn': cont_yn,
+                'next-key': next_key,
+            };
+            const body = {
+                acnt_no: accountNo,
+                all_stk_tp,
+                trde_tp,
+                stk_cd,
+                stex_tp,
+            };
+            try {
+                const response = await axios.post(url, body, { headers });
+                console.log('[KiwoomService] getUnexecutedOrders Response Data:', JSON.stringify(response.data));
+                return response.data;
+            } catch (err: any) {
+                console.error('[KiwoomService] getUnexecutedOrders Error:', err?.response?.data || err.message);
+                throw err;
             }
-        })
+        });
     }
 }

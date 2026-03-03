@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useScheduleStore } from '../store/useScheduleStore'
 import { useNoteStore } from '../store/useNoteStore'
+import { getLocalDateStr } from '../utils'
 
 function isTimeMatch(alertTime: string) {
     const now = new Date()
@@ -23,7 +24,7 @@ function calculateTargetDate(eventDateStr: string, reminderType: string): string
         eventDate.setDate(eventDate.getDate() - 7)
     }
 
-    return eventDate.toISOString().split('T')[0]
+    return getLocalDateStr(eventDate)
 }
 
 export function useScheduleNotifier(alertTime: string = '08:30') {
@@ -36,7 +37,7 @@ export function useScheduleNotifier(alertTime: string = '08:30') {
         const intervalId = setInterval(() => {
             const now = new Date()
             const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-            const dateStr = now.toISOString().split('T')[0]
+            const dateStr = getLocalDateStr()
 
             // If we hit the alert minute and haven't processed it yet
             if (timeStr === alertTime && lastCheckedTime.current !== timeStr) {

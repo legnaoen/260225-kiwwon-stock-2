@@ -51,8 +51,31 @@ export class DatabaseService {
             );
         `
 
+        const createFinancialDataTable = `
+            CREATE TABLE IF NOT EXISTS financial_data (
+                stock_code TEXT,
+                year TEXT,
+                reprt_code TEXT,
+                account_id TEXT,
+                account_nm TEXT,
+                fs_div TEXT,
+                amount REAL,
+                PRIMARY KEY (stock_code, year, reprt_code, account_id, fs_div)
+            );
+        `
+
+        const createAnalysisCacheTable = `
+            CREATE TABLE IF NOT EXISTS analysis_cache (
+                stock_code TEXT PRIMARY KEY,
+                analysis_json TEXT,
+                updated_at TEXT
+            );
+        `
+
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
+        this.db.exec(createFinancialDataTable)
+        this.db.exec(createAnalysisCacheTable)
 
         // Ensure columns exist for migration
         try {
@@ -126,6 +149,36 @@ export class DatabaseService {
 
     public deleteSchedule(id: string) {
         this.db.prepare('DELETE FROM schedules WHERE id = ?').run(id)
+    }
+
+    public insertFinancialData(data: any[]) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO financial_data (stock_code, year, reprt_code, account_id, account_nm, fs_div, amount)
+            VALUES (@stock_code, @year, @reprt_code, @account_id, @account_nm, @fs_div, @amount)
+        `)
+
+        const insertMany = this.db.transaction((items) => {
+            for (const item of items) {
+                stmt.run(item)
+            }
+        })
+        insertMany(data)
+    }
+
+    public getFinancialData(stockCode: string) {
+        return this.db.prepare('SELECT * FROM financial_data WHERE stock_code = ? ORDER BY year DESC, reprt_code DESC').all(stockCode)
+    }
+
+    public saveAnalysisCache(stockCode: string, analysisJson: string) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO analysis_cache (stock_code, analysis_json, updated_at)
+            VALUES (?, ?, ?)
+        `)
+        stmt.run(stockCode, analysisJson, new Date().toISOString())
+    }
+
+    public getAnalysisCache(stockCode: string) {
+        return this.db.prepare('SELECT * FROM analysis_cache WHERE stock_code = ?').get(stockCode) as any
     }
 
     public getDb() {

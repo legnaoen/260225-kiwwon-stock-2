@@ -38,6 +38,10 @@ export default function Settings() {
     const [statusDisclosures, setStatusDisclosures] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageDisclosures, setMessageDisclosures] = useState('')
 
+    const [isSyncingFinancials, setIsSyncingFinancials] = useState(false)
+    const [statusFinancials, setStatusFinancials] = useState<'idle' | 'success' | 'error'>('idle')
+    const [messageFinancials, setMessageFinancials] = useState('')
+
     const [activeTab, setActiveTab] = useState<'kiwoom' | 'telegram' | 'schedule' | 'dart'>('kiwoom')
 
     useEffect(() => {
@@ -147,6 +151,34 @@ export default function Settings() {
             setMessageDisclosures(err.message)
         } finally {
             setIsSyncingDisclosures(false)
+        }
+    }
+
+    const handleSyncBatchFinancials = async () => {
+        setIsSyncingFinancials(true)
+        setStatusFinancials('idle')
+        setMessageFinancials('10년 재무 데이터 동기화 시작 중...')
+        try {
+            const symbols = await window.electronAPI.getWatchlistSymbols()
+            if (symbols.length === 0) {
+                setStatusFinancials('error')
+                setMessageFinancials('관심종목이 없습니다.')
+                return
+            }
+            const result = await window.electronAPI.syncBatchFinancials(symbols)
+            if (result.success) {
+                setStatusFinancials('success')
+                setMessageFinancials('10년 재무 데이터 동기화 완료!')
+            } else {
+                setStatusFinancials('error')
+                setMessageFinancials(result.error || '동기화 실패')
+            }
+        } catch (err: any) {
+            setStatusFinancials('error')
+            setMessageFinancials(err.message)
+        } finally {
+            setIsSyncingFinancials(false)
+            setTimeout(() => setStatusFinancials('idle'), 5000)
         }
     }
 
@@ -741,6 +773,41 @@ export default function Settings() {
                                             <RefreshCw size={14} className={isSyncingDisclosures ? 'animate-spin' : ''} />
                                             공시 일정 동기화
                                         </button>
+                                    </div>
+
+                                    <div className="pt-2 border-t border-border/20 flex flex-col gap-3">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                {isSyncingFinancials && (
+                                                    <span className="text-[11px] text-muted-foreground animate-pulse flex items-center gap-2">
+                                                        <RefreshCw size={12} className="animate-spin" /> {messageFinancials}
+                                                    </span>
+                                                )}
+                                                {statusFinancials === 'success' && (
+                                                    <span className="text-[11px] text-green-500 font-medium bg-green-500/10 px-2 py-1 rounded-full border border-green-500/20">
+                                                        {messageFinancials}
+                                                    </span>
+                                                )}
+                                                {statusFinancials === 'error' && (
+                                                    <span className="text-[11px] text-destructive font-medium bg-destructive/10 px-2 py-1 rounded-full border border-destructive/20">
+                                                        {messageFinancials}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={handleSyncBatchFinancials}
+                                                disabled={isSyncingFinancials || !dartKey}
+                                                className="flex items-center gap-2 bg-blue-500/10 text-blue-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-500/20 disabled:opacity-50 transition-all border border-blue-500/20"
+                                            >
+                                                <Database size={14} className={isSyncingFinancials ? 'animate-spin' : ''} />
+                                                10년 재무정보 일괄 업데이트
+                                            </button>
+                                        </div>
+                                        <p className="text-[10px] text-muted-foreground italic leading-relaxed">
+                                            * 관심종목에 등록된 모든 종목의 최근 10개년 사업보고서 데이터를 수집합니다.<br />
+                                            * DART API 호출 간격을 고려하여 종목당 약 10~15초가 소요됩니다.
+                                        </p>
                                     </div>
                                 </div>
                             </div>

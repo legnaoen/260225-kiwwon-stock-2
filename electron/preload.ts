@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAccountList: () => ipcRenderer.invoke('kiwoom:get-accounts'),
     getHoldings: (options: { accountNo: string, nextKey?: string }) => ipcRenderer.invoke('kiwoom:get-holdings', options),
     getDeposit: (options: { accountNo: string }) => ipcRenderer.invoke('kiwoom:get-deposit', options),
+    getUnexecutedOrders: (options: { accountNo: string }) => ipcRenderer.invoke('kiwoom:get-unexecuted-orders', options),
     getAllStocks: (marketType: string) => ipcRenderer.invoke('kiwoom:get-all-stocks', { marketType }),
     getWatchlist: (symbols: string[]) => ipcRenderer.invoke('kiwoom:get-watchlist', { symbols }),
     getChartData: (options: { stk_cd: string, base_dt?: string }) => ipcRenderer.invoke('kiwoom:get-chart-data', options),
@@ -29,9 +30,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('kiwoom:real-time-data', listener)
         return () => ipcRenderer.removeListener('kiwoom:real-time-data', listener)
     },
+    onMarketStatus: (callback: (data: { code: string, time: string }) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('kiwoom:market-status', listener)
+        return () => ipcRenderer.removeListener('kiwoom:market-status', listener)
+    },
+    notifyDisparitySlump: (data: { code: string, name: string, disparity: number }) => ipcRenderer.send('kiwoom:notify-disparity-slump', data),
     saveWatchlistSymbols: (symbols: string[]) => ipcRenderer.invoke('kiwoom:save-watchlist-symbols', symbols),
     getWatchlistSymbols: () => ipcRenderer.invoke('kiwoom:get-watchlist-symbols'),
     getConnectionStatus: () => ipcRenderer.invoke('kiwoom:get-connection-status'),
+    analyzeStock: (stockCode: string) => ipcRenderer.invoke('kiwoom:analyze-stock', stockCode),
 
     // Auto Trade
     saveAutoTradeSettings: (settings: any) => ipcRenderer.invoke('kiwoom:save-autotrade-settings', settings),
@@ -42,6 +50,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const listener = (_event: any, log: any) => callback(log)
         ipcRenderer.on('kiwoom:auto-trade-log', listener)
         return () => ipcRenderer.removeListener('kiwoom:auto-trade-log', listener)
+    },
+    onAutoTradeStatusChanged: (callback: (running: boolean) => void) => {
+        const listener = (_event: any, running: boolean) => callback(running)
+        ipcRenderer.on('kiwoom:auto-trade-status-changed', listener)
+        return () => ipcRenderer.removeListener('kiwoom:auto-trade-status-changed', listener)
+    },
+    // Real-time order updates
+    onOrderRealtime: (callback: (order: any) => void) => {
+        const listener = (_event: any, order: any) => callback(order);
+        ipcRenderer.on('kiwoom:order-realtime', listener);
+        return () => ipcRenderer.removeListener('kiwoom:order-realtime', listener);
+    },
+    // Real-time order updates
+    onOrderRealtime: (callback: (order: any) => void) => {
+        const listener = (_event: any, order: any) => callback(order);
+        ipcRenderer.on('kiwoom:order-realtime', listener);
+        return () => ipcRenderer.removeListener('kiwoom:order-realtime', listener);
     },
 
     // Telegram
@@ -67,7 +92,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveDartSettings: (settings: any) => ipcRenderer.invoke('dart:save-settings', settings),
     getDartSettings: () => ipcRenderer.invoke('dart:get-settings'),
     syncDartCorpCodes: () => ipcRenderer.invoke('dart:sync-corp-codes'),
+    getFinancialData: (stockCode: string) => ipcRenderer.invoke('dart:get-financial-data', stockCode),
     syncDartWatchlistSchedules: () => ipcRenderer.invoke('dart:sync-watchlist-schedules'),
+    syncBatchFinancials: (stockCodes: string[]) => ipcRenderer.invoke('dart:sync-batch-financials', stockCodes),
     fetchDartDisclosures: (options: { corpCodes: string[], bgnDe: string, endDe: string }) =>
         ipcRenderer.invoke('dart:fetch-disclosures', options),
 
@@ -81,4 +108,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSchedulesByStock: (stockCode: string) => ipcRenderer.invoke('schedule:get-by-stock', stockCode),
     onScheduleNotified: (callback: any) => ipcRenderer.on('schedule:notified', callback),
     testScheduleSummary: () => ipcRenderer.invoke('schedule:test-summary'),
+    openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
 })

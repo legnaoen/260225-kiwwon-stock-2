@@ -9,6 +9,7 @@ export interface IElectronAPI {
     getAccountList: () => Promise<any>
     getHoldings: (options: { accountNo: string, nextKey?: string }) => Promise<any>
     getDeposit: (options: { accountNo: string }) => Promise<any>
+    getUnexecutedOrders: (options: { accountNo: string }) => Promise<any>
     getAllStocks: (marketType: string) => Promise<any>
     getWatchlist: (symbols: string[]) => Promise<any>
     getChartData: (options: { stk_cd: string, base_dt?: string }) => Promise<any>
@@ -17,6 +18,12 @@ export interface IElectronAPI {
     saveWatchlistSymbols: (symbols: string[]) => Promise<any>
     getWatchlistSymbols: () => Promise<string[]>
     getConnectionStatus: () => Promise<{ connected: boolean, mockConnected: boolean, realConnected: boolean }>
+    analyzeStock: (stockCode: string) => Promise<{ success: boolean, data?: any, error?: string }>
+    sendTelegramMessage: (message: string) => Promise<{ success: boolean, error?: string }>
+    onMarketStatus: (callback: (data: { code: string, time: string }) => void) => () => void
+    onScheduleNotified: (callback: (...args: any[]) => void) => void
+    notifyDisparitySlump: (data: { code: string, name: string, disparity: number }) => void
+
     // Telegram
     saveTelegramSettings: (settings: { botToken: string, chatId: string, chartTheme?: string }) => Promise<{ success: boolean, message?: string, error?: string }>
     saveTelegramTheme: (theme: string) => Promise<{ success: boolean }>
@@ -33,9 +40,30 @@ export interface IElectronAPI {
     startConditionSearch: (seq: string) => Promise<any>
     onConditionList: (callback: (data: any[]) => void) => () => void
     onAutoTradeLog: (callback: (log: any) => void) => () => void
+    onAutoTradeStatusChanged: (callback: (running: boolean) => void) => () => void
 
     // Capture
     sendChartRenderComplete: (code: string) => void
+
+    // DART & Schedules
+    saveDartApiKey: (key: string) => Promise<{ success: boolean }>
+    getDartApiKey: () => Promise<string>
+    saveDartSettings: (settings: any) => Promise<{ success: boolean }>
+    getDartSettings: () => Promise<any>
+    getFinancialData: (stockCode: string) => Promise<{ success: boolean, data?: any[], error?: string }>
+    syncDartCorpCodes: () => Promise<{ success: boolean, error?: string }>
+    syncDartWatchlistSchedules: () => Promise<{ success: boolean, error?: string }>
+    syncBatchFinancials: (stockCodes: string[]) => Promise<{ success: boolean, error?: string }>
+    fetchDartDisclosures: (options: { corpCodes: string[], bgnDe: string, endDe: string }) => Promise<{ success: boolean, data?: any[], error?: string }>
+
+    saveScheduleSettings: (settings: { notificationTime: string, globalDailyNotify: boolean, sendMissedOnStartup?: boolean }) => Promise<{ success: boolean }>
+    getScheduleSettings: () => Promise<{ notificationTime: string, globalDailyNotify: boolean, sendMissedOnStartup?: boolean }>
+    syncSchedules: (schedules: any[]) => Promise<{ success: boolean }>
+    deleteSchedule: (id: string) => Promise<{ success: boolean }>
+    getSchedules: () => Promise<any[]>
+    getSchedulesByStock: (stockCode: string) => Promise<{ success: boolean, data: any[] }>
+    testScheduleSummary: () => Promise<{ success: boolean }>
+    openExternal: (url: string) => Promise<{ success: boolean, error?: string }>
 }
 
 declare global {

@@ -8,6 +8,8 @@ import { AutoTradeService } from './AutoTradeService';
 import { KiwoomService } from './KiwoomService';
 import { ChartRenderService } from './ChartRenderService';
 import { DatabaseService } from './DatabaseService';
+import { CompanyAnalysisService } from './CompanyAnalysisService';
+import { DartApiService } from './DartApiService';
 
 const store = new Store();
 
@@ -72,6 +74,11 @@ export class TelegramService {
                 this.bot.on('text', async (ctx) => {
                     let text = ctx.message.text.trim();
                     if (text.startsWith('/')) return;
+
+                    const isAnalysisRequest = text.endsWith(' 분석') || text.endsWith('분석');
+                    if (isAnalysisRequest) {
+                        text = text.replace(/ 분석$/, '').replace(/분석$/, '').trim();
+                    }
 
                     const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
                     const botUsername = ctx.botInfo.username;
@@ -198,11 +205,34 @@ export class TelegramService {
                         const tgSettings: any = store.get('telegram_settings') || {};
                         const theme = tgSettings.chartTheme || 'dark';
 
-                        const buffer = await ChartRenderService.captureChart(targetCode, targetName, theme);
+                        if (isAnalysisRequest) {
+                            try {
+                                const analysisService = CompanyAnalysisService.getInstance();
+                                const dartApi = DartApiService.getInstance();
 
-                        const finalCaption = `https://stock.naver.com/domestic/stock/${targetCode}` + basicInfoMsg;
+                                // 5. Check if we have financial data
+                                const financials = DatabaseService.getInstance().getFinancialData(targetCode);
+                                if (financials.length < 5) { // Need at least some years
+                                    await ctx.reply(`📊 [${targetName}] 10년 재무 데이터를 DART에서 새로 수집합니다. 약 20초가 소요됩니다...`);
+                                    await dartApi.syncBatchFinancials([targetCode]);
+                                }
 
-                        await ctx.replyWithPhoto({ source: buffer }, { caption: finalCaption });
+                                const result = await analysisService.analyzeStock(targetCode);
+                                if (result) {
+                                    await ctx.reply(result.report)
+                                } else {
+                                    await ctx.reply(`[${targetCode}] 분석을 위한 데이터가 부족합니다. DART 동기화 후 다시 시도해주세요.`)
+                                }
+                            } catch (analysisErr: any) {
+                                console.error('[TelegramService] 분석 실패:', analysisErr);
+                                await ctx.reply(`🚫 [오류] 분석 중 예외 발생: ${analysisErr.message}`);
+                            }
+                        } else {
+                            const buffer = await ChartRenderService.captureChart(targetCode, targetName, theme);
+                            const finalCaption = `https://stock.naver.com/domestic/stock/${targetCode}` + basicInfoMsg;
+                            await ctx.replyWithPhoto({ source: buffer }, { caption: finalCaption });
+                        }
+
                         // 성공 시 로딩 메시지 삭제 시도 (실패해도 무시)
                         try { await ctx.deleteMessage(loadingMsg.message_id); } catch (e) { }
                     } catch (err: any) {
@@ -404,16 +434,52 @@ export class TelegramService {
         });
     }
 
-    private setupCronJobs() {
-        // [6] 자동매매 동작 상태 스케줄 알림 (08:50, 15:10)
-        const sendStatus = () => {
+    public async sendAutoTradeStatusMessage(isTest: boolean = false) {
+        try {
             const isRunning = AutoTradeService.getInstance().getIsRunning();
             const statusTxt = isRunning ? '🟢 실행 중' : '🔴 중지 상태';
-            this.sendMessage(`⏰ [자동매매 상태 알림]\n현재 자동매매 봇이 [${statusTxt}] 입니다.`);
+
+            const settings: any = store.get('autotrade_settings') || {};
+            const seq = settings.selectedSeq || '미설정';
+            const timeHours = settings.timeHours || '09';
+            const timeMinutes = settings.timeMinutes || '00';
+            const buyLimit = Number(String(settings.buyLimit || '').replace(/[^0-9]/g, '') || 0);
+
+            let conditionName = settings.selectedSeqName || '알 수 없음';
+            if (conditionName === '알 수 없음' && seq !== '미설정') {
+                try {
+                    const conditions = await KiwoomService.getInstance().getConditionList();
+                    const found = conditions.find((c: any) => c[0] === seq);
+                    if (found) {
+                        conditionName = found[1];
+                    }
+                } catch (e) {
+                    console.error('[TelegramService] failed to fetch condition list for status message', e);
+                }
+            }
+
+            let message = '';
+            if (isTest) {
+                message += '✅ [테스트 메시지]\n안티그래비티 PC앱과 텔레그램 연동이 정상적으로 완료되었습니다!\n\n';
+            }
+
+            message += `⏰ [자동매매 상태 알림]\n현재 자동매매 봇이 [${statusTxt}] 입니다.\n\n📊 설정 정보\n- 조건식: ${conditionName} (${seq})\n- 매수 스케줄: ${timeHours}:${timeMinutes}\n- 종목당 한도: ${buyLimit.toLocaleString()}원`;
+
+            await this.sendMessage(message);
+        } catch (error) {
+            console.error('[TelegramService] sendAutoTradeStatusMessage error', error);
+            throw error;
+        }
+    }
+
+    private setupCronJobs() {
+        // [6] 자동매매 동작 상태 스케줄 알림 (08:50, 15:00)
+        const sendStatus = () => {
+            this.sendAutoTradeStatusMessage(false);
         };
 
         cron.schedule('0 50 8 * * *', sendStatus, { timezone: 'Asia/Seoul' });
-        cron.schedule('0 10 15 * * *', sendStatus, { timezone: 'Asia/Seoul' });
+        cron.schedule('0 0 15 * * *', sendStatus, { timezone: 'Asia/Seoul' });
     }
 
     public async sendMessage(message: string) {

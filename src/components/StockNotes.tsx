@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Plus, Edit2, Trash2, X } from 'lucide-react'
 import { useNoteStore, Note } from '../store/useNoteStore'
+import { useTagStore } from '../store/useTagStore'
 import { formatTargetDate } from '../utils'
 
 interface StockNotesProps {
@@ -12,6 +13,7 @@ interface StockNotesProps {
 
 export function StockNotes({ stockCode, stockName }: StockNotesProps) {
     const { notes, addNote, updateNote, deleteNote } = useNoteStore()
+    const { tags, addTag, removeTag } = useTagStore()
     const [isEditorOpen, setIsEditorOpen] = useState(false)
     const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create')
     const [editNoteId, setEditNoteId] = useState<string | null>(null)
@@ -19,8 +21,22 @@ export function StockNotes({ stockCode, stockName }: StockNotesProps) {
     const [targetDate, setTargetDate] = useState('')
     const [reminderType, setReminderType] = useState('없음')
     const [selectedNote, setSelectedNote] = useState<Note | null>(null)
+    const [tagInput, setTagInput] = useState('')
 
     const numericStockCode = stockCode?.replace(/[^a-zA-Z0-9]/g, '') || ''
+
+    const stockTags = useMemo(() => {
+        if (!numericStockCode) return []
+        return tags[numericStockCode] || []
+    }, [tags, numericStockCode])
+
+    const handleAddTag = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' && tagInput.trim()) {
+            const newTags = tagInput.split(',').map(t => t.trim()).filter(Boolean)
+            newTags.forEach(tag => addTag(numericStockCode, tag))
+            setTagInput('')
+        }
+    }
 
     const stockNotes = useMemo(() => {
         if (!numericStockCode) return []
@@ -107,27 +123,45 @@ export function StockNotes({ stockCode, stockName }: StockNotesProps) {
                 </button>
             </div>
 
-            <div className="flex items-center gap-2 mb-3">
-                <button
-                    onClick={() => {
-                        const code = numericStockCode.replace(/^A/, '');
-                        window.electronAPI.openExternal(`https://stock.naver.com/domestic/stock/${code}/`);
-                    }}
-                    className="px-2.5 py-0.5 rounded bg-[#03C75A]/10 text-[#03C75A] hover:bg-[#03C75A]/20 transition-colors text-[11px] font-bold border border-[#03C75A]/20 flex items-center gap-1"
-                >
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#03C75A]" />
-                    NAVER
-                </button>
-                <button
-                    onClick={() => {
-                        const code = numericStockCode.replace(/^A/, '');
-                        window.electronAPI.openExternal(`https://www.tossinvest.com/stocks/A${code}/`);
-                    }}
-                    className="px-2.5 py-0.5 rounded bg-[#3182F6]/10 text-[#3182F6] hover:bg-[#3182F6]/20 transition-colors text-[11px] font-bold border border-[#3182F6]/20 flex items-center gap-1"
-                >
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#3182F6]" />
-                    TOSS
-                </button>
+            <div className="flex items-center justify-between gap-4 mb-3 mt-1">
+                <div className="flex items-center flex-wrap gap-1.5">
+                    {stockTags.map(tag => (
+                        <span key={tag} className="flex items-center gap-1 bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded text-[11px] font-bold">
+                            #{tag}
+                            <button onClick={() => removeTag(numericStockCode, tag)} className="opacity-50 hover:opacity-100"><X size={10} /></button>
+                        </span>
+                    ))}
+                    <input
+                        type="text"
+                        placeholder="태그 추가 (Enter)"
+                        className="bg-transparent border-b border-border px-1 py-0.5 text-[11px] outline-none focus:border-primary/50 text-foreground w-28 rounded-none"
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        onKeyDown={handleAddTag}
+                    />
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                    <button
+                        onClick={() => {
+                            const code = numericStockCode.replace(/^A/, '');
+                            window.electronAPI.openExternal(`https://stock.naver.com/domestic/stock/${code}/`);
+                        }}
+                        className="px-2.5 py-0.5 rounded bg-[#03C75A]/10 text-[#03C75A] hover:bg-[#03C75A]/20 transition-colors text-[11px] font-bold border border-[#03C75A]/20 flex items-center gap-1"
+                    >
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#03C75A]" />
+                        NAVER
+                    </button>
+                    <button
+                        onClick={() => {
+                            const code = numericStockCode.replace(/^A/, '');
+                            window.electronAPI.openExternal(`https://www.tossinvest.com/stocks/A${code}/`);
+                        }}
+                        className="px-2.5 py-0.5 rounded bg-[#3182F6]/10 text-[#3182F6] hover:bg-[#3182F6]/20 transition-colors text-[11px] font-bold border border-[#3182F6]/20 flex items-center gap-1"
+                    >
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#3182F6]" />
+                        TOSS
+                    </button>
+                </div>
             </div>
 
             {stockNotes.length === 0 ? (

@@ -111,7 +111,21 @@ ipcMain.on('window-controls:close', () => {
     win?.close()
 })
 
-ipcMain.on('kiwoom:notify-disparity-slump', (_event, data: { code: string, name: string, disparity: number }) => {
+ipcMain.handle('yahoo:test-connection', async () => {
+    try {
+        const { YahooFinanceService } = await import('./services/YahooFinanceService')
+        // Test with Samsung Electronics (005930.KS)
+        const result = await YahooFinanceService.getInstance().getHistoricalRates('005930', 'KOSPI')
+        if (result && result.quotes) {
+            return { success: true, count: result.quotes.length }
+        }
+        return { success: false, error: '데이터를 가져오지 못했습니다.' }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.on('kiwoom:notify-disparity-slump', (_event, data: { code: string, name: string, disparity: number, changeRate: number }) => {
     eventBus.emit(SystemEvent.DISPARITY_SLUMP_DETECTED, data)
 })
 
@@ -245,6 +259,15 @@ ipcMain.handle('kiwoom:set-autotrade-status', (_event, status: boolean) => {
     store.set('autotrade_status', status)
     autoTradeService.setRunning(status) // Update service memory
     return { success: true }
+})
+
+ipcMain.handle('kiwoom:execute-manual-buy', async () => {
+    try {
+        await autoTradeService.executeManualBuy();
+        return { success: true };
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
 })
 
 ipcMain.handle('kiwoom:connect-condition-ws', async () => {

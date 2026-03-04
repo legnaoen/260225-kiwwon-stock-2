@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database } from 'lucide-react'
+import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database, Globe } from 'lucide-react'
 import { useScheduleStore } from '../store/useScheduleStore'
 
 export default function Settings() {
@@ -42,7 +42,11 @@ export default function Settings() {
     const [statusFinancials, setStatusFinancials] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageFinancials, setMessageFinancials] = useState('')
 
-    const [activeTab, setActiveTab] = useState<'kiwoom' | 'telegram' | 'schedule' | 'dart'>('kiwoom')
+    const [activeTab, setActiveTab] = useState<'kiwoom' | 'telegram' | 'schedule' | 'dart' | 'external'>('kiwoom')
+
+    const [isTestingYahoo, setIsTestingYahoo] = useState(false)
+    const [statusYahoo, setStatusYahoo] = useState<'idle' | 'success' | 'error'>('idle')
+    const [messageYahoo, setMessageYahoo] = useState('')
 
     useEffect(() => {
         const loadKeys = async () => {
@@ -311,6 +315,7 @@ export default function Settings() {
         { id: 'telegram', label: '텔레그램 연동', icon: Send, color: 'text-blue-500' },
         { id: 'schedule', label: '일정 알림', icon: Bell, color: 'text-amber-500' },
         { id: 'dart', label: 'DART 공시', icon: Database, color: 'text-green-600' },
+        { id: 'external', label: '외부 API', icon: Globe, color: 'text-purple-500' },
     ] as const
 
     return (
@@ -808,6 +813,93 @@ export default function Settings() {
                                             * 관심종목에 등록된 모든 종목의 최근 10개년 사업보고서 데이터를 수집합니다.<br />
                                             * DART API 호출 간격을 고려하여 종목당 약 10~15초가 소요됩니다.
                                         </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}                    {activeTab === 'external' && (
+                        <div className="space-y-8">
+                            <div className="space-y-1">
+                                <h2 className="text-3xl font-bold tracking-tight">외부 API 연동</h2>
+                                <p className="text-muted-foreground">매크로 및 차트 분석을 위한 글로벌 데이터 소스를 관리합니다.</p>
+                            </div>
+
+                            <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                <div className="space-y-6">
+                                    <div className="flex items-center justify-between p-6 bg-muted/20 border border-border/40 rounded-2xl group hover:border-purple-500/30 transition-all">
+                                        <div className="flex items-center gap-4">
+                                            <div className="p-3 bg-purple-500/10 rounded-xl">
+                                                <Globe className="text-purple-500" size={24} />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-bold">Yahoo Finance</h3>
+                                                <p className="text-xs text-muted-foreground">10년 주가 데이터 및 글로벌 지수 (별도 인증 불필요)</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-4">
+                                            {statusYahoo === 'success' && (
+                                                <span className="text-[11px] font-bold text-green-500 bg-green-500/10 px-3 py-1 rounded-full border border-green-500/20">
+                                                    연결됨
+                                                </span>
+                                            )}
+                                            {statusYahoo === 'error' && (
+                                                <span className="text-[11px] font-bold text-destructive bg-destructive/10 px-3 py-1 rounded-full border border-destructive/20">
+                                                    연결 오류
+                                                </span>
+                                            )}
+                                            <button
+                                                onClick={async () => {
+                                                    setIsTestingYahoo(true)
+                                                    setStatusYahoo('idle')
+                                                    try {
+                                                        const result = await window.electronAPI.testYahooFinance()
+                                                        if (result.success) {
+                                                            setStatusYahoo('success')
+                                                            setMessageYahoo(`연결 성공: 삼성전자 10년치 데이터(${result.count}건) 수신 완료`)
+                                                        } else {
+                                                            setStatusYahoo('error')
+                                                            setMessageYahoo(result.error || '연결 실패')
+                                                        }
+                                                    } catch (e) {
+                                                        setStatusYahoo('error')
+                                                        setMessageYahoo('연결 중 오류 발생')
+                                                    } finally {
+                                                        setIsTestingYahoo(false)
+                                                    }
+                                                }}
+                                                disabled={isTestingYahoo}
+                                                className="flex items-center gap-2 bg-purple-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 transition-all"
+                                            >
+                                                {isTestingYahoo ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                                연결 테스트
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {messageYahoo && (
+                                        <div className={`p-4 rounded-xl border text-xs flex items-center gap-2 ${statusYahoo === 'success' ? 'bg-green-500/5 border-green-500/20 text-green-600' : 'bg-destructive/5 border-destructive/20 text-destructive'}`}>
+                                            {statusYahoo === 'success' ? <ShieldCheck size={14} /> : <AlertCircle size={14} />}
+                                            {messageYahoo}
+                                        </div>
+                                    )}
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="p-5 border border-border/40 rounded-2xl bg-muted/10">
+                                            <p className="text-xs font-bold mb-2">수집 데이터</p>
+                                            <ul className="text-[11px] text-muted-foreground space-y-1.5 list-disc list-inside">
+                                                <li>KOSPI/KOSDAQ 종목 10년 월봉</li>
+                                                <li>S&P 500, 나스닥 등 주요 지수</li>
+                                                <li>USD/KRW 환율 및 미국채 금리</li>
+                                            </ul>
+                                        </div>
+                                        <div className="p-5 border border-border/40 rounded-2xl bg-muted/10">
+                                            <p className="text-xs font-bold mb-2">활용 계획</p>
+                                            <ul className="text-[11px] text-muted-foreground space-y-1.5 list-disc list-inside">
+                                                <li>역사적 P/E, P/B 밴드 분석</li>
+                                                <li>글로벌 시황 기반 AI 리포팅</li>
+                                                <li>매크로 지표 변동 알림 (예정)</li>
+                                            </ul>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

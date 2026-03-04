@@ -4,6 +4,7 @@ import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import TitleBar from './components/TitleBar'
 import Sidebar, { menuItems } from './components/Sidebar'
+import Dashboard from './components/Dashboard'
 import Holdings from './components/Holdings'
 import Watchlist from './components/Watchlist'
 import Settings from './components/Settings'
@@ -11,6 +12,7 @@ import AutoTrade from './components/AutoTrade'
 import CapturePage from './components/CapturePage'
 import Schedule from './components/Schedule'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
+import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
 import { useNoteStore } from './store/useNoteStore'
 import { useScheduleStore } from './store/useScheduleStore'
 import { useMarketStore } from './store/useMarketStore'
@@ -72,6 +74,7 @@ export default function App() {
 
 function AppContent() {
     useScheduleNotifier()
+    useGlobalSignalMonitor()
 
     useEffect(() => {
         const handleNotified = (_event: any, { ids }: { ids: string[] }) => {
@@ -97,8 +100,64 @@ function AppContent() {
         }
     }, [])
 
-    const { marketStatus, currentTime, setMarketStatus, updateTime } = useMarketStore()
+    const { marketStatus, currentTime, tradingDays, setMarketStatus, setTradingDays, updateTime } = useMarketStore()
     const { isRunning: isAutoTradeRunning, setIsRunning: setIsAutoTradeRunning } = useAutoTradeStore()
+    const [status, setStatus] = useState({ connected: false, mockConnected: false, realConnected: false })
+
+    useEffect(() => {
+        const checkStatus = async () => {
+            const currentStatus = await window.electronAPI.getConnectionStatus()
+            setStatus(currentStatus)
+        }
+
+        checkStatus()
+        const interval = setInterval(checkStatus, 5000)
+        return () => clearInterval(interval)
+    }, [])
+
+    // Fetch Trading Days
+    useEffect(() => {
+        const fetchTradingDays = async () => {
+            if (!status.connected || !window.electronAPI?.getChartData) return;
+
+            try {
+                console.log('[App] Fetching trading days from Kiwoom API...');
+                // Ensure we use Samsung Electronics (005930) as market reference
+                const result = await window.electronAPI.getChartData({ stk_cd: '005930' });
+
+                if (result.success && result.data) {
+                    const rawData = result.data?.stk_dt_pole_chart_qry || result.data?.output2 || result.data?.Body || result.data?.list || [];
+
+                    if (Array.isArray(rawData) && rawData.length > 0) {
+                        const dates = rawData.map((d: any) => {
+                            let dateStr = String(d.dt || d.stck_bsop_date || d.date || d.trd_dt || d.trd_date || '');
+                            if (dateStr.length === 8) {
+                                return `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+                            }
+                            return dateStr;
+                        }).filter((d: string) => d.length === 10).sort();
+
+                        const today = new Date().toLocaleDateString('sv-SE');
+                        const now = new Date();
+                        const hours = now.getHours();
+                        const day = now.getDay();
+
+                        // Add today if it's a weekday and past 9 AM, and not yet in the list
+                        if (day >= 1 && day <= 5 && hours >= 9 && !dates.includes(today)) {
+                            dates.push(today);
+                        }
+
+                        setTradingDays(dates);
+                        console.log(`[App] Successfully initialized ${dates.length} trading days.`);
+                    }
+                }
+            } catch (err) {
+                console.error('[App] Failed to fetch trading days:', err);
+            }
+        };
+
+        fetchTradingDays();
+    }, [status.connected]) // Re-run whenever connection status becomes true
 
     // Clock and Market Status listener
     useEffect(() => {
@@ -122,7 +181,7 @@ function AppContent() {
         }
     }, [])
 
-    const [activeTab, setActiveTab] = useState('holdings')
+    const [activeTab, setActiveTab] = useState('dashboard')
     const [isDarkMode, setIsDarkMode] = useState(() => {
         // Use system theme by default
         return window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -152,19 +211,6 @@ function AppContent() {
                 setCaptureMode({ code, name, theme })
             }
         }
-    }, [])
-
-    const [status, setStatus] = useState({ connected: false, mockConnected: false, realConnected: false })
-
-    useEffect(() => {
-        const checkStatus = async () => {
-            const currentStatus = await window.electronAPI.getConnectionStatus()
-            setStatus(currentStatus)
-        }
-
-        checkStatus()
-        const interval = setInterval(checkStatus, 5000)
-        return () => clearInterval(interval)
     }, [])
 
     // Market Hours Auto-Refresh (1 minute interval)
@@ -227,13 +273,14 @@ function AppContent() {
                 {/* Main Content */}
                 <main className="flex-1 overflow-hidden bg-background flex flex-col">
                     <div className="w-full h-full flex flex-col min-h-0">
+                        {activeTab === 'dashboard' && <Dashboard />}
                         {activeTab === 'holdings' && <Holdings />}
                         {activeTab === 'watchlist' && <Watchlist />}
                         {activeTab === 'auto-trade' && <AutoTrade />}
                         {activeTab === 'schedule' && <Schedule />}
                         {activeTab === 'settings' && <Settings />}
 
-                        {(activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule') && (
+                        {(activeTab !== 'dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

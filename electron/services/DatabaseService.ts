@@ -72,10 +72,28 @@ export class DatabaseService {
             );
         `
 
+        const createYahooFinanceCacheTable = `
+            CREATE TABLE IF NOT EXISTS yahoo_finance_cache (
+                symbol TEXT PRIMARY KEY,
+                historical_data TEXT,
+                updated_at TEXT
+            );
+        `
+
+        const createYahooMacroCacheTable = `
+            CREATE TABLE IF NOT EXISTS yahoo_macro_cache (
+                symbol TEXT PRIMARY KEY,
+                macro_data TEXT,
+                updated_at TEXT
+            );
+        `
+
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
         this.db.exec(createFinancialDataTable)
         this.db.exec(createAnalysisCacheTable)
+        this.db.exec(createYahooFinanceCacheTable)
+        this.db.exec(createYahooMacroCacheTable)
 
         // Ensure columns exist for migration
         try {
@@ -179,6 +197,30 @@ export class DatabaseService {
 
     public getAnalysisCache(stockCode: string) {
         return this.db.prepare('SELECT * FROM analysis_cache WHERE stock_code = ?').get(stockCode) as any
+    }
+
+    public saveYahooFinanceCache(symbol: string, historicalDataJson: string) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO yahoo_finance_cache (symbol, historical_data, updated_at)
+            VALUES (?, ?, ?)
+        `)
+        stmt.run(symbol, historicalDataJson, new Date().toISOString())
+    }
+
+    public getYahooFinanceCache(symbol: string) {
+        return this.db.prepare('SELECT * FROM yahoo_finance_cache WHERE symbol = ?').get(symbol) as any
+    }
+
+    public saveYahooMacroCache(symbol: string, macroDataJson: string) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO yahoo_macro_cache (symbol, macro_data, updated_at)
+            VALUES (?, ?, ?)
+        `)
+        stmt.run(symbol, macroDataJson, new Date().toISOString())
+    }
+
+    public getYahooMacroCache(symbol: string) {
+        return this.db.prepare('SELECT * FROM yahoo_macro_cache WHERE symbol = ?').get(symbol) as any
     }
 
     public getDb() {

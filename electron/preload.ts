@@ -35,7 +35,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('kiwoom:market-status', listener)
         return () => ipcRenderer.removeListener('kiwoom:market-status', listener)
     },
-    notifyDisparitySlump: (data: { code: string, name: string, disparity: number }) => ipcRenderer.send('kiwoom:notify-disparity-slump', data),
+    notifyDisparitySlump: (data: { code: string, name: string, disparity: number, changeRate: number }) => ipcRenderer.send('kiwoom:notify-disparity-slump', data),
     saveWatchlistSymbols: (symbols: string[]) => ipcRenderer.invoke('kiwoom:save-watchlist-symbols', symbols),
     getWatchlistSymbols: () => ipcRenderer.invoke('kiwoom:get-watchlist-symbols'),
     getConnectionStatus: () => ipcRenderer.invoke('kiwoom:get-connection-status'),
@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAutoTradeSettings: () => ipcRenderer.invoke('kiwoom:get-autotrade-settings'),
     getAutoTradeStatus: () => ipcRenderer.invoke('kiwoom:get-autotrade-status'),
     setAutoTradeStatus: (status: boolean) => ipcRenderer.invoke('kiwoom:set-autotrade-status', status),
+    executeManualBuy: () => ipcRenderer.invoke('kiwoom:execute-manual-buy'),
     onAutoTradeLog: (callback: (log: any) => void) => {
         const listener = (_event: any, log: any) => callback(log)
         ipcRenderer.on('kiwoom:auto-trade-log', listener)
@@ -109,4 +110,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onScheduleNotified: (callback: any) => ipcRenderer.on('schedule:notified', callback),
     testScheduleSummary: () => ipcRenderer.invoke('schedule:test-summary'),
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+    testYahooFinance: () => ipcRenderer.invoke('yahoo:test-connection'),
 })

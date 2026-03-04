@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
-import { Search, Plus, X, RefreshCw, AlertCircle, TrendingUp, TrendingDown } from 'lucide-react'
+import { Search, Plus, X, RefreshCw, AlertCircle, TrendingUp, TrendingDown, Filter, ChevronDown, Check } from 'lucide-react'
 import { cn } from '../utils'
 import { matchChoseong } from '../utils/hangul'
 import { useLayoutStore } from '../store/useLayoutStore'
 import { useSignalStore } from '../store/useSignalStore'
+import { useTagStore } from '../store/useTagStore'
 import { useBackgroundSignalFetcher } from '../hooks/useBackgroundSignalFetcher'
 import { StockChart } from './StockChart'
 import { StockNotes } from './StockNotes'
@@ -41,7 +42,21 @@ export default function Watchlist() {
     const [selectedStock, setSelectedStock] = useState<{ code: string, name: string } | null>(null)
     const [activeInfoTab, setActiveInfoTab] = useState<'notes' | 'schedules' | 'financials'>('notes')
     const searchRef = useRef<HTMLDivElement>(null)
-    const notifiedSlumpRef = useRef<Set<string>>(new Set())
+
+    const { tags: tagData, getAllTags } = useTagStore()
+    const allAvailableTags = useMemo(() => getAllTags(), [tagData, getAllTags])
+    const [selectedTags, setSelectedTags] = useState<string[]>([])
+    const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false)
+    const [tagSearchQuery, setTagSearchQuery] = useState('')
+    const tagDropdownRef = useRef<HTMLDivElement>(null)
+
+    const toggleFilterTag = (tag: string) => {
+        setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag])
+    }
+
+    const filteredTagsForDropdown = useMemo(() => {
+        return allAvailableTags.filter(tag => tag.toLowerCase().includes(tagSearchQuery.toLowerCase()))
+    }, [allAvailableTags, tagSearchQuery])
 
     const { chartHeight, setChartHeight } = useLayoutStore()
     const isDragging = useRef(false)
@@ -208,22 +223,121 @@ export default function Watchlist() {
             if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
                 setIsSearching(false)
             }
+            if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
+                setIsTagDropdownOpen(false)
+            }
         }
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [])
 
+    const displayedWatchlist = useMemo(() => {
+        if (selectedTags.length === 0) return watchlist;
+        return watchlist.filter(stock => {
+            const stockNumericCode = stock.code.replace(/[^0-9]/g, '')
+            const stockTags = tagData[stockNumericCode] || []
+            // OR condition
+            return selectedTags.some(tag => stockTags.includes(tag))
+        })
+    }, [watchlist, selectedTags, tagData])
+
     return (
         <div className="flex-1 flex flex-col animate-in bg-muted/20 fade-in slide-in-from-bottom-4 duration-500 overflow-hidden h-full min-h-0">
             {/* Header / Search Section */}
-            <div className="flex flex-col shrink-0 p-4 pb-4 z-20">
-                <div className="relative w-full max-w-2xl" ref={searchRef}>
+            <div className="flex shrink-0 p-4 gap-4 z-20 items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur">
+                {/* Tag Filter Dropdown Section */}
+                <div className="flex items-center gap-2 flex-1 relative" ref={tagDropdownRef}>
+                    <button
+                        onClick={() => setIsTagDropdownOpen(!isTagDropdownOpen)}
+                        className={cn(
+                            "flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-bold transition-all border shadow-sm",
+                            selectedTags.length > 0
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "bg-background text-foreground border-border hover:border-primary/50"
+                        )}
+                    >
+                        <Filter size={14} />
+                        <span>Filter {selectedTags.length > 0 && `(${selectedTags.length})`}</span>
+                        <ChevronDown size={14} className={cn("transition-transform", isTagDropdownOpen && "rotate-180")} />
+                    </button>
+
+                    {selectedTags.length > 0 && (
+                        <button
+                            onClick={() => setSelectedTags([])}
+                            className="bg-muted hover:bg-muted/80 text-muted-foreground p-2 rounded-lg transition-colors border border-border"
+                            title="필터 초기화"
+                        >
+                            <X size={14} />
+                        </button>
+                    )}
+
+                    {isTagDropdownOpen && (
+                        <div className="absolute top-full left-0 mt-2 w-[240px] bg-background border border-border rounded-xl shadow-2xl z-[60] flex flex-col overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className="p-2 border-b border-border bg-muted/30">
+                                <div className="relative">
+                                    <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                    <input
+                                        type="text"
+                                        placeholder="태그 검색..."
+                                        className="w-full bg-background border border-border rounded-md py-1.5 pl-8 pr-2 text-[12px] focus:outline-none focus:ring-1 focus:ring-primary/50"
+                                        value={tagSearchQuery}
+                                        onChange={(e) => setTagSearchQuery(e.target.value)}
+                                        autoFocus
+                                    />
+                                </div>
+                            </div>
+                            <div className="max-h-[300px] overflow-y-auto p-1 py-2 custom-scrollbar">
+                                {filteredTagsForDropdown.length > 0 ? (
+                                    filteredTagsForDropdown.map(tag => {
+                                        const isSelected = selectedTags.includes(tag)
+                                        return (
+                                            <button
+                                                key={tag}
+                                                onClick={() => toggleFilterTag(tag)}
+                                                className={cn(
+                                                    "w-full flex items-center justify-between px-3 py-2 rounded-md text-[12px] font-medium transition-colors mb-0.5",
+                                                    isSelected ? "bg-primary/10 text-primary font-bold" : "text-foreground hover:bg-muted"
+                                                )}
+                                            >
+                                                <span>#{tag}</span>
+                                                {isSelected && <Check size={14} />}
+                                            </button>
+                                        )
+                                    })
+                                ) : (
+                                    <div className="py-8 text-center text-[12px] text-muted-foreground">태그가 없습니다.</div>
+                                )}
+                            </div>
+                            {selectedTags.length > 0 && (
+                                <div className="p-2 border-t border-border bg-muted/50 flex justify-between items-center text-[11px] px-3">
+                                    <span className="text-muted-foreground">{selectedTags.length}개 선택됨</span>
+                                    <button onClick={() => setSelectedTags([])} className="text-primary font-bold hover:underline">초기화</button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Selected Tags Display (Small Pills) */}
+                    <div className="flex items-center gap-1.5 ml-2 overflow-x-auto no-scrollbar max-w-[calc(100%-180px)]">
+                        {selectedTags.map(tag => (
+                            <span key={tag} className="shrink-0 flex items-center gap-1 bg-primary/5 text-primary border border-primary/10 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                                #{tag}
+                                <button onClick={() => toggleFilterTag(tag)} className="hover:text-foreground opacity-60 hover:opacity-100">
+                                    <X size={10} />
+                                </button>
+                            </span>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Search Section */}
+                <div className="relative w-[280px] shrink-0" ref={searchRef}>
                     <div className="relative">
-                        <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <input
                             type="text"
                             placeholder="종목명, 코드, 초성 검색"
-                            className="w-full bg-background border border-border rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-sm"
+                            className="w-full bg-background border border-border rounded-lg py-2 pl-9 pr-3 text-[13px] focus:outline-none focus:ring-1 focus:ring-primary/50 shadow-sm"
                             value={searchQuery}
                             onChange={(e) => {
                                 setSearchQuery(e.target.value)
@@ -232,7 +346,7 @@ export default function Watchlist() {
                             onFocus={() => setIsSearching(true)}
                         />
                         {isLoadingMaster && (
-                            <RefreshCw size={14} className="absolute right-4 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />
+                            <RefreshCw size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />
                         )}
                     </div>
 
@@ -284,7 +398,7 @@ export default function Watchlist() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {watchlist.map((stock) => {
+                            {displayedWatchlist.map((stock) => {
                                 const numericCode = stock.code.replace(/[^0-9]/g, '')
                                 const sum19 = previous19DaysSum[numericCode]
                                 let isDepressed = false
@@ -292,11 +406,6 @@ export default function Watchlist() {
                                     const ma20 = (sum19 + stock.price) / 20
                                     if ((stock.price / ma20) * 100 < 95) {
                                         isDepressed = true
-                                        const disparity = Number(((stock.price / ma20) * 100).toFixed(2))
-                                        if (!notifiedSlumpRef.current.has(stock.code)) {
-                                            notifiedSlumpRef.current.add(stock.code)
-                                            window.electronAPI?.notifyDisparitySlump?.({ code: stock.code, name: stock.name, disparity })
-                                        }
                                     }
                                 }
 
@@ -341,9 +450,11 @@ export default function Watchlist() {
                                     </tr>
                                 )
                             })}
-                            {watchlist.length === 0 && !isLoadingData && (
+                            {displayedWatchlist.length === 0 && !isLoadingData && (
                                 <TableRow>
-                                    <TableCell colSpan={4} className="py-12 text-center text-muted-foreground">등록된 관심종목이 없습니다.</TableCell>
+                                    <TableCell colSpan={4} className="py-12 text-center text-muted-foreground">
+                                        {watchlist.length === 0 ? "등록된 관심종목이 없습니다." : "선택한 태그에 해당하는 종목이 없습니다."}
+                                    </TableCell>
                                 </TableRow>
                             )}
                         </TableBody>

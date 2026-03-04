@@ -9,7 +9,9 @@ export interface MarketStatus {
 interface MarketState {
     marketStatus: MarketStatus;
     currentTime: Date;
+    tradingDays: string[];
     setMarketStatus: (status: Partial<MarketStatus>) => void;
+    setTradingDays: (days: string[]) => void;
     updateTime: () => void;
 }
 
@@ -36,6 +38,7 @@ export const useMarketStore = create<MarketState>((set) => ({
         time: '--:--:--'
     },
     currentTime: new Date(),
+    tradingDays: [],
     setMarketStatus: (status) => set((state) => ({
         marketStatus: {
             ...state.marketStatus,
@@ -43,5 +46,6 @@ export const useMarketStore = create<MarketState>((set) => ({
             text: status.code ? getStatusText(status.code) : state.marketStatus.text
         }
     })),
+    setTradingDays: (days) => set({ tradingDays: days }),
     updateTime: () => set({ currentTime: new Date() })
 }))

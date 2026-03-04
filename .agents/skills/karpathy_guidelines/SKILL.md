@@ -65,3 +65,15 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+## 5. API & Dependency Management
+
+**Prefer direct API calls over heavy libraries. Avoid dependency bloat.**
+
+When integrating external data sources or services:
+- **Direct First**: Always consider a direct `axios` or `fetch` call to a REST endpoint before adding a specialized client library (e.g., `yahoo-finance2`, `google-sdk`).
+- **Environment Check**: In Electron/Vite environments, be wary of ESM-only or Node-native libraries that cause build-time or runtime path issues.
+- **Manual Proof**: Before writing integration code, verify the API response with a simple scratch script (`fetch_test.js`) or `curl` to understand the raw data structure.
+- **Stability over Convenience**: A library might save 10 lines of code today but cause 100 lines of build debugging tomorrow. Choose the most "fundamental" way to get the data.
+
+The test: "Can I do this with a single `axios.get()` call?" If yes, don't install a library.

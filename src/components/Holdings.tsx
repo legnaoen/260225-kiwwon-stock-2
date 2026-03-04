@@ -12,6 +12,9 @@ import { StockFinancials } from './StockFinancials'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './ui/Table'
 import { Card, CardContent } from './ui/Card'
 import { ProfitBadge, ProfitText } from './ui/ProfitDisplay'
+import { useHoldingHistoryStore } from '../store/useHoldingHistoryStore'
+import { Calendar } from 'lucide-react'
+import { useMarketStore } from '../store/useMarketStore'
 
 interface Stock {
     code: string
@@ -46,9 +49,10 @@ export default function Holdings() {
     const [activeInfoTab, setActiveInfoTab] = useState<'notes' | 'schedules' | 'financials'>('notes')
     const [debugData, setDebugData] = useState<any>(null)
     const [showDebug, setShowDebug] = useState(false)
-    const notifiedSlumpRef = useRef<Set<string>>(new Set())
 
     const { chartHeight, setChartHeight } = useLayoutStore()
+    const { history, syncHistory } = useHoldingHistoryStore()
+    const { tradingDays } = useMarketStore()
     const isDragging = useRef(false)
     const startY = useRef(0)
     const startHeight = useRef(0)
@@ -141,6 +145,12 @@ export default function Holdings() {
                 if (symbols.length > 0) {
                     window.electronAPI.wsRegister(symbols)
                     enqueueSymbols(symbols)
+
+                    // Sync holding history (track first seen date)
+                    syncHistory(symbols)
+                } else {
+                    // Even if empty, sync to clear historical codes no longer held
+                    syncHistory([])
                 }
             } else {
                 const hError = hResult.error?.message || JSON.stringify(hResult.error) || '보유종목 조회 실패'
@@ -289,60 +299,108 @@ export default function Holdings() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {data.holdings.map((stock) => {
-                                const numericCode = stock.code.replace(/[^0-9]/g, '')
-                                const sum19 = previous19DaysSum[numericCode]
-                                let isDepressed = false
-                                if (sum19 !== undefined && sum19 > 0) {
-                                    const ma20 = (sum19 + stock.price) / 20
-                                    if ((stock.price / ma20) * 100 < 95) {
-                                        isDepressed = true
-                                        const disparity = Number(((stock.price / ma20) * 100).toFixed(2))
-                                        if (!notifiedSlumpRef.current.has(stock.code)) {
-                                            notifiedSlumpRef.current.add(stock.code)
-                                            window.electronAPI?.notifyDisparitySlump?.({ code: stock.code, name: stock.name, disparity })
-                                        }
-                                    }
+                            {(() => {
+                                // Group holdings by date
+                                const groups: Record<string, Stock[]> = {}
+                                data.holdings.forEach(stock => {
+                                    const date = history[stock.code] || '알 수 없음'
+                                    if (!groups[date]) groups[date] = []
+                                    groups[date].push(stock)
+                                })
+
+                                // Sort dates in descending order (newest first)
+                                const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a))
+
+                                if (data.holdings.length === 0 && !isLoading) {
+                                    return (
+                                        <TableRow>
+                                            <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">보유 종목이 없습니다.</TableCell>
+                                        </TableRow>
+                                    )
                                 }
 
-                                return (
-                                    <tr
-                                        key={stock.code}
-                                        className={cn(
-                                            "hover:bg-muted/40 transition-colors cursor-pointer group",
-                                            selectedStock?.code === stock.code && "bg-primary/5"
-                                        )}
-                                        onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
-                                    >
-                                        <TableCell className="px-2">
-                                            <div className="flex flex-col gap-0.5">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className={cn("font-bold text-[13px] leading-none", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
-                                                    {isDepressed && <span className="text-[10px] font-bold bg-[#a855f7] text-white px-1 py-0.5 rounded shadow-sm leading-none">침체</span>}
-                                                </div>
-                                                <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono font-semibold text-[13px] whitespace-nowrap overflow-hidden text-clip px-2">
-                                            ₩ {stock.price.toLocaleString()}
-                                        </TableCell>
-                                        <TableCell className="text-right text-muted-foreground text-[13px] whitespace-nowrap overflow-hidden text-clip px-2">
-                                            {stock.qty.toLocaleString()}
-                                        </TableCell>
-                                        <TableCell className="text-right font-medium text-[13px] whitespace-nowrap overflow-hidden text-clip px-2">
-                                            ₩ {stock.value.toLocaleString()}
-                                        </TableCell>
-                                        <TableCell className="text-right whitespace-nowrap overflow-hidden text-clip px-2">
-                                            <ProfitText value={stock.profit} suffix="%" className="text-[13px] font-bold" />
-                                        </TableCell>
-                                    </tr>
-                                )
-                            })}
-                            {data.holdings.length === 0 && !isLoading && (
-                                <TableRow>
-                                    <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">보유 종목이 없습니다.</TableCell>
-                                </TableRow>
-                            )}
+                                return sortedDates.map(date => {
+                                    // Calculate trading days difference (+N일)
+                                    let diffTag = '';
+                                    if (tradingDays && tradingDays.length > 0 && date !== '알 수 없음') {
+                                        const startIndex = tradingDays.indexOf(date);
+                                        const today = new Date().toLocaleDateString('sv-SE');
+                                        const todayIndex = tradingDays.indexOf(today);
+
+                                        if (startIndex !== -1 && todayIndex !== -1) {
+                                            const diff = todayIndex - startIndex;
+                                            diffTag = diff === 0 ? ' (오늘)' : ` (+${diff}거래일)`;
+                                        } else if (startIndex !== -1) {
+                                            // Today not in list yet, but start is. Take the last index.
+                                            const lastIndex = tradingDays.length - 1;
+                                            const diff = lastIndex - startIndex;
+                                            diffTag = diff === 0 ? ' (오늘)' : ` (+${diff}거래일)`;
+                                        }
+                                    }
+
+                                    return (
+                                        <React.Fragment key={date}>
+                                            {/* Date Group Header */}
+                                            <TableRow className="bg-muted/30 hover:bg-muted/30 border-y border-border/50">
+                                                <TableCell colSpan={5} className="py-1.5 px-3">
+                                                    <div className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                                                        <Calendar size={12} className="text-primary/70" />
+                                                        <span>{date}</span>
+                                                        <span className="text-primary font-bold">{diffTag}</span>
+                                                        <span className="bg-muted px-1.5 py-0.5 rounded text-[10px] ml-1">{groups[date].length}종목</span>
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+
+                                            {/* Grouped Stocks */}
+                                            {groups[date].map((stock) => {
+                                                const numericCode = stock.code.replace(/[^0-9]/g, '')
+                                                const sum19 = previous19DaysSum[numericCode]
+                                                let isDepressed = false
+                                                if (sum19 !== undefined && sum19 > 0) {
+                                                    const ma20 = (sum19 + stock.price) / 20
+                                                    if ((stock.price / ma20) * 100 < 95) {
+                                                        isDepressed = true
+                                                    }
+                                                }
+
+                                                return (
+                                                    <tr
+                                                        key={stock.code}
+                                                        className={cn(
+                                                            "hover:bg-muted/40 transition-colors cursor-pointer group",
+                                                            selectedStock?.code === stock.code && "bg-primary/5"
+                                                        )}
+                                                        onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
+                                                    >
+                                                        <TableCell className="px-2">
+                                                            <div className="flex flex-col gap-0.5">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span className={cn("font-bold text-[13px] leading-none", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
+                                                                    {isDepressed && <span className="text-[10px] font-bold bg-[#a855f7] text-white px-1 py-0.5 rounded shadow-sm leading-none">침체</span>}
+                                                                </div>
+                                                                <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
+                                                            </div>
+                                                        </TableCell>
+                                                        <TableCell className="text-right font-mono font-semibold text-[13px] whitespace-nowrap overflow-hidden text-clip px-2">
+                                                            ₩ {stock.price.toLocaleString()}
+                                                        </TableCell>
+                                                        <TableCell className="text-right text-muted-foreground text-[13px] whitespace-nowrap overflow-hidden text-clip px-2">
+                                                            {stock.qty.toLocaleString()}
+                                                        </TableCell>
+                                                        <TableCell className="text-right font-medium text-[13px] whitespace-nowrap overflow-hidden text-clip px-2">
+                                                            ₩ {stock.value.toLocaleString()}
+                                                        </TableCell>
+                                                        <TableCell className="text-right whitespace-nowrap overflow-hidden text-clip px-2">
+                                                            <ProfitText value={stock.profit} suffix="%" className="text-[13px] font-bold" />
+                                                        </TableCell>
+                                                    </tr>
+                                                )
+                                            })}
+                                        </React.Fragment>
+                                    )
+                                })
+                            })()}
                         </TableBody>
                     </Table>
                 </div>

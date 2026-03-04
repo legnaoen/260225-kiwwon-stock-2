@@ -13,6 +13,8 @@ export class AutoTradeService {
 
     private hasRunToday = false;
     private lastRunDate = ''; // 'YYYY-MM-DD'
+    private isLiquidationMode = false;
+    private liquidationMonitorTimer: NodeJS.Timeout | null = null;
 
     private orderQueue: any[] = [];
     private modifyQueue: any[] = [];
@@ -36,6 +38,8 @@ export class AutoTradeService {
         eventBus.on(SystemEvent.CONDITION_MATCHED, this.handleConditionMatched.bind(this));
         // 실시간 주문체결 내역 처리
         eventBus.on(SystemEvent.ORDER_REALTIME_UPDATE, (d) => this.handleOrderRealtimeUpdate(d))
+        // 비상 청산 모드 시작
+        eventBus.on(SystemEvent.EMERGENCY_LIQUIDATION_STARTED, this.handleEmergencyLiquidationStarted.bind(this));
     }
 
     public static getInstance(): AutoTradeService {
@@ -48,12 +52,26 @@ export class AutoTradeService {
     }
 
     public updateConfig(newConfig: any) {
+        if (
+            this.config.timeHours !== newConfig.timeHours ||
+            this.config.timeMinutes !== newConfig.timeMinutes ||
+            this.config.selectedSeq !== newConfig.selectedSeq
+        ) {
+            this.hasRunToday = false;
+        }
         this.config = newConfig || {};
         console.log('[AutoTrade] Config Updated:', this.config);
     }
 
     public setRunning(status: boolean) {
         this.isRunning = status;
+        if (!status) {
+            this.isLiquidationMode = false;
+            if (this.liquidationMonitorTimer) {
+                clearInterval(this.liquidationMonitorTimer);
+                this.liquidationMonitorTimer = null;
+            }
+        }
         this.broadcastLog(`시스템 가동 상태 변경: ${this.isRunning ? 'RUNNING' : 'STOPPED'}`, 'INFO');
         eventBus.emit(SystemEvent.AUTO_TRADE_STATUS_CHANGED, this.isRunning);
     }
@@ -132,9 +150,12 @@ export class AutoTradeService {
             const currentHour = String(now.getHours()).padStart(2, '0');
             const currentMinute = String(now.getMinutes()).padStart(2, '0');
 
+            const configHour = String(this.config.timeHours || '').padStart(2, '0');
+            const configMinute = String(this.config.timeMinutes || '').padStart(2, '0');
+
             if (!this.hasRunToday &&
-                currentHour === this.config.timeHours &&
-                currentMinute === this.config.timeMinutes) {
+                currentHour === configHour &&
+                currentMinute === configMinute) {
 
                 this.broadcastLog(`지정 시간 도달 (${currentHour}:${currentMinute}). 조건 검색 시작...`, 'INFO');
                 this.hasRunToday = true;
@@ -146,10 +167,27 @@ export class AutoTradeService {
     }
 
     /**
+     * 수동 매수 실행 트리거 (예약 시간 지남 등의 이유)
+     */
+    public executeManualBuy() {
+        if (!this.isRunning) {
+            this.broadcastLog(`수동 매수 실행 실패. 자동매매 봇이 실행 중이지 않습니다.`, 'WARN');
+            return;
+        }
+        if (!this.config.selectedSeq) {
+            this.broadcastLog(`수동 매수 실행 실패. 조건검색식이 설정되지 않았습니다.`, 'WARN');
+            return;
+        }
+
+        this.broadcastLog(`[시스템 알림] 사용자 요청으로 수동 매수 검색 호출 시작...`, 'INFO');
+        this.kiwoomService.startConditionSearch(this.config.selectedSeq);
+    }
+
+    /**
      * 2. 조건 검색결과 수신 시 예산 분할 및 큐 투입 (Throttling 준비)
      */
     private async handleConditionMatched(stocks: any[]) {
-        if (!this.isRunning) return;
+        if (!this.isRunning || this.isLiquidationMode) return;
 
         this.broadcastLog(`조건 검색 결과 수신: ${stocks.length} 종목 포착`, 'INFO');
 
@@ -196,21 +234,23 @@ export class AutoTradeService {
                 continue;
             }
 
-            // 종목 가격 정보가 없는 경우, 주식기본조회 API를 통해 실시간 조회
-            if (isNaN(basePrice) || basePrice <= 0) {
-                try {
-                    const priceInfo = await this.kiwoomService.getCurrentPrice(cleanCode);
-                    let rawStr = '';
-                    if (priceInfo?.currentPrice) rawStr = priceInfo.currentPrice;
-                    else if (priceInfo?.Body?.currentPrice) rawStr = priceInfo.Body.currentPrice;
-                    else if (priceInfo?.Body?.out1?.currentPrice) rawStr = priceInfo.Body.out1.currentPrice;
+            // 전일 종가 조회 (최대 상한캡 계산용)
+            let yesterdayClosePrice = 0;
+            try {
+                const info = await this.kiwoomService.getStockBasicInfo(cleanCode);
+                const body = info?.Body || info?.out1 || info;
 
-                    const matchStr = String(rawStr).replace(/[^0-9]/g, '');
-                    if (matchStr) basePrice = parseInt(matchStr, 10);
-                } catch (e) {
-                    this.broadcastLog(`종목 가격을 불러오지 못해 매수 큐 제외: ${stock.name}(${cleanCode})`, 'WARN');
-                    continue;
+                // 가격 정보 복구 로직 보강
+                if (isNaN(basePrice) || basePrice <= 0) {
+                    const matchStr = String(body?.stk_prc || body?.currentPrice || body?.cur_prc || '').replace(/[^0-9-]/g, '');
+                    if (matchStr) basePrice = Math.abs(parseInt(matchStr, 10));
                 }
+
+                // 전일 종가 조회 (prdy_clpr 등)
+                const yStr = String(body?.prdy_clpr || body?.yesterdayPrice || body?.prdy_clpr_prc || '').replace(/[^0-9]/g, '');
+                if (yStr) yesterdayClosePrice = parseInt(yStr, 10);
+            } catch (e) {
+                this.broadcastLog(`[AutoTrade] 기본정보 조회 실패 (전일종가 미상): ${stock.name}`, 'WARN');
             }
 
             if (isNaN(basePrice) || basePrice <= 0) {
@@ -221,8 +261,10 @@ export class AutoTradeService {
             // 할증 가격 계산 (+3%)
             const rawPremiumPrice = basePrice * (1 + (buyPremiumPct / 100));
 
-            // 상한 캡 가격 계산 (+20%)
-            const rawMaxCapPrice = basePrice * (1 + (maxPriceLimitPct / 100));
+            // 상한 캡 가격 계산 (+20%, 기준: 전일 종가)
+            // 전일 종가를 못 구했다면 어쩔 수 없이 당일 현재가(basePrice)를 기준으로 방어
+            const capBasePrice = yesterdayClosePrice > 0 ? yesterdayClosePrice : basePrice;
+            const rawMaxCapPrice = capBasePrice * (1 + (maxPriceLimitPct / 100));
 
             // 최종 목표가 (상한 캡 이하로 제한)
             const targetRawPrice = Math.min(rawPremiumPrice, rawMaxCapPrice);
@@ -365,16 +407,22 @@ export class AutoTradeService {
 
             const currentTimeStr = `${String(currentHour).padStart(2, '0')}${String(currentMin).padStart(2, '0')}`;
 
-            // 15:20 이후 처리 로직 (일괄 시장가 매도 및 모니터링 타이머 종료)
+            // 15:20 이후 처리 로직 (일괄 시장가 매도 및 모니터링 타이머 종료 안함)
             if (currentHour > 15 || (currentHour === 15 && currentMin >= 20)) {
-                this.broadcastLog(`[시스템 알림] 15:20 도달. 잔여 미체결 매도 물량 시장가 일괄 청산 진행.`, 'WARN');
-                await this.executeMarketSweep(accountNo);
 
-                if (this.modifyTimer) clearInterval(this.modifyTimer);
-                this.modifyTimer = null;
+                // 실행 여부 체크 플래그 (중복실행 방지, 매일 초기화 필요)
+                // this.lastMarketSweepDate 로 하루 1회만 동작하게 제한 필요
+                const todayStr = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+                const lastMarketSweepDateStr = (this as any)._lastMarketSweepDate || '';
 
-                // 앱 전체 자동매매 동작 종료 (선택사항, 모니터링 및 로봇 배달부만 중지)
-                this.setRunning(false);
+                if (lastMarketSweepDateStr !== todayStr) {
+                    this.broadcastLog(`[시스템 알림] 15:20 도달. 잔여 미체결 매도 물량 시장가 일괄 청산 진행.`, 'WARN');
+                    await this.executeMarketSweep(accountNo);
+                    (this as any)._lastMarketSweepDate = todayStr;
+                }
+
+                // 앱 전체 자동매매 동작 종료 제거 (시장 시간 외에도 봇은 살아있음)
+                // this.setRunning(false); 
                 return;
             }
 
@@ -453,6 +501,15 @@ export class AutoTradeService {
 
                     // --- [로직 A] 조건부지정가 (05) 분할 청산 로직 ---
                     if (trdeType === '05' || trdeType.includes('조건부')) {
+                        // [신규 로직] 매도정정이 진행된 물량(원주문번호 보유)이면서 15시 이후인 경우 10초 쿨타임 무한 추적
+                        const isModifiedOrder = order.orig_ord_no && String(order.orig_ord_no).trim() !== '' && String(order.orig_ord_no).trim() !== '0000000';
+
+                        if (isModifiedOrder && currentHour >= 15 && diffSeconds >= 10) {
+                            enqueueModify('CONDITIONAL_CHASING');
+                            continue; // 아래 분할 스케줄 로직은 건너뜀
+                        }
+
+                        // [기존 로직] 신규 매도 물량인 경우 설정시간에 맞춘 3분할 스케줄 정정
                         const currentTotalMinutes = currentHour * 60 + currentMin;
                         const condStartTotalMinutes = condHours * 60 + condMins;
 
@@ -584,6 +641,8 @@ export class AutoTradeService {
 
                         if (type === 'CONDITIONAL') {
                             this.broadcastLog(`상태도달 조건부 정정 [${step}차]: ${stk_cd} -> ${currentPrice}원 정정 (${rspMsg})`, 'SUCCESS');
+                        } else if (type === 'CONDITIONAL_CHASING') {
+                            this.broadcastLog(`조건부 추적 현재가 정정: ${stk_cd} -> ${currentPrice}원 정정 (${rspMsg})`, 'SUCCESS');
                         } else {
                             this.broadcastLog(`일반 지연 매도 정정: ${stk_cd} -> ${currentPrice}원 정정 (${rspMsg})`, 'SUCCESS');
                         }
@@ -595,5 +654,111 @@ export class AutoTradeService {
             });
 
         }, 1000); // 초당 주문 (스로틀링)
+    }
+
+    private async handleEmergencyLiquidationStarted() {
+        if (!this.isRunning || this.isLiquidationMode) return;
+
+        this.broadcastLog(`[시스템 자동 알림] 비상 청산 모드 돌입. 신규 매수 전면 차단.`, 'WARN');
+        this.isLiquidationMode = true;
+
+        const accountNo = this.config.selectedAccount;
+        if (!accountNo) {
+            this.broadcastLog(`[오류] 선택된 계좌가 없어 청산을 진행할 수 없습니다.`, 'ERROR');
+            return;
+        }
+
+        try {
+            // 잔고 조회
+            const holdingsRes = await this.kiwoomService.getHoldings(accountNo);
+            const holdings = holdingsRes?.data?.Body?.out1 || holdingsRes?.data?.list || [];
+            if (!Array.isArray(holdings) || holdings.length === 0) {
+                this.broadcastLog(`보유 종목이 없어 청산을 종료합니다.`, 'INFO');
+                this.setRunning(false);
+                eventBus.emit(SystemEvent.EMERGENCY_LIQUIDATION_COMPLETED);
+                return;
+            }
+
+            // 전량 시장가 통보 (현재 키움 API가 지정가(00)만 지원한다면 0원으로 03이 되지 않으니, 현재가로 00 주문 생성 필요)
+            this.broadcastLog(`총 ${holdings.length}개 잔고 종목 청산 매도 전송 시작.`, 'WARN');
+            for (const stock of holdings) {
+                if (parseInt(stock.hld_qty) <= 0) continue;
+
+                let stk_cd = String(stock.pdno || stock.stk_cd || stock.item_cd).replace(/^A/i, '').trim();
+                let currentPrice = Math.abs(parseInt(String(stock.prpr || stock.cur_prc || stock.price || '0').replace(/[^0-9-]/g, ''), 10));
+
+                if (!currentPrice || currentPrice <= 0) {
+                    try {
+                        const priceInfo = await this.kiwoomService.getCurrentPrice(stk_cd);
+                        let rawStr = '';
+                        if (priceInfo?.currentPrice) rawStr = priceInfo.currentPrice;
+                        else if (priceInfo?.Body?.currentPrice) rawStr = priceInfo.Body.currentPrice;
+                        else if (priceInfo?.Body?.out1?.currentPrice) rawStr = priceInfo.Body.out1.currentPrice;
+
+                        const matchStr = String(rawStr).replace(/[^0-9]/g, '');
+                        if (matchStr) currentPrice = parseInt(matchStr, 10);
+                    } catch (e) {
+                        currentPrice = 0; // fallback 도 실패시
+                    }
+                }
+
+                if (currentPrice > 0) {
+                    currentPrice = this.normalizePrice(currentPrice); // 호가 맞춤
+                    try {
+                        // sendSellOrder가 아직 없으면 KiwoomService.ts에 kt10001 (매도) 로켓 런처 필요
+                        // 임시: modifyOrder는 기존 주문에 대한 처리이므로 kt10001 매수 API 호출
+                        await this.kiwoomService.sendSellOrder(accountNo, stk_cd, parseInt(stock.hld_qty, 10), currentPrice);
+                        this.broadcastLog(`일괄청산 [${stk_cd}] ${stock.prdt_name} - ${stock.hld_qty}주 현재가(${currentPrice}원) 매도 전송`, 'INFO');
+                    } catch (err: any) {
+                        const errMsg = err?.response?.data?.msg1 || err?.message || err;
+                        this.broadcastLog(`일괄청산 전송 실패 [${stk_cd}]: ${errMsg}`, 'ERROR');
+                    }
+                } else {
+                    this.broadcastLog(`[${stk_cd}] 현재가를 가져올 수 없어 매도 전송 실패.`, 'ERROR');
+                }
+
+                // 스로틀링 1초 대기 (키움 API)
+                await new Promise(res => setTimeout(res, 1000));
+            }
+
+            // 모든 매도 전송이 끝남. 이제 남은 미체결 잔량들이 모두 0이 되고, 보유 수량이 0이 되는 것을 감시.
+            this.broadcastLog(`청산 매도 명령 전송 완료. 미체결 정리 및 완료 여부 모니터링 시작...`, 'INFO');
+
+            if (this.liquidationMonitorTimer) clearInterval(this.liquidationMonitorTimer);
+            this.liquidationMonitorTimer = setInterval(async () => {
+                if (!this.isRunning || !this.isLiquidationMode) return;
+
+                // 1. 미체결 주문이 남아있는지 확인
+                const response = await this.kiwoomService.getUnexecutedOrders(accountNo);
+                const unexecutedOrders = response?.oso || response?.output || response?.data || response?.Body?.out1 || [];
+                const hasUnexecutedSellOrders = Array.isArray(unexecutedOrders) && unexecutedOrders.some((order: any) => {
+                    const isSell = order.sll_buy_tp === '1' || order.trde_tp === '1' || String(order.io_tp_nm || order.sll_buy_tp || '').includes('매도');
+                    const totalQty = parseInt(order.unexec_qty || order.oso_qty || order.qty || '0', 10);
+                    return isSell && totalQty > 0;
+                });
+
+                if (hasUnexecutedSellOrders) {
+                    return; // 아직 미체결 매도가 남아있으면 modifyMonitor가 처리해주도록 기다림
+                }
+
+                // 2. 보유 종목이 남아있는지(전량 매도 체결 확인)
+                const holdRes = await this.kiwoomService.getHoldings(accountNo);
+                const currentHoldings = holdRes?.data?.Body?.out1 || holdRes?.data?.list || [];
+                const remainItems = Array.isArray(currentHoldings) ? currentHoldings.filter((h: any) => parseInt(h.hld_qty, 10) > 0) : [];
+
+                if (remainItems.length === 0) {
+                    // 완벽한 청산
+                    this.broadcastLog(`⭐ 모든 종목 청산 및 체결 확인. 시스템 자동 종료 수행.`, 'SUCCESS');
+                    this.setRunning(false);
+                    eventBus.emit(SystemEvent.EMERGENCY_LIQUIDATION_COMPLETED);
+                } else {
+                    // 매도가 늦어 아직 반영안됐을수 있으니 다음 사이클에 조회 (또는 단주 등 기타 이유, 무한루프를 막는 방어 추가 필요)
+                }
+
+            }, 10000); // 10초마다 완벽 청산 여부 확인
+
+        } catch (e: any) {
+            this.broadcastLog(`일괄 청산 중 치명적 오류 발생: ${e.message}`, 'ERROR');
+        }
     }
 }

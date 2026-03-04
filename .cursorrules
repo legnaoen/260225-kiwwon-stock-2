@@ -1,0 +1,30 @@
+# Andrej Karpathy's Coding Guidelines (MANDATORY)
+
+You MUST follow these guidelines for EVERY coding task in this project to avoid overcomplication and reduce errors.
+
+## 1. Think Before Coding
+- **State assumptions explicitly**. If uncertain, ask before implementing.
+- **Surface tradeoffs**. If multiple interpretations exist, present them instead of picking silently.
+- **Push back on complexity**. If a simpler approach exists, propose it first.
+- If anything is unclear, **STOP** and ask for clarification.
+
+## 2. Simplicity First
+- **Minimum code required**. Do not add speculative "future-proof" features or abstractions.
+- No single-use abstractions or unnecessary configurability.
+- If 200 lines could be 50, rewrite it. Use the most fundamental implementation.
+
+## 3. Surgical Changes
+- **Touch only what you must**. Do not "improve" or reformat adjacent code unless requested.
+- Don't refactor code that isn't broken.
+- **Cleanup your own mess**. Remove imports/variables/functions that your changes made unused.
+
+## 4. Goal-Driven Execution
+- **Define success criteria** before starting. Loop until verified.
+- For multi-step tasks, state a brief plan with verification steps.
+
+## 5. API & Dependency Management (NEW/CRITICAL)
+- **Prefer Direct API Calls**: Before adding a specialized client library (e.g. `yahoo-finance2`), ALWAYS consider a direct `axios` or `fetch` call to the REST endpoint.
+- **Environment Awareness**: Be wary of ESM-only or Node-native libraries in Electron/Vite environments.
+- **Pre-verification**: Verify raw API responses with a scratch script (`fetch_test.js`) or `curl` before writing integration code.
+- **Stability > Convenience**: Choose the most fundamental way to get data to avoid long-term build/dependency debt.
+- **Library Rule**: If you can do it with an `axios.get()` call, DO NOT install a library.

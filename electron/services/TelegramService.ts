@@ -2,7 +2,7 @@ import { BrowserWindow, app } from 'electron';
 import path from 'path';
 import { eventBus, SystemEvent } from '../utils/EventBus';
 import Store from 'electron-store';
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import cron from 'node-cron';
 import { AutoTradeService } from './AutoTradeService';
 import { KiwoomService } from './KiwoomService';
@@ -20,6 +20,8 @@ export class TelegramService {
     private chatId: string | null = null;
     private disparityCache: Map<string, string> = new Map();
     private stockSearchCache: Array<{ code: string, name: string }> = [];
+    private isWaitingForLiquidation = false;
+    private liquidationWaitTimer: NodeJS.Timeout | null = null;
 
     private constructor() {
         this.initializeBot();
@@ -70,9 +72,109 @@ export class TelegramService {
                     ctx.reply('✅ [알림 수신 등록 완료]\n이제부터 이 1:1 대화방으로 모든 일정을 안내해 드립니다.');
                 });
 
+                // 텔레그램 명령어 메뉴 (자동완성) 세팅
+                this.bot.telegram.setMyCommands([
+                    { command: 'menu', description: '자동매매 메뉴 제어 UI 열기' },
+                    { command: 'panic', description: '🚨 비상 일괄 매도 청산' },
+                    { command: '청산', description: '🚨 비상 일괄 매도 청산' }
+                ]).catch(err => console.error('[TelegramService] setMyCommands Error:', err));
+
+                // 종합 메뉴 커맨드
+                this.bot.command('menu', (ctx) => {
+                    const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+                    if (isGroup) {
+                        return ctx.reply('⚠️ 해당 메뉴는 보안상 1:1 개인 대화방에서만 열 수 있습니다.');
+                    }
+
+                    const autoTradeSvc = AutoTradeService.getInstance();
+                    const isRunning = autoTradeSvc.getIsRunning();
+                    const statusText = isRunning ? '🟢 가동 중' : '🔴 정지 상태';
+
+                    ctx.reply(
+                        `🤖 [Kiwoom 자동매매 통합 메뉴]\n\n` +
+                        `현재 자동매매 시스템 상태: ${statusText}\n` +
+                        `아래 버튼을 터치하여 원하시는 기능을 즉시 실행하세요.`,
+                        Markup.inlineKeyboard([
+                            [
+                                Markup.button.callback(isRunning ? '🔴 자동매매 OFF' : '🟢 자동매매 ON', 'toggle_autotrade')
+                            ],
+                            [
+                                Markup.button.callback('🚨 비상 일괄 개별청산(비추천)', 'emergency_panic')
+                            ]
+                        ])
+                    );
+                });
+
+                // 인라인 버튼 액션 핸들러
+                this.bot.action('toggle_autotrade', (ctx) => {
+                    const autoTradeSvc = AutoTradeService.getInstance();
+                    const isRunning = autoTradeSvc.getIsRunning();
+
+                    if (isRunning) {
+                        autoTradeSvc.setRunning(false);
+                        ctx.editMessageText('✅ 매수 기능이 [정지(OFF)] 되었습니다. (기존 미체결 건의 정정 매도는 유지됩니다.)');
+                    } else {
+                        autoTradeSvc.setRunning(true);
+                        ctx.editMessageText('✅ 자동매매 봇이 [가동(ON)] 되었습니다. 예약된 스케줄에 따라 매수가 감시됩니다.');
+                    }
+                    ctx.answerCbQuery();
+                });
+
+                this.bot.action('emergency_panic', (ctx) => {
+                    this.isWaitingForLiquidation = true;
+                    if (this.liquidationWaitTimer) clearTimeout(this.liquidationWaitTimer);
+
+                    this.liquidationWaitTimer = setTimeout(() => {
+                        this.isWaitingForLiquidation = false;
+                        ctx.reply('⏱️ [비상 청산 취소] 1분이 경과하여 청산 대기 상태가 해제되었습니다.');
+                    }, 60000);
+
+                    ctx.reply(
+                        '⚠️ [경고] 비상 청산 모드 ⚠️\n\n' +
+                        '버튼이 눌렸습니다.\n현재 보유 중인 모든 종목을 현재가로 즉각 매도 주문하며, 자동매매 가동이 중지되고 남은 예약 매수가 완전히 차단됩니다.\n\n' +
+                        '진행에 정말 동의하시면 채팅창에 [청산실행] 이라고 정확히 입력해 주세요. (1분 내 입력시 즉시 가동)'
+                    );
+                    ctx.answerCbQuery();
+                });
+
+                // 비상 청산 모드 진입 커맨드
+                this.bot.command(['panic', '청산'], (ctx) => {
+                    const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+                    if (isGroup) {
+                        return ctx.reply('⚠️ [오류] 비상 청산은 1:1 개인 대화방에서만 가능합니다.');
+                    }
+                    this.isWaitingForLiquidation = true;
+                    if (this.liquidationWaitTimer) clearTimeout(this.liquidationWaitTimer);
+
+                    this.liquidationWaitTimer = setTimeout(() => {
+                        this.isWaitingForLiquidation = false;
+                        ctx.reply('⏱️ [비상 청산 취소] 1분이 경과하여 청산 대기 상태가 해제되었습니다.');
+                    }, 60000);
+
+                    ctx.reply(
+                        '⚠️ [경고] 비상 청산 모드 ⚠️\n\n' +
+                        '현재 보유 중인 모든 종목을 현재가로 즉각 매도 주문하며, 자동매매 가동이 중지되고 남은 예약 매수가 완전히 차단됩니다.\n\n' +
+                        '동의하시면 채팅창에 [청산실행] 이라고 정확히 입력해 주세요. (1분 내 작동)'
+                    );
+                });
+
                 // 커맨드: 종목명 입력 시 차트 캡처
                 this.bot.on('text', async (ctx) => {
                     let text = ctx.message.text.trim();
+
+                    if (text === '청산실행') {
+                        if (this.isWaitingForLiquidation) {
+                            this.isWaitingForLiquidation = false;
+                            if (this.liquidationWaitTimer) clearTimeout(this.liquidationWaitTimer);
+
+                            ctx.reply('🚨 [비상 청산 승인 완료] 즉시 모든 종목에 대한 현재가 매도 주문을 전송하며 자동매매 시스템을 차단합니다. 잠시만 기다려주세요...');
+                            eventBus.emit(SystemEvent.EMERGENCY_LIQUIDATION_STARTED);
+                        } else {
+                            ctx.reply('⚠️ 청산 대기 상태가 아닙니다. /panic 또는 /청산 명령어를 먼저 입력해주세요.');
+                        }
+                        return;
+                    }
+
                     if (text.startsWith('/')) return;
 
                     const isAnalysisRequest = text.endsWith(' 분석') || text.endsWith('분석');
@@ -412,13 +514,31 @@ export class TelegramService {
             this.sendMessage(`🚨 [시스템 오류]\n${error.message || error}`);
         });
 
+        // [2.5] 비상 청산 종료 알림
+        eventBus.on(SystemEvent.EMERGENCY_LIQUIDATION_COMPLETED, () => {
+            this.sendMessage(`✅ [비상 청산 종료]\n모든 잔고 청산 및 시장가 매도가 완료되었습니다.\n자동매매 스위치가 완전히 [정지(OFF)] 상태로 전환되었습니다.`);
+        });
+
         // [3] 이격침체 조건 감지 (일 1회 제한)
-        eventBus.on(SystemEvent.DISPARITY_SLUMP_DETECTED, (data: { code: string, name: string, disparity: number }) => {
+        eventBus.on(SystemEvent.DISPARITY_SLUMP_DETECTED, (data: { code: string, name: string, disparity: number, changeRate: number }) => {
             const today = new Date().toISOString().split('T')[0];
-            const cacheKey = `${data.code}`;
+            const numericCode = data.code.replace(/[^0-9]/g, '');
+            const cacheKey = numericCode;
+
             if (this.disparityCache.get(cacheKey) !== today) {
                 this.disparityCache.set(cacheKey, today);
-                this.sendMessage(`⚠️ [이격침체 포착]\n종목명: ${data.name} (${data.code})\n현재 이격도: ${data.disparity}\n\n* 본 알림은 종목당 하루 1회만 발송됩니다.`);
+
+                let displayName = data.name;
+                // 이름 데이터가 날아오지 않았거나 코드와 동일한 경우 캐시에서 종목명 찾기
+                if (!displayName || displayName === numericCode || displayName === data.code || displayName === '알 수 없음') {
+                    const match = this.stockSearchCache.find(s => s.code === numericCode || s.code.replace(/[^0-9]/g, '') === numericCode);
+                    if (match) {
+                        displayName = match.name;
+                    }
+                }
+
+                const sign = data.changeRate > 0 ? '+' : '';
+                this.sendMessage(`📉 ${displayName}  ${sign}${data.changeRate.toFixed(2)}%\nhttps://stock.naver.com/domestic/stock/${numericCode}/`);
             }
         });
 
@@ -463,7 +583,25 @@ export class TelegramService {
                 message += '✅ [테스트 메시지]\n안티그래비티 PC앱과 텔레그램 연동이 정상적으로 완료되었습니다!\n\n';
             }
 
-            message += `⏰ [자동매매 상태 알림]\n현재 자동매매 봇이 [${statusTxt}] 입니다.\n\n📊 설정 정보\n- 조건식: ${conditionName} (${seq})\n- 매수 스케줄: ${timeHours}:${timeMinutes}\n- 종목당 한도: ${buyLimit.toLocaleString()}원`;
+            // [추가] 현재 보유 종목 수 조회
+            let holdingsCountText = '';
+            const accountNo = settings.selectedAccount;
+            if (accountNo) {
+                try {
+                    const kiwoom = KiwoomService.getInstance();
+                    const result = await kiwoom.getHoldings(accountNo);
+                    // kt00018 API 규격에 따라 Body 또는 list에서 종목 리스트 추출
+                    const holdingsList = result.data?.Body || result.data?.list || [];
+                    if (Array.isArray(holdingsList)) {
+                        holdingsCountText = `\n📦 보유 현황: 총 ${holdingsList.length}개 종목 보유 중`;
+                    }
+                } catch (e) {
+                    console.error('[TelegramService] failed to fetch holdings count for status message', e);
+                    holdingsCountText = `\n📦 보유 현황: 정보 조회 실패`;
+                }
+            }
+
+            message += `⏰ [자동매매 상태 알림]\n현재 자동매매 봇이 [${statusTxt}] 입니다.${holdingsCountText}\n\n📊 설정 정보\n- 조건식: ${conditionName} (${seq})\n- 매수 스케줄: ${timeHours}:${timeMinutes}\n- 종목당 한도: ${buyLimit.toLocaleString()}원`;
 
             await this.sendMessage(message);
         } catch (error) {

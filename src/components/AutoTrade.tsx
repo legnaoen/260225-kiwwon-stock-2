@@ -208,6 +208,20 @@ export default function AutoTrade() {
         alert('테스트로 조건검색을 1회 실행했습니다. 터미널 로그를 확인해주세요.')
     }
 
+    const handleManualExecuteBuy = async () => {
+        if (!isActive) {
+            alert('자동매매 가동을 먼저 시작해주세요.');
+            return;
+        }
+        if (!selectedSeq) {
+            alert('조건검색식을 선택해주세요.');
+            return;
+        }
+        if (window.confirm('현재 설정된 조건식으로 수동 매수 파도타기를 호출하시겠습니까?')) {
+            await window.electronAPI.executeManualBuy();
+        }
+    }
+
     return (
         <div className="flex-1 flex flex-col h-full overflow-hidden bg-background">
             {/* Header Area */}
@@ -426,6 +440,18 @@ export default function AutoTrade() {
                                     <span className="text-[10px] text-muted-foreground mt-0.5 leading-tight">지정가 매도가 1분 경과시 현재가로 정정</span>
                                 </div>
                             </label>
+
+                            <div className="pt-6 border-t border-border/50 mt-4">
+                                <button
+                                    onClick={handleManualExecuteBuy}
+                                    className="w-full py-2.5 px-4 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded shadow-sm flex items-center justify-center gap-2 transition-colors text-sm"
+                                >
+                                    <Play fill="currentColor" size={14} /> 수동 매수 파도타기 호출
+                                </button>
+                                <p className="text-[9px] text-muted-foreground mt-2 text-center leading-tight">
+                                    오류 발생, 앱 재시작 등 예약시간을 놓쳤을 때 강제로 조건검색을 실행하여 매수 프로세스를 태웁니다.
+                                </p>
+                            </div>
                         </div>
                     </div>
 

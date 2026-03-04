@@ -197,6 +197,7 @@ export class KiwoomService {
                 'api-id': 'ka10081'
             }
         }))
+        console.log('[KiwoomService] getChartData response keys:', Object.keys(response.data || {}), response.data?.Body ? Object.keys(response.data.Body) : 'No Body');
         return response.data;
     }
 
@@ -265,6 +266,31 @@ export class KiwoomService {
                 'Content-Type': 'application/json;charset=UTF-8',
                 'authorization': `Bearer ${token}`,
                 'api-id': 'kt10000', // 매수
+            }
+            const body = {
+                acnt_no: accountNo,
+                dmst_stex_tp: 'KRX',
+                stk_cd: stk_cd,
+                ord_qty: String(qty),
+                ord_uv: String(price),
+                trde_tp: '00', // 지정가 (보통)
+                cond_uv: ''
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data
+        })
+    }
+
+    /**
+     * 국내주식 매도 주문
+     */
+    public async sendSellOrder(accountNo: string, stk_cd: string, qty: number, price: number): Promise<any> {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/ordr`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'kt10001', // 매도
             }
             const body = {
                 acnt_no: accountNo,

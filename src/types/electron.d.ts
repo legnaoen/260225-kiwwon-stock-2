@@ -22,7 +22,7 @@ export interface IElectronAPI {
     sendTelegramMessage: (message: string) => Promise<{ success: boolean, error?: string }>
     onMarketStatus: (callback: (data: { code: string, time: string }) => void) => () => void
     onScheduleNotified: (callback: (...args: any[]) => void) => void
-    notifyDisparitySlump: (data: { code: string, name: string, disparity: number }) => void
+    notifyDisparitySlump: (data: { code: string, name: string, disparity: number, changeRate: number }) => void
 
     // Telegram
     saveTelegramSettings: (settings: { botToken: string, chatId: string, chartTheme?: string }) => Promise<{ success: boolean, message?: string, error?: string }>
@@ -38,6 +38,7 @@ export interface IElectronAPI {
     connectConditionWs: () => Promise<any>
     getConditionList: () => Promise<any>
     startConditionSearch: (seq: string) => Promise<any>
+    executeManualBuy: () => Promise<any>
     onConditionList: (callback: (data: any[]) => void) => () => void
     onAutoTradeLog: (callback: (log: any) => void) => () => void
     onAutoTradeStatusChanged: (callback: (running: boolean) => void) => () => void
@@ -64,6 +65,7 @@ export interface IElectronAPI {
     getSchedulesByStock: (stockCode: string) => Promise<{ success: boolean, data: any[] }>
     testScheduleSummary: () => Promise<{ success: boolean }>
     openExternal: (url: string) => Promise<{ success: boolean, error?: string }>
+    testYahooFinance: () => Promise<{ success: boolean, count?: number, error?: string }>
 }
 
 declare global {

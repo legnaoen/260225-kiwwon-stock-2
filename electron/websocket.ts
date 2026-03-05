@@ -94,33 +94,21 @@ export class KiwoomWebSocketManager {
             .map(sym => sym.replace(/[^0-9]/g, ''))
             .filter(sym => sym.length === 6)
 
-        // Add Samsung Electronics (005930) to guarantee high-frequency trades for testing.
-        if (!allSymbols.includes('005930')) {
-            allSymbols.push('005930')
-        }
-
         if (allSymbols.length === 0) return
 
         const regPacket = {
             trnm: 'REG',
             grp_no: '1',
-            refresh: '1',
+            refresh: '0',
             data: [
                 {
                     item: allSymbols,
-                    type: ['0B'] // 주식체결 (현재가 실시간)
-                },
-                {
-                    item: [''], // 장시작시간은 item이 공백이거나 없어도 됨
-                    type: ['0s'] // 장시작시간 (시장 상태)
-                },
-                {
-                    item: [''], // 주문·체결 실시간 (미체결)
-                    type: ['00'] // 주문·체결 (미체결)
+                    type: ['0B', '0s', '00']
                 }
             ]
         }
         const msg = JSON.stringify(regPacket)
+        console.log('[WebSocket] Sending REG message:', msg)
         if (this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(msg)
         }
@@ -203,6 +191,20 @@ export class KiwoomWebSocketManager {
                             const priceNum = Math.abs(parseInt(d.values["10"]?.replace(/[^0-9-]/g, '') || '0'))
                             if (cleanCode.length === 6 && priceNum > 0) {
                                 PriceStore.getInstance().setPrice(cleanCode, priceNum)
+
+                                // Emit to internal systems for AI trading logic (VWAP calculation, etc.)
+                                if (d.type === '0B') {
+                                    eventBus.emit(SystemEvent.PRICE_UPDATE, {
+                                        code: cleanCode,
+                                        price: priceNum,
+                                        volume: Math.abs(parseInt(d.values["15"] || '0')), // 단위체결량 (순간 체결량)
+                                        cumVolume: Math.abs(parseInt(d.values["13"] || '0')), // 누적거래량
+                                        cumAmount: Math.abs(parseInt(d.values["14"] || '0')), // 누적거래대금
+                                        open: Math.abs(parseInt(d.values["16"] || '0')),   // 시가
+                                        high: Math.abs(parseInt(d.values["17"] || '0')),   // 고가
+                                        low: Math.abs(parseInt(d.values["18"] || '0'))     // 저가
+                                    });
+                                }
                             }
 
                             this.mainWindow!.webContents.send('kiwoom:real-time-data', mappedData)

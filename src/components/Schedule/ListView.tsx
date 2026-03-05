@@ -321,9 +321,9 @@ export default function ListView() {
                                 </div>
 
                                 <div className="px-6 py-4 border-t border-border bg-muted/5 flex justify-end gap-3 shrink-0">
-                                    {selectedEvent.source === 'DART' && selectedEvent.originId && (
+                                    {(selectedEvent as any).source === 'DART' && (selectedEvent as any).originId && (
                                         <button
-                                            onClick={() => window.open(`https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${selectedEvent.originId}`, '_blank', 'width=1200,height=1000')}
+                                            onClick={() => window.open(`https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${(selectedEvent as any).originId}`, '_blank', 'width=1200,height=1000')}
                                             className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold bg-green-500/10 hover:bg-green-500/20 text-green-600 border border-green-500/20 rounded-md transition-colors mr-auto"
                                         >
                                             <ExternalLink size={14} /> DART 원문보기

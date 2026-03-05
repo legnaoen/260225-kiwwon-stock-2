@@ -19,11 +19,17 @@ interface AutoTradeState {
     orders: OrderInfo[];
     setOrders: (orders: OrderInfo[]) => void;
     addOrUpdateOrder: (order: OrderInfo) => void;
+    isAiEvaluating: boolean;
+    aiEvaluatingStock: { code: string; name: string } | null;
+    setAiEvaluating: (isEvaluating: boolean, stock: { code: string; name: string } | null) => void;
 }
 
 export const useAutoTradeStore = create<AutoTradeState>((set) => ({
     isRunning: false,
     setIsRunning: (status) => set({ isRunning: status }),
+    isAiEvaluating: false,
+    aiEvaluatingStock: null,
+    setAiEvaluating: (isEvaluating, stock) => set({ isAiEvaluating: isEvaluating, aiEvaluatingStock: stock }),
     orders: [],
     setOrders: (orders) => set({ orders }),
     addOrUpdateOrder: (order) =>

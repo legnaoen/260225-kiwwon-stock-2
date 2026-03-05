@@ -11,6 +11,7 @@ import Settings from './components/Settings'
 import AutoTrade from './components/AutoTrade'
 import CapturePage from './components/CapturePage'
 import Schedule from './components/Schedule'
+import AiTradeDashboard from './components/AiTrade/AiTradeDashboard'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
 import { useNoteStore } from './store/useNoteStore'
@@ -279,8 +280,9 @@ function AppContent() {
                         {activeTab === 'auto-trade' && <AutoTrade />}
                         {activeTab === 'schedule' && <Schedule />}
                         {activeTab === 'settings' && <Settings />}
+                        {activeTab === 'ai-trade' && <AiTradeDashboard />}
 
-                        {(activeTab !== 'dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule') && (
+                        {(activeTab !== 'dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

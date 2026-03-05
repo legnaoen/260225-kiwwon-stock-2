@@ -24,6 +24,10 @@ export interface IElectronAPI {
     onScheduleNotified: (callback: (...args: any[]) => void) => void
     notifyDisparitySlump: (data: { code: string, name: string, disparity: number, changeRate: number }) => void
 
+    // API Diagnostics
+    getApiLogs: () => Promise<any[]>
+    testMarketScanner: () => Promise<{ success: boolean, data?: any, error?: any }>
+
     // Telegram
     saveTelegramSettings: (settings: { botToken: string, chatId: string, chartTheme?: string }) => Promise<{ success: boolean, message?: string, error?: string }>
     saveTelegramTheme: (theme: string) => Promise<{ success: boolean }>
@@ -66,6 +70,24 @@ export interface IElectronAPI {
     testScheduleSummary: () => Promise<{ success: boolean }>
     openExternal: (url: string) => Promise<{ success: boolean, error?: string }>
     testYahooFinance: () => Promise<{ success: boolean, count?: number, error?: string }>
+
+    // AI Trade
+    onAiTradeStream: (callback: (data: any) => void) => () => void
+    onAiTradeEvaluationUpdate: (callback: (data: { isEvaluating: boolean, stock: { code: string, name: string } | null }) => void) => () => void
+    getAiTradeStatus: () => Promise<boolean>
+    getAiStrategies: () => Promise<any[]>
+    setAiActiveStrategy: (id: string) => Promise<{ success: boolean }>
+    deleteAiStrategy: (id: string) => Promise<{ success: boolean }>
+    runAiRetrospective: () => Promise<{ success: boolean, strategy?: any }>
+    setAiAutoPilot: (active: boolean) => Promise<{ success: boolean }>
+    getAiAutoPilot: () => Promise<boolean>
+    getAiTradeLogs: () => Promise<any[]>
+    resetAiAccount: () => Promise<{ success: boolean }>
+    getAiAccountState: () => Promise<any>
+    // AI Settings
+    saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance: number }) => Promise<{ success: boolean }>
+    getAiSettings: () => Promise<{ geminiKey: string, modelName?: string, virtualInitialBalance: number } | null>
+    testAiConnection: (settings: { geminiKey: string, modelName: string }) => Promise<{ success: boolean, response?: string, error?: string }>
 }
 
 declare global {

@@ -119,10 +119,9 @@ export default function AutoTrade() {
         return () => removeListener()
     }, [])
 
-    // Synchronize selectedAccount from store if blank
     useEffect(() => {
         if (!selectedAccount && accounts && accounts.length > 0) {
-            setSelectedAccount(accounts[0].acc_no || accounts[0])
+            setSelectedAccount((accounts[0] as any).acc_no || accounts[0])
         }
     }, [accounts, selectedAccount])
 
@@ -169,29 +168,29 @@ export default function AutoTrade() {
 
     // Subscribe to real-time orders
     useEffect(() => {
-        if (!window.electronAPI.onOrderRealtime) return;
-        const removeOrderListener = window.electronAPI.onOrderRealtime((order: any) => {
-            const mapped = {
-                order_no: String(order.order_no || order.ord_no || ''),
-                stk_cd: String(order.stk_cd || '').replace(/^A/i, '').trim(),
-                stk_nm: order.stk_nm || order.name || '',
-                status: String(order.ord_stt || order.status || ''),
-                price: Number(order.cur_prc || order.price || 0),
-                qty: Number(order.qty || order.unexec_qty || 0),
-                remain_qty: Number(order.unexec_qty || order.remain_qty || 0),
-                time: (() => {
-                    let t = String(order.time || order.ord_tmd || new Date().toLocaleTimeString());
-                    if (t.length === 6 && !t.includes(':')) {
-                        return `${t.substring(0, 2)}:${t.substring(2, 4)}:${t.substring(4, 6)}`;
-                    }
-                    return t;
-                })(),
-                type: String(order.io_tp_nm || order.sll_buy_tp || order.type || '알수없음').replace(/[^가-힣0-9a-zA-Z]/g, ''),
-                order_type: String(order.trde_tp || '')
-            };
-            addOrUpdateOrder(mapped)
-        })
-        return () => removeOrderListener()
+        // if (!window.electronAPI.onOrderRealtime) return;
+        // const removeOrderListener = window.electronAPI.onOrderRealtime((order: any) => {
+        //     const mapped = {
+        //         order_no: String(order.order_no || order.ord_no || ''),
+        //         stk_cd: String(order.stk_cd || '').replace(/^A/i, '').trim(),
+        //         stk_nm: order.stk_nm || order.name || '',
+        //         status: String(order.ord_stt || order.status || ''),
+        //         price: Number(order.cur_prc || order.price || 0),
+        //         qty: Number(order.qty || order.unexec_qty || 0),
+        //         remain_qty: Number(order.unexec_qty || order.remain_qty || 0),
+        //         time: (() => {
+        //             let t = String(order.time || order.ord_tmd || new Date().toLocaleTimeString());
+        //             if (t.length === 6 && !t.includes(':')) {
+        //                 return `${t.substring(0, 2)}:${t.substring(2, 4)}:${t.substring(4, 6)}`;
+        //             }
+        //             return t;
+        //         })(),
+        //         type: String(order.io_tp_nm || order.sll_buy_tp || order.type || '알수없음').replace(/[^가-힣0-9a-zA-Z]/g, ''),
+        //         order_type: String(order.trde_tp || '')
+        //     };
+        //     addOrUpdateOrder(mapped)
+        // })
+        // return () => removeOrderListener()
     }, [])
 
     // Subscribe to logs

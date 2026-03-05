@@ -14,6 +14,8 @@ export interface ScheduleEvent {
     isMarketEvent?: boolean // True for DART/Market common events
     source?: string
     originId?: string
+    isMemo?: boolean
+    originalId?: string
 }
 
 interface ScheduleState {

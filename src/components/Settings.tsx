@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database, Globe } from 'lucide-react'
+import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database, Globe, BrainCircuit, Info, Activity } from 'lucide-react'
 import { useScheduleStore } from '../store/useScheduleStore'
+import ApiDiagnosticsTab from './ApiDiagnosticsTab'
 
 export default function Settings() {
     const [keys, setKeys] = useState({ appkey: '', secretkey: '' })
@@ -9,6 +10,13 @@ export default function Settings() {
     const [message, setMessage] = useState('')
 
     const [telegramKeys, setTelegramKeys] = useState({ botToken: '', chatId: '', chartTheme: 'dark', chatType: '' })
+    const [aiSettings, setAiSettings] = useState({
+        geminiKey: '',
+        modelName: 'gemini-1.5-flash',
+        virtualInitialBalance: 1000000,
+        buyStartTime: '09:10',
+        buyEndTime: '15:00'
+    })
     const [isSavingTg, setIsSavingTg] = useState(false)
     const [statusTg, setStatusTg] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageTg, setMessageTg] = useState('')
@@ -42,7 +50,12 @@ export default function Settings() {
     const [statusFinancials, setStatusFinancials] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageFinancials, setMessageFinancials] = useState('')
 
-    const [activeTab, setActiveTab] = useState<'kiwoom' | 'telegram' | 'schedule' | 'dart' | 'external'>('kiwoom')
+    const [isSavingAi, setIsSavingAi] = useState(false)
+    const [statusAi, setStatusAi] = useState<'idle' | 'success' | 'error'>('idle')
+    const [messageAi, setMessageAi] = useState('')
+    const [isTestingAi, setIsTestingAi] = useState(false)
+
+    const [activeTab, setActiveTab] = useState<'kiwoom' | 'telegram' | 'schedule' | 'dart' | 'external' | 'ai' | 'diagnostics'>('kiwoom')
 
     const [isTestingYahoo, setIsTestingYahoo] = useState(false)
     const [statusYahoo, setStatusYahoo] = useState<'idle' | 'success' | 'error'>('idle')
@@ -61,13 +74,17 @@ export default function Settings() {
                     botToken: savedTgKeys.botToken || '',
                     chatId: savedTgKeys.chatId || '',
                     chartTheme: savedTgKeys.chartTheme || 'dark',
-                    chatType: savedTgKeys.chatType || ''
+                    chatType: (savedTgKeys as any).chatType || ''
                 })
             }
 
             const savedScheduleSettings = await window.electronAPI.getScheduleSettings()
             if (savedScheduleSettings) {
-                setScheduleSettings(savedScheduleSettings)
+                setScheduleSettings({
+                    notificationTime: savedScheduleSettings.notificationTime || '08:30',
+                    globalDailyNotify: savedScheduleSettings.globalDailyNotify || false,
+                    sendMissedOnStartup: savedScheduleSettings.sendMissedOnStartup ?? true
+                })
             }
 
             // DART 설정 로드
@@ -77,6 +94,17 @@ export default function Settings() {
             const savedDartSettings = await window.electronAPI.getDartSettings()
             if (savedDartSettings?.options) {
                 setDartOptions(savedDartSettings.options)
+            }
+
+            const savedAiSettings = await window.electronAPI.getAiSettings()
+            if (savedAiSettings) {
+                setAiSettings({
+                    geminiKey: savedAiSettings.geminiKey || '',
+                    modelName: savedAiSettings.modelName || 'gemini-1.5-flash',
+                    virtualInitialBalance: savedAiSettings.virtualInitialBalance ?? 1000000,
+                    buyStartTime: savedAiSettings.buyStartTime || '09:10',
+                    buyEndTime: savedAiSettings.buyEndTime || '15:00'
+                })
             }
         }
         loadKeys()
@@ -243,7 +271,8 @@ export default function Settings() {
             const trimmedKeys = {
                 botToken: telegramKeys.botToken.trim(),
                 chatId: telegramKeys.chatId.trim(),
-                chartTheme: telegramKeys.chartTheme || 'dark'
+                chartTheme: telegramKeys.chartTheme || 'dark',
+                chatType: telegramKeys.chatType || ''
             }
             const result = await window.electronAPI.saveTelegramSettings(trimmedKeys)
 
@@ -261,6 +290,53 @@ export default function Settings() {
             setMessageTg('저장 중 오류가 발생했습니다.')
         } finally {
             setIsSavingTg(false)
+        }
+    }
+
+    const handleSaveAi = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setIsSavingAi(true)
+        setStatusAi('idle')
+        setMessageAi('AI 설정 저장 중...')
+        try {
+            await window.electronAPI.saveAiSettings(aiSettings)
+            setStatusAi('success')
+            setMessageAi('AI 설정이 저장되었습니다.')
+            setTimeout(() => setStatusAi('idle'), 3000)
+        } catch (error: any) {
+            setStatusAi('error')
+            setMessageAi('저장 오류')
+        } finally {
+            setIsSavingAi(false)
+        }
+    }
+
+    const handleTestAi = async () => {
+        if (!aiSettings.geminiKey) {
+            setStatusAi('error')
+            setMessageAi('API 키를 먼저 입력해주세요.')
+            return
+        }
+        setIsTestingAi(true)
+        setStatusAi('idle')
+        setMessageAi('Gemini API 연결 테스트 중...')
+        try {
+            const result = await window.electronAPI.testAiConnection({
+                geminiKey: aiSettings.geminiKey,
+                modelName: aiSettings.modelName
+            })
+            if (result.success) {
+                setStatusAi('success')
+                setMessageAi(`연결 성공! 응답: ${result.response}`)
+            } else {
+                setStatusAi('error')
+                setMessageAi(`연결 실패: ${result.error}`)
+            }
+        } catch (error: any) {
+            setStatusAi('error')
+            setMessageAi(`테스트 오류: ${error.message}`)
+        } finally {
+            setIsTestingAi(false)
         }
     }
 
@@ -313,9 +389,11 @@ export default function Settings() {
     const menuItems = [
         { id: 'kiwoom', label: '키움증권 API', icon: ShieldCheck, color: 'text-primary' },
         { id: 'telegram', label: '텔레그램 연동', icon: Send, color: 'text-blue-500' },
+        { id: 'ai', label: 'AI 인공지능', icon: BrainCircuit, color: 'text-indigo-500' },
         { id: 'schedule', label: '일정 알림', icon: Bell, color: 'text-amber-500' },
         { id: 'dart', label: 'DART 공시', icon: Database, color: 'text-green-600' },
         { id: 'external', label: '외부 API', icon: Globe, color: 'text-purple-500' },
+        { id: 'diagnostics', label: '시스템 진단', icon: Activity, color: 'text-rose-500' },
     ] as const
 
     return (
@@ -345,568 +423,721 @@ export default function Settings() {
             </aside>
 
             {/* Content Area */}
-            <main className="flex-1 overflow-y-auto bg-background/50 backdrop-blur-3xl">
-                <div className="max-w-3xl mx-auto p-12 space-y-10 animate-in slide-in-from-right-4 fade-in duration-500 delay-75">
+            <main className={`flex-1 overflow-y-auto bg-background/50 backdrop-blur-3xl ${activeTab === 'diagnostics' ? 'h-full p-0 relative' : 'p-12'}`}>
+                {activeTab === 'diagnostics' ? (
+                    <ApiDiagnosticsTab />
+                ) : (
+                    <div className="max-w-3xl mx-auto space-y-10 animate-in slide-in-from-right-4 fade-in duration-500 delay-75">
 
-                    {activeTab === 'kiwoom' && (
-                        <div className="space-y-8">
-                            <div className="space-y-1">
-                                <h2 className="text-3xl font-bold tracking-tight">키움증권 API</h2>
-                                <p className="text-muted-foreground">키움증권 REST API 연동 정보를 설정합니다.</p>
-                            </div>
-
-                            <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
-                                <form onSubmit={handleSave} className="space-y-6">
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-semibold ml-1">App Key</label>
-                                        <input
-                                            type="password"
-                                            value={keys.appkey}
-                                            onChange={(e) => setKeys({ ...keys, appkey: e.target.value })}
-                                            placeholder="발급받은 App Key를 입력하세요"
-                                            className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
-                                        />
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-semibold ml-1">Secret Key</label>
-                                        <input
-                                            type="password"
-                                            value={keys.secretkey}
-                                            onChange={(e) => setKeys({ ...keys, secretkey: e.target.value })}
-                                            placeholder="발급받은 Secret Key를 입력하세요"
-                                            className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
-                                        />
-                                    </div>
-
-                                    <div className="pt-4 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            {isSaving && (
-                                                <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
-                                                    <RefreshCw size={14} className="animate-spin" /> {message}
-                                                </span>
-                                            )}
-                                            {status === 'success' && (
-                                                <span className="text-xs text-green-500 font-medium flex items-center gap-1 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
-                                                    <ShieldCheck size={14} /> {message}
-                                                </span>
-                                            )}
-                                            {status === 'error' && (
-                                                <span className="text-xs text-destructive font-medium flex items-center gap-1 bg-destructive/10 px-3 py-1.5 rounded-full border border-destructive/20 max-w-[400px]">
-                                                    <AlertCircle size={14} className="shrink-0" /> {message}
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <button
-                                            type="submit"
-                                            disabled={isSaving}
-                                            className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-primary/20"
-                                        >
-                                            {isSaving ? <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" /> : <Save size={18} />}
-                                            저장하기
-                                        </button>
-                                    </div>
-                                </form>
-
-                                <div className="bg-muted/30 rounded-2xl p-6 flex gap-4 items-start border border-border/40">
-                                    <AlertCircle className="text-muted-foreground/60 mt-0.5" size={18} />
-                                    <div className="space-y-1">
-                                        <p className="text-xs font-bold">보안 안내</p>
-                                        <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                            입력하신 Key는 사용자 PC의 로컬 스토리지에만 안전하게 저장되며, 외부 서버로 전송되지 않습니다.
-                                        </p>
-                                    </div>
+                        {activeTab === 'kiwoom' && (
+                            <div className="space-y-8">
+                                <div className="space-y-1">
+                                    <h2 className="text-3xl font-bold tracking-tight">키움증권 API</h2>
+                                    <p className="text-muted-foreground">키움증권 REST API 연동 정보를 설정합니다.</p>
                                 </div>
-                            </div>
-                        </div>
-                    )}
 
-                    {activeTab === 'telegram' && (
-                        <div className="space-y-8">
-                            <div className="space-y-1">
-                                <h2 className="text-3xl font-bold tracking-tight">텔레그램 연동</h2>
-                                <p className="text-muted-foreground">알림 및 차트 전송을 위한 텔레그램 설정을 구성합니다.</p>
-                            </div>
-
-                            <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
-                                <form onSubmit={handleSaveTelegram} className="space-y-6">
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-semibold ml-1">Bot Token</label>
-                                        <input
-                                            type="password"
-                                            value={telegramKeys.botToken}
-                                            onChange={(e) => setTelegramKeys({ ...telegramKeys, botToken: e.target.value })}
-                                            placeholder="BotFather에서 발급받은 봇 토큰"
-                                            className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:text-muted-foreground/50"
-                                        />
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-semibold ml-1 flex items-center justify-between">
-                                            <span>Chat ID</span>
-                                            {telegramKeys.chatId && (
-                                                <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider ${telegramKeys.chatType === 'private' ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'}`}>
-                                                    {telegramKeys.chatType === 'private' ? 'Private' : 'Group/Complex'}
-                                                </span>
-                                            )}
-                                        </label>
-                                        <div className="relative group">
+                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                    <form onSubmit={handleSave} className="space-y-6">
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-semibold ml-1">App Key</label>
                                             <input
-                                                type="text"
-                                                value={telegramKeys.chatId}
-                                                onChange={(e) => setTelegramKeys({ ...telegramKeys, chatId: e.target.value })}
-                                                placeholder="사용자 ID 혹은 그룹 ID"
-                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all pr-14 placeholder:text-muted-foreground/50"
+                                                type="password"
+                                                value={keys.appkey}
+                                                onChange={(e) => setKeys({ ...keys, appkey: e.target.value })}
+                                                placeholder="발급받은 App Key를 입력하세요"
+                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
                                             />
-                                            {telegramKeys.chatId && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setTelegramKeys({ ...telegramKeys, chatId: '', chatType: '' })}
-                                                    className="absolute right-4 top-1/2 -translate-y-1/2 p-1.5 text-muted-foreground hover:text-destructive transition-colors"
-                                                    title="초기화"
-                                                >
-                                                    <RefreshCw size={16} />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-4">
-                                        <label className="text-sm font-semibold ml-1">차트 배경 테마</label>
-                                        <div className="flex gap-4">
-                                            {['dark', 'light'].map((theme) => (
-                                                <button
-                                                    key={theme}
-                                                    type="button"
-                                                    onClick={async () => {
-                                                        setTelegramKeys({ ...telegramKeys, chartTheme: theme })
-                                                        await window.electronAPI.saveTelegramTheme(theme)
-                                                    }}
-                                                    className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-2xl border transition-all ${(telegramKeys.chartTheme === theme || (theme === 'dark' && !telegramKeys.chartTheme))
-                                                        ? 'bg-blue-500/10 border-blue-500 text-blue-600 font-bold'
-                                                        : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/50'
-                                                        }`}
-                                                >
-                                                    <div className={`w-2 h-2 rounded-full ${theme === 'dark' ? 'bg-zinc-800' : 'bg-zinc-200'} border border-border`} />
-                                                    <span className="text-sm capitalize">{theme === 'dark' ? '어두운 테마' : '밝은 테마'}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    <div className="pt-4 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            {isSavingTg && (
-                                                <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
-                                                    <RefreshCw size={14} className="animate-spin" /> {messageTg}
-                                                </span>
-                                            )}
-                                            {statusTg === 'success' && (
-                                                <span className="text-xs text-green-500 font-medium flex items-center gap-1 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
-                                                    <MessageCircle size={14} /> {messageTg}
-                                                </span>
-                                            )}
-                                            {statusTg === 'error' && (
-                                                <span className="text-xs text-destructive font-medium flex items-center gap-1 bg-destructive/10 px-3 py-1.5 rounded-full border border-destructive/20 max-w-[400px]">
-                                                    <AlertCircle size={14} className="shrink-0" /> {messageTg}
-                                                </span>
-                                            )}
                                         </div>
 
-                                        <div className="flex gap-3">
-                                            <button
-                                                type="button"
-                                                onClick={handleTestMessage}
-                                                disabled={isTestingTg}
-                                                className="flex items-center gap-2 bg-muted/50 text-foreground px-6 py-3.5 rounded-2xl font-bold hover:bg-muted active:scale-[0.98] disabled:opacity-50 transition-all border border-border"
-                                            >
-                                                {isTestingTg ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} className="text-blue-500" />}
-                                                테스트 발송
-                                            </button>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-semibold ml-1">Secret Key</label>
+                                            <input
+                                                type="password"
+                                                value={keys.secretkey}
+                                                onChange={(e) => setKeys({ ...keys, secretkey: e.target.value })}
+                                                placeholder="발급받은 Secret Key를 입력하세요"
+                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
+                                            />
+                                        </div>
+
+                                        <div className="pt-4 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                {isSaving && (
+                                                    <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
+                                                        <RefreshCw size={14} className="animate-spin" /> {message}
+                                                    </span>
+                                                )}
+                                                {status === 'success' && (
+                                                    <span className="text-xs text-green-500 font-medium flex items-center gap-1 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
+                                                        <ShieldCheck size={14} /> {message}
+                                                    </span>
+                                                )}
+                                                {status === 'error' && (
+                                                    <span className="text-xs text-destructive font-medium flex items-center gap-1 bg-destructive/10 px-3 py-1.5 rounded-full border border-destructive/20 max-w-[400px]">
+                                                        <AlertCircle size={14} className="shrink-0" /> {message}
+                                                    </span>
+                                                )}
+                                            </div>
+
                                             <button
                                                 type="submit"
-                                                disabled={isSavingTg}
-                                                className="flex items-center gap-2 bg-blue-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-blue-600/20"
+                                                disabled={isSaving}
+                                                className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-primary/20"
                                             >
-                                                {isSavingTg ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
+                                                {isSaving ? <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" /> : <Save size={18} />}
                                                 저장하기
                                             </button>
                                         </div>
-                                    </div>
-                                </form>
+                                    </form>
 
-                                <div className="bg-muted/30 rounded-2xl p-6 flex gap-4 items-start border border-border/40">
-                                    <MessageCircle className="text-muted-foreground/60 mt-0.5" size={18} />
-                                    <div className="space-y-1">
-                                        <p className="text-xs font-bold">도움말</p>
-                                        <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                            봇 생성은 <strong>@BotFather</strong>에게, Chat ID 확인은 <strong>@userinfobot</strong>을 통해 가능합니다.
-                                        </p>
+                                    <div className="bg-muted/30 rounded-2xl p-6 flex gap-4 items-start border border-border/40">
+                                        <AlertCircle className="text-muted-foreground/60 mt-0.5" size={18} />
+                                        <div className="space-y-1">
+                                            <p className="text-xs font-bold">보안 안내</p>
+                                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                                입력하신 Key는 사용자 PC의 로컬 스토리지에만 안전하게 저장되며, 외부 서버로 전송되지 않습니다.
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {activeTab === 'schedule' && (
-                        <div className="space-y-8">
-                            <div className="space-y-1">
-                                <h2 className="text-3xl font-bold tracking-tight">일정 알림</h2>
-                                <p className="text-muted-foreground">매일 지정된 시간에 텔레그램으로 주요 정보를 받아봅니다.</p>
-                            </div>
+                        {activeTab === 'telegram' && (
+                            <div className="space-y-8">
+                                <div className="space-y-1">
+                                    <h2 className="text-3xl font-bold tracking-tight">텔레그램 연동</h2>
+                                    <p className="text-muted-foreground">알림 및 차트 전송을 위한 텔레그램 설정을 구성합니다.</p>
+                                </div>
 
-                            <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
-                                <form onSubmit={handleSaveSchedule} className="space-y-8">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                        <div className="space-y-3">
-                                            <label className="text-sm font-semibold ml-1 flex items-center gap-2">
-                                                <Clock size={16} /> 알림 발송 시간
-                                            </label>
+                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                    <form onSubmit={handleSaveTelegram} className="space-y-6">
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-semibold ml-1">Bot Token</label>
                                             <input
-                                                type="time"
-                                                value={scheduleSettings.notificationTime}
-                                                onChange={(e) => setScheduleSettings({ ...scheduleSettings, notificationTime: e.target.value })}
-                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all"
+                                                type="password"
+                                                value={telegramKeys.botToken}
+                                                onChange={(e) => setTelegramKeys({ ...telegramKeys, botToken: e.target.value })}
+                                                placeholder="BotFather에서 발급받은 봇 토큰"
+                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:text-muted-foreground/50"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-semibold ml-1 flex items-center justify-between">
+                                                <span>Chat ID</span>
+                                                {telegramKeys.chatId && (
+                                                    <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider ${telegramKeys.chatType === 'private' ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'}`}>
+                                                        {telegramKeys.chatType === 'private' ? 'Private' : 'Group/Complex'}
+                                                    </span>
+                                                )}
+                                            </label>
+                                            <div className="relative group">
+                                                <input
+                                                    type="text"
+                                                    value={telegramKeys.chatId}
+                                                    onChange={(e) => setTelegramKeys({ ...telegramKeys, chatId: e.target.value })}
+                                                    placeholder="사용자 ID 혹은 그룹 ID"
+                                                    className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all pr-14 placeholder:text-muted-foreground/50"
+                                                />
+                                                {telegramKeys.chatId && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setTelegramKeys({ ...telegramKeys, chatId: '', chatType: '' })}
+                                                        className="absolute right-4 top-1/2 -translate-y-1/2 p-1.5 text-muted-foreground hover:text-destructive transition-colors"
+                                                        title="초기화"
+                                                    >
+                                                        <RefreshCw size={16} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <label className="text-sm font-semibold ml-1">차트 배경 테마</label>
+                                            <div className="flex gap-4">
+                                                {['dark', 'light'].map((theme) => (
+                                                    <button
+                                                        key={theme}
+                                                        type="button"
+                                                        onClick={async () => {
+                                                            setTelegramKeys({ ...telegramKeys, chartTheme: theme })
+                                                            await window.electronAPI.saveTelegramTheme(theme)
+                                                        }}
+                                                        className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-2xl border transition-all ${(telegramKeys.chartTheme === theme || (theme === 'dark' && !telegramKeys.chartTheme))
+                                                            ? 'bg-blue-500/10 border-blue-500 text-blue-600 font-bold'
+                                                            : 'bg-muted/30 border-border text-muted-foreground hover:bg-muted/50'
+                                                            }`}
+                                                    >
+                                                        <div className={`w-2 h-2 rounded-full ${theme === 'dark' ? 'bg-zinc-800' : 'bg-zinc-200'} border border-border`} />
+                                                        <span className="text-sm capitalize">{theme === 'dark' ? '어두운 테마' : '밝은 테마'}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="pt-4 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                {isSavingTg && (
+                                                    <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
+                                                        <RefreshCw size={14} className="animate-spin" /> {messageTg}
+                                                    </span>
+                                                )}
+                                                {statusTg === 'success' && (
+                                                    <span className="text-xs text-green-500 font-medium flex items-center gap-1 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
+                                                        <MessageCircle size={14} /> {messageTg}
+                                                    </span>
+                                                )}
+                                                {statusTg === 'error' && (
+                                                    <span className="text-xs text-destructive font-medium flex items-center gap-1 bg-destructive/10 px-3 py-1.5 rounded-full border border-destructive/20 max-w-[400px]">
+                                                        <AlertCircle size={14} className="shrink-0" /> {messageTg}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            <div className="flex gap-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleTestMessage}
+                                                    disabled={isTestingTg}
+                                                    className="flex items-center gap-2 bg-muted/50 text-foreground px-6 py-3.5 rounded-2xl font-bold hover:bg-muted active:scale-[0.98] disabled:opacity-50 transition-all border border-border"
+                                                >
+                                                    {isTestingTg ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} className="text-blue-500" />}
+                                                    테스트 발송
+                                                </button>
+                                                <button
+                                                    type="submit"
+                                                    disabled={isSavingTg}
+                                                    className="flex items-center gap-2 bg-blue-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-blue-600/20"
+                                                >
+                                                    {isSavingTg ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
+                                                    저장하기
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </form>
+
+                                    <div className="bg-muted/30 rounded-2xl p-6 flex gap-4 items-start border border-border/40">
+                                        <MessageCircle className="text-muted-foreground/60 mt-0.5" size={18} />
+                                        <div className="space-y-1">
+                                            <p className="text-xs font-bold">도움말</p>
+                                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                                봇 생성은 <strong>@BotFather</strong>에게, Chat ID 확인은 <strong>@userinfobot</strong>을 통해 가능합니다.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'schedule' && (
+                            <div className="space-y-8">
+                                <div className="space-y-1">
+                                    <h2 className="text-3xl font-bold tracking-tight">일정 알림</h2>
+                                    <p className="text-muted-foreground">매일 지정된 시간에 텔레그램으로 주요 정보를 받아봅니다.</p>
+                                </div>
+
+                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                    <form onSubmit={handleSaveSchedule} className="space-y-8">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                            <div className="space-y-3">
+                                                <label className="text-sm font-semibold ml-1 flex items-center gap-2">
+                                                    <Clock size={16} /> 알림 발송 시간
+                                                </label>
+                                                <input
+                                                    type="time"
+                                                    value={scheduleSettings.notificationTime}
+                                                    onChange={(e) => setScheduleSettings({ ...scheduleSettings, notificationTime: e.target.value })}
+                                                    className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all"
+                                                />
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                <label className="text-sm font-semibold ml-1 flex items-center gap-2">
+                                                    <Bell size={16} /> 알림 옵션
+                                                </label>
+                                                <div className="space-y-3">
+                                                    {[
+                                                        { id: 'globalDailyNotify', label: '모든 일정 당일 알람', desc: '개별 설정 무관 전송' },
+                                                        { id: 'sendMissedOnStartup', label: '부팅 시 미전송 알람 전송', desc: '시작 시 과거 알람 즉시 처리' }
+                                                    ].map((opt) => (
+                                                        <div
+                                                            key={opt.id}
+                                                            onClick={() => setScheduleSettings({ ...scheduleSettings, [opt.id]: !scheduleSettings[opt.id as keyof typeof scheduleSettings] })}
+                                                            className={`flex items-center gap-3 p-4 rounded-2xl border transition-all cursor-pointer ${scheduleSettings[opt.id as keyof typeof scheduleSettings]
+                                                                ? 'bg-amber-500/10 border-amber-500/30'
+                                                                : 'bg-muted/30 border-border/40 hover:bg-muted/50'
+                                                                }`}
+                                                        >
+                                                            <div className={`w-5 h-5 rounded flex items-center justify-center border transition-all ${scheduleSettings[opt.id as keyof typeof scheduleSettings]
+                                                                ? 'bg-amber-500 border-amber-500 text-white'
+                                                                : 'bg-background border-border shadow-inner'
+                                                                }`}>
+                                                                {scheduleSettings[opt.id as keyof typeof scheduleSettings] && <Save size={12} />}
+                                                            </div>
+                                                            <div className="flex-1">
+                                                                <p className="text-sm font-bold">{opt.label}</p>
+                                                                <p className="text-[10px] text-muted-foreground">{opt.desc}</p>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="pt-2 flex items-center justify-between border-t border-border/40 mt-4 pt-8">
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={async () => {
+                                                        setIsSavingSchedule(true)
+                                                        setMessageSchedule('테스트 알림 발송 중...')
+                                                        const res = await window.electronAPI.testScheduleSummary()
+                                                        if (res.success) {
+                                                            setStatusSchedule('success')
+                                                            setMessageSchedule('테스트 알림 전송 완료')
+                                                        } else {
+                                                            setStatusSchedule('error')
+                                                            setMessageSchedule('발송 실패')
+                                                        }
+                                                        setIsSavingSchedule(false)
+                                                        setTimeout(() => setStatusSchedule('idle'), 3000)
+                                                    }}
+                                                    className="flex items-center gap-2 text-xs text-amber-600 hover:text-amber-700 font-bold px-4 py-2.5 rounded-xl border border-amber-200 hover:bg-amber-50 transition-colors"
+                                                >
+                                                    <Send size={14} /> 즉시 테스트
+                                                </button>
+                                                {isSavingSchedule && (
+                                                    <span className="text-xs text-muted-foreground animate-pulse ml-2 flex items-center gap-2">
+                                                        <RefreshCw size={14} className="animate-spin" /> {messageSchedule}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            <button
+                                                type="submit"
+                                                disabled={isSavingSchedule}
+                                                className="flex items-center gap-2 bg-amber-500 text-white px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-amber-500/20"
+                                            >
+                                                {isSavingSchedule ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
+                                                설정 저장하기
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'dart' && (
+                            <div className="space-y-8">
+                                <div className="space-y-1">
+                                    <h2 className="text-3xl font-bold tracking-tight">DART 공시</h2>
+                                    <p className="text-muted-foreground">Open DART 연동 및 기업 고유번호 매핑을 관리합니다.</p>
+                                </div>
+
+                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                    <form onSubmit={handleSaveDart} className="space-y-6">
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-semibold ml-1">Certified Key (DART API Key)</label>
+                                            <input
+                                                type="password"
+                                                value={dartKey}
+                                                onChange={(e) => setDartKey(e.target.value)}
+                                                placeholder="Open DART API 키를 입력하세요"
+                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all placeholder:text-muted-foreground/50"
                                             />
                                         </div>
 
                                         <div className="space-y-4">
-                                            <label className="text-sm font-semibold ml-1 flex items-center gap-2">
-                                                <Bell size={16} /> 알림 옵션
-                                            </label>
-                                            <div className="space-y-3">
+                                            <label className="text-sm font-semibold ml-1 text-muted-foreground">수집할 공시 항목</label>
+                                            <div className="grid grid-cols-2 gap-3">
                                                 {[
-                                                    { id: 'globalDailyNotify', label: '모든 일정 당일 알람', desc: '개별 설정 무관 전송' },
-                                                    { id: 'sendMissedOnStartup', label: '부팅 시 미전송 알람 전송', desc: '시작 시 과거 알람 즉시 처리' }
+                                                    { id: 'regular', label: '정기공시', desc: '사업/분기보고서 (실적발표 등)' },
+                                                    { id: 'major', label: '주요사항보고', desc: '배당/증자/감자/납입 결정 등' },
+                                                    { id: 'exchange', label: '거래소공시', desc: '영업실적 잠정치/수주 등' },
+                                                    { id: 'issue', label: '발행공시', desc: '증권신고서/투자설명서' }
                                                 ].map((opt) => (
                                                     <div
                                                         key={opt.id}
-                                                        onClick={() => setScheduleSettings({ ...scheduleSettings, [opt.id]: !scheduleSettings[opt.id as keyof typeof scheduleSettings] })}
-                                                        className={`flex items-center gap-3 p-4 rounded-2xl border transition-all cursor-pointer ${scheduleSettings[opt.id as keyof typeof scheduleSettings]
-                                                            ? 'bg-amber-500/10 border-amber-500/30'
+                                                        onClick={() => setDartOptions({ ...dartOptions, [opt.id]: !dartOptions[opt.id as keyof typeof dartOptions] })}
+                                                        className={`flex items-start gap-3 p-4 rounded-2xl border transition-all cursor-pointer ${dartOptions[opt.id as keyof typeof dartOptions]
+                                                            ? 'bg-green-500/10 border-green-500/30'
                                                             : 'bg-muted/30 border-border/40 hover:bg-muted/50'
                                                             }`}
                                                     >
-                                                        <div className={`w-5 h-5 rounded flex items-center justify-center border transition-all ${scheduleSettings[opt.id as keyof typeof scheduleSettings]
-                                                            ? 'bg-amber-500 border-amber-500 text-white'
+                                                        <div className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center border transition-all ${dartOptions[opt.id as keyof typeof dartOptions]
+                                                            ? 'bg-green-600 border-green-600 text-white'
                                                             : 'bg-background border-border shadow-inner'
                                                             }`}>
-                                                            {scheduleSettings[opt.id as keyof typeof scheduleSettings] && <Save size={12} />}
+                                                            {dartOptions[opt.id as keyof typeof dartOptions] && <Save size={12} />}
                                                         </div>
                                                         <div className="flex-1">
                                                             <p className="text-sm font-bold">{opt.label}</p>
-                                                            <p className="text-[10px] text-muted-foreground">{opt.desc}</p>
+                                                            <p className="text-[10px] text-muted-foreground leading-tight">{opt.desc}</p>
                                                         </div>
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
-                                    </div>
 
-                                    <div className="pt-2 flex items-center justify-between border-t border-border/40 mt-4 pt-8">
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    setIsSavingSchedule(true)
-                                                    setMessageSchedule('테스트 알림 발송 중...')
-                                                    const res = await window.electronAPI.testScheduleSummary()
-                                                    if (res.success) {
-                                                        setStatusSchedule('success')
-                                                        setMessageSchedule('테스트 알림 전송 완료')
-                                                    } else {
-                                                        setStatusSchedule('error')
-                                                        setMessageSchedule('발송 실패')
-                                                    }
-                                                    setIsSavingSchedule(false)
-                                                    setTimeout(() => setStatusSchedule('idle'), 3000)
-                                                }}
-                                                className="flex items-center gap-2 text-xs text-amber-600 hover:text-amber-700 font-bold px-4 py-2.5 rounded-xl border border-amber-200 hover:bg-amber-50 transition-colors"
-                                            >
-                                                <Send size={14} /> 즉시 테스트
-                                            </button>
-                                            {isSavingSchedule && (
-                                                <span className="text-xs text-muted-foreground animate-pulse ml-2 flex items-center gap-2">
-                                                    <RefreshCw size={14} className="animate-spin" /> {messageSchedule}
-                                                </span>
-                                            )}
-                                        </div>
+                                        <div className="pt-4 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                {(isSavingDart || isSyncingDart) && (
+                                                    <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
+                                                        <RefreshCw size={14} className="animate-spin" /> {messageDart}
+                                                    </span>
+                                                )}
+                                                {statusDart === 'success' && (
+                                                    <span className="text-xs text-green-500 font-medium flex items-center gap-1 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
+                                                        <ShieldCheck size={14} /> {messageDart}
+                                                    </span>
+                                                )}
+                                                {statusDart === 'error' && (
+                                                    <span className="text-xs text-destructive font-medium flex items-center gap-1 bg-destructive/10 px-3 py-1.5 rounded-full border border-destructive/20 max-w-[400px]">
+                                                        <AlertCircle size={14} className="shrink-0" /> {messageDart}
+                                                    </span>
+                                                )}
+                                            </div>
 
-                                        <button
-                                            type="submit"
-                                            disabled={isSavingSchedule}
-                                            className="flex items-center gap-2 bg-amber-500 text-white px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-amber-500/20"
-                                        >
-                                            {isSavingSchedule ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
-                                            설정 저장하기
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeTab === 'dart' && (
-                        <div className="space-y-8">
-                            <div className="space-y-1">
-                                <h2 className="text-3xl font-bold tracking-tight">DART 공시</h2>
-                                <p className="text-muted-foreground">Open DART 연동 및 기업 고유번호 매핑을 관리합니다.</p>
-                            </div>
-
-                            <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
-                                <form onSubmit={handleSaveDart} className="space-y-6">
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-semibold ml-1">Certified Key (DART API Key)</label>
-                                        <input
-                                            type="password"
-                                            value={dartKey}
-                                            onChange={(e) => setDartKey(e.target.value)}
-                                            placeholder="Open DART API 키를 입력하세요"
-                                            className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all placeholder:text-muted-foreground/50"
-                                        />
-                                    </div>
-
-                                    <div className="space-y-4">
-                                        <label className="text-sm font-semibold ml-1 text-muted-foreground">수집할 공시 항목</label>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            {[
-                                                { id: 'regular', label: '정기공시', desc: '사업/분기보고서 (실적발표 등)' },
-                                                { id: 'major', label: '주요사항보고', desc: '배당/증자/감자/납입 결정 등' },
-                                                { id: 'exchange', label: '거래소공시', desc: '영업실적 잠정치/수주 등' },
-                                                { id: 'issue', label: '발행공시', desc: '증권신고서/투자설명서' }
-                                            ].map((opt) => (
-                                                <div
-                                                    key={opt.id}
-                                                    onClick={() => setDartOptions({ ...dartOptions, [opt.id]: !dartOptions[opt.id as keyof typeof dartOptions] })}
-                                                    className={`flex items-start gap-3 p-4 rounded-2xl border transition-all cursor-pointer ${dartOptions[opt.id as keyof typeof dartOptions]
-                                                        ? 'bg-green-500/10 border-green-500/30'
-                                                        : 'bg-muted/30 border-border/40 hover:bg-muted/50'
-                                                        }`}
+                                            <div className="flex gap-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSyncCorpCodes}
+                                                    disabled={isSyncingDart || !dartKey}
+                                                    className="flex items-center gap-2 bg-muted/50 text-foreground px-6 py-3.5 rounded-2xl font-bold hover:bg-muted active:scale-[0.98] disabled:opacity-50 transition-all border border-border"
                                                 >
-                                                    <div className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center border transition-all ${dartOptions[opt.id as keyof typeof dartOptions]
-                                                        ? 'bg-green-600 border-green-600 text-white'
-                                                        : 'bg-background border-border shadow-inner'
-                                                        }`}>
-                                                        {dartOptions[opt.id as keyof typeof dartOptions] && <Save size={12} />}
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <p className="text-sm font-bold">{opt.label}</p>
-                                                        <p className="text-[10px] text-muted-foreground leading-tight">{opt.desc}</p>
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                    {isSyncingDart ? <RefreshCw size={18} className="animate-spin" /> : <RefreshCw size={18} className="text-green-500" />}
+                                                    코드 동기화
+                                                </button>
+                                                <button
+                                                    type="submit"
+                                                    disabled={isSavingDart}
+                                                    className="flex items-center gap-2 bg-green-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-green-600/20"
+                                                >
+                                                    {isSavingDart ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
+                                                    저장하기
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
+                                    </form>
 
-                                    <div className="pt-4 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            {(isSavingDart || isSyncingDart) && (
-                                                <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
-                                                    <RefreshCw size={14} className="animate-spin" /> {messageDart}
-                                                </span>
-                                            )}
-                                            {statusDart === 'success' && (
-                                                <span className="text-xs text-green-500 font-medium flex items-center gap-1 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
-                                                    <ShieldCheck size={14} /> {messageDart}
-                                                </span>
-                                            )}
-                                            {statusDart === 'error' && (
-                                                <span className="text-xs text-destructive font-medium flex items-center gap-1 bg-destructive/10 px-3 py-1.5 rounded-full border border-destructive/20 max-w-[400px]">
-                                                    <AlertCircle size={14} className="shrink-0" /> {messageDart}
-                                                </span>
-                                            )}
+                                    <div className="bg-muted/30 rounded-2xl p-6 flex flex-col gap-4 border border-border/40">
+                                        <div className="flex gap-4 items-start">
+                                            <Database className="text-muted-foreground/60 mt-0.5" size={18} />
+                                            <div className="space-y-1">
+                                                <p className="text-xs font-bold">동기화 안내</p>
+                                                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                                    최초 1회 '코드 동기화'가 필요합니다. 이후 '공시 일정 동기화'를 통해 관심종목의 최신 일정을 가져올 수 있습니다. (앱 시작 시 자동 실행됨)
+                                                </p>
+                                            </div>
                                         </div>
 
-                                        <div className="flex gap-3">
+                                        <div className="pt-2 border-t border-border/20 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                {isSyncingDisclosures && (
+                                                    <span className="text-[11px] text-muted-foreground animate-pulse flex items-center gap-2">
+                                                        <RefreshCw size={12} className="animate-spin" /> {messageDisclosures}
+                                                    </span>
+                                                )}
+                                                {statusDisclosures === 'success' && (
+                                                    <span className="text-[11px] text-green-500 font-medium bg-green-500/10 px-2 py-1 rounded-full border border-green-500/20">
+                                                        {messageDisclosures}
+                                                    </span>
+                                                )}
+                                                {statusDisclosures === 'error' && (
+                                                    <span className="text-[11px] text-destructive font-medium bg-destructive/10 px-2 py-1 rounded-full border border-destructive/20">
+                                                        {messageDisclosures}
+                                                    </span>
+                                                )}
+                                            </div>
                                             <button
                                                 type="button"
-                                                onClick={handleSyncCorpCodes}
-                                                disabled={isSyncingDart || !dartKey}
-                                                className="flex items-center gap-2 bg-muted/50 text-foreground px-6 py-3.5 rounded-2xl font-bold hover:bg-muted active:scale-[0.98] disabled:opacity-50 transition-all border border-border"
+                                                onClick={handleSyncDisclosures}
+                                                disabled={isSyncingDisclosures || !dartKey}
+                                                className="flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/20 disabled:opacity-50 transition-all border border-primary/20"
                                             >
-                                                {isSyncingDart ? <RefreshCw size={18} className="animate-spin" /> : <RefreshCw size={18} className="text-green-500" />}
-                                                코드 동기화
-                                            </button>
-                                            <button
-                                                type="submit"
-                                                disabled={isSavingDart}
-                                                className="flex items-center gap-2 bg-green-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-green-600/20"
-                                            >
-                                                {isSavingDart ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
-                                                저장하기
+                                                <RefreshCw size={14} className={isSyncingDisclosures ? 'animate-spin' : ''} />
+                                                공시 일정 동기화
                                             </button>
                                         </div>
-                                    </div>
-                                </form>
 
-                                <div className="bg-muted/30 rounded-2xl p-6 flex flex-col gap-4 border border-border/40">
-                                    <div className="flex gap-4 items-start">
-                                        <Database className="text-muted-foreground/60 mt-0.5" size={18} />
-                                        <div className="space-y-1">
-                                            <p className="text-xs font-bold">동기화 안내</p>
-                                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                                최초 1회 '코드 동기화'가 필요합니다. 이후 '공시 일정 동기화'를 통해 관심종목의 최신 일정을 가져올 수 있습니다. (앱 시작 시 자동 실행됨)
+                                        <div className="pt-2 border-t border-border/20 flex flex-col gap-3">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    {isSyncingFinancials && (
+                                                        <span className="text-[11px] text-muted-foreground animate-pulse flex items-center gap-2">
+                                                            <RefreshCw size={12} className="animate-spin" /> {messageFinancials}
+                                                        </span>
+                                                    )}
+                                                    {statusFinancials === 'success' && (
+                                                        <span className="text-[11px] text-green-500 font-medium bg-green-500/10 px-2 py-1 rounded-full border border-green-500/20">
+                                                            {messageFinancials}
+                                                        </span>
+                                                    )}
+                                                    {statusFinancials === 'error' && (
+                                                        <span className="text-[11px] text-destructive font-medium bg-destructive/10 px-2 py-1 rounded-full border border-destructive/20">
+                                                            {messageFinancials}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSyncBatchFinancials}
+                                                    disabled={isSyncingFinancials || !dartKey}
+                                                    className="flex items-center gap-2 bg-blue-500/10 text-blue-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-500/20 disabled:opacity-50 transition-all border border-blue-500/20"
+                                                >
+                                                    <Database size={14} className={isSyncingFinancials ? 'animate-spin' : ''} />
+                                                    10년 재무정보 일괄 업데이트
+                                                </button>
+                                            </div>
+                                            <p className="text-[10px] text-muted-foreground italic leading-relaxed">
+                                                * 관심종목에 등록된 모든 종목의 최근 10개년 사업보고서 데이터를 수집합니다.<br />
+                                                * DART API 호출 간격을 고려하여 종목당 약 10~15초가 소요됩니다.
                                             </p>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+                        )}                    {activeTab === 'ai' && (
+                            <div className="space-y-8">
+                                <div className="space-y-1">
+                                    <h2 className="text-3xl font-bold tracking-tight">AI 인공지능 설정</h2>
+                                    <p className="text-muted-foreground">자동매매 전략 복기 및 종목 분석을 위한 AI 모델을 설정합니다.</p>
+                                </div>
 
-                                    <div className="pt-2 border-t border-border/20 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            {isSyncingDisclosures && (
-                                                <span className="text-[11px] text-muted-foreground animate-pulse flex items-center gap-2">
-                                                    <RefreshCw size={12} className="animate-spin" /> {messageDisclosures}
-                                                </span>
-                                            )}
-                                            {statusDisclosures === 'success' && (
-                                                <span className="text-[11px] text-green-500 font-medium bg-green-500/10 px-2 py-1 rounded-full border border-green-500/20">
-                                                    {messageDisclosures}
-                                                </span>
-                                            )}
-                                            {statusDisclosures === 'error' && (
-                                                <span className="text-[11px] text-destructive font-medium bg-destructive/10 px-2 py-1 rounded-full border border-destructive/20">
-                                                    {messageDisclosures}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={handleSyncDisclosures}
-                                            disabled={isSyncingDisclosures || !dartKey}
-                                            className="flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/20 disabled:opacity-50 transition-all border border-primary/20"
-                                        >
-                                            <RefreshCw size={14} className={isSyncingDisclosures ? 'animate-spin' : ''} />
-                                            공시 일정 동기화
-                                        </button>
-                                    </div>
-
-                                    <div className="pt-2 border-t border-border/20 flex flex-col gap-3">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                {isSyncingFinancials && (
-                                                    <span className="text-[11px] text-muted-foreground animate-pulse flex items-center gap-2">
-                                                        <RefreshCw size={12} className="animate-spin" /> {messageFinancials}
-                                                    </span>
-                                                )}
-                                                {statusFinancials === 'success' && (
-                                                    <span className="text-[11px] text-green-500 font-medium bg-green-500/10 px-2 py-1 rounded-full border border-green-500/20">
-                                                        {messageFinancials}
-                                                    </span>
-                                                )}
-                                                {statusFinancials === 'error' && (
-                                                    <span className="text-[11px] text-destructive font-medium bg-destructive/10 px-2 py-1 rounded-full border border-destructive/20">
-                                                        {messageFinancials}
-                                                    </span>
-                                                )}
+                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm">
+                                    <form onSubmit={handleSaveAi} className="space-y-8">
+                                        <div className="space-y-6">
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-sm font-bold flex items-center gap-2">
+                                                        Google Gemini API Key
+                                                        <a
+                                                            href="https://aistudio.google.com/app/apikey"
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="text-[10px] text-primary hover:underline font-normal"
+                                                        >
+                                                            (키 발급받기)
+                                                        </a>
+                                                    </label>
+                                                </div>
+                                                <input
+                                                    type="password"
+                                                    value={aiSettings.geminiKey}
+                                                    onChange={(e) => setAiSettings({ ...aiSettings, geminiKey: e.target.value })}
+                                                    placeholder="AI Studio에서 발급받은 API 키를 입력하세요"
+                                                    className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
+                                                />
                                             </div>
+
+                                            <div className="space-y-3">
+                                                <label className="text-sm font-bold">사용할 모델명</label>
+                                                <select
+                                                    value={aiSettings.modelName}
+                                                    onChange={(e) => setAiSettings({ ...aiSettings, modelName: e.target.value })}
+                                                    className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
+                                                >
+                                                    <optgroup label="Gemini 3.1 / 3 (2026 Latest Preview)">
+                                                        <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (세계 최상위 지능)</option>
+                                                        <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview (극도로 빠름)</option>
+                                                        <option value="gemini-3-flash-preview">gemini-3-flash-preview (최신 Flash 미리보기)</option>
+                                                    </optgroup>
+                                                    <optgroup label="Gemini 2.5 (Stable GA)">
+                                                        <option value="gemini-2.5-pro">gemini-2.5-pro (안정적 Pro, 추천)</option>
+                                                        <option value="gemini-2.5-flash">gemini-2.5-flash (표준 Flash, 추천)</option>
+                                                        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (경량형 가성비)</option>
+                                                    </optgroup>
+                                                    <optgroup label="Discontinued / Legacy">
+                                                        <option value="gemini-2.0-flash" disabled>gemini-2.0-flash (지원 중단)</option>
+                                                        <option value="gemini-1.5-flash" disabled>gemini-1.5-flash (지원 중단)</option>
+                                                    </optgroup>
+                                                </select>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-sm font-bold">가상계좌 초기 자본금 (KRW)</label>
+                                                    <span className="text-xs text-indigo-500 font-bold">
+                                                        ₩ {aiSettings.virtualInitialBalance?.toLocaleString() || '1,000,000'}
+                                                    </span>
+                                                </div>
+                                                <input
+                                                    type="number"
+                                                    step="100000"
+                                                    value={aiSettings.virtualInitialBalance}
+                                                    onChange={(e) => setAiSettings({ ...aiSettings, virtualInitialBalance: Number(e.target.value) })}
+                                                    placeholder="예: 1000000"
+                                                    className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
+                                                />
+                                                <p className="text-[10px] text-muted-foreground ml-1">
+                                                    * 자본금을 변경하고 저장하면 이후 RESET 시 위 금액으로 시작합니다.
+                                                </p>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4 pt-2">
+                                                <div className="space-y-3">
+                                                    <label className="text-sm font-bold flex items-center gap-2">
+                                                        <Clock size={14} className="text-indigo-500" />
+                                                        매수 시작 시간
+                                                    </label>
+                                                    <input
+                                                        type="time"
+                                                        value={aiSettings.buyStartTime}
+                                                        onChange={(e) => setAiSettings({ ...aiSettings, buyStartTime: e.target.value })}
+                                                        className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
+                                                    />
+                                                </div>
+                                                <div className="space-y-3">
+                                                    <label className="text-sm font-bold flex items-center gap-2">
+                                                        <Clock size={14} className="text-destructive/70" />
+                                                        매수 종료 시간
+                                                    </label>
+                                                    <input
+                                                        type="time"
+                                                        value={aiSettings.buyEndTime}
+                                                        onChange={(e) => setAiSettings({ ...aiSettings, buyEndTime: e.target.value })}
+                                                        className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <p className="text-[10px] text-muted-foreground ml-1">
+                                                * 장 초반 노이즈 방지를 위해 09:10 이후를 권장하며, 마감 전 진입은 15:00 이전을 권장합니다.
+                                            </p>
+                                        </div>
+
+                                        <div className="flex gap-4">
                                             <button
                                                 type="button"
-                                                onClick={handleSyncBatchFinancials}
-                                                disabled={isSyncingFinancials || !dartKey}
-                                                className="flex items-center gap-2 bg-blue-500/10 text-blue-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-500/20 disabled:opacity-50 transition-all border border-blue-500/20"
+                                                onClick={handleTestAi}
+                                                disabled={isTestingAi || isSavingAi}
+                                                className="flex-1 flex items-center justify-center gap-2 bg-muted border border-border rounded-2xl py-4 font-bold text-base hover:bg-muted/80 active:scale-[0.98] transition-all disabled:opacity-50"
                                             >
-                                                <Database size={14} className={isSyncingFinancials ? 'animate-spin' : ''} />
-                                                10년 재무정보 일괄 업데이트
-                                            </button>
-                                        </div>
-                                        <p className="text-[10px] text-muted-foreground italic leading-relaxed">
-                                            * 관심종목에 등록된 모든 종목의 최근 10개년 사업보고서 데이터를 수집합니다.<br />
-                                            * DART API 호출 간격을 고려하여 종목당 약 10~15초가 소요됩니다.
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}                    {activeTab === 'external' && (
-                        <div className="space-y-8">
-                            <div className="space-y-1">
-                                <h2 className="text-3xl font-bold tracking-tight">외부 API 연동</h2>
-                                <p className="text-muted-foreground">매크로 및 차트 분석을 위한 글로벌 데이터 소스를 관리합니다.</p>
-                            </div>
-
-                            <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
-                                <div className="space-y-6">
-                                    <div className="flex items-center justify-between p-6 bg-muted/20 border border-border/40 rounded-2xl group hover:border-purple-500/30 transition-all">
-                                        <div className="flex items-center gap-4">
-                                            <div className="p-3 bg-purple-500/10 rounded-xl">
-                                                <Globe className="text-purple-500" size={24} />
-                                            </div>
-                                            <div>
-                                                <h3 className="font-bold">Yahoo Finance</h3>
-                                                <p className="text-xs text-muted-foreground">10년 주가 데이터 및 글로벌 지수 (별도 인증 불필요)</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-4">
-                                            {statusYahoo === 'success' && (
-                                                <span className="text-[11px] font-bold text-green-500 bg-green-500/10 px-3 py-1 rounded-full border border-green-500/20">
-                                                    연결됨
-                                                </span>
-                                            )}
-                                            {statusYahoo === 'error' && (
-                                                <span className="text-[11px] font-bold text-destructive bg-destructive/10 px-3 py-1 rounded-full border border-destructive/20">
-                                                    연결 오류
-                                                </span>
-                                            )}
-                                            <button
-                                                onClick={async () => {
-                                                    setIsTestingYahoo(true)
-                                                    setStatusYahoo('idle')
-                                                    try {
-                                                        const result = await window.electronAPI.testYahooFinance()
-                                                        if (result.success) {
-                                                            setStatusYahoo('success')
-                                                            setMessageYahoo(`연결 성공: 삼성전자 10년치 데이터(${result.count}건) 수신 완료`)
-                                                        } else {
-                                                            setStatusYahoo('error')
-                                                            setMessageYahoo(result.error || '연결 실패')
-                                                        }
-                                                    } catch (e) {
-                                                        setStatusYahoo('error')
-                                                        setMessageYahoo('연결 중 오류 발생')
-                                                    } finally {
-                                                        setIsTestingYahoo(false)
-                                                    }
-                                                }}
-                                                disabled={isTestingYahoo}
-                                                className="flex items-center gap-2 bg-purple-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 transition-all"
-                                            >
-                                                {isTestingYahoo ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                                {isTestingAi ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} className="text-indigo-500" />}
                                                 연결 테스트
                                             </button>
+                                            <button
+                                                type="submit"
+                                                disabled={isSavingAi || isTestingAi}
+                                                className="flex-[2] flex items-center justify-center gap-2 bg-indigo-600 text-white rounded-2xl py-4 font-bold text-base hover:bg-indigo-700 active:scale-[0.98] transition-all disabled:opacity-50 shadow-lg shadow-indigo-600/20"
+                                            >
+                                                {isSavingAi ? <RefreshCw size={20} className="animate-spin" /> : <Save size={20} />}
+                                                AI 설정 저장하기
+                                            </button>
                                         </div>
-                                    </div>
 
-                                    {messageYahoo && (
-                                        <div className={`p-4 rounded-xl border text-xs flex items-center gap-2 ${statusYahoo === 'success' ? 'bg-green-500/5 border-green-500/20 text-green-600' : 'bg-destructive/5 border-destructive/20 text-destructive'}`}>
-                                            {statusYahoo === 'success' ? <ShieldCheck size={14} /> : <AlertCircle size={14} />}
-                                            {messageYahoo}
-                                        </div>
-                                    )}
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="p-5 border border-border/40 rounded-2xl bg-muted/10">
-                                            <p className="text-xs font-bold mb-2">수집 데이터</p>
-                                            <ul className="text-[11px] text-muted-foreground space-y-1.5 list-disc list-inside">
-                                                <li>KOSPI/KOSDAQ 종목 10년 월봉</li>
-                                                <li>S&P 500, 나스닥 등 주요 지수</li>
-                                                <li>USD/KRW 환율 및 미국채 금리</li>
+                                        {messageAi && (
+                                            <div className={`p-4 rounded-xl border text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-1 ${statusAi === 'success' ? 'bg-green-500/5 border-green-500/20 text-green-600' : 'bg-destructive/5 border-destructive/20 text-destructive'}`}>
+                                                {statusAi === 'success' ? <ShieldCheck size={14} /> : <AlertCircle size={14} />}
+                                                {messageAi}
+                                            </div>
+                                        )}
+                                        <div className="p-6 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl space-y-3">
+                                            <h4 className="text-sm font-bold text-indigo-600 flex items-center gap-2">
+                                                <Info size={14} />
+                                                AI 활용 가이드
+                                            </h4>
+                                            <ul className="text-xs text-muted-foreground space-y-2 list-disc list-inside leading-relaxed">
+                                                <li>입력하신 API 키는 사용자 PC의 로컬 저장소에만 안전하게 보관됩니다.</li>
+                                                <li>장 마감 후 진행되는 <strong>'AI 전략 복기'</strong>에서 활약하게 됩니다.</li>
+                                                <li>Gemini 1.5/2.0 Flash 모델은 대부분의 무료 티어에서도 충분한 속도를 제공합니다.</li>
                                             </ul>
                                         </div>
-                                        <div className="p-5 border border-border/40 rounded-2xl bg-muted/10">
-                                            <p className="text-xs font-bold mb-2">활용 계획</p>
-                                            <ul className="text-[11px] text-muted-foreground space-y-1.5 list-disc list-inside">
-                                                <li>역사적 P/E, P/B 밴드 분석</li>
-                                                <li>글로벌 시황 기반 AI 리포팅</li>
-                                                <li>매크로 지표 변동 알림 (예정)</li>
-                                            </ul>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'external' && (
+                            <div className="space-y-8">
+                                <div className="space-y-1">
+                                    <h2 className="text-3xl font-bold tracking-tight">외부 API 연동</h2>
+                                    <p className="text-muted-foreground">매크로 및 차트 분석을 위한 글로벌 데이터 소스를 관리합니다.</p>
+                                </div>
+
+                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                    <div className="space-y-6">
+                                        <div className="flex items-center justify-between p-6 bg-muted/20 border border-border/40 rounded-2xl group hover:border-purple-500/30 transition-all">
+                                            <div className="flex items-center gap-4">
+                                                <div className="p-3 bg-purple-500/10 rounded-xl">
+                                                    <Globe className="text-purple-500" size={24} />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold">Yahoo Finance</h3>
+                                                    <p className="text-xs text-muted-foreground">10년 주가 데이터 및 글로벌 지수 (별도 인증 불필요)</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                                {statusYahoo === 'success' && (
+                                                    <span className="text-[11px] font-bold text-green-500 bg-green-500/10 px-3 py-1 rounded-full border border-green-500/20">
+                                                        연결됨
+                                                    </span>
+                                                )}
+                                                {statusYahoo === 'error' && (
+                                                    <span className="text-[11px] font-bold text-destructive bg-destructive/10 px-3 py-1 rounded-full border border-destructive/20">
+                                                        연결 오류
+                                                    </span>
+                                                )}
+                                                <button
+                                                    onClick={async () => {
+                                                        setIsTestingYahoo(true)
+                                                        setStatusYahoo('idle')
+                                                        try {
+                                                            const result = await window.electronAPI.testYahooFinance()
+                                                            if (result.success) {
+                                                                setStatusYahoo('success')
+                                                                setMessageYahoo(`연결 성공: 삼성전자 10년치 데이터(${result.count}건) 수신 완료`)
+                                                            } else {
+                                                                setStatusYahoo('error')
+                                                                setMessageYahoo(result.error || '연결 실패')
+                                                            }
+                                                        } catch (e) {
+                                                            setStatusYahoo('error')
+                                                            setMessageYahoo('연결 중 오류 발생')
+                                                        } finally {
+                                                            setIsTestingYahoo(false)
+                                                        }
+                                                    }}
+                                                    disabled={isTestingYahoo}
+                                                    className="flex items-center gap-2 bg-purple-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 transition-all"
+                                                >
+                                                    {isTestingYahoo ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                                    연결 테스트
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {messageYahoo && (
+                                            <div className={`p-4 rounded-xl border text-xs flex items-center gap-2 ${statusYahoo === 'success' ? 'bg-green-500/5 border-green-500/20 text-green-600' : 'bg-destructive/5 border-destructive/20 text-destructive'}`}>
+                                                {statusYahoo === 'success' ? <ShieldCheck size={14} /> : <AlertCircle size={14} />}
+                                                {messageYahoo}
+                                            </div>
+                                        )}
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="p-5 border border-border/40 rounded-2xl bg-muted/10">
+                                                <p className="text-xs font-bold mb-2">수집 데이터</p>
+                                                <ul className="text-[11px] text-muted-foreground space-y-1.5 list-disc list-inside">
+                                                    <li>KOSPI/KOSDAQ 종목 10년 월봉</li>
+                                                    <li>S&P 500, 나스닥 등 주요 지수</li>
+                                                    <li>USD/KRW 환율 및 미국채 금리</li>
+                                                </ul>
+                                            </div>
+                                            <div className="p-5 border border-border/40 rounded-2xl bg-muted/10">
+                                                <p className="text-xs font-bold mb-2">활용 계획</p>
+                                                <ul className="text-[11px] text-muted-foreground space-y-1.5 list-disc list-inside">
+                                                    <li>역사적 P/E, P/B 밴드 분석</li>
+                                                    <li>글로벌 시황 기반 AI 리포팅</li>
+                                                    <li>매크로 지표 변동 알림 (예정)</li>
+                                                </ul>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    )}
-
-                </div>
+                        )}
+                    </div>
+                )}
             </main>
         </div>
     )

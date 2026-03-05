@@ -7,12 +7,21 @@ import { TelegramService } from './services/TelegramService'
 import { DatabaseService } from './services/DatabaseService'
 import { DartApiService } from './services/DartApiService'
 import { CompanyAnalysisService } from './services/CompanyAnalysisService'
+import { MarketScannerService } from './services/MarketScannerService'
+import { AiDecisionService } from './services/AiDecisionService'
+import { DataLoggingService } from './services/DataLoggingService'
+import { DailyRetrospectiveService } from './services/DailyRetrospectiveService'
+import { AiService } from './services/AiService'
+import { VirtualAccountService } from './services/VirtualAccountService'
 import { eventBus, SystemEvent } from './utils/EventBus'
 
 const store = new Store()
 const kiwoomService = KiwoomService.getInstance()
 const autoTradeService = AutoTradeService.getInstance()
 const telegramService = TelegramService.getInstance()
+const marketScannerService = MarketScannerService.getInstance()
+const aiDecisionService = AiDecisionService.getInstance()
+// DataLoggingService is now lazily instantiated.
 
 // Load initial settings to the service
 const initialSettings = store.get('autotrade_settings')
@@ -25,7 +34,7 @@ if (initialStatus) {
 }
 
 process.env.DIST = path.join(__dirname, '../dist')
-process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(process.env.DIST, '../public')
+process.env.VITE_PUBLIC = (app && app.isPackaged) ? process.env.DIST : path.join(process.env.DIST, '../public')
 
 let win: BrowserWindow | null
 
@@ -51,6 +60,20 @@ function createWindow() {
     eventBus.on(SystemEvent.AUTO_TRADE_STATUS_CHANGED, (running) => {
         if (win && !win.isDestroyed()) {
             win.webContents.send('kiwoom:auto-trade-status-changed', running)
+        }
+    })
+
+    // Forward AI Trade Stream to renderer
+    eventBus.on(SystemEvent.AI_TRADE_STREAM, (data) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('ai-trade:stream', data)
+        }
+    })
+
+    // Forward AI Evaluation update
+    eventBus.on(SystemEvent.AI_EVALUATION_UPDATE, (data) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('ai-trade:evaluation-update', data)
         }
     })
 
@@ -91,6 +114,9 @@ app.whenReady().then(() => {
         } catch (err) {
             console.error('[Main] Startup DART sync failed:', err)
         }
+
+        // Start Market Scanner
+        marketScannerService.start()
     }, 5000)
 })
 
@@ -211,6 +237,19 @@ ipcMain.handle('kiwoom:save-watchlist-symbols', async (_event, symbols: string[]
 
 ipcMain.handle('kiwoom:get-watchlist-symbols', () => {
     return store.get('watchlist_symbols') || []
+})
+
+ipcMain.handle('kiwoom:get-api-logs', () => {
+    return kiwoomService.getApiLogs()
+})
+
+ipcMain.handle('kiwoom:test-market-scanner', async () => {
+    try {
+        const data = await kiwoomService.getVolumeSpikeStocks()
+        return { success: true, data }
+    } catch (error: any) {
+        return { success: false, error: error?.response?.data || { message: error.message } }
+    }
 })
 
 ipcMain.handle('kiwoom:get-watchlist', async (_event, { symbols }) => {
@@ -439,6 +478,77 @@ ipcMain.handle('open-external', async (_event, url: string) => {
     try {
         await shell.openExternal(url)
         return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('ai-trade:set-autopilot', (_event, active: boolean) => {
+    AiDecisionService.getInstance().setAutoPilot(active)
+    return { success: true }
+})
+
+ipcMain.handle('ai-trade:get-autopilot', () => {
+    return AiDecisionService.getInstance().getIsAutoPilot()
+})
+
+ipcMain.handle('ai-trade:get-logs', () => {
+    return MarketScannerService.getInstance().getLogHistory()
+})
+ipcMain.handle('ai-trade:get-strategies', () => {
+    return DatabaseService.getInstance().getAiStrategies()
+})
+
+ipcMain.handle('ai-trade:set-active-strategy', (_event, id: string) => {
+    DatabaseService.getInstance().setAiStrategyActive(id)
+    return { success: true }
+})
+
+ipcMain.handle('ai-trade:delete-strategy', (_event, id: string) => {
+    DatabaseService.getInstance().deleteAiStrategy(id)
+    return { success: true }
+})
+
+ipcMain.handle('ai-trade:run-retrospective', async () => {
+    const result = await DailyRetrospectiveService.getInstance().runRetrospective()
+    return { success: true, strategy: result }
+})
+
+ipcMain.handle('ai-trade:reset-account', () => {
+    return VirtualAccountService.getInstance().resetAccount()
+})
+
+ipcMain.handle('ai-trade:get-account-state', () => {
+    return VirtualAccountService.getInstance().getAccountState()
+})
+ipcMain.handle('ai-trade:get-runtime-config', () => {
+    return AiDecisionService.getInstance().getActiveConfig()
+})
+ipcMain.handle('ai-trade:save-runtime-config', (_event, config: any) => {
+    store.set('ai_runtime_config', config)
+    return { success: true }
+})
+ipcMain.handle('ai-trade:sync-strategy-config', () => {
+    AiDecisionService.getInstance().syncRuntimeConfigWithActiveStrategy()
+    return { success: true }
+})
+ipcMain.handle('ai:save-settings', (_event, settings: any) => {
+    store.set('ai_settings', settings)
+    return { success: true }
+})
+ipcMain.handle('ai:get-settings', () => {
+    return store.get('ai_settings') || null
+})
+
+ipcMain.handle('ai:test-connection', async (_event, { geminiKey, modelName }: { geminiKey: string, modelName: string }) => {
+    try {
+        const response = await AiService.getInstance().askGemini(
+            'Hello, this is a connection test. Please respond with "Connected".',
+            undefined,
+            geminiKey,
+            modelName
+        )
+        return { success: true, response }
     } catch (err: any) {
         return { success: false, error: err.message }
     }

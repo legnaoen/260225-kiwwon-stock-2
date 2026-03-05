@@ -33,7 +33,9 @@ export default function CalendarView() {
         code: n.stockCode,
         reminderType: (n.reminderType as any) || '없음',
         isNotified: n.isNotified || false,
-        isMemo: true
+        isMemo: true,
+        isMarketEvent: false,
+        originalId: ''
     }))
 
     const events = [...scheduleEvents, ...memoEvents]

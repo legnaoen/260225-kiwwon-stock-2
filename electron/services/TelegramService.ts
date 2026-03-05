@@ -22,6 +22,7 @@ export class TelegramService {
     private stockSearchCache: Array<{ code: string, name: string }> = [];
     private isWaitingForLiquidation = false;
     private liquidationWaitTimer: NodeJS.Timeout | null = null;
+    private scheduleSummaryJob: cron.ScheduledTask | null = null;
 
     private constructor() {
         this.initializeBot();

@@ -63,12 +63,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('kiwoom:order-realtime', listener);
         return () => ipcRenderer.removeListener('kiwoom:order-realtime', listener);
     },
-    // Real-time order updates
-    onOrderRealtime: (callback: (order: any) => void) => {
-        const listener = (_event: any, order: any) => callback(order);
-        ipcRenderer.on('kiwoom:order-realtime', listener);
-        return () => ipcRenderer.removeListener('kiwoom:order-realtime', listener);
-    },
+
+    // API Diagnostics
+    getApiLogs: () => ipcRenderer.invoke('kiwoom:get-api-logs'),
+    testMarketScanner: () => ipcRenderer.invoke('kiwoom:test-market-scanner'),
 
     // Telegram
     saveTelegramSettings: (settings: { botToken: string, chatId: string, chartTheme?: string }) => ipcRenderer.invoke('telegram:save-settings', settings),
@@ -111,4 +109,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testScheduleSummary: () => ipcRenderer.invoke('schedule:test-summary'),
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
     testYahooFinance: () => ipcRenderer.invoke('yahoo:test-connection'),
+
+    // AI Trade
+    onAiTradeStream: (callback: (data: any) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('ai-trade:stream', listener)
+        return () => ipcRenderer.removeListener('ai-trade:stream', listener)
+    },
+    onAiTradeEvaluationUpdate: (callback: (data: { isEvaluating: boolean, stock: { code: string, name: string } | null }) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('ai-trade:evaluation-update', listener)
+        return () => ipcRenderer.removeListener('ai-trade:evaluation-update', listener)
+    },
+    getAiTradeStatus: () => ipcRenderer.invoke('ai-trade:get-status'),
+    setAiAutoPilot: (active: boolean) => ipcRenderer.invoke('ai-trade:set-autopilot', active),
+    getAiAutoPilot: () => ipcRenderer.invoke('ai-trade:get-autopilot'),
+    getAiTradeLogs: () => ipcRenderer.invoke('ai-trade:get-logs'),
+    resetAiAccount: () => ipcRenderer.invoke('ai-trade:reset-account'),
+    getAiAccountState: () => ipcRenderer.invoke('ai-trade:get-account-state'),
+    getAiStrategies: () => ipcRenderer.invoke('ai-trade:get-strategies'),
+    setAiActiveStrategy: (id: string) => ipcRenderer.invoke('ai-trade:set-active-strategy', id),
+    deleteAiStrategy: (id: string) => ipcRenderer.invoke('ai-trade:delete-strategy', id),
+    runAiRetrospective: () => ipcRenderer.invoke('ai-trade:run-retrospective'),
+    getAiRuntimeConfig: () => ipcRenderer.invoke('ai-trade:get-runtime-config'),
+    saveAiRuntimeConfig: (config: any) => ipcRenderer.invoke('ai-trade:save-runtime-config', config),
+    syncStrategyConfig: () => ipcRenderer.invoke('ai-trade:sync-strategy-config'),
+    saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance?: number }) => ipcRenderer.invoke('ai:save-settings', settings),
+    getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
+    testAiConnection: (settings: { geminiKey: string, modelName: string }) => ipcRenderer.invoke('ai:test-connection', settings),
 })

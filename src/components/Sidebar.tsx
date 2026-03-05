@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, ListOrdered, History, Settings, Bot, Calendar, Wallet } from 'lucide-react'
+import { LayoutDashboard, ListOrdered, History, Settings, Bot, Calendar, Wallet, Brain } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -13,6 +13,7 @@ export const menuItems = [
     { id: 'watchlist', name: '관심종목', icon: ListOrdered },
     { id: 'schedule', name: '일정', icon: Calendar },
     { id: 'auto-trade', name: '자동매매', icon: Bot },
+    { id: 'ai-trade', name: 'AI Trade', icon: Brain },
     { id: 'settings', name: '설정', icon: Settings },
 ]
 

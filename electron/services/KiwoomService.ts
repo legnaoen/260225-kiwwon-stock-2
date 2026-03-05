@@ -12,8 +12,66 @@ export class KiwoomService {
     private tokenManager = KiwoomTokenManager.getInstance();
     private wsManager: KiwoomWebSocketManager | null = null;
     private conditionWsManager: KiwoomConditionWebSocketManager | null = null;
+    private apiLogs: any[] = [];
 
-    private constructor() { }
+    private constructor() {
+        // Setup axios interceptors for diagnostic logging
+        axios.interceptors.request.use((config) => {
+            (config as any).metadata = { startTime: new Date() };
+            return config;
+        });
+
+        axios.interceptors.response.use(
+            (response) => {
+                if (response.config.url?.includes('api.kiwoom.com')) {
+                    const config = response.config;
+                    const apiId = config.headers?.['api-id'] || 'Unknown API';
+                    const duration = new Date().getTime() - (config as any).metadata.startTime.getTime();
+
+                    const logEntry = {
+                        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                        time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+                        apiId: apiId,
+                        url: config.url,
+                        requestData: config.data ? (typeof config.data === 'string' ? JSON.parse(config.data) : config.data) : null,
+                        responseData: response.data,
+                        success: true,
+                        duration: duration
+                    };
+
+                    this.apiLogs.unshift(logEntry);
+                    if (this.apiLogs.length > 50) this.apiLogs.pop();
+                }
+                return response;
+            },
+            (error) => {
+                if (error.config?.url?.includes('api.kiwoom.com')) {
+                    const config = error.config;
+                    const apiId = config?.headers?.['api-id'] || 'Unknown API';
+                    const duration = config ? (new Date().getTime() - (config as any).metadata.startTime.getTime()) : 0;
+
+                    const logEntry = {
+                        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                        time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+                        apiId: apiId,
+                        url: config?.url || 'Unknown URL',
+                        requestData: config?.data ? (typeof config.data === 'string' ? JSON.parse(config.data) : config.data) : null,
+                        responseData: error.response?.data || error.message,
+                        success: false,
+                        duration: duration
+                    };
+
+                    this.apiLogs.unshift(logEntry);
+                    if (this.apiLogs.length > 50) this.apiLogs.pop();
+                }
+                throw error;
+            }
+        );
+    }
+
+    public getApiLogs() {
+        return this.apiLogs;
+    }
 
     public static getInstance(): KiwoomService {
         if (!KiwoomService.instance) {
@@ -231,8 +289,10 @@ export class KiwoomService {
         return response.data;
     }
 
-    public wsRegister(symbols: string[]) {
+    public async wsRegister(symbols: string[]) {
         if (this.wsManager) {
+            let token = await this.tokenManager.getAccessToken()
+            await this.wsManager.connect(token)
             this.wsManager.registerItems(symbols)
             return true;
         }
@@ -379,6 +439,106 @@ export class KiwoomService {
                 console.error('[KiwoomService] getUnexecutedOrders Error:', err?.response?.data || err.message);
                 throw err;
             }
+        });
+    }
+
+    /**
+     * 예상체결등락률상위 조회 (ka10029) - 장전 갭상승 종목 포착용
+     */
+    public async getGapUpStocks() {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/stkinfo`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'ka10029'
+            }
+            const body = {
+                mrkt_tp: '0', // 전체
+                drt_tp: '1',  // 상승
+                rank_tp: '1'  // 등락률순
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data
+        })
+    }
+
+    /**
+     * 거래량급증 조회 (ka10023) - 장중 수급 종목 포착용
+     */
+    public async getVolumeSpikeStocks() {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/rkinfo`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'ka10023'
+            }
+            const body = {
+                mrkt_tp: "000",      // 시장구분: 000(전체)
+                sort_tp: "1",        // 정렬구분: 1(급증량)
+                tm_tp: "1",          // 시간구분: 1(분)
+                trde_qty_tp: "5",    // 거래량구분: 5(5천주이상)
+                tm: "1",             // 시간(분)
+                stk_cnd: "0",        // 종목조건: 0(전체조회)
+                pric_tp: "0",        // 가격구분: 0(전체조회)
+                stex_tp: "3"         // 거래소구분: 3(통합)
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data
+        })
+    }
+
+    /**
+     * 거래대금 상위 조회 (ka10030) - 당일 주도 테마 파악용
+     */
+    public async getTopTradingValueStocks() {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/rkinfo`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'ka10030'
+            }
+            const body = {
+                mrkt_tp: '000',        // 시장구분: 000(전체)
+                sort_tp: '3',          // 정렬구분: 3(거래대금)
+                mang_stk_incls: '1',   // 관리종목 포함 여부: 1(미포함)
+                crd_tp: '0',           // 신용구분: 0(전체조회)
+                trde_qty_tp: '0',      // 거래량구분: 0(전체조회)
+                pric_tp: '8',          // 가격구분: 8(1천원이상) -> 동전주 제외
+                trde_prica_tp: '0',    // 거래대금구분: 0(전체조회)
+                mrkt_open_tp: '0',     // 장운영구분: 0(전체조회)
+                stex_tp: '3'           // 거래소구분: 3(통합)
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data
+        })
+    }
+
+    /**
+     * 주식 분봉 차트 조회 (ka10070)
+     * @param code 종목코드
+     * @param targetTime 조회 기준시각 (HHMMSS 형식) - 0이면 현재시간
+     */
+    public async getMinuteChartData(code: string, targetTime: string = "0") {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/minutChart`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'ka10070'
+            }
+            const t = targetTime === "0" ? new Date().toTimeString().split(' ')[0].replace(/:/g, '') : targetTime;
+
+            const body = {
+                stk_cd: code, // 종목코드
+                tm: t, // 검색시간 (HHMMSS)
+                req_cnt: "30", // 요청개수 (최대 30개)
+                tm_dvs: "1" // 시간구분: 1 (1분봉)
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data;
         });
     }
 }

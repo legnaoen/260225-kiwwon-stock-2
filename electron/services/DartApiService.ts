@@ -1,6 +1,7 @@
 import axios from 'axios'
 import Store from 'electron-store'
 import { DatabaseService } from './DatabaseService'
+// @ts-ignore
 import * as unzipper from 'unzipper'
 import { XMLParser } from 'fast-xml-parser'
 import { eventBus, SystemEvent } from '../utils/EventBus'

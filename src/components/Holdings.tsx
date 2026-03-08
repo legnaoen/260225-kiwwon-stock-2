@@ -51,7 +51,7 @@ export default function Holdings() {
     const [showDebug, setShowDebug] = useState(false)
 
     const { chartHeight, setChartHeight } = useLayoutStore()
-    const { history, syncHistory } = useHoldingHistoryStore()
+    const { history, fetchHistory } = useHoldingHistoryStore()
     const { tradingDays } = useMarketStore()
     const isDragging = useRef(false)
     const startY = useRef(0)
@@ -97,8 +97,10 @@ export default function Holdings() {
                 console.log('Holdings Result:', hResult.data);
                 console.log('Deposit Result:', dResult.data);
 
-                let hData = hResult.data;
-                let dData = dResult.data;
+                // IPC 핸들러(main.ts)의 스프레드 방식과 직접 data 객체 전달 방식 모두 대응
+                let hData = hResult.data || hResult;
+                let dData = dResult.data || dResult;
+
                 if (typeof hData === 'string') try { hData = JSON.parse(hData); } catch (e) { }
                 if (typeof dData === 'string') try { dData = JSON.parse(dData); } catch (e) { }
 
@@ -145,13 +147,10 @@ export default function Holdings() {
                 if (symbols.length > 0) {
                     window.electronAPI.wsRegister(symbols)
                     enqueueSymbols(symbols)
-
-                    // Sync holding history (track first seen date)
-                    syncHistory(symbols)
-                } else {
-                    // Even if empty, sync to clear historical codes no longer held
-                    syncHistory([])
                 }
+
+                // Fetch updated history from DB after backend syncs it in getHoldings IPC
+                fetchHistory();
             } else {
                 const hError = hResult.error?.message || JSON.stringify(hResult.error) || '보유종목 조회 실패'
                 const dError = dResult.error?.message || JSON.stringify(dResult.error) || '예수금 조회 실패'
@@ -199,6 +198,10 @@ export default function Holdings() {
             cleanup()
         }
     }, [])
+
+    useEffect(() => {
+        fetchHistory();
+    }, []);
 
     // React to manual refresh events via window event listener,
     // ensuring we ALWAYS use the latest selectedAccount from the store context.
@@ -303,7 +306,8 @@ export default function Holdings() {
                                 // Group holdings by date
                                 const groups: Record<string, Stock[]> = {}
                                 data.holdings.forEach(stock => {
-                                    const date = history[stock.code] || '알 수 없음'
+                                    const cleanCode = stock.code.replace(/^A/i, '').trim();
+                                    const date = history[cleanCode] || '알 수 없음'
                                     if (!groups[date]) groups[date] = []
                                     groups[date].push(stock)
                                 })
@@ -321,19 +325,22 @@ export default function Holdings() {
 
                                 return sortedDates.map(date => {
                                     // Calculate trading days difference (+N일)
+                                    let diff = -1;
                                     let diffTag = '';
                                     if (tradingDays && tradingDays.length > 0 && date !== '알 수 없음') {
                                         const startIndex = tradingDays.indexOf(date);
-                                        const today = new Date().toLocaleDateString('sv-SE');
-                                        const todayIndex = tradingDays.indexOf(today);
+                                        const todayStr = new Date().toLocaleDateString('sv-SE');
+                                        let todayIndex = tradingDays.indexOf(todayStr);
+
+                                        // 만약 오늘 날짜가 리스트에 없다면 가장 최근 거래일을 오늘로 간주
+                                        if (todayIndex === -1 && tradingDays.length > 0) {
+                                            todayIndex = tradingDays.length - 1;
+                                        }
 
                                         if (startIndex !== -1 && todayIndex !== -1) {
-                                            const diff = todayIndex - startIndex;
-                                            diffTag = diff === 0 ? ' (오늘)' : ` (+${diff}거래일)`;
-                                        } else if (startIndex !== -1) {
-                                            // Today not in list yet, but start is. Take the last index.
-                                            const lastIndex = tradingDays.length - 1;
-                                            const diff = lastIndex - startIndex;
+                                            diff = todayIndex - startIndex;
+                                            // 음수 방지 (데이터 정합성 문제 대비)
+                                            if (diff < 0) diff = 0;
                                             diffTag = diff === 0 ? ' (오늘)' : ` (+${diff}거래일)`;
                                         }
                                     }
@@ -343,11 +350,26 @@ export default function Holdings() {
                                             {/* Date Group Header */}
                                             <TableRow className="bg-muted/30 hover:bg-muted/30 border-y border-border/50">
                                                 <TableCell colSpan={5} className="py-1.5 px-3">
-                                                    <div className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                                                        <Calendar size={12} className="text-primary/70" />
-                                                        <span>{date}</span>
-                                                        <span className="text-primary font-bold">{diffTag}</span>
-                                                        <span className="bg-muted px-1.5 py-0.5 rounded text-[10px] ml-1">{groups[date].length}종목</span>
+                                                    <div className="flex items-center justify-between w-full">
+                                                        <div className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                                                            <Calendar size={12} className="text-primary/70" />
+                                                            <span>{date}</span>
+                                                            <span className="text-primary font-bold">{diffTag}</span>
+                                                            <span className="bg-muted px-1.5 py-0.5 rounded text-[10px] ml-1">{groups[date].length}종목</span>
+                                                        </div>
+                                                        {diff === 3 && (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (confirm('D+3 자동매도 로직을 즉시 실행하시겠습니까? (상한가 조건부지정가 매도)')) {
+                                                                        window.electronAPI.executeD3AutoSell();
+                                                                    }
+                                                                }}
+                                                                className="text-[10px] bg-primary/10 text-primary hover:bg-primary/20 px-2 py-0.5 rounded border border-primary/20 font-bold transition-colors"
+                                                            >
+                                                                D+3 수동주문 실행
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </TableCell>
                                             </TableRow>

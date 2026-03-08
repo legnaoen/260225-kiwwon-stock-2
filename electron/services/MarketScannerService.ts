@@ -106,10 +106,6 @@ export class MarketScannerService {
         console.log('[MarketScanner] Service Stopped');
     }
 
-    public getThemeStocks(): string[] {
-        return this.themeStocks;
-    }
-
     private async performThemeScan() {
         try {
             const now = new Date();
@@ -207,7 +203,7 @@ export class MarketScannerService {
                 console.log('[MarketScanner] ka10023 raw data check:', res ? Object.keys(res) : 'empty');
 
                 // Support multiple possible response keys (Body, list, output, trde_qty_sdnin)
-                scanResults = res?.trde_qty_sdnin || res?.Body || res?.list || res?.output || [];
+                scanResults = (res as any)?.trde_qty_sdnin || (res as any)?.Body || (res as any)?.list || (res as any)?.output || [];
 
                 if (scanResults.length === 0) {
                     console.log('[MarketScanner] No results found. Response preview:', JSON.stringify(res).slice(0, 150));
@@ -253,7 +249,7 @@ export class MarketScannerService {
                             cumAmount: currentPrice * Math.abs(parseInt(stock.now_trde_qty || stock.vol || stock.volume || '0')),
                             vwap: currentPrice,
                             gap: gap,
-                            velocity: parseInt(stock.sdnin_qty || stock.vol_velocity || '0'),
+                            velocity: parseInt((stock as any).sdnin_qty || (stock as any).vol_velocity || '0'),
                             aiScore: 0
                         });
                         const state = this.monitoredStocks.get(code)!;
@@ -263,7 +259,7 @@ export class MarketScannerService {
                         const state = this.monitoredStocks.get(code)!;
                         state.name = name !== code ? name : state.name; // 이름이 있으면 업데이트
                         state.gap = gap;
-                        state.velocity = parseInt(stock.sdnin_qty || stock.vol_velocity || state.velocity);
+                        state.velocity = parseInt((stock as any).sdnin_qty || (stock as any).vol_velocity || state.velocity);
                         // vwap이 0이면 초기화 (최초 스캔 시점 기준)
                         if (state.vwap === 0 && currentPrice > 0) {
                             state.cumVolume = Math.abs(parseInt(stock.now_trde_qty || stock.vol || stock.volume || '0'));
@@ -462,7 +458,7 @@ export class MarketScannerService {
             // 실시간 점수 계산 및 상태 업데이트 (매매 엔진 공유용)
             state.aiScore = this.calculateAiScore(state);
             return { ...state };
-        }).filter(Boolean);
+        }).filter((s): s is NonNullable<typeof s> => s !== null);
 
         // Sort by AI Score descending
         radarCandidates.sort((a, b) => b.aiScore - a.aiScore);

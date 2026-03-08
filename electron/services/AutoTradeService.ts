@@ -1,5 +1,6 @@
 import { KiwoomService } from './KiwoomService'
 import { eventBus, SystemEvent } from '../utils/EventBus'
+import { DatabaseService } from './DatabaseService'
 
 export class AutoTradeService {
     private static instance: AutoTradeService;
@@ -13,7 +14,10 @@ export class AutoTradeService {
 
     private hasRunToday = false;
     private lastRunDate = ''; // 'YYYY-MM-DD'
+    private lastD3SellDate = ''; // 'YYYY-MM-DD'
     private isLiquidationMode = false;
+    private startTime = Date.now();
+    private d3SellTimer: NodeJS.Timeout | null = null;
     private liquidationMonitorTimer: NodeJS.Timeout | null = null;
 
     private orderQueue: any[] = [];
@@ -121,50 +125,284 @@ export class AutoTradeService {
         return 1000;
     }
 
-    /**
-     * 목표 가격을 호가 단위에 맞게 정규화(내림 처리)
-     */
     private normalizePrice(targetPrice: number): number {
         const tick = this.getTickSize(targetPrice);
         return Math.floor(targetPrice / tick) * tick;
     }
 
     /**
-     * 1. 1일 1회 스케줄링 체크 로직 (1초마다 시간 확인)
+     * 종목의 주요 가격 정보(현재가, 전일종가, 상한가)를 안전하게 추출
      */
+    private async resolveStockPriceInfo(code: string) {
+        try {
+            const info = await this.kiwoomService.getStockBasicInfo(code);
+            // ka10001, ka10100 등 다양한 API 응답 구조 대응
+            const body = info?.Body || info?.out1 || info?.body || info?.output || info;
+
+            // 로깅 추가: 상한가가 안 나올 경우를 대비해 원본 응답의 키들을 확인
+
+
+            // 1. 현재가 추출 (ka10001: cur_prc)
+            const curStr = String(body?.cur_prc || body?.stk_prc || body?.currentPrice || body?.cur_prc || body?.stck_prpr || body?.prpr || '0').replace(/[^0-9-]/g, '');
+            const currentPrice = Math.abs(parseInt(curStr, 10)) || 0;
+
+            // 2. 전일 종가(기준가) 추출 (ka10001: base_pric = 기준가 = 전일종가)
+            const yStr = String(body?.base_pric || body?.prdy_clpr || body?.lst_pric || body?.yesterdayPrice || body?.lastPrice || '').replace(/[^0-9]/g, '');
+            const yesterdayPrice = parseInt(yStr, 10) || 0;
+
+            // 3. 상한가 추출 (ka10001: upl_pric = 상한가)
+            const uStr = String(body?.upl_pric || body?.up_lmt_prc || body?.upperLimitPrice || body?.mx_prc || body?.stck_mxpr || '').replace(/[^0-9]/g, '');
+            let upperLimitPrice = parseInt(uStr, 10) || 0;
+
+            // [안전장치] 상한가 정보가 없을 경우 전일 종가 기반으로 직접 계산 (+30%)
+            if (upperLimitPrice <= 0 && yesterdayPrice > 0) {
+                const calculatedUpper = yesterdayPrice * 1.30;
+                upperLimitPrice = this.normalizePrice(calculatedUpper);
+                console.log(`[AutoTrade] Upper limit for ${code} calculated manually: ${upperLimitPrice} (Reference close: ${yesterdayPrice})`);
+            }
+
+            return {
+                currentPrice,
+                yesterdayPrice,
+                upperLimitPrice,
+                name: body?.stk_nm || body?.prdt_nm || body?.name || body?.stck_shrn_isnm || ''
+            };
+        } catch (e) {
+            console.error(`[AutoTrade] resolveStockPriceInfo error for ${code}:`, e);
+            return null;
+        }
+    }
+
     private startScheduleChecker() {
         if (this.scheduleTimer) clearInterval(this.scheduleTimer);
 
         this.scheduleTimer = setInterval(() => {
-            if (!this.isRunning || !this.config.selectedSeq || !this.config.timeHours) return;
+            if (!this.isRunning || !this.config.selectedAccount) return;
 
             const now = new Date();
-            const todayStr = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+            const todayStr = now.toLocaleDateString('sv-SE');
 
             // 날짜가 바뀌면 실행 여부 초기화
             if (this.lastRunDate !== todayStr) {
                 this.lastRunDate = todayStr;
                 this.hasRunToday = false;
+                this.lastD3SellDate = '';
             }
 
-            const currentHour = String(now.getHours()).padStart(2, '0');
-            const currentMinute = String(now.getMinutes()).padStart(2, '0');
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            const currentSecond = now.getSeconds();
 
-            const configHour = String(this.config.timeHours || '').padStart(2, '0');
-            const configMinute = String(this.config.timeMinutes || '').padStart(2, '0');
+            // 1. 기존 매수 스케줄 (조건검색)
+            const configHour = parseInt(String(this.config.timeHours || '9'), 10);
+            const configMinute = parseInt(String(this.config.timeMinutes || '5'), 10);
 
-            if (!this.hasRunToday &&
-                currentHour === configHour &&
-                currentMinute === configMinute) {
+            if (!this.hasRunToday && this.config.selectedSeq &&
+                currentHour === configHour && currentMinute === configMinute) {
 
-                this.broadcastLog(`지정 시간 도달 (${currentHour}:${currentMinute}). 조건 검색 시작...`, 'INFO');
+                this.broadcastLog(`지정 시간 도달 (${configHour}:${configMinute}). 조건 검색 시작...`, 'INFO');
                 this.hasRunToday = true;
 
-                // 조건검색 조회 1회 실행
-                this.kiwoomService.startConditionSearch(this.config.selectedSeq);
+                // 조건검색 조회 1회 실행 (WS 미연결 시 자동 재연결 후 실행)
+                this.kiwoomService.startConditionSearch(this.config.selectedSeq)
+                    .catch((err: any) => {
+                        this.broadcastLog(`[오류] 조건 검색 실패: ${err.message}`, 'ERROR');
+                        this.hasRunToday = false; // 실패 시 재시도 허용
+                    });
+            }
+
+            // 2. D+3 자동 매도 스케줄 (장 시작 감지 기반 동적 실행)
+            if (this.lastD3SellDate !== todayStr && currentHour >= 9) {
+                this.checkMarketOpenAndScheduleD3Sell(todayStr);
             }
         }, 1000); // 1초마다 확인
     }
+
+    /**
+     * 장 시작을 감지하고 D+3 매도 스케줄링 (오늘의 봉 데이터 포착 시)
+     */
+    private async checkMarketOpenAndScheduleD3Sell(todayStr: string) {
+        // todayStr가 형식이 안 맞을 수 있으므로 보정 (예: 2026-3-6 -> 2026-03-06)
+        if (todayStr.length < 10) {
+            const parts = todayStr.split('-');
+            if (parts.length === 3) {
+                todayStr = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+            }
+        }
+
+        // 중복 체크 방지 (이미 타이머가 돌고 있거나 오늘 완료했다면 패스)
+        if (this.d3SellTimer || this.lastD3SellDate === todayStr) return;
+
+        try {
+            const chartRes = await this.kiwoomService.getChartData('005930');
+            const rawData = chartRes?.stk_dt_pole_chart_qry || chartRes?.output2 || chartRes?.Body || chartRes?.list || [];
+
+            if (Array.isArray(rawData) && rawData.length > 0) {
+                const dates = rawData.map((d: any) => {
+                    const dateStr = String(d.dt || d.stck_bsop_date || d.date || d.trd_dt || '');
+                    return dateStr.length === 8 ? `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}` : dateStr;
+                });
+
+                // 오늘 날짜가 차트 데이터(삼성전자)에 나타났다면? -> 장이 열렸음!
+                if (dates.includes(todayStr)) {
+                    this.lastD3SellDate = todayStr; // 중복 방지 즉시 마킹
+
+                    const timeSinceStart = Date.now() - this.startTime;
+
+                    // 앱 시작 후 30초 이내에 이미 오늘 날짜가 차트에 있다면 -> 이미 장이 열린 상태에서 앱을 켠 것(Late Startup)
+                    // 앱을 켜두고 대기하다가 오늘 날짜가 처음 나타난 것이라면 -> 실제 장 개장 포착 (Wait 3 mins)
+                    if (timeSinceStart < 30000) {
+                        this.broadcastLog(`[D+3 감시] 장중 진입 포착(Late Startup). 즉시 D+3 대상 조회를 시작합니다.`, 'INFO');
+                        this.executeD3AutoSell();
+                    } else {
+                        this.broadcastLog(`[D+3 감시] 시장 개장 포착. 안정화를 위해 3분 후 주문을 실행합니다.`, 'INFO');
+                        this.d3SellTimer = setTimeout(() => {
+                            this.executeD3AutoSell();
+                            this.d3SellTimer = null;
+                        }, 180000); // 3분
+                    }
+
+                    // 렌더러(UI)에도 오늘이 거래일임을 알리기 위해 이벤트 발송
+                    eventBus.emit(SystemEvent.MARKET_OPENED_DETECTED, { date: todayStr, tradingDays: dates });
+                }
+            }
+        } catch (e) {
+            console.error('[AutoTrade] checkMarketOpenAndScheduleD3Sell error:', e);
+        }
+    }
+
+    /**
+     * D+3 거래일 맞이 종목 자동 매도 (공용)
+     */
+    public async executeD3AutoSell() {
+        this.broadcastLog(`[D+3 자동매도] 로직 시작...`, 'INFO');
+
+        const accountNo = this.config.selectedAccount;
+        if (!accountNo) {
+            this.broadcastLog(`[D+3 자동매도] 계좌 정보가 없어 종료합니다.`, 'WARN');
+            return;
+        }
+
+        try {
+            // 1. 거래일 리스트 확보 (삼성전자 차트 활용)
+            const chartRes = await this.kiwoomService.getChartData('005930');
+            const rawData = chartRes?.stk_dt_pole_chart_qry || chartRes?.output2 || chartRes?.Body || chartRes?.list || [];
+
+            if (!Array.isArray(rawData) || rawData.length === 0) {
+                this.broadcastLog(`[D+3 자동매도] 거래일 데이터를 가져오지 못해 취소합니다.`, 'ERROR');
+                return;
+            }
+
+            const tradingDays = rawData.map((d: any) => {
+                const dateStr = String(d.dt || d.stck_bsop_date || d.date || d.trd_dt || '');
+                return dateStr.length === 8 ? `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}` : dateStr;
+            }).filter((d: string) => d.length === 10).sort();
+
+            const today = new Date().toLocaleDateString('sv-SE');
+            if (!tradingDays.includes(today)) tradingDays.push(today);
+            tradingDays.sort();
+
+            // 2. 보유 종목 및 기록일 조회 (DB)
+            const history = DatabaseService.getInstance().getHoldingHistory();
+            const holdingsRes = await this.kiwoomService.getHoldings(accountNo);
+
+            // getHoldings 응답 파싱 강화
+            const hData = holdingsRes?.data || holdingsRes;
+            const hBody = hData?.Body || hData?.body || hData?.output1 || hData;
+
+            let listData = [];
+            if (Array.isArray(hBody)) {
+                listData = hBody;
+            } else {
+                listData = hBody?.acnt_evlt_remn_indv_tot || hBody?.output1 || hBody?.list || hBody?.grid || [];
+            }
+
+            const holdings = Array.isArray(listData) ? listData : [listData].filter(Boolean);
+
+            if (holdings.length === 0) {
+                console.log('[AutoTrade D+3] No holdings found. Full response sample:', JSON.stringify(holdingsRes).substring(0, 300));
+                this.broadcastLog(`[D+3 자동매도] 보유 종목 데이터를 찾을 수 없습니다. (응답 키: ${Object.keys(hData || {}).join(', ')})`, 'WARN');
+                return;
+            }
+
+            const todayIdx = tradingDays.indexOf(today);
+            const soldStocks: any[] = [];
+
+            this.broadcastLog(`[D+3 체크] 총 ${holdings.length}개 보유 종목 분석 시작 (거래일수: ${tradingDays.length}, 오늘인덱스: ${todayIdx})`, 'INFO');
+
+            for (const stock of holdings) {
+                // UI 및 DB(main.ts/Holdings.tsx)와 완전히 동일한 코드 추출 로직 사용
+                let rawCode = String(stock.pdno || stock.stk_cd || stock.code || stock.item_cd || '');
+                let cleanCode = rawCode.replace(/^A/i, '').trim();
+
+                // 만약 숫자로만 구성되어 있는데 6자리가 안 되는 경우(앞자리 0 증발) 복구
+                if (cleanCode.length > 0 && cleanCode.length < 6 && /^\d+$/.test(cleanCode)) {
+                    cleanCode = cleanCode.padStart(6, '0');
+                }
+
+                const stockName = stock.prdt_nm || stock.stk_nm || stock.item_nm || stock.name || cleanCode;
+                const startDate = history[cleanCode];
+
+                if (!startDate) {
+                    continue; // 구매 기록 없는 종목은 조용히 skip
+                }
+
+                const startIdx = tradingDays.indexOf(startDate);
+                // todayIdx와 startIdx가 둘 다 존재할 때만 계산
+                const diff = (startIdx !== -1 && todayIdx !== -1) ? (todayIdx - startIdx) : -1;
+
+                if (diff === 3) {
+                    console.log(`[AutoTrade D+3] 매도 대상 포착: ${stockName}(${cleanCode}) 매수일=${startDate}, 거래일차이=${diff}`);
+                    const qty = parseInt(stock.hldg_qty || stock.rmnd_qty || stock.qty || '0', 10);
+                    if (qty <= 0) {
+                        continue;
+                    }
+
+                    // 3. 당일 상한가 정보 확보 (검증된 공통 로직 사용)
+                    const priceInfo = await this.resolveStockPriceInfo(cleanCode);
+                    const orderPrice = priceInfo?.upperLimitPrice || 0;
+
+                    if (orderPrice > 0) {
+                        this.broadcastLog(`[D+3 자동매도 포착] ${stockName}: 상한가 ${orderPrice}원 매도 큐 추가`, 'INFO');
+
+                        // 통합 주문 큐(orderQueue)에 투입 (Common Order Module 사용)
+                        this.orderQueue.push({
+                            type: 'SELL',
+                            code: cleanCode,
+                            name: stockName,
+                            orderQty: qty,
+                            orderPrice: orderPrice,
+                            trdeType: '5', // 조건부지정가 (Python 예시 기준 '5')
+                        });
+
+                        soldStocks.push({ name: stockName, code: cleanCode, qty, price: orderPrice });
+                    } else {
+                        this.broadcastLog(`[D+3 자동매도] ${stockName}: 가격 정보를 가져올 수 없어 매도 실패`, 'ERROR');
+                    }
+                }
+            }
+
+            if (soldStocks.length > 0) {
+                // 주문 세션 초기화 (매도용)
+                this.buySessionStats.totalTarget += soldStocks.length;
+                this.buySessionStats.pending += soldStocks.length;
+
+                this.processOrderQueue();
+            }
+
+            if (soldStocks.length > 0) {
+                eventBus.emit(SystemEvent.D3_AUTO_SELL_ORDER_SENT, {
+                    count: soldStocks.length,
+                    stocks: soldStocks
+                });
+            }
+
+            this.broadcastLog(`[D+3 자동매도] 총 ${soldStocks.length}건 주문 완료.`, 'INFO');
+        } catch (err: any) {
+            this.broadcastLog(`[D+3 자동매도] 오류 발생: ${err.message}`, 'ERROR');
+        }
+    }
+
 
     /**
      * 수동 매수 실행 트리거 (예약 시간 지남 등의 이유)
@@ -180,7 +418,10 @@ export class AutoTradeService {
         }
 
         this.broadcastLog(`[시스템 알림] 사용자 요청으로 수동 매수 검색 호출 시작...`, 'INFO');
-        this.kiwoomService.startConditionSearch(this.config.selectedSeq);
+        this.kiwoomService.startConditionSearch(this.config.selectedSeq)
+            .catch((err: any) => {
+                this.broadcastLog(`[오류] 수동 매수 조건 검색 실패: ${err.message}`, 'ERROR');
+            });
     }
 
     /**
@@ -335,45 +576,65 @@ export class AutoTradeService {
             const batch = this.orderQueue.splice(0, throttleLimit);
 
             batch.forEach(async (order) => {
-                const msgBase = `매수 대기: ${order.name}(${order.code}) | Qty: ${order.orderQty} | Price: ${order.orderPrice}`;
+                const isBuy = order.type === 'BUY' || !order.type;
+                const msgBase = `${isBuy ? '매수' : '매도'} 대기: ${order.name}(${order.code}) | Qty: ${order.orderQty} | Price: ${order.orderPrice}`;
 
                 const accountNo = this.config.selectedAccount;
                 if (!accountNo) {
-                    this.broadcastLog(`계좌가 선택되지 않아 매수 실패: ${order.name}`, 'ERROR');
-                    this.buySessionStats.failCount++;
+                    this.broadcastLog(`계좌가 선택되지 않아 주문 실패: ${order.name}`, 'ERROR');
+                    if (isBuy) this.buySessionStats.failCount++;
                     this.buySessionStats.pending--;
                     return;
                 }
 
                 try {
-                    const result = await this.kiwoomService.sendBuyOrder(
-                        accountNo,
-                        order.code,
-                        order.orderQty,
-                        order.orderPrice
-                    );
+                    let result: any;
+                    if (isBuy) {
+                        result = await this.kiwoomService.sendBuyOrder(
+                            accountNo,
+                            order.code,
+                            order.orderQty,
+                            order.orderPrice
+                        );
+                    } else {
+                        // D+3 매도 등 (조건부지정가 지원)
+                        result = await this.kiwoomService.sendSellOrder(
+                            accountNo,
+                            order.code,
+                            order.orderQty,
+                            order.orderPrice,
+                            order.trdeType || (order.type === 'SELL' ? '5' : '00'),
+                            order.condUv || (order.type === 'SELL' ? String(order.orderPrice) : '')
+                        );
+                    }
 
-                    // 키움서버 정상 응답이더라도 '예수금 부족' 등이 msg1로 올 수 있음
                     const rspMsg = result?.msg1 || result?.message || result?.msg_cd || JSON.stringify(result?.Body || result || "OK");
+                    const ordNo = result?.ord_no || result?.Body?.ord_no || '';
 
-                    // msg1이 에러 성격인지 체크 (단순히 "정상처리"가 아닌 경우)
                     if (String(rspMsg).includes('부족') || String(rspMsg).includes('불가') || String(rspMsg).includes('초과')) {
                         throw new Error(rspMsg);
                     }
 
-                    this.broadcastLog(`${msgBase} -> 거래소 응답: ${rspMsg}`, 'SUCCESS');
-                    this.buySessionStats.successCount++;
-                    this.buySessionStats.successAmount += (order.orderPrice * order.orderQty);
+                    this.broadcastLog(`${msgBase} -> 거래소 응답: ${rspMsg} ${ordNo ? `(주문번호: ${ordNo})` : ''}`, 'SUCCESS');
+                    console.log(`[AutoTrade Order Success] ${order.name}:`, result);
+
+                    if (isBuy) {
+                        this.buySessionStats.successCount++;
+                        this.buySessionStats.successAmount += (order.orderPrice * order.orderQty);
+                    }
                 } catch (err: any) {
                     const errMsg = err?.response?.data?.msg1 || err?.response?.data?.message || err.message || err;
+                    const fullError = JSON.stringify(err?.response?.data || err);
+
                     this.broadcastLog(`${msgBase} -> 발송 실패: ${errMsg}`, 'ERROR');
+                    console.error(`[AutoTrade Order Error] ${order.name}:`, fullError);
 
-                    this.buySessionStats.failCount++;
+                    if (isBuy) this.buySessionStats.failCount++;
 
-                    // 주문 실패 이벤트(텔레그램용) Emit
                     eventBus.emit(SystemEvent.ORDER_FAILED, {
                         reason: String(errMsg),
                         name: order.name,
+                        type: order.type || 'BUY',
                         time: new Date().toLocaleTimeString()
                     });
                 } finally {
@@ -442,7 +703,9 @@ export class AutoTradeService {
                             }
                         }
                         this.lastUnexecutedSyncTime = Date.now();
-                        console.log(`[AutoTrade] 미체결 목록 REST API 동기화 완료 (건수: ${this.activeOrders.size}건)`);
+                        if (this.activeOrders.size > 0) {
+                            console.log(`[AutoTrade] 미체결 동기화: ${this.activeOrders.size}건 감시 중`);
+                        }
                     }
                 }
 
@@ -481,7 +744,7 @@ export class AutoTradeService {
                         diffSeconds = (currentHour * 3600 + currentMin * 60 + currentSec) - (ordHour * 3600 + ordMin * 60 + ordSec);
                     }
 
-                    console.log(`[AutoTrade Debug] ${stk_cd}: current=${currentTimeStr}, rawTimeStr=${rawTimeStr}, diffSeconds=${diffSeconds}, trdeType=${trdeType}`);
+
 
                     // 큐 삽입 헬퍼
                     const enqueueModify = (typeStr: string, tStep?: number) => {

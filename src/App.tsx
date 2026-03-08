@@ -116,14 +116,15 @@ function AppContent() {
         return () => clearInterval(interval)
     }, [])
 
-    // Fetch Trading Days
+    // Fetch and Sync Trading Days (Smart Sync Logic)
     useEffect(() => {
+        let fetchInterval: NodeJS.Timeout | null = null;
+
         const fetchTradingDays = async () => {
-            if (!status.connected || !window.electronAPI?.getChartData) return;
+            if (!status.connected || !window.electronAPI?.getChartData) return false;
 
             try {
-                console.log('[App] Fetching trading days from Kiwoom API...');
-                // Ensure we use Samsung Electronics (005930) as market reference
+                console.log('[App] Syncing trading days...');
                 const result = await window.electronAPI.getChartData({ stk_cd: '005930' });
 
                 if (result.success && result.data) {
@@ -139,26 +140,70 @@ function AppContent() {
                         }).filter((d: string) => d.length === 10).sort();
 
                         const today = new Date().toLocaleDateString('sv-SE');
-                        const now = new Date();
-                        const hours = now.getHours();
-                        const day = now.getDay();
-
-                        // Add today if it's a weekday and past 9 AM, and not yet in the list
-                        if (day >= 1 && day <= 5 && hours >= 9 && !dates.includes(today)) {
-                            dates.push(today);
-                        }
+                        const isSynced = dates.includes(today);
 
                         setTradingDays(dates);
-                        console.log(`[App] Successfully initialized ${dates.length} trading days.`);
+                        console.log(`[App] Trading days updated. Synced today: ${isSynced}`);
+                        return isSynced;
                     }
                 }
             } catch (err) {
                 console.error('[App] Failed to fetch trading days:', err);
             }
+            return false;
         };
 
-        fetchTradingDays();
-    }, [status.connected]) // Re-run whenever connection status becomes true
+        const startSyncLoop = async () => {
+            const isSynced = await fetchTradingDays();
+
+            const now = new Date();
+            const day = now.getDay();
+            const hour = now.getHours();
+            const isMarketHours = day >= 1 && day <= 5 && hour >= 9 && hour < 16;
+
+            // 평일 장중인데 동기화가 안 된 경우에만 주기적 체크 가동 (10시 개장 등 대응)
+            if (!isSynced && isMarketHours) {
+                console.log('[App] Market is open but today not synced. Starting sync loop...');
+                if (fetchInterval) clearInterval(fetchInterval);
+                fetchInterval = setInterval(async () => {
+                    const success = await fetchTradingDays();
+                    if (success) {
+                        console.log('[App] Today synced successfully. Stopping sync loop.');
+                        if (fetchInterval) {
+                            clearInterval(fetchInterval);
+                            fetchInterval = null;
+                        }
+                    }
+                }, 60000); // 1분 간격
+            }
+        };
+
+        if (status.connected) {
+            startSyncLoop();
+        }
+
+        // Backend에서 장 시작 포착 시 발생하는 이벤트 리스너 등록
+        const unsubscribeSync = window.electronAPI.onMarketOpenedDetected?.((data) => {
+            console.log('[App] Received market open signal from backend:', data.date);
+            setTradingDays(data.tradingDays);
+            if (fetchInterval) {
+                clearInterval(fetchInterval);
+                fetchInterval = null;
+            }
+        });
+
+        const handleManualRefresh = () => {
+            console.log('[App] Manual refresh triggered. Force syncing trading days...');
+            fetchTradingDays();
+        };
+        window.addEventListener('kiwoom:refresh-data', handleManualRefresh);
+
+        return () => {
+            if (fetchInterval) clearInterval(fetchInterval);
+            if (unsubscribeSync) unsubscribeSync();
+            window.removeEventListener('kiwoom:refresh-data', handleManualRefresh);
+        };
+    }, [status.connected])
 
     // Clock and Market Status listener
     useEffect(() => {

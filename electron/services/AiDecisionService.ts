@@ -33,7 +33,7 @@ export class AiDecisionService {
         setInterval(() => this.analyzeMarket(), 5000);
     }
 
-    private getActiveConfig() {
+    public getActiveConfig() {
         // [Manual Priority] Use manually set parameters if they exist in runtime config
         const runtime = store.get('ai_runtime_config') as any;
         if (runtime && Object.keys(runtime).length > 0) return runtime; // Check if runtime is not empty object
@@ -370,10 +370,10 @@ ${simpleChart}
                 if (currentLivePrice >= min_buy_price && currentLivePrice <= max_buy_price) {
                     this.executeBuy(state.code, state.name, currentLivePrice, `[AI 승인] ${decision.reason}`, target_price, stop_price);
                 } else {
-                    this.logToDashboard(`[AI 타점 이탈 방어] ${state.name} 지침 범위(${min_buy_price}~${max_buy_price}) 이탈. 현재가: ${currentLivePrice}. 매수 취소(Pass).`, "warn");
+                    this.logToDashboard(`[AI 타점 이탈 방어] ${state.name} 지침 범위(${min_buy_price}~${max_buy_price}) 이탈. 현재가: ${currentLivePrice}. 매수 취소(Pass).`, "alert");
                 }
             } else {
-                this.logToDashboard(`[AI 매수 보류] ${state.name} - ${decision.reason}`, "warn");
+                this.logToDashboard(`[AI 매수 보류] ${state.name} - ${decision.reason}`, "info");
             }
 
         } catch (e) {
@@ -410,7 +410,7 @@ ${simpleChart}
                 this.logToDashboard(`[SELL ORDER] ${name}(${code}) | ${holding.currentPrice.toLocaleString()}원 | ${holding.pnlRate.toFixed(2)}%`, 'trade');
                 this.logToDashboard(`[청산 완료] ${reason}`, 'trade');
             } else {
-                this.logToDashboard(`[ERROR] ${name} 매도 주문 실패: ${result.error}`, 'alert');
+                this.logToDashboard(`[ERROR] ${name} 매도 주문 실패: ${result.reason}`, 'alert');
             }
         }
     }

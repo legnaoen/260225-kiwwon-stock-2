@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getWatchlistSymbols: () => ipcRenderer.invoke('kiwoom:get-watchlist-symbols'),
     getConnectionStatus: () => ipcRenderer.invoke('kiwoom:get-connection-status'),
     analyzeStock: (stockCode: string) => ipcRenderer.invoke('kiwoom:analyze-stock', stockCode),
+    getHoldingHistory: () => ipcRenderer.invoke('holding:get-history'),
+    getTradingDays: () => ipcRenderer.invoke('kiwoom:get-trading-days'),
 
     // Auto Trade
     saveAutoTradeSettings: (settings: any) => ipcRenderer.invoke('kiwoom:save-autotrade-settings', settings),
@@ -47,6 +49,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAutoTradeStatus: () => ipcRenderer.invoke('kiwoom:get-autotrade-status'),
     setAutoTradeStatus: (status: boolean) => ipcRenderer.invoke('kiwoom:set-autotrade-status', status),
     executeManualBuy: () => ipcRenderer.invoke('kiwoom:execute-manual-buy'),
+    executeD3AutoSell: () => ipcRenderer.invoke('kiwoom:execute-d3-auto-sell'),
     onAutoTradeLog: (callback: (log: any) => void) => {
         const listener = (_event: any, log: any) => callback(log)
         ipcRenderer.on('kiwoom:auto-trade-log', listener)
@@ -134,7 +137,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAiRuntimeConfig: () => ipcRenderer.invoke('ai-trade:get-runtime-config'),
     saveAiRuntimeConfig: (config: any) => ipcRenderer.invoke('ai-trade:save-runtime-config', config),
     syncStrategyConfig: () => ipcRenderer.invoke('ai-trade:sync-strategy-config'),
-    saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance?: number }) => ipcRenderer.invoke('ai:save-settings', settings),
+    saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance?: number, buyStartTime?: string, buyEndTime?: string }) => ipcRenderer.invoke('ai:save-settings', settings),
     getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
     testAiConnection: (settings: { geminiKey: string, modelName: string }) => ipcRenderer.invoke('ai:test-connection', settings),
+    onMarketOpenedDetected: (callback: (data: { date: string, tradingDays: string[] }) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('kiwoom:market-opened-detected', listener)
+        return () => ipcRenderer.removeListener('kiwoom:market-opened-detected', listener)
+    }
 })

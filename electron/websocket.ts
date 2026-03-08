@@ -108,7 +108,7 @@ export class KiwoomWebSocketManager {
             ]
         }
         const msg = JSON.stringify(regPacket)
-        console.log('[WebSocket] Sending REG message:', msg)
+
         if (this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(msg)
         }

@@ -11,6 +11,7 @@ interface RadarItem {
     vwap: number;
     gap: number;
     velocity: number;
+    aiScore?: number;
 }
 
 interface Holding {
@@ -22,6 +23,8 @@ interface Holding {
     pnl: number;
     pnlRate: number;
     buyTime: string;
+    targetPrice?: number;
+    stopPrice?: number;
 }
 
 interface LogEntry {
@@ -334,11 +337,11 @@ export default function LiveTradeTab() {
                                                         <div className="flex items-center justify-end gap-2">
                                                             <div className="h-1.5 w-16 bg-muted rounded-full overflow-hidden">
                                                                 <div
-                                                                    className={`h-full transition-all duration-500 ${item.aiScore >= 80 ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : item.aiScore >= 60 ? 'bg-amber-500' : 'bg-green-500'}`}
+                                                                    className={`h-full transition-all duration-500 ${(item.aiScore || 0) >= 80 ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : (item.aiScore || 0) >= 60 ? 'bg-amber-500' : 'bg-green-500'}`}
                                                                     style={{ width: `${Math.min(item.aiScore || 0, 100)}%` }}
                                                                 ></div>
                                                             </div>
-                                                            <span className={`font-mono font-bold text-[10px] w-6 ${item.aiScore >= 80 ? 'text-red-500' : item.aiScore >= 60 ? 'text-amber-500' : 'text-foreground'}`}>{item.aiScore || 0}</span>
+                                                            <span className={`font-mono font-bold text-[10px] w-6 ${(item.aiScore || 0) >= 80 ? 'text-red-500' : (item.aiScore || 0) >= 60 ? 'text-amber-500' : 'text-foreground'}`}>{item.aiScore || 0}</span>
                                                         </div>
                                                     </td>
                                                     <td className={`px-3 py-3 text-right font-mono font-bold ${Number(vwapGap) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
@@ -702,8 +705,8 @@ export default function LiveTradeTab() {
                                         ))}
                                         <div className="p-2.5 bg-primary/5 border border-primary/20 text-[10px] flex justify-between items-center rounded">
                                             <span className="font-bold">가중치 합계 (100% 권장)</span>
-                                            <span className={`text-sm font-mono font-bold ${Object.values(runtimeConfig.scoringWeights || {}).reduce((a: any, b: any) => a + b, 0) === 100 ? 'text-green-500' : 'text-amber-500'}`}>
-                                                {Object.values(runtimeConfig.scoringWeights || {}).reduce((a: any, b: any) => a + b, 0)}%
+                                            <span className={`text-sm font-mono font-bold ${(Object.values(runtimeConfig.scoringWeights || {}) as number[]).reduce((a: number, b: number) => a + b, 0) === 100 ? 'text-green-500' : 'text-amber-500'}`}>
+                                                {(Object.values(runtimeConfig.scoringWeights || {}) as number[]).reduce((a: number, b: number) => a + b, 0)}%
                                             </span>
                                         </div>
 

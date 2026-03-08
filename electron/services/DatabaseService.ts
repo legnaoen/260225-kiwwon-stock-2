@@ -116,6 +116,13 @@ export class DatabaseService {
             );
         `
 
+        const createHoldingHistoryTable = `
+            CREATE TABLE IF NOT EXISTS holding_history (
+                stock_code TEXT PRIMARY KEY,
+                first_seen_date TEXT NOT NULL
+            );
+        `
+
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
         this.db.exec(createFinancialDataTable)
@@ -124,6 +131,7 @@ export class DatabaseService {
         this.db.exec(createYahooMacroCacheTable)
         this.db.exec(createAiStrategiesTable)
         this.db.exec(createAiStrategyHistoryTable)
+        this.db.exec(createHoldingHistoryTable)
 
         // Ensure columns exist for migration
         try {
@@ -148,7 +156,11 @@ export class DatabaseService {
 
         // Ensure v1 Factory Strategy exists
         this.ensureV1Strategy();
+
+        // Ensure v1 Factory Strategy exists
+        this.ensureV1Strategy();
     }
+
 
     private ensureV1Strategy() {
         const v1 = this.db.prepare('SELECT id FROM ai_strategies WHERE version = ?').get('v1');
@@ -365,6 +377,47 @@ export class DatabaseService {
         this.db.prepare('DELETE FROM ai_strategies WHERE id = ?').run(id);
         this.db.prepare('DELETE FROM ai_strategy_history WHERE strategy_id = ?').run(id);
     }
+
+    public syncHoldingHistory(currentCodes: string[]) {
+        if (!currentCodes || currentCodes.length === 0) {
+            console.log('[DatabaseService] syncHoldingHistory: Empty codes list, skipping sync to avoid accidental deletion');
+            return;
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        const insertStmt = this.db.prepare('INSERT OR IGNORE INTO holding_history (stock_code, first_seen_date) VALUES (?, ?)');
+        const deleteStmt = this.db.prepare('DELETE FROM holding_history WHERE stock_code = ?');
+        const getAllStmt = this.db.prepare("SELECT stock_code FROM holding_history WHERE stock_code NOT LIKE 'internal-%'");
+
+        const sync = this.db.transaction((codes: string[]) => {
+            // 1. Add new stocks
+            for (const code of codes) {
+                insertStmt.run(code, today);
+            }
+
+            // 2. Remove stocks no longer held (skip internal markers)
+            const existingEntries = getAllStmt.all() as any[];
+            for (const entry of existingEntries) {
+                if (!codes.includes(entry.stock_code)) {
+                    console.log(`[DatabaseService] Removing ${entry.stock_code} from history because it's no longer held`);
+                    deleteStmt.run(entry.stock_code);
+                }
+            }
+        });
+
+        sync(currentCodes);
+    }
+
+    public getHoldingHistory(): Record<string, string> {
+        // Simple query without the problematic wildcard (_)
+        const rows = this.db.prepare("SELECT * FROM holding_history WHERE stock_code NOT LIKE 'internal-%'").all() as any[];
+        const history: Record<string, string> = {};
+        rows.forEach(row => {
+            history[row.stock_code] = row.first_seen_date;
+        });
+        return history;
+    }
+
 
     public getDb() {
         return this.db

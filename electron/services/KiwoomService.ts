@@ -167,10 +167,6 @@ export class KiwoomService {
             }
         }))
 
-        // Ensure WebSocket is connected after getting holdings logic
-        let token = await this.tokenManager.getAccessToken()
-        if (this.wsManager) this.wsManager.connect(token)
-
         return { data: response.data, headers: response.headers };
     }
 
@@ -255,10 +251,13 @@ export class KiwoomService {
                 'api-id': 'ka10081'
             }
         }))
-        console.log('[KiwoomService] getChartData response keys:', Object.keys(response.data || {}), response.data?.Body ? Object.keys(response.data.Body) : 'No Body');
+
         return response.data;
     }
 
+    /**
+     * 주식 기본 정보 조회 (ka10001)
+     */
     public async getStockBasicInfo(stk_cd: string) {
         const url = `${BASE_URL}/api/dostk/stkinfo`
         const response = await this.makeApiRequestWithRetry((t) => axios.post(url, {
@@ -311,8 +310,34 @@ export class KiwoomService {
         if (this.conditionWsManager) this.conditionWsManager.connect(token)
     }
 
-    public startConditionSearch(seq: string) {
+    public async startConditionSearch(seq: string) {
         if (!this.conditionWsManager) throw new Error("Condition WebSocket Manager is not initialized");
+
+        // WS가 끊겨 있으면 재연결 후 최대 10초 대기
+        const isReady = () => {
+            const conditions = this.conditionWsManager!.getConditions();
+            // 조건식 목록이 수신됐다면 로그인까지 완료된 상태
+            return conditions.length > 0;
+        };
+
+        if (!isReady()) {
+            console.log('[KiwoomService] Condition WS 미연결 감지 → 재연결 시도...');
+            await this.connectConditionWs();
+
+            // 최대 10초(500ms × 20회) 대기
+            const maxRetries = 20;
+            for (let i = 0; i < maxRetries; i++) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                if (isReady()) {
+                    console.log(`[KiwoomService] Condition WS 재연결 완료 (${(i + 1) * 0.5}초 소요). 조건 검색 실행.`);
+                    break;
+                }
+                if (i === maxRetries - 1) {
+                    throw new Error('Condition WebSocket 재연결 실패: 10초 내 조건식 목록을 수신하지 못했습니다.');
+                }
+            }
+        }
+
         this.conditionWsManager.requestConditionSearch(seq);
     }
 
@@ -327,15 +352,15 @@ export class KiwoomService {
                 'authorization': `Bearer ${token}`,
                 'api-id': 'kt10000', // 매수
             }
-            const body = {
+            const body: any = {
                 acnt_no: accountNo,
                 dmst_stex_tp: 'KRX',
                 stk_cd: stk_cd,
                 ord_qty: String(qty),
                 ord_uv: String(price),
                 trde_tp: '00', // 지정가 (보통)
-                cond_uv: ''
             }
+            // 지정가 주문인 경우 cond_uv를 아예 포함하지 않아야 오류 방지 가능
             const response = await axios.post(url, body, { headers })
             return response.data
         })
@@ -343,8 +368,10 @@ export class KiwoomService {
 
     /**
      * 국내주식 매도 주문
+     * @param trdeType '00':지정가, '05':조건부지정가
+     * ⚠️ 키움 REST API 매도 주문은 cond_uv(스톱가격) 파라미터를 사용하지 않음 (407022 오류 방지)
      */
-    public async sendSellOrder(accountNo: string, stk_cd: string, qty: number, price: number): Promise<any> {
+    public async sendSellOrder(accountNo: string, stk_cd: string, qty: number, price: number, trdeType: string = '00', condUv: string = ''): Promise<any> {
         return this.makeApiRequestWithRetry(async (token) => {
             const url = `${BASE_URL}/api/dostk/ordr`
             const headers = {
@@ -352,15 +379,22 @@ export class KiwoomService {
                 'authorization': `Bearer ${token}`,
                 'api-id': 'kt10001', // 매도
             }
-            const body = {
+
+            // trdeType 표준화: '5' -> '05'
+            const normalizedTrdeType = trdeType === '5' ? '05' : trdeType;
+
+            // ⚠️ 키움 REST API 국내주식 매도 주문은 cond_uv(스톱가격)를 절대 포함하면 안됨
+            // 포함 시 error 407022 발생: "해당 주문은 스톱가격을 입력하지 않습니다"
+            const body: any = {
                 acnt_no: accountNo,
                 dmst_stex_tp: 'KRX',
                 stk_cd: stk_cd,
                 ord_qty: String(qty),
                 ord_uv: String(price),
-                trde_tp: '00', // 지정가 (보통)
-                cond_uv: ''
+                trde_tp: normalizedTrdeType,
             }
+
+            console.log(`[KiwoomService] sendSellOrder: code=${stk_cd}, qty=${qty}, price=${price}, trde_tp=${normalizedTrdeType}`);
             const response = await axios.post(url, body, { headers })
             return response.data
         })
@@ -433,7 +467,8 @@ export class KiwoomService {
             };
             try {
                 const response = await axios.post(url, body, { headers });
-                console.log('[KiwoomService] getUnexecutedOrders Response Data:', JSON.stringify(response.data));
+                const orderCount = response.data?.oso?.length ?? 0;
+                if (orderCount > 0) console.log(`[KiwoomService] 미체결 조회: ${orderCount}건`);
                 return response.data;
             } catch (err: any) {
                 console.error('[KiwoomService] getUnexecutedOrders Error:', err?.response?.data || err.message);

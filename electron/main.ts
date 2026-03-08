@@ -77,6 +77,13 @@ function createWindow() {
         }
     })
 
+    // Forward Market Opened Detection (Trading Days Sync)
+    eventBus.on(SystemEvent.MARKET_OPENED_DETECTED, (data) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('kiwoom:market-opened-detected', data)
+        }
+    })
+
     win.webContents.on('did-finish-load', () => {
         win?.webContents.send('main-process-message', (new Date).toLocaleString())
     })
@@ -197,9 +204,52 @@ ipcMain.handle('kiwoom:get-accounts', async () => {
 ipcMain.handle('kiwoom:get-holdings', async (_event, { accountNo, nextKey = "" }) => {
     try {
         const result = await kiwoomService.getHoldings(accountNo, nextKey)
-        return { success: true, ...result }
+
+        // Sync holding history with DB automatically
+        try {
+            const hBody = result?.data?.Body || result?.data;
+            const listData = hBody?.acnt_evlt_remn_indv_tot || hBody?.output1 || hBody?.list || hBody?.grid || [];
+            const list = Array.isArray(listData) ? listData : [listData].filter(Boolean);
+
+            if (list.length > 0) {
+                const currentCodes = list.map((item: any) =>
+                    String(item.stk_cd || item.pdno || item.code || '').replace(/^A/i, '').trim()
+                ).filter(Boolean);
+                DatabaseService.getInstance().syncHoldingHistory(currentCodes);
+            }
+        } catch (syncErr) {
+            console.error('[Main] Failed to sync holding history:', syncErr);
+        }
+
+        // Return consistent structure
+        return { success: true, data: result.data, headers: result.headers }
     } catch (error: any) {
         return { success: false, error: error?.response?.data || { message: error.message } }
+    }
+})
+
+
+ipcMain.handle('holding:get-history', () => {
+    return DatabaseService.getInstance().getHoldingHistory();
+})
+
+ipcMain.handle('kiwoom:get-trading-days', async () => {
+    try {
+        const chartRes = await kiwoomService.getChartData('005930');
+        const rawData = chartRes?.stk_dt_pole_chart_qry || chartRes?.output2 || chartRes?.Body || chartRes?.list || [];
+
+        const tradingDays = rawData.map((d: any) => {
+            const dateStr = String(d.dt || d.stck_bsop_date || d.date || d.trd_dt || '');
+            return dateStr.length === 8 ? `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}` : dateStr;
+        }).filter((d: string) => d.length === 10).sort();
+
+        const today = new Date().toISOString().split('T')[0];
+        if (!tradingDays.includes(today)) tradingDays.push(today);
+        tradingDays.sort();
+
+        return { success: true, data: tradingDays };
+    } catch (err: any) {
+        return { success: false, error: err.message };
     }
 })
 
@@ -271,7 +321,7 @@ ipcMain.handle('kiwoom:get-chart-data', async (_event, { stk_cd, base_dt }) => {
 })
 
 ipcMain.handle('kiwoom:ws-register', async (_event, symbols: string[]) => {
-    const success = kiwoomService.wsRegister(symbols)
+    const success = await kiwoomService.wsRegister(symbols)
     if (success) {
         return { success: true }
     }
@@ -303,6 +353,15 @@ ipcMain.handle('kiwoom:set-autotrade-status', (_event, status: boolean) => {
 ipcMain.handle('kiwoom:execute-manual-buy', async () => {
     try {
         await autoTradeService.executeManualBuy();
+        return { success: true };
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
+})
+
+ipcMain.handle('kiwoom:execute-d3-auto-sell', async () => {
+    try {
+        await autoTradeService.executeD3AutoSell();
         return { success: true };
     } catch (error: any) {
         return { success: false, error: error.message };

@@ -60,6 +60,8 @@ export interface IElectronAPI {
     syncDartWatchlistSchedules: () => Promise<{ success: boolean, error?: string }>
     syncBatchFinancials: (stockCodes: string[]) => Promise<{ success: boolean, error?: string }>
     fetchDartDisclosures: (options: { corpCodes: string[], bgnDe: string, endDe: string }) => Promise<{ success: boolean, data?: any[], error?: string }>
+    onMarketOpenedDetected: (callback: (data: { date: string, tradingDays: string[] }) => void) => () => void
+    onOrderRealtime: (callback: (order: any) => void) => () => void
 
     saveScheduleSettings: (settings: { notificationTime: string, globalDailyNotify: boolean, sendMissedOnStartup?: boolean }) => Promise<{ success: boolean }>
     getScheduleSettings: () => Promise<{ notificationTime: string, globalDailyNotify: boolean, sendMissedOnStartup?: boolean }>
@@ -70,6 +72,7 @@ export interface IElectronAPI {
     testScheduleSummary: () => Promise<{ success: boolean }>
     openExternal: (url: string) => Promise<{ success: boolean, error?: string }>
     testYahooFinance: () => Promise<{ success: boolean, count?: number, error?: string }>
+    getTradingDays: () => Promise<string[]>
 
     // AI Trade
     onAiTradeStream: (callback: (data: any) => void) => () => void
@@ -84,9 +87,27 @@ export interface IElectronAPI {
     getAiTradeLogs: () => Promise<any[]>
     resetAiAccount: () => Promise<{ success: boolean }>
     getAiAccountState: () => Promise<any>
+    getAiRuntimeConfig: () => Promise<any>
+    saveAiRuntimeConfig: (config: any) => Promise<any>
+    syncStrategyConfig: () => Promise<any>
+    executeD3AutoSell: () => Promise<any>
+    getHoldingHistory: () => Promise<Record<string, string>>
+
     // AI Settings
-    saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance: number }) => Promise<{ success: boolean }>
-    getAiSettings: () => Promise<{ geminiKey: string, modelName?: string, virtualInitialBalance: number } | null>
+    saveAiSettings: (settings: {
+        geminiKey: string,
+        modelName?: string,
+        virtualInitialBalance: number,
+        buyStartTime?: string,
+        buyEndTime?: string
+    }) => Promise<{ success: boolean }>
+    getAiSettings: () => Promise<{
+        geminiKey: string,
+        modelName?: string,
+        virtualInitialBalance: number,
+        buyStartTime?: string,
+        buyEndTime?: string
+    } | null>
     testAiConnection: (settings: { geminiKey: string, modelName: string }) => Promise<{ success: boolean, response?: string, error?: string }>
 }
 

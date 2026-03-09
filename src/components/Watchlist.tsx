@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
-import { Search, Plus, X, RefreshCw, AlertCircle, TrendingUp, TrendingDown, Filter, ChevronDown, Check } from 'lucide-react'
+import { Search, Plus, X, RefreshCw, AlertCircle, TrendingUp, TrendingDown, Filter, ChevronDown, Check, GripVertical } from 'lucide-react'
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import { cn } from '../utils'
 import { matchChoseong } from '../utils/hangul'
 import { useLayoutStore } from '../store/useLayoutStore'
@@ -141,7 +142,17 @@ export default function Watchlist() {
                     volume: Number(item.trde_qty || item.acml_vol || 0)
                 }))
 
-                setWatchlist(mapped)
+                // Sort results according to the original targetSymbols order
+                const sorted = mapped.sort((a: any, b: any) => {
+                    const idxA = targetSymbols.indexOf(a.code)
+                    const idxB = targetSymbols.indexOf(b.code)
+                    if (idxA === -1 && idxB === -1) return 0
+                    if (idxA === -1) return 1
+                    if (idxB === -1) return -1
+                    return idxA - idxB
+                })
+
+                setWatchlist(sorted)
                 if (mapped.length > 0 && !selectedStock) {
                     setSelectedStock({ code: mapped[0].code, name: mapped[0].name })
                 }
@@ -209,6 +220,23 @@ export default function Watchlist() {
         setSearchQuery('')
         setIsSearching(false)
         fetchData(newSymbols)
+    }
+
+    const onDragEnd = async (result: DropResult) => {
+        if (!result.destination) return
+
+        // Skip if filtering or searching
+        if (selectedTags.length > 0 || searchQuery.trim() !== '') return
+
+        const items = Array.from(watchlist)
+        const [reorderedItem] = items.splice(result.source.index, 1)
+        items.splice(result.destination.index, 0, reorderedItem)
+
+        setWatchlist(items)
+
+        // Save new order to store
+        const newSymbols = items.map(item => item.code)
+        await window.electronAPI.saveWatchlistSymbols(newSymbols)
     }
 
     const removeStock = async (code: string) => {
@@ -388,77 +416,106 @@ export default function Watchlist() {
             <div className="flex-1 min-h-0 flex bg-background border-t border-border overflow-hidden">
                 {/* Left side: Watchlist List */}
                 <div className="flex-1 w-[45%] flex flex-col border-r border-border overflow-hidden bg-background shrink-0 min-w-[350px] relative [&>div.overflow-auto]:overflow-x-hidden">
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead className="w-auto">종목명</TableHead>
-                                <TableHead className="text-right w-[85px] px-2">현재가</TableHead>
-                                <TableHead className="text-right w-[80px] px-2">등락률</TableHead>
-                                <TableHead className="w-8 px-1"></TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {displayedWatchlist.map((stock) => {
-                                const numericCode = stock.code.replace(/[^0-9]/g, '')
-                                const sum19 = previous19DaysSum[numericCode]
-                                let isDepressed = false
-                                if (sum19 !== undefined && sum19 > 0) {
-                                    const ma20 = (sum19 + stock.price) / 20
-                                    if ((stock.price / ma20) * 100 < 95) {
-                                        isDepressed = true
-                                    }
-                                }
-
-                                return (
-                                    <tr
-                                        key={stock.code}
-                                        className={cn(
-                                            "hover:bg-muted/40 transition-colors cursor-pointer group",
-                                            selectedStock?.code === stock.code && "bg-primary/5"
-                                        )}
-                                        onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
-                                    >
-                                        <TableCell>
-                                            <div className="flex flex-col gap-0.5">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className={cn("font-bold text-[13px] leading-none", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
-                                                    {isDepressed && <span className="text-[10px] font-bold bg-[#a855f7] text-white px-1 py-0.5 rounded shadow-sm leading-none">침체</span>}
-                                                </div>
-                                                <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono font-bold text-[13px] whitespace-nowrap overflow-hidden px-2">
-                                            ₩ {stock.price.toLocaleString()}
-                                        </TableCell>
-                                        <TableCell className="text-right whitespace-nowrap overflow-hidden px-2">
-                                            <div className={cn(
-                                                "inline-flex items-center gap-1 font-bold text-[13px]",
-                                                stock.changeRate > 0 ? "text-rise" : stock.changeRate < 0 ? "text-fall" : "text-muted-foreground"
-                                            )}>
-                                                {stock.changeRate > 0 ? <TrendingUp size={14} /> : stock.changeRate < 0 ? <TrendingDown size={14} /> : null}
-                                                <ProfitText value={stock.changeRate} suffix="%" colorful={false} />
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="text-right px-1">
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); removeStock(stock.code) }}
-                                                className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
-                                            >
-                                                <X size={14} />
-                                            </button>
-                                        </TableCell>
-                                    </tr>
-                                )
-                            })}
-                            {displayedWatchlist.length === 0 && !isLoadingData && (
+                    <DragDropContext onDragEnd={onDragEnd}>
+                        <Table>
+                            <TableHeader>
                                 <TableRow>
-                                    <TableCell colSpan={4} className="py-12 text-center text-muted-foreground">
-                                        {watchlist.length === 0 ? "등록된 관심종목이 없습니다." : "선택한 태그에 해당하는 종목이 없습니다."}
-                                    </TableCell>
+                                    <TableHead className="w-auto pl-10">종목명</TableHead>
+                                    <TableHead className="text-right w-[85px] px-2">현재가</TableHead>
+                                    <TableHead className="text-right w-[80px] px-2">등락률</TableHead>
+                                    <TableHead className="w-8 px-1"></TableHead>
                                 </TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
+                            </TableHeader>
+                            <Droppable
+                                droppableId="watchlist"
+                                isDropDisabled={!!searchQuery || selectedTags.length > 0}
+                            >
+                                {(provided) => (
+                                    <TableBody {...provided.droppableProps} ref={provided.innerRef}>
+                                        {displayedWatchlist.map((stock, index) => {
+                                            const numericCode = stock.code.replace(/[^0-9]/g, '')
+                                            const sum19 = previous19DaysSum[numericCode]
+                                            let isDepressed = false
+                                            if (sum19 !== undefined && sum19 > 0) {
+                                                const ma20 = (sum19 + stock.price) / 20
+                                                if ((stock.price / ma20) * 100 < 95) {
+                                                    isDepressed = true
+                                                }
+                                            }
+
+                                            return (
+                                                <Draggable
+                                                    key={stock.code}
+                                                    draggableId={stock.code}
+                                                    index={index}
+                                                    isDragDisabled={!!searchQuery || selectedTags.length > 0}
+                                                >
+                                                    {(provided, snapshot) => (
+                                                        <TableRow
+                                                            ref={provided.innerRef}
+                                                            {...provided.draggableProps}
+                                                            className={cn(
+                                                                "hover:bg-muted/40 transition-colors cursor-pointer group",
+                                                                selectedStock?.code === stock.code && "bg-primary/5",
+                                                                snapshot.isDragging && "bg-muted shadow-2xl z-50 opacity-90 border-y border-primary/20"
+                                                            )}
+                                                            onClick={() => setSelectedStock({ code: stock.code, name: stock.name })}
+                                                        >
+                                                            <TableCell className="relative">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div
+                                                                        {...provided.dragHandleProps}
+                                                                        className="p-1 -ml-2 rounded hover:bg-muted-foreground/10 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors cursor-grab active:cursor-grabbing"
+                                                                    >
+                                                                        <GripVertical size={14} />
+                                                                    </div>
+                                                                    <div className="flex flex-col gap-0.5">
+                                                                        <div className="flex items-center gap-1.5">
+                                                                            <span className={cn("font-bold text-[13px] leading-none", selectedStock?.code === stock.code ? "text-primary" : "group-hover:text-primary")}>{stock.name}</span>
+                                                                            {isDepressed && <span className="text-[10px] font-bold bg-[#a855f7] text-white px-1 py-0.5 rounded shadow-sm leading-none">침체</span>}
+                                                                        </div>
+                                                                        <span className="text-[10px] text-muted-foreground font-mono leading-none">{stock.code}</span>
+                                                                    </div>
+                                                                </div>
+                                                            </TableCell>
+                                                            <TableCell className="text-right font-mono font-bold text-[13px] whitespace-nowrap overflow-hidden px-2">
+                                                                ₩ {stock.price.toLocaleString()}
+                                                            </TableCell>
+                                                            <TableCell className="text-right whitespace-nowrap overflow-hidden px-2">
+                                                                <div className={cn(
+                                                                    "inline-flex items-center gap-1 font-bold text-[13px]",
+                                                                    stock.changeRate > 0 ? "text-rise" : stock.changeRate < 0 ? "text-fall" : "text-muted-foreground"
+                                                                )}>
+                                                                    {stock.changeRate > 0 ? <TrendingUp size={14} /> : stock.changeRate < 0 ? <TrendingDown size={14} /> : null}
+                                                                    <ProfitText value={stock.changeRate} suffix="%" colorful={false} />
+                                                                </div>
+                                                            </TableCell>
+                                                            <TableCell className="text-right px-1">
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); removeStock(stock.code) }}
+                                                                    className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                                                                >
+                                                                    <X size={14} />
+                                                                </button>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    )}
+                                                </Draggable>
+                                            )
+                                        })}
+                                        {provided.placeholder}
+                                        {displayedWatchlist.length === 0 && !isLoadingData && (
+                                            <TableRow>
+                                                <TableCell colSpan={4} className="py-12 text-center text-muted-foreground">
+                                                    {watchlist.length === 0 ? "등록된 관심종목이 없습니다." : "선택한 태그에 해당하는 종목이 없습니다."}
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                )}
+                            </Droppable>
+                        </Table>
+                    </DragDropContext>
                     {isLoadingData && (
                         <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10"><RefreshCw size={24} className="animate-spin text-primary" /></div>
                     )}

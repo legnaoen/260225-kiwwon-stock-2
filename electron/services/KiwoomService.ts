@@ -427,6 +427,30 @@ export class KiwoomService {
     }
 
     /**
+     * 국내주식 취소 주문
+     */
+    public async cancelOrder(accountNo: string, orig_ord_no: string, stk_cd: string, mdfy_qty: number): Promise<any> {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/ordr`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'kt10003', // 취소
+            }
+            const body = {
+                acnt_no: accountNo,
+                dmst_stex_tp: 'KRX',
+                stk_cd: stk_cd,
+                orig_ord_no: orig_ord_no,
+                mdfy_qty: String(mdfy_qty),
+                trde_tp: '00'
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data
+        })
+    }
+
+    /**
      * 미체결 주문 내역 조회 (TODO: 정확한 TR명 반영 필요)
      */
     public async getUnexecutedOrders(
@@ -575,5 +599,62 @@ export class KiwoomService {
             const response = await axios.post(url, body, { headers })
             return response.data;
         });
+    }
+
+    /**
+     * 전일대비 등락률 상위 조회 (ka10027) - 장 종료 후에도 데이터 조회가 가능하여 ka10020보다 안정적임
+     */
+    public async getTopRisingStocks() {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/rkinfo`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'ka10027'
+            }
+            const body = {
+                mrkt_tp: '000',          // 시장구분: 000(전체)
+                sort_tp: '1',            // 정렬구분: 1(상승률순)
+                trde_qty_cnd: '0',       // 거래량조건: 0(전체)
+                stk_cnd: '1',            // 종목조건: 1(관리종목제외)
+                crd_cnd: '0',            // 신용조건: 0(전체)
+                updown_incls: '1',       // 상하한 포함여부: 1(포함)
+                pric_cnd: '0',           // 가격조건: 0(전체)
+                trde_prica_cnd: '0',     // 거래대금조건: 0(전체)
+                stex_tp: '3'             // 거래소구분: 3(통합)
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data
+        })
+    }
+
+    /**
+     * 가격급등락요청 (ka10019) - 기간(최근 n일) 내 급등 종목 조회
+     * tm_tp: 1(분전), 2(일전)
+     * tm: 시간/일수 (예: '5'일전)
+     */
+    public async getPeriodRisingStocks(days: number = 5) {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/stkinfo`
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'ka10019'
+            }
+            const body = {
+                mrkt_tp: '000',          // 전체시장
+                flu_tp: '1',             // 1:급등, 2:급락
+                tm_tp: '2',              // 2:일전
+                tm: String(days),        // n일간
+                trde_qty_tp: '0000',     // 전체 거래량
+                stk_cnd: '1',            // 관리종목제외
+                crd_cnd: '0',            // 신용전체
+                pric_cnd: '0',           // 가격전체
+                updown_incls: '1',       // 상하한가포함
+                stex_tp: '3'             // 통합거래소
+            }
+            const response = await axios.post(url, body, { headers })
+            return response.data
+        })
     }
 }

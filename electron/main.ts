@@ -386,7 +386,7 @@ ipcMain.handle('kiwoom:start-condition-search', (_event, seq: string) => {
 })
 
 // === Telegram Settings IPC Handlers ===
-ipcMain.handle('telegram:save-settings', (_event, settings: { botToken: string, chatId: string, chartTheme?: string }) => {
+ipcMain.handle('telegram:save-settings', (_event, settings: any) => {
     store.set('telegram_settings', settings)
     telegramService.reloadConfig()
     return { success: true }
@@ -406,6 +406,24 @@ ipcMain.handle('telegram:get-settings', () => {
 ipcMain.handle('telegram:test-message', async () => {
     try {
         await telegramService.sendAutoTradeStatusMessage(true);
+        return { success: true };
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
+})
+
+ipcMain.handle('telegram:test-top-rising', async () => {
+    try {
+        await telegramService.sendDailyTopRisingMessage('단일 테스트');
+        return { success: true };
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
+})
+
+ipcMain.handle('telegram:test-period-rising', async (_event, { label, days }) => {
+    try {
+        await telegramService.sendPeriodTopRisingMessage(label, days);
         return { success: true };
     } catch (error: any) {
         return { success: false, error: error.message };

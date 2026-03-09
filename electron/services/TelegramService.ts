@@ -23,12 +23,18 @@ export class TelegramService {
     private isWaitingForLiquidation = false;
     private liquidationWaitTimer: NodeJS.Timeout | null = null;
     private scheduleSummaryJob: cron.ScheduledTask | null = null;
+    private dailyTopRisingJobs: cron.ScheduledTask[] = [];
+    private weeklyTopRisingJobs: cron.ScheduledTask[] = [];
+    private monthlyTopRisingJobs: cron.ScheduledTask[] = [];
 
     private constructor() {
         this.initializeBot();
         this.setupListeners();
         this.setupCronJobs();
         this.setupScheduleCron();
+        this.setupDailyTopRisingCron();
+        this.setupWeeklyTopRisingCron();
+        this.setupMonthlyTopRisingCron();
         this.buildStockSearchCache();
 
         // Startup check for missed schedule summary
@@ -54,23 +60,18 @@ export class TelegramService {
                     const receivedChatId = ctx.chat.id.toString();
                     const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
 
-                    if (isGroup) {
-                        ctx.reply('⚠️ [단체방 활성화]\n이 방은 종목 검색 전용으로만 사용됩니다.\n일정 및 시스템 알림을 받으시려면 봇과의 1:1 대화방에서 /start 를 입력해주세요.');
-                        return;
-                    }
-
-                    // Auto-save the chat ID ONLY for private chats
+                    // Auto-save the chat ID for both private and group chats
                     this.chatId = receivedChatId;
                     const currentSettings: any = store.get('telegram_settings') || {};
                     store.set('telegram_settings', {
                         ...currentSettings,
                         botToken: settings.botToken,
                         chatId: receivedChatId,
-                        chatType: 'private'
+                        chatType: isGroup ? 'group' : 'private'
                     });
 
-                    console.log(`[TelegramService] Registered Private Chat ID: ${receivedChatId}`);
-                    ctx.reply('✅ [알림 수신 등록 완료]\n이제부터 이 1:1 대화방으로 모든 일정을 안내해 드립니다.');
+                    console.log(`[TelegramService] Registered Chat ID (${isGroup ? 'Group' : 'Private'}): ${receivedChatId}`);
+                    ctx.reply(`✅ [알림 수신 등록 완료]\n이제부터 이 ${isGroup ? '단톡방' : '1:1 대화방'}으로 모든 일정을 안내해 드립니다.`);
                 });
 
                 // 텔레그램 명령어 메뉴 (자동완성) 세팅
@@ -250,6 +251,65 @@ export class TelegramService {
                             // 키움 API는 Body, body, output, 혹은 최상단에 직접 데이터를 내려줄 수 있음
                             const body = infoRes?.body || infoRes?.Body || infoRes?.output || infoRes;
 
+                            let currentPriceMsg = '';
+                            let price = body?.stk_prc || body?.currentPrice || body?.cur_prc || body?.prpr || body?.stk_cls_prc;
+                            let changeRate = body?.prdy_ctrt || body?.fltt_rt || body?.change_rate || body?.flu_rt || body?.stk_prdy_ctrt;
+                            const yesterdayPrice = body?.prdy_clpr || body?.yesterdayPrice || body?.prdy_clpr_prc;
+
+                            if (price) {
+                                const matchStr = String(price).replace(/[^0-9]/g, '');
+                                if (matchStr) {
+                                    const priceNum = parseInt(matchStr, 10);
+                                    let rateStr = '';
+
+                                    // 1. 직접 등락률 필드가 있는 경우
+                                    if (changeRate !== undefined && changeRate !== null && changeRate !== '') {
+                                        const rateNum = parseFloat(String(changeRate));
+                                        if (!isNaN(rateNum)) {
+                                            const sign = rateNum > 0 ? '+' : '';
+                                            rateStr = ` ${sign}${rateNum.toFixed(2)}%`;
+                                        }
+                                    }
+                                    // 2. 등락률 필드는 없는데 전일종가가 있는 경우 계산 시도
+                                    else if (yesterdayPrice) {
+                                        const yMatch = String(yesterdayPrice).replace(/[^0-9]/g, '');
+                                        if (yMatch) {
+                                            const yPriceNum = parseInt(yMatch, 10);
+                                            if (yPriceNum > 0) {
+                                                const rateNum = ((priceNum - yPriceNum) / yPriceNum) * 100;
+                                                const sign = rateNum > 0 ? '+' : '';
+                                                rateStr = ` ${sign}${rateNum.toFixed(2)}%`;
+                                            }
+                                        }
+                                    }
+
+                                    currentPriceMsg = `\n\n💵 현재주가: ${priceNum.toLocaleString()}원${rateStr}`;
+                                }
+                            }
+
+                            if (!currentPriceMsg) {
+                                try {
+                                    const priceInfo = await kiwoom.getCurrentPrice(targetCode);
+                                    const pBody = priceInfo?.Body || priceInfo?.Body?.out1 || priceInfo?.output || priceInfo;
+
+                                    let rawPrice = pBody?.currentPrice || pBody?.cur_prc || pBody?.stk_prc || pBody?.prpr || '';
+                                    let rawRate = pBody?.prdy_ctrt || pBody?.fltt_rt || pBody?.flu_rt || pBody?.change_rate || '';
+
+                                    const matchStr = String(rawPrice).replace(/[^0-9]/g, '');
+                                    if (matchStr) {
+                                        const priceNum = parseInt(matchStr, 10);
+                                        let rateStr = '';
+
+                                        const rateNum = parseFloat(String(rawRate));
+                                        if (!isNaN(rateNum)) {
+                                            const sign = rateNum > 0 ? '+' : '';
+                                            rateStr = ` ${sign}${rateNum.toFixed(2)}%`;
+                                        }
+                                        currentPriceMsg = `\n\n💵 현재주가: ${priceNum.toLocaleString()}원${rateStr}`;
+                                    }
+                                } catch (e) { }
+                            }
+
                             if (body && (body.per || body.mac || Object.keys(body).length > 2)) {
                                 const per = body.per || 'N/A';
                                 const pbr = body.pbr || 'N/A';
@@ -264,8 +324,9 @@ export class TelegramService {
                                 }
 
                                 const stStr = st !== '정상' ? `\n⚠️ 상태: ${st}` : '';
-                                basicInfoMsg = `\n\n💰 시가총액: ${cap}\n📊 PER: ${per} | PBR: ${pbr} | ROE: ${roe}%${stStr}`;
+                                basicInfoMsg = `${currentPriceMsg}\n💰 시가총액: ${cap}\n📊 PER: ${per} | PBR: ${pbr} | ROE: ${roe}%${stStr}`;
                             } else {
+                                basicInfoMsg = currentPriceMsg;
                                 console.warn('[TelegramService] 응답에 재무 필드가 부족합니다.', Object.keys(body));
                             }
                         } catch (infoErr) {
@@ -332,7 +393,7 @@ export class TelegramService {
                             }
                         } else {
                             const buffer = await ChartRenderService.captureChart(targetCode, targetName, theme);
-                            const finalCaption = `https://stock.naver.com/domestic/stock/${targetCode}` + basicInfoMsg;
+                            const finalCaption = `https://www.tossinvest.com/?focusedProductCode=A${targetCode}` + basicInfoMsg;
                             await ctx.replyWithPhoto({ source: buffer }, { caption: finalCaption });
                         }
 
@@ -474,6 +535,187 @@ export class TelegramService {
         }
     }
 
+    private setupDailyTopRisingCron() {
+        this.dailyTopRisingJobs.forEach(job => job.stop());
+        this.dailyTopRisingJobs = [];
+
+        const settings: any = store.get('telegram_settings') || {};
+        if (!settings.dailyTopRisingNotify) return;
+
+        const times = [
+            settings.dailyTopRisingTime1 || '09:30',
+            settings.dailyTopRisingTime2 || '14:30'
+        ];
+
+        times.forEach(time => {
+            const [hour, minute] = time.split(':').map(Number);
+            if (!isNaN(hour) && !isNaN(minute)) {
+                const cronTime = `${minute} ${hour} * * 1-5`; // Mon-Fri
+                const job = cron.schedule(cronTime, () => {
+                    this.sendDailyTopRisingMessage(time);
+                }, { timezone: 'Asia/Seoul' });
+                this.dailyTopRisingJobs.push(job);
+                console.log(`[TelegramService] Daily Top Rising Cron set for ${time}`);
+            }
+        });
+    }
+
+    private setupWeeklyTopRisingCron() {
+        this.weeklyTopRisingJobs.forEach(job => job.stop());
+        this.weeklyTopRisingJobs = [];
+
+        const settings: any = store.get('telegram_settings') || {};
+        if (!settings.weeklyTopRisingNotify) return;
+
+        const time = settings.weeklyTopRisingTime || '10:00';
+        const [hour, minute] = time.split(':').map(Number);
+        if (!isNaN(hour) && !isNaN(minute)) {
+            const cronTime = `${minute} ${hour} * * 1-5`;
+            const job = cron.schedule(cronTime, () => {
+                this.sendPeriodTopRisingMessage('주간(1주일)', 5);
+            }, { timezone: 'Asia/Seoul' });
+            this.weeklyTopRisingJobs.push(job);
+            console.log(`[TelegramService] Weekly Top Rising Cron set for ${time}`);
+        }
+    }
+
+    private setupMonthlyTopRisingCron() {
+        this.monthlyTopRisingJobs.forEach(job => job.stop());
+        this.monthlyTopRisingJobs = [];
+
+        const settings: any = store.get('telegram_settings') || {};
+        if (!settings.monthlyTopRisingNotify) return;
+
+        const time = settings.monthlyTopRisingTime || '12:00';
+        const [hour, minute] = time.split(':').map(Number);
+        if (!isNaN(hour) && !isNaN(minute)) {
+            const cronTime = `${minute} ${hour} * * 1-5`;
+            const job = cron.schedule(cronTime, () => {
+                this.sendPeriodTopRisingMessage('월간(1개월)', 20);
+            }, { timezone: 'Asia/Seoul' });
+            this.monthlyTopRisingJobs.push(job);
+            console.log(`[TelegramService] Monthly Top Rising Cron set for ${time}`);
+        }
+    }
+
+    public async sendDailyTopRisingMessage(timeLabel: string) {
+        try {
+            console.log(`[TelegramService] Sending daily top rising message for ${timeLabel}...`);
+            const kiwoom = KiwoomService.getInstance();
+            const res = await kiwoom.getTopRisingStocks();
+
+            // ka10027 응답 키: bid_req_upper 지원 추가
+            let rawList: any[] = [];
+            if (Array.isArray(res)) {
+                rawList = res;
+            } else {
+                rawList = res?.bid_req_upper || res?.rkinfo_qry || res?.output1 || res?.Body || res?.body?.rkinfo_qry || res?.body?.output1 || res?.body || res?.list || res?.output || res?.data || [];
+            }
+
+            if (!Array.isArray(rawList) || rawList.length === 0) {
+                // 한 번 더 시도 (다른 필드 탐색)
+                if (typeof res === 'object' && res !== null) {
+                    const found = Object.values(res).find(v => Array.isArray(v));
+                    if (found) rawList = found as any[];
+                }
+            }
+
+            console.log(`[TelegramService] ka10027 response keys: ${Object.keys(res || {})}`);
+
+            if (!Array.isArray(rawList) || rawList.length === 0) {
+                throw new Error('조회된 당일 급등 종목이 없습니다 (목록 없음).');
+            }
+
+            // 필터링 및 상위 10개
+            const etfKeywords = ['ETF', 'ETN', 'KODEX', 'TIGER', 'ACE', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'KOSEF', 'VINA', 'KINDEX', 'KB스타'];
+            const top10 = rawList
+                .filter((s: any) => {
+                    const name = (s.stck_nm || s.stk_nm || s.name || '').replace(/\s+/g, '');
+                    const isEtf = etfKeywords.some(keyword => name.toUpperCase().includes(keyword.toUpperCase()));
+                    return name && !isEtf;
+                })
+                .slice(0, 10);
+
+            if (top10.length === 0) throw new Error('ETF/ETN을 제외한 당일 급등 종목이 없습니다.');
+
+            let message = `🚀 *[오늘의 급등주 TOP 10]* (${timeLabel})\n\n`;
+            top10.forEach((s: any, idx: number) => {
+                const name = (s.stck_nm || s.stk_nm || s.name || '알 수 없음').replace(/[*_`\[\]()]/g, '');
+                const price = s.stck_prpr || s.stk_prc || s.cur_prc || s.price || '0';
+                // flu_rt (ka10027), prdy_ctrt (일반), fltt_rt 등 다양한 키 지원
+                const rate = s.flu_rt || s.prdy_ctrt || s.fltt_rt || s.change_rate || '0';
+
+                const priceNum = Math.abs(parseInt(String(price).replace(/[^0-9-]/g, ''), 10)) || 0;
+                const rateNum = parseFloat(String(rate)) || 0;
+                const sign = rateNum > 0 ? '+' : '';
+
+                message += `${idx + 1}. ${name} ${priceNum.toLocaleString()}원 ${sign}${rateNum.toFixed(2)}%\n`;
+            });
+
+            await this.sendMessage(message);
+            console.log(`[TelegramService] Daily Top Rising Message sent.`);
+        } catch (error: any) {
+            console.error('[TelegramService] Daily Message Fail:', error);
+            throw error;
+        }
+    }
+
+    public async sendPeriodTopRisingMessage(label: string, days: number) {
+        try {
+            console.log(`[TelegramService] Sending ${label} top rising message...`);
+            const kiwoom = KiwoomService.getInstance();
+            const res = await kiwoom.getPeriodRisingStocks(days);
+
+            // ka10019 응답 키: pric_jmpflu
+            let rawList: any[] = [];
+            if (Array.isArray(res)) {
+                rawList = res;
+            } else {
+                rawList = res?.pric_jmpflu || res?.pric_jmp || res?.output1 || res?.Body || res?.body?.pric_jmpflu || res?.data || [];
+            }
+
+            if (!Array.isArray(rawList) || rawList.length === 0) {
+                throw new Error(`${label} 데이터가 없습니다.`);
+            }
+
+            // 기간 등락률(jmp_rt) 기준 정렬 및 필터링
+            const etfKeywords = ['ETF', 'ETN', 'KODEX', 'TIGER', 'ACE', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'KOSEF', 'VINA', 'KINDEX', 'KB스타'];
+            const top10 = rawList
+                .filter((s: any) => {
+                    const name = (s.stck_nm || s.stk_nm || s.name || '').replace(/\s+/g, '');
+                    const isEtf = etfKeywords.some(keyword => name.toUpperCase().includes(keyword.toUpperCase()));
+                    return name && !isEtf;
+                })
+                .map((s: any) => {
+                    // flu_rt, jmp_rt 등 기간 수익률 관련 키 지원
+                    const rateStr = String(s.flu_rt || s.jmp_rt || s.prdy_ctrt || '0').replace(/[^0-9.-]/g, '');
+                    return { ...s, numericRate: parseFloat(rateStr) };
+                })
+                .sort((a, b) => b.numericRate - a.numericRate)
+                .slice(0, 10);
+
+            if (top10.length === 0) throw new Error(`${label} ETF/ETN 제외 데이터가 없습니다.`);
+
+            let message = `📅 *[${label} 수익률 TOP 10]*\n\n`;
+            top10.forEach((s: any, idx: number) => {
+                const name = (s.stck_nm || s.stk_nm || s.name || '알 수 없음').replace(/[*_`\[\]()]/g, '');
+                const price = s.stck_prpr || s.stk_prc || s.cur_prc || s.price || '0';
+                const rate = s.numericRate;
+
+                const priceNum = Math.abs(parseInt(String(price).replace(/[^0-9-]/g, ''), 10)) || 0;
+                const sign = rate > 0 ? '+' : '';
+
+                message += `${idx + 1}. ${name} ${priceNum.toLocaleString()}원 ${sign}${rate.toFixed(2)}%\n`;
+            });
+
+            await this.sendMessage(message);
+            console.log(`[TelegramService] ${label} Message sent.`);
+        } catch (error: any) {
+            console.error(`[TelegramService] ${label} Message Fail:`, error);
+            throw error;
+        }
+    }
+
     private setupListeners() {
         // [1] 매매 체결 시 자동 알림 발송
         eventBus.on(SystemEvent.TRADE_EXECUTED, (data) => {
@@ -509,7 +751,7 @@ export class TelegramService {
                 }
 
                 const sign = data.changeRate > 0 ? '+' : '';
-                this.sendMessage(`📉 ${displayName}  ${sign}${data.changeRate.toFixed(2)}%\nhttps://stock.naver.com/domestic/stock/${numericCode}/`);
+                this.sendMessage(`📉 ${displayName}  ${sign}${data.changeRate.toFixed(2)}%\nhttps://www.tossinvest.com/?focusedProductCode=A${numericCode}`);
             }
         });
 
@@ -606,15 +848,11 @@ export class TelegramService {
             throw new Error("텔레그램 봇 토큰이 설정되지 않았거나 초기화되지 않았습니다.");
         }
         if (!this.chatId) {
-            throw new Error("Chat ID가 설정되지 않았습니다. 텔레그램 개인 톡방에서 봇에게 /start 를 먼저 입력해주세요.");
-        }
-        // 단톡방(음수 Chat ID)으로는 시스템 알림 발송 제한
-        if (this.chatId.startsWith('-')) {
-            throw new Error("현재 등록된 Chat ID가 단톡방입니다. 알림을 받으시려면 개인 톡방에서 봇에게 /start 를 입력해주세요.");
+            throw new Error("Chat ID가 설정되지 않았습니다. 텔레그램 개인 톡방 혹은 단톡방에서 봇에게 /start 를 먼저 입력해주세요.");
         }
 
         try {
-            await this.bot.telegram.sendMessage(this.chatId, message);
+            await this.bot.telegram.sendMessage(this.chatId, message, { parse_mode: 'Markdown' });
         } catch (error: any) {
             console.error('[TelegramService] Telegram delivery failed:', error);
             throw new Error(`텔레그램 발송 실패: ${error.message}`);
@@ -626,6 +864,9 @@ export class TelegramService {
         if (this.bot && this.botToken === settings?.botToken) {
             // 토큰이 같으면 봇을 아예 재시작하지 않고 내부 데이터만 업데이트
             this.chatId = settings?.chatId || null;
+            this.setupDailyTopRisingCron();
+            this.setupWeeklyTopRisingCron();
+            this.setupMonthlyTopRisingCron();
             return;
         }
 
@@ -637,6 +878,9 @@ export class TelegramService {
         // 텔레그램 API 충돌(409 Conflict) 방지를 위해 기존 봇 종료 후 약간의 딜레이
         setTimeout(() => {
             this.initializeBot();
+            this.setupDailyTopRisingCron();
+            this.setupWeeklyTopRisingCron();
+            this.setupMonthlyTopRisingCron();
         }, 1500);
     }
 

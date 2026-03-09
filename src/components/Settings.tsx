@@ -9,7 +9,33 @@ export default function Settings() {
     const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
     const [message, setMessage] = useState('')
 
-    const [telegramKeys, setTelegramKeys] = useState({ botToken: '', chatId: '', chartTheme: 'dark', chatType: '' })
+    interface TelegramSettings {
+        botToken: string;
+        chatId: string;
+        chartTheme: string;
+        chatType: string;
+        dailyTopRisingNotify: boolean;
+        dailyTopRisingTime1: string;
+        dailyTopRisingTime2: string;
+        weeklyTopRisingNotify: boolean;
+        weeklyTopRisingTime: string;
+        monthlyTopRisingNotify: boolean;
+        monthlyTopRisingTime: string;
+    }
+
+    const [telegramKeys, setTelegramKeys] = useState<TelegramSettings>({
+        botToken: '',
+        chatId: '',
+        chartTheme: 'dark',
+        chatType: '',
+        dailyTopRisingNotify: false,
+        dailyTopRisingTime1: '09:30',
+        dailyTopRisingTime2: '14:30',
+        weeklyTopRisingNotify: false,
+        weeklyTopRisingTime: '10:00',
+        monthlyTopRisingNotify: false,
+        monthlyTopRisingTime: '12:00'
+    })
     const [aiSettings, setAiSettings] = useState({
         geminiKey: '',
         modelName: 'gemini-1.5-flash',
@@ -21,6 +47,8 @@ export default function Settings() {
     const [statusTg, setStatusTg] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageTg, setMessageTg] = useState('')
     const [isTestingTg, setIsTestingTg] = useState(false)
+    const [isTestingTopRising, setIsTestingTopRising] = useState(false)
+    const [isTestingPeriodRising, setIsTestingPeriodRising] = useState(false)
 
     const [scheduleSettings, setScheduleSettings] = useState({
         notificationTime: '08:30',
@@ -70,11 +98,19 @@ export default function Settings() {
 
             const savedTgKeys = await window.electronAPI.getTelegramSettings()
             if (savedTgKeys) {
+                const tgData = savedTgKeys as any;
                 setTelegramKeys({
-                    botToken: savedTgKeys.botToken || '',
-                    chatId: savedTgKeys.chatId || '',
-                    chartTheme: savedTgKeys.chartTheme || 'dark',
-                    chatType: (savedTgKeys as any).chatType || ''
+                    botToken: tgData.botToken || '',
+                    chatId: tgData.chatId || '',
+                    chartTheme: tgData.chartTheme || 'dark',
+                    chatType: tgData.chatType || '',
+                    dailyTopRisingNotify: tgData.dailyTopRisingNotify || false,
+                    dailyTopRisingTime1: tgData.dailyTopRisingTime1 || '09:30',
+                    dailyTopRisingTime2: tgData.dailyTopRisingTime2 || '14:30',
+                    weeklyTopRisingNotify: tgData.weeklyTopRisingNotify || false,
+                    weeklyTopRisingTime: tgData.weeklyTopRisingTime || '10:00',
+                    monthlyTopRisingNotify: tgData.monthlyTopRisingNotify || false,
+                    monthlyTopRisingTime: tgData.monthlyTopRisingTime || '12:00'
                 })
             }
 
@@ -272,9 +308,16 @@ export default function Settings() {
                 botToken: telegramKeys.botToken.trim(),
                 chatId: telegramKeys.chatId.trim(),
                 chartTheme: telegramKeys.chartTheme || 'dark',
-                chatType: telegramKeys.chatType || ''
+                chatType: telegramKeys.chatType || '',
+                dailyTopRisingNotify: telegramKeys.dailyTopRisingNotify,
+                dailyTopRisingTime1: telegramKeys.dailyTopRisingTime1,
+                dailyTopRisingTime2: telegramKeys.dailyTopRisingTime2,
+                weeklyTopRisingNotify: telegramKeys.weeklyTopRisingNotify,
+                weeklyTopRisingTime: telegramKeys.weeklyTopRisingTime,
+                monthlyTopRisingNotify: telegramKeys.monthlyTopRisingNotify,
+                monthlyTopRisingTime: telegramKeys.monthlyTopRisingTime
             }
-            const result = await window.electronAPI.saveTelegramSettings(trimmedKeys)
+            const result = await (window.electronAPI as any).saveTelegramSettings(trimmedKeys)
 
             if (result.success) {
                 setTelegramKeys(trimmedKeys)
@@ -382,6 +425,50 @@ export default function Settings() {
             setMessageTg('메시지 발송 중 오류가 발생했습니다.')
         } finally {
             setIsTestingTg(false)
+            setTimeout(() => setStatusTg('idle'), 4000)
+        }
+    }
+
+    const handleTestTopRising = async () => {
+        setIsTestingTopRising(true)
+        setStatusTg('idle')
+        setMessageTg('급등주 TOP 10 테스트 발송 중...')
+        try {
+            const result = await (window.electronAPI as any).testTelegramTopRising()
+            if (result.success) {
+                setStatusTg('success')
+                setMessageTg('급등주 TOP 10 메시지가 발송되었습니다.')
+            } else {
+                setStatusTg('error')
+                setMessageTg(result.error || '발송 실패 (연결 혹은 API 확인)')
+            }
+        } catch (error: any) {
+            setStatusTg('error')
+            setMessageTg('발송 중 오류가 발생했습니다.')
+        } finally {
+            setIsTestingTopRising(false)
+            setTimeout(() => setStatusTg('idle'), 4000)
+        }
+    }
+
+    const handleTestPeriodRising = async (label: string, days: number) => {
+        setIsTestingPeriodRising(true)
+        setStatusTg('idle')
+        setMessageTg(`${label} TOP 10 테스트 발송 중...`)
+        try {
+            const result = await (window.electronAPI as any).testTelegramPeriodRising({ label, days })
+            if (result.success) {
+                setStatusTg('success')
+                setMessageTg(`${label} TOP 10 메시지가 발송되었습니다.`)
+            } else {
+                setStatusTg('error')
+                setMessageTg(result.error || '발송 실패')
+            }
+        } catch (error: any) {
+            setStatusTg('error')
+            setMessageTg('발송 중 오류가 발생했습니다.')
+        } finally {
+            setIsTestingPeriodRising(false)
             setTimeout(() => setStatusTg('idle'), 4000)
         }
     }
@@ -573,6 +660,163 @@ export default function Settings() {
                                                         <span className="text-sm capitalize">{theme === 'dark' ? '어두운 테마' : '밝은 테마'}</span>
                                                     </button>
                                                 ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-6 pt-4 border-t border-border/40">
+                                            <div className="flex items-center justify-between">
+                                                <div className="space-y-1">
+                                                    <h3 className="text-sm font-bold flex items-center gap-2 text-foreground">
+                                                        <Activity size={16} className="text-blue-500" /> 당일 급등주 TOP 10 알림
+                                                    </h3>
+                                                    <p className="text-[11px] text-muted-foreground">지정된 시간에 당일 상승률 상위 종목을 요약하여 전송합니다.</p>
+                                                </div>
+                                                <label className="relative inline-flex items-center cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={telegramKeys.dailyTopRisingNotify}
+                                                        onChange={(e) => setTelegramKeys({ ...telegramKeys, dailyTopRisingNotify: e.target.checked })}
+                                                        className="sr-only peer"
+                                                    />
+                                                    <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                                </label>
+                                            </div>
+
+                                            {telegramKeys.dailyTopRisingNotify && (
+                                                <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2 duration-300">
+                                                    <div className="space-y-2">
+                                                        <label className="text-xs font-semibold ml-1 text-muted-foreground uppercase flex items-center gap-1">
+                                                            <Clock size={12} /> 알림 시간 1
+                                                        </label>
+                                                        <input
+                                                            type="time"
+                                                            value={telegramKeys.dailyTopRisingTime1}
+                                                            onChange={(e) => setTelegramKeys({ ...telegramKeys, dailyTopRisingTime1: e.target.value })}
+                                                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <label className="text-xs font-semibold ml-1 text-muted-foreground uppercase flex items-center gap-1">
+                                                            <Clock size={12} /> 알림 시간 2
+                                                        </label>
+                                                        <input
+                                                            type="time"
+                                                            value={telegramKeys.dailyTopRisingTime2}
+                                                            onChange={(e) => setTelegramKeys({ ...telegramKeys, dailyTopRisingTime2: e.target.value })}
+                                                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {telegramKeys.dailyTopRisingNotify && (
+                                                <div className="flex justify-start">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleTestTopRising}
+                                                        disabled={isTestingTopRising}
+                                                        className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-700 font-bold px-4 py-2.5 rounded-xl border border-blue-200 hover:bg-blue-50 transition-colors"
+                                                    >
+                                                        {isTestingTopRising ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                        당일 급등주 TOP 10 즉시 테스트
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            <div className="pt-4 border-t border-border/40 space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="space-y-1">
+                                                        <h3 className="text-sm font-bold flex items-center gap-2 text-foreground">
+                                                            <Activity size={16} className="text-indigo-500" /> 주간 수익률 TOP 10 알림
+                                                        </h3>
+                                                        <p className="text-[11px] text-muted-foreground">매일 지정된 시간에 최근 1주일간 수익률 상위 종목을 전송합니다.</p>
+                                                    </div>
+                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={telegramKeys.weeklyTopRisingNotify}
+                                                            onChange={(e) => setTelegramKeys({ ...telegramKeys, weeklyTopRisingNotify: e.target.checked })}
+                                                            className="sr-only peer"
+                                                        />
+                                                        <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                                    </label>
+                                                </div>
+                                                {telegramKeys.weeklyTopRisingNotify && (
+                                                    <div className="space-y-4">
+                                                        <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2 duration-300">
+                                                            <div className="space-y-2">
+                                                                <label className="text-xs font-semibold ml-1 text-muted-foreground uppercase flex items-center gap-1">
+                                                                    <Clock size={12} /> 알림 시간
+                                                                </label>
+                                                                <input
+                                                                    type="time"
+                                                                    value={telegramKeys.weeklyTopRisingTime}
+                                                                    onChange={(e) => setTelegramKeys({ ...telegramKeys, weeklyTopRisingTime: e.target.value })}
+                                                                    className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                                                />
+                                                            </div>
+                                                            <div className="flex items-end">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleTestPeriodRising('주간(1주일)', 5)}
+                                                                    disabled={isTestingPeriodRising}
+                                                                    className="flex items-center gap-2 text-xs text-indigo-600 hover:text-indigo-700 font-bold px-4 py-2.5 rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-colors w-full justify-center"
+                                                                >
+                                                                    {isTestingPeriodRising ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                                    주간 TOP 10 테스트
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="pt-4 border-t border-border/40 space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="space-y-1">
+                                                        <h3 className="text-sm font-bold flex items-center gap-2 text-foreground">
+                                                            <Activity size={16} className="text-purple-500" /> 월간 수익률 TOP 10 알림
+                                                        </h3>
+                                                        <p className="text-[11px] text-muted-foreground">매일 지정된 시간에 최근 1개월간 수익률 상위 종목을 전송합니다.</p>
+                                                    </div>
+                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={telegramKeys.monthlyTopRisingNotify}
+                                                            onChange={(e) => setTelegramKeys({ ...telegramKeys, monthlyTopRisingNotify: e.target.checked })}
+                                                            className="sr-only peer"
+                                                        />
+                                                        <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                                    </label>
+                                                </div>
+                                                {telegramKeys.monthlyTopRisingNotify && (
+                                                    <div className="space-y-4">
+                                                        <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2 duration-300">
+                                                            <div className="space-y-2">
+                                                                <label className="text-xs font-semibold ml-1 text-muted-foreground uppercase flex items-center gap-1">
+                                                                    <Clock size={12} /> 알림 시간
+                                                                </label>
+                                                                <input
+                                                                    type="time"
+                                                                    value={telegramKeys.monthlyTopRisingTime}
+                                                                    onChange={(e) => setTelegramKeys({ ...telegramKeys, monthlyTopRisingTime: e.target.value })}
+                                                                    className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                                                />
+                                                            </div>
+                                                            <div className="flex items-end">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleTestPeriodRising('월간(1개월)', 20)}
+                                                                    disabled={isTestingPeriodRising}
+                                                                    className="flex items-center gap-2 text-xs text-purple-600 hover:text-purple-700 font-bold px-4 py-2.5 rounded-xl border border-purple-200 hover:bg-purple-50 transition-colors w-full justify-center"
+                                                                >
+                                                                    {isTestingPeriodRising ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                                    월간 TOP 10 테스트
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
 

@@ -932,10 +932,53 @@ export class AutoTradeService {
         }
 
         try {
-            // 잔고 조회
+            // [Step 1] 기존 미체결 주문 최우선 일괄 취소
+            this.broadcastLog(`[비상청산 Step 1] 계좌의 모든 미체결 주문 취소 전송 시작.`, 'INFO');
+            try {
+                const unexecRes = await this.kiwoomService.getUnexecutedOrders(accountNo);
+                const unexecutedOrders = unexecRes?.oso || unexecRes?.output || unexecRes?.data || unexecRes?.Body?.out1 || [];
+
+                if (Array.isArray(unexecutedOrders) && unexecutedOrders.length > 0) {
+                    let cancelCount = 0;
+                    for (const order of unexecutedOrders) {
+                        const totalQty = parseInt(order.unexec_qty || order.oso_qty || order.qty || '0', 10);
+                        if (totalQty > 0 && order.ord_no) {
+                            let stk_cd = String(order.stk_cd).replace(/^A/i, '').trim();
+                            if (stk_cd.length > 0 && stk_cd.length < 6 && /^\d+$/.test(stk_cd)) stk_cd = stk_cd.padStart(6, '0');
+
+                            try {
+                                await this.kiwoomService.cancelOrder(accountNo, order.ord_no, stk_cd, totalQty);
+                                cancelCount++;
+                                await new Promise(res => setTimeout(res, 1000)); // 스로틀링
+                            } catch (cancelErr: any) {
+                                const errMsg = cancelErr?.response?.data?.msg1 || cancelErr?.message || cancelErr;
+                                this.broadcastLog(`[취소실패] ${stk_cd}(${order.ord_no}): ${errMsg}`, 'WARN');
+                            }
+                        }
+                    }
+                    if (cancelCount > 0) {
+                        this.broadcastLog(`총 ${cancelCount}건의 미체결 주문 취소 전송 완료. 거래소 반영 대기(3초)...`, 'INFO');
+                        await new Promise(res => setTimeout(res, 3000));
+                    }
+                }
+            } catch (err: any) {
+                this.broadcastLog(`미체결 주문 조회 실패로 취소 과정 생략: ${err.message}`, 'WARN');
+            }
+
+            // [Step 2] 잔고 조회 및 전단 매도 전송
             const holdingsRes = await this.kiwoomService.getHoldings(accountNo);
-            const holdings = holdingsRes?.data?.Body?.out1 || holdingsRes?.data?.list || [];
-            if (!Array.isArray(holdings) || holdings.length === 0) {
+            const hData = holdingsRes?.data || holdingsRes;
+            const hBody = hData?.Body || hData?.body || hData?.output1 || hData;
+
+            let listData = [];
+            if (Array.isArray(hBody)) {
+                listData = hBody;
+            } else {
+                listData = hBody?.acnt_evlt_remn_indv_tot || hBody?.output1 || hBody?.list || hBody?.grid || [];
+            }
+            const holdings = Array.isArray(listData) ? listData : [listData].filter(Boolean);
+
+            if (holdings.length === 0) {
                 this.broadcastLog(`보유 종목이 없어 청산을 종료합니다.`, 'INFO');
                 this.setRunning(false);
                 eventBus.emit(SystemEvent.EMERGENCY_LIQUIDATION_COMPLETED);
@@ -945,7 +988,8 @@ export class AutoTradeService {
             // 전량 시장가 통보 (현재 키움 API가 지정가(00)만 지원한다면 0원으로 03이 되지 않으니, 현재가로 00 주문 생성 필요)
             this.broadcastLog(`총 ${holdings.length}개 잔고 종목 청산 매도 전송 시작.`, 'WARN');
             for (const stock of holdings) {
-                if (parseInt(stock.hld_qty) <= 0) continue;
+                const qty = parseInt(stock.hld_qty || stock.hldg_qty || stock.rmnd_qty || stock.qty || '0', 10);
+                if (qty <= 0) continue;
 
                 let stk_cd = String(stock.pdno || stock.stk_cd || stock.item_cd).replace(/^A/i, '').trim();
                 let currentPrice = Math.abs(parseInt(String(stock.prpr || stock.cur_prc || stock.price || '0').replace(/[^0-9-]/g, ''), 10));
@@ -968,10 +1012,8 @@ export class AutoTradeService {
                 if (currentPrice > 0) {
                     currentPrice = this.normalizePrice(currentPrice); // 호가 맞춤
                     try {
-                        // sendSellOrder가 아직 없으면 KiwoomService.ts에 kt10001 (매도) 로켓 런처 필요
-                        // 임시: modifyOrder는 기존 주문에 대한 처리이므로 kt10001 매수 API 호출
-                        await this.kiwoomService.sendSellOrder(accountNo, stk_cd, parseInt(stock.hld_qty, 10), currentPrice);
-                        this.broadcastLog(`일괄청산 [${stk_cd}] ${stock.prdt_name} - ${stock.hld_qty}주 현재가(${currentPrice}원) 매도 전송`, 'INFO');
+                        await this.kiwoomService.sendSellOrder(accountNo, stk_cd, qty, currentPrice);
+                        this.broadcastLog(`일괄청산 [${stk_cd}] ${stock.prdt_name || stock.prdt_nm || stk_cd} - ${qty}주 현재가(${currentPrice}원) 매도 전송`, 'INFO');
                     } catch (err: any) {
                         const errMsg = err?.response?.data?.msg1 || err?.message || err;
                         this.broadcastLog(`일괄청산 전송 실패 [${stk_cd}]: ${errMsg}`, 'ERROR');
@@ -984,8 +1026,8 @@ export class AutoTradeService {
                 await new Promise(res => setTimeout(res, 1000));
             }
 
-            // 모든 매도 전송이 끝남. 이제 남은 미체결 잔량들이 모두 0이 되고, 보유 수량이 0이 되는 것을 감시.
-            this.broadcastLog(`청산 매도 명령 전송 완료. 미체결 정리 및 완료 여부 모니터링 시작...`, 'INFO');
+            // [Step 3] 모든 매도 전송이 끝남. 이제 남은 미체결 잔량들이 모두 0이 되고, 보유 수량이 0이 되는 것을 감시.
+            this.broadcastLog(`청산 매도 명령 전송 완료. 잔여 미체결 및 잔고 추적 모니터링 시작...`, 'INFO');
 
             if (this.liquidationMonitorTimer) clearInterval(this.liquidationMonitorTimer);
             this.liquidationMonitorTimer = setInterval(async () => {
@@ -1004,14 +1046,25 @@ export class AutoTradeService {
                     return; // 아직 미체결 매도가 남아있으면 modifyMonitor가 처리해주도록 기다림
                 }
 
-                // 2. 보유 종목이 남아있는지(전량 매도 체결 확인)
+                // 2. 보유 종목이 남아있는지 최종 확인 (파싱 강화)
                 const holdRes = await this.kiwoomService.getHoldings(accountNo);
-                const currentHoldings = holdRes?.data?.Body?.out1 || holdRes?.data?.list || [];
-                const remainItems = Array.isArray(currentHoldings) ? currentHoldings.filter((h: any) => parseInt(h.hld_qty, 10) > 0) : [];
+                const hdData = holdRes?.data || holdRes;
+                const hdBody = hdData?.Body || hdData?.body || hdData?.output1 || hdData;
+
+                let hdList = [];
+                if (Array.isArray(hdBody)) {
+                    hdList = hdBody;
+                } else {
+                    hdList = hdBody?.acnt_evlt_remn_indv_tot || hdBody?.output1 || hdBody?.list || hdBody?.grid || [];
+                }
+                const currentHoldings = Array.isArray(hdList) ? hdList : [hdList].filter(Boolean);
+
+                const remainItems = currentHoldings.filter((h: any) => parseInt(h.hld_qty || h.hldg_qty || h.rmnd_qty || h.qty || '0', 10) > 0);
 
                 if (remainItems.length === 0) {
                     // 완벽한 청산
                     this.broadcastLog(`⭐ 모든 종목 청산 및 체결 확인. 시스템 자동 종료 수행.`, 'SUCCESS');
+                    if (this.liquidationMonitorTimer) clearInterval(this.liquidationMonitorTimer);
                     this.setRunning(false);
                     eventBus.emit(SystemEvent.EMERGENCY_LIQUIDATION_COMPLETED);
                 } else {

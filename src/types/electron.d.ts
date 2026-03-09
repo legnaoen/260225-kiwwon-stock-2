@@ -29,10 +29,11 @@ export interface IElectronAPI {
     testMarketScanner: () => Promise<{ success: boolean, data?: any, error?: any }>
 
     // Telegram
-    saveTelegramSettings: (settings: { botToken: string, chatId: string, chartTheme?: string }) => Promise<{ success: boolean, message?: string, error?: string }>
+    saveTelegramSettings: (settings: { botToken: string, chatId: string, chartTheme?: string, dailyTopRisingNotify?: boolean, dailyTopRisingTime1?: string, dailyTopRisingTime2?: string }) => Promise<{ success: boolean, message?: string, error?: string }>
     saveTelegramTheme: (theme: string) => Promise<{ success: boolean }>
-    getTelegramSettings: () => Promise<{ botToken: string, chatId: string, chartTheme?: string } | null>
+    getTelegramSettings: () => Promise<{ botToken: string, chatId: string, chartTheme?: string, dailyTopRisingNotify?: boolean, dailyTopRisingTime1?: string, dailyTopRisingTime2?: string } | null>
     sendTelegramTestMessage: () => Promise<{ success: boolean, error?: string }>
+    testTelegramTopRising: () => Promise<{ success: boolean, error?: string }>
 
     // Auto Trade & Condition Search
     saveAutoTradeSettings: (settings: any) => Promise<any>

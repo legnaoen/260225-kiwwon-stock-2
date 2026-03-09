@@ -72,10 +72,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testMarketScanner: () => ipcRenderer.invoke('kiwoom:test-market-scanner'),
 
     // Telegram
-    saveTelegramSettings: (settings: { botToken: string, chatId: string, chartTheme?: string }) => ipcRenderer.invoke('telegram:save-settings', settings),
+    saveTelegramSettings: (settings: { botToken: string, chatId: string, chartTheme?: string, dailyTopRisingNotify?: boolean, dailyTopRisingTime1?: string, dailyTopRisingTime2?: string }) => ipcRenderer.invoke('telegram:save-settings', settings),
     saveTelegramTheme: (theme: string) => ipcRenderer.invoke('telegram:save-theme', theme),
     getTelegramSettings: () => ipcRenderer.invoke('telegram:get-settings'),
     sendTelegramTestMessage: () => ipcRenderer.invoke('telegram:test-message'),
+    testTelegramTopRising: () => ipcRenderer.invoke('telegram:test-top-rising'),
     sendTelegramMessage: (message: string) => ipcRenderer.invoke('telegram:send-message', message),
 
     // Condition Search

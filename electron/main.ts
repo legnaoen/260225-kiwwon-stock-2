@@ -13,6 +13,7 @@ import { DataLoggingService } from './services/DataLoggingService'
 import { DailyRetrospectiveService } from './services/DailyRetrospectiveService'
 import { AiService } from './services/AiService'
 import { VirtualAccountService } from './services/VirtualAccountService'
+import { SchedulerService } from './services/SchedulerService'
 import { eventBus, SystemEvent } from './utils/EventBus'
 
 const store = new Store()
@@ -21,6 +22,7 @@ const autoTradeService = AutoTradeService.getInstance()
 const telegramService = TelegramService.getInstance()
 const marketScannerService = MarketScannerService.getInstance()
 const aiDecisionService = AiDecisionService.getInstance()
+const schedulerService = SchedulerService.getInstance()
 // DataLoggingService is now lazily instantiated.
 
 // Load initial settings to the service
@@ -37,6 +39,11 @@ process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = (app && app.isPackaged) ? process.env.DIST : path.join(process.env.DIST, '../public')
 
 let win: BrowserWindow | null
+
+// 앱 시작 시 스킬스 파일 초기 스냅샷 DB 기록
+import('./services/SkillsService').then(({ SkillsService }) => {
+    SkillsService.getInstance().initSnapshots()
+}).catch(console.error)
 
 function createWindow() {
     win = new BrowserWindow({
@@ -81,6 +88,20 @@ function createWindow() {
     eventBus.on(SystemEvent.MARKET_OPENED_DETECTED, (data) => {
         if (win && !win.isDestroyed()) {
             win.webContents.send('kiwoom:market-opened-detected', data)
+        }
+    })
+
+    // Forward Batch Progress
+    eventBus.on(SystemEvent.BATCH_PROGRESS, (data) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('analysis:batch-progress', data)
+        }
+    })
+
+    // Forward System Error
+    eventBus.on(SystemEvent.SYSTEM_ERROR, (errorInfo) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('system:error', errorInfo)
         }
     })
 
@@ -296,6 +317,33 @@ ipcMain.handle('kiwoom:get-api-logs', () => {
 ipcMain.handle('kiwoom:test-market-scanner', async () => {
     try {
         const data = await kiwoomService.getVolumeSpikeStocks()
+        return { success: true, data }
+    } catch (error: any) {
+        return { success: false, error: error?.response?.data || { message: error.message } }
+    }
+})
+
+ipcMain.handle('kiwoom:get-top-trading-value-stocks', async () => {
+    try {
+        const data = await kiwoomService.getTopTradingValueStocks()
+        return { success: true, data }
+    } catch (error: any) {
+        return { success: false, error: error?.response?.data || { message: error.message } }
+    }
+})
+
+ipcMain.handle('kiwoom:get-top-rising-stocks', async () => {
+    try {
+        const data = await kiwoomService.getTopRisingStocks()
+        return { success: true, data }
+    } catch (error: any) {
+        return { success: false, error: error?.response?.data || { message: error.message } }
+    }
+})
+
+ipcMain.handle('kiwoom:get-combined-top-stocks', async (_event, { risingLimit, tradingValueLimit }) => {
+    try {
+        const data = await kiwoomService.getCombinedTopStocks(risingLimit, tradingValueLimit)
         return { success: true, data }
     } catch (error: any) {
         return { success: false, error: error?.response?.data || { message: error.message } }
@@ -626,6 +674,208 @@ ipcMain.handle('ai:test-connection', async (_event, { geminiKey, modelName }: { 
             modelName
         )
         return { success: true, response }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+// === Naver API Handlers ===
+ipcMain.handle('naver:save-keys', (_event, keys: { clientId: string, clientSecret: string }) => {
+    store.set('naver_api_keys', keys)
+    return { success: true }
+})
+
+ipcMain.handle('naver:get-keys', () => {
+    return store.get('naver_api_keys') || null
+})
+
+ipcMain.handle('naver:test-api', async (_event, { clientId, clientSecret }) => {
+    try {
+        const axios = (await import('axios')).default
+        const response = await axios.get('https://openapi.naver.com/v1/search/news.json', {
+            params: { query: '삼성전자', display: 1 },
+            headers: {
+                'X-Naver-Client-Id': clientId,
+                'X-Naver-Client-Secret': clientSecret
+            }
+        })
+        if (response.data && response.data.items && response.data.items.length > 0) {
+            // HTML 태그 제거
+            const cleanTitle = response.data.items[0].title.replace(/<[^>]*>?/gm, '')
+            return { success: true, title: cleanTitle }
+        }
+        return { success: false, error: '검색 결과가 없습니다.' }
+    } catch (err: any) {
+        console.error('[Main] Naver API Test Error:', err.response?.data || err.message)
+        return { success: false, error: err.response?.data?.errorMessage || err.message }
+    }
+})
+
+// === Rising Stocks Analysis DB Handlers ===
+ipcMain.handle('analysis:save-market-report', async (_event, report) => {
+    try {
+        DatabaseService.getInstance().saveMarketDailyReport(report)
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:get-market-report', async (_event, date) => {
+    try {
+        const report = DatabaseService.getInstance().getMarketDailyReport(date)
+        return { success: true, data: report }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:save-stock-analysis', async (_event, analysis) => {
+    try {
+        DatabaseService.getInstance().saveRisingStockAnalysis(analysis)
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:get-stocks-by-date', async (_event, date) => {
+    try {
+        const stocks = DatabaseService.getInstance().getRisingStocksByDate(date)
+        return { success: true, data: stocks }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:get-stock-analysis', async (_event, stockCode) => {
+    try {
+        const history = DatabaseService.getInstance().getStockAnalysis(stockCode)
+        return { success: true, data: history }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:run-stock-analysis', async (_event, { code, name, changeRate, tradingValue, source }) => {
+    try {
+        const result = await (await import('./services/RisingStockAnalysisService')).RisingStockAnalysisService.getInstance().analyzeAndSave(code, name, changeRate, tradingValue, source)
+        return result
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:run-market-report', async (_event, date) => {
+    try {
+        const result = await (await import('./services/RisingStockAnalysisService')).RisingStockAnalysisService.getInstance().generateMarketDailyReport(date)
+        return result
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:run-batch-report', async (_event) => {
+    try {
+        const { SchedulerService } = await import('./services/SchedulerService')
+        const result = await SchedulerService.getInstance().runManualBatchAnalysis('MANUAL')
+        return result
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:get-report-history', async () => {
+    try {
+        const history = DatabaseService.getInstance().getDailyReportHistory()
+        return { success: true, data: history }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:get-raw-data', async (_event, { date, stockCode }) => {
+    try {
+        const raw = DatabaseService.getInstance().getRawData(date, stockCode)
+        if (!raw) return { success: false, error: '저장된 원본 데이터가 없습니다.' }
+        return {
+            success: true,
+            data: {
+                news: JSON.parse(raw.news_json || '[]'),
+                disclosures: JSON.parse(raw.disclosures_json || '[]'),
+                collectedAt: (raw as any).collected_at
+            }
+        }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('naver:collect-news', async (_event, { date, stockCode, stockName }) => {
+    try {
+        const { NaverNewsService } = await import('./services/NaverNewsService')
+        const news = await NaverNewsService.getInstance().searchNews(stockName, 10)
+        
+        // DB 저장
+        DatabaseService.getInstance().saveNewsRawData(date, stockCode, stockName, news)
+        
+        return { success: true, data: news }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('dart:collect-disclosures', async (_event, { date, stockCode, stockName }) => {
+    try {
+        const { DartApiService } = await import('./services/DartApiService')
+        const result = await DartApiService.getInstance().getDisclosuresSummaryForAiWithRaw(stockCode)
+        
+        // DB 저장
+        DatabaseService.getInstance().saveDisclosuresRawData(date, stockCode, stockName, result.items)
+        
+        return { success: true, data: result.items }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+// ─── Skills File IPC ─────────────────────────────────────────────────────────
+
+ipcMain.handle('skills:get-all', async () => {
+    try {
+        const { SkillsService } = await import('./services/SkillsService')
+        const list = SkillsService.getInstance().getAllSkillsInfo()
+        return { success: true, data: list }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('skills:get-history', async (_event, fileName: string) => {
+    try {
+        const { SkillsService } = await import('./services/SkillsService')
+        const history = SkillsService.getInstance().getHistory(fileName)
+        return { success: true, data: history }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('skills:get-version', async (_event, { fileName, version }: { fileName: string, version: number }) => {
+    try {
+        const { SkillsService } = await import('./services/SkillsService')
+        const content = SkillsService.getInstance().getVersionContent(fileName, version)
+        return { success: true, data: content }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('skills:save', async (_event, { fileName, content, diffSummary }: { fileName: string, content: string, diffSummary: string }) => {
+    try {
+        const { SkillsService } = await import('./services/SkillsService')
+        SkillsService.getInstance().saveAndSnapshot(fileName, content, diffSummary, 'MANUAL')
+        return { success: true }
     } catch (err: any) {
         return { success: false, error: err.message }
     }

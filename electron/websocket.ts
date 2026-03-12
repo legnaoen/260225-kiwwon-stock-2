@@ -80,11 +80,18 @@ export class KiwoomWebSocketManager {
     }
 
     public registerItems(symbols: string[]) {
-        // 새로운 종목 추가
-        symbols.forEach(s => this.registeredItems.add(s))
+        let newlyAdded = false
+        symbols.forEach(s => {
+            if (!this.registeredItems.has(s)) {
+                this.registeredItems.add(s)
+                newlyAdded = true
+            }
+        })
 
         if (!this.ws || !this.isConnected) {
-            console.log('WS not connected yet. Symbols added to queue:', symbols)
+            if (newlyAdded) {
+                console.log(`[WS] Not connected yet. Queued ${symbols.length} symbols for later registration.`);
+            }
             return
         }
 

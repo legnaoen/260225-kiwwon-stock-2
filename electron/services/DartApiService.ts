@@ -385,4 +385,88 @@ export class DartApiService {
             message: `[DART] ${totalCount}개 종목의 10년 재무 데이터 수집이 완료되었습니다.`
         })
     }
+
+    /**
+     * AI 분석을 위해 특정 종목의 최근 공시 목록을 가져와 텍스트로 결합합니다.
+     */
+    public async getDisclosuresSummaryForAi(stockCode: string): Promise<string> {
+        const apiKey = this.getApiKey()
+        if (!apiKey) return 'DART API 키가 없습니다.'
+
+        const corpCodeMap = DatabaseService.getInstance().getCorpCodesByStockCodes([stockCode])
+        const corpCode = corpCodeMap[stockCode]
+        if (!corpCode) return '종목 코드에 해당하는 DART 법인코드를 찾을 수 없습니다. 법인코드 동기화가 필요합니다.'
+
+        const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+        const bgnDe = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '') // 최근 7일
+        
+        const types = ['A', 'B', 'C', 'I'] // 정기, 주요사항, 발행, 기타
+        let allDisclosures: any[] = []
+
+        for (const type of types) {
+            try {
+                // Throttling
+                await new Promise(resolve => setTimeout(resolve, 500))
+                const url = `${DART_BASE_URL}/list.json?crtfc_key=${apiKey}&corp_code=${corpCode}&bgn_de=${bgnDe}&end_de=${todayStr}&pblntf_ty=${type}`
+                const res = await axios.get(url)
+                
+                if (res.data.status === '000' && res.data.list) {
+                    allDisclosures.push(...res.data.list)
+                }
+            } catch (err) {
+                console.error(`[DartApiService] AI Summary fetch error (${type}):`, err)
+            }
+        }
+
+        if (allDisclosures.length === 0) return '최근 7일간 주요 공시가 없습니다.'
+
+        // 날짜순 정렬 (최신순)
+        allDisclosures.sort((a, b) => b.rcept_dt.localeCompare(a.rcept_dt))
+
+        return allDisclosures.slice(0, 10).map((item, idx) => 
+            `[공시 ${idx + 1}] ${item.rcept_dt.slice(4, 6)}/${item.rcept_dt.slice(6, 8)} - ${item.report_nm}`
+        ).join('\n')
+    }
+
+    /**
+     * AI 분석을 위한 공시 요약 텍스트와 raw 배열을 함께 반환합니다.
+     */
+    public async getDisclosuresSummaryForAiWithRaw(stockCode: string): Promise<{ summary: string, items: any[] }> {
+        const apiKey = this.getApiKey()
+        if (!apiKey) return { summary: 'DART API 키가 없습니다.', items: [] }
+
+        const corpCodeMap = DatabaseService.getInstance().getCorpCodesByStockCodes([stockCode])
+        const corpCode = corpCodeMap[stockCode]
+        if (!corpCode) return { summary: '종목 코드에 해당하는 DART 법인코드를 찾을 수 없습니다.', items: [] }
+
+        const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+        const bgnDe = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '')
+        
+        const types = ['A', 'B', 'C', 'I']
+        let allDisclosures: any[] = []
+
+        for (const type of types) {
+            try {
+                await new Promise(resolve => setTimeout(resolve, 500))
+                const url = `${DART_BASE_URL}/list.json?crtfc_key=${apiKey}&corp_code=${corpCode}&bgn_de=${bgnDe}&end_de=${todayStr}&pblntf_ty=${type}`
+                const res = await axios.get(url)
+                if (res.data.status === '000' && res.data.list) {
+                    allDisclosures.push(...res.data.list)
+                }
+            } catch (err) {
+                console.error(`[DartApiService] AI Summary fetch error (${type}):`, err)
+            }
+        }
+
+        if (allDisclosures.length === 0) return { summary: '최근 7일간 주요 공시가 없습니다.', items: [] }
+
+        allDisclosures.sort((a, b) => b.rcept_dt.localeCompare(a.rcept_dt))
+        const top = allDisclosures.slice(0, 10)
+
+        const summary = top.map((item, idx) =>
+            `[공시 ${idx + 1}] ${item.rcept_dt.slice(4, 6)}/${item.rcept_dt.slice(6, 8)} - ${item.report_nm}`
+        ).join('\n')
+
+        return { summary, items: top }
+    }
 }

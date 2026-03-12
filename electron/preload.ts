@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getUnexecutedOrders: (options: { accountNo: string }) => ipcRenderer.invoke('kiwoom:get-unexecuted-orders', options),
     getAllStocks: (marketType: string) => ipcRenderer.invoke('kiwoom:get-all-stocks', { marketType }),
     getWatchlist: (symbols: string[]) => ipcRenderer.invoke('kiwoom:get-watchlist', { symbols }),
+    getTopRisingStocks: () => ipcRenderer.invoke('kiwoom:get-top-rising-stocks'),
+    getTopTradingValueStocks: () => ipcRenderer.invoke('kiwoom:get-top-trading-value-stocks'),
+    getCombinedTopStocks: (options: { risingLimit?: number, tradingValueLimit?: number }) => ipcRenderer.invoke('kiwoom:get-combined-top-stocks', options),
     getChartData: (options: { stk_cd: string, base_dt?: string }) => ipcRenderer.invoke('kiwoom:get-chart-data', options),
     wsRegister: (symbols: string[]) => ipcRenderer.invoke('kiwoom:ws-register', symbols),
     onRealTimeData: (callback: (data: any) => void) => {
@@ -145,5 +148,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('kiwoom:market-opened-detected', listener)
         return () => ipcRenderer.removeListener('kiwoom:market-opened-detected', listener)
-    }
+    },
+    saveNaverApiKeys: (keys: { clientId: string, clientSecret: string }) => ipcRenderer.invoke('naver:save-keys', keys),
+    getNaverApiKeys: () => ipcRenderer.invoke('naver:get-keys'),
+    testNaverApi: (keys: { clientId: string, clientSecret: string }) => ipcRenderer.invoke('naver:test-api', keys),
+
+    // Rising Stocks Analysis
+    saveMarketDailyReport: (report: any) => ipcRenderer.invoke('analysis:save-market-report', report),
+    getMarketDailyReport: (date: string) => ipcRenderer.invoke('analysis:get-market-report', date),
+    saveRisingStockAnalysis: (analysis: any) => ipcRenderer.invoke('analysis:save-stock-analysis', analysis),
+    getRisingStocksByDate: (date: string) => ipcRenderer.invoke('analysis:get-stocks-by-date', date),
+    getStockAnalysis: (stockCode: string) => ipcRenderer.invoke('analysis:get-stock-analysis', stockCode),
+    runStockAnalysis: (options: { code: string, name: string, changeRate: number }) => ipcRenderer.invoke('analysis:run-stock-analysis', options),
+    runMarketReport: (date: string) => ipcRenderer.invoke('analysis:run-market-report', date),
+    getReportHistory: () => ipcRenderer.invoke('analysis:get-report-history'),
+    runBatchReport: () => ipcRenderer.invoke('analysis:run-batch-report'),
+    onBatchProgress: (callback: (data: { step: string, current: number, total: number, message: string }) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('analysis:batch-progress', listener)
+        return () => ipcRenderer.removeListener('analysis:batch-progress', listener)
+    },
+    getRawData: (options: { date: string, stockCode: string }) => ipcRenderer.invoke('analysis:get-raw-data', options),
+    collectNews: (options: { date: string, stockCode: string, stockName: string }) => ipcRenderer.invoke('naver:collect-news', options),
+    collectDisclosures: (options: { date: string, stockCode: string, stockName: string }) => ipcRenderer.invoke('dart:collect-disclosures', options),
+    // Skills
+    skillsGetAll: () => ipcRenderer.invoke('skills:get-all'),
+    skillsGetHistory: (fileName: string) => ipcRenderer.invoke('skills:get-history', fileName),
+    skillsGetVersion: (options: { fileName: string, version: number }) => ipcRenderer.invoke('skills:get-version', options),
+    skillsSave: (options: { fileName: string, content: string, diffSummary: string }) => ipcRenderer.invoke('skills:save', options),
+    onSystemError: (callback: (error: { message: string, code: string, time: string }) => void) => {
+        const listener = (_event: any, error: any) => callback(error)
+        ipcRenderer.on('system:error', listener)
+        return () => ipcRenderer.removeListener('system:error', listener)
+    },
 })

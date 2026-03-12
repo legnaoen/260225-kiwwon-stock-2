@@ -198,7 +198,7 @@ export default function HistoryTab() {
                                                         <span className="text-muted-foreground font-normal">보유 중</span>
                                                     ) : (
                                                         <span className={item.returnRate && item.returnRate > 0 ? 'text-green-500' : 'text-red-500'}>
-                                                            {item.returnRate !== undefined ? (item.returnRate > 0 ? `+${item.returnRate.toFixed(2)}%` : `${item.returnRate.toFixed(2)}%`) : '0.00%'}
+                                                            {item.returnRate !== undefined && item.returnRate !== null ? (item.returnRate > 0 ? `+${item.returnRate.toFixed(2)}%` : `${item.returnRate.toFixed(2)}%`) : '0.00%'}
                                                         </span>
                                                     )}
                                                 </td>

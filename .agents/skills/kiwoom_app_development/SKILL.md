@@ -42,13 +42,17 @@ description: Instructions and guidelines for cleanly scaling the Kiwoom REST API
 * **설정 UI 분리**: 기능이 거대해짐에 따라 AI나 자동매매 세팅 기능은 기존 화면에 욱여넣지 않고 새로운 탭(Tab)이나 설정(Settings) 다이얼로그로 독립시켜 여백과 사용성을 유지하세요.
 
 ## 4. 키움 REST API 연동 시 필수 고려사항 (제약 및 특징)
+
+> [!IMPORTANT]
+> 키움 REST API의 구현 상세 규격(Body 파라미터, 필드명, TR 코드 등)은 프로젝트 루트의 [KIWOOM_API_REFERENCE.md](../../../docs/KIWOOM_API_REFERENCE.md) 문서를 최우선으로 조회하고 참조해야 합니다.
+
 자동매매 및 각종 부가기능 연동 시 키움증권 OpenAPI의 특징을 반드시 고려해야 합니다.
 
-* **API 호출 제한 (Rate Limit & Throttling)**: REST API 호출에 엄격한 속도 제한(TPS)이 적용됩니다. 순간적인 과부하(초당 과도한 요청) 발생 시 API 접근이 차단될 수 있으므로, `KiwoomService` 에는 반드시 **API 요청 큐(Queue) 및 스로틀링(Throttling)** 메커니즘을 적용하여 연속된 요청 간에 일정한 딜레이를 강제해야 합니다.
-* **토큰 만료 완벽 처리 (8005 Error)**: Oauth 2.0 기반으로 작동하므로 토큰에 유효기간이 존재합니다. 프로그램 중단 없이 작동하는 자동매매 봇의 특성을 위해, **API 요청 시점에 토큰 만료 여부를 점검**하고 8005 에러 발생 시 스스로 토큰을 재발행한 뒤 실패했던 요청을 다시 이어가는 **자동 재시도(Retry) 로직**이 서비스 계층 최하단에 포함되어야 합니다.
-* **WebSocket 구독 임계치 제한**: 실시간 시세를 수신하기 위한 WebSocket 연결에서 한 번에 수신할 수 있는 최대 종목(Symbol) 등록 개수에 제한이 있습니다. `AutoTradeService`와 연계 시 전체 시장 종목을 구독하는 것은 불가능하므로, 자동매매(조건검색) 등 **실제로 장중 감시가 필요한 종목만 필터링하여 동적으로 구독/구독해제를 관리**해야 합니다.
-* **정규장 시간 제어 (Time 필터)**: 국내 주식 정규 시간(09:00 ~ 15:30) 외에는 정상적인 시세/체결 이벤트가 발생하지 않으므로, 스케줄링 프로세스에는 반드시 타임필터 방식이 들어가 불필요한 야간 API 호출을 방지해야 합니다.
-* **동시 다발적 대량주문 제어**: 조건검색 결과로 수십 개 종목이 검색되었을 때 동시 매수를 시도하면 API 호출 한도 초과 및 증거금 부족 오류가 발생하기 쉽습니다. 주문 로직 처리 시 분할이나 동시 주문개수 통제 로직이 있어야 합니다.
+* **API 호출 제한 (Rate Limit & Throttling)**: REST API 호출에 엄격한 속도 제한(TPS)이 적용됩니다. `KiwoomService`에는 반드시 API 요청 큐 및 스로틀링 메커니즘을 적용하여 일정한 딜레이를 강제해야 합니다.
+* **토큰 만료 완벽 처리 (8005 Error)**: Oauth 2.0 기반이므로 토큰 만료 시(`return_code: 3` & `8005`) 스스로 토큰을 재발행하고 실패했던 요청을 재시도하는 로직이 필수입니다.
+* **WebSocket 구독 임계치 제한**: 실시간 시세 수신 시 한 번에 등록 가능한 종목 개수에 제한이 있으므로, 필요한 종목만 동적으로 구독/해제 관리해야 합니다.
+* **정규장 시간 제어 (Time 필터)**: 국내 주식 정규 시간(09:00 ~ 15:30) 외에는 불필요한 API 호출을 방지하기 위해 타임필터를 적용합니다. 단, 데이터 조회의 경우 키움이 장외에도 직전 데이터를 반환하므로 유연하게 적용합니다.
+* **동시 다발적 대량주문 제어**: 대량 주문 시 API 호출 한도 및 증거금 부족 오류 방지를 위해 주문 개수 통제 로직이 필요합니다.
 
 ## 5. AI 에이전트 필수 행동 수칙 (개발 프로세스)
 이 프로젝트에서 새로운 기능을 개발하거나 코드를 수정하는 모든 AI 에이전트(혹은 협력 개발자)는 코딩을 시작하기 전 **반드시 아래의 절차를 준수**해야 합니다.
@@ -57,7 +61,8 @@ description: Instructions and guidelines for cleanly scaling the Kiwoom REST API
    * 개발 전 무조건 프로젝트 루트의 `PLAN.md`를 읽고 현재 진행 중인 단계(Phase)와 기존 아키텍처 제약사항을 확인합니다.
 2. **사전 리서치 및 API 규격 확인**:
    * 기능 구현에 API 스펙이 필요한 경우, 섣불리 코드를 작성하지 않습니다.
-   * `키움 REST API 문서.pdf` 또는 `키움 REST API 문서.xlsx` 등 문서를 검색하여 **엔드포인트(URL), 요청 헤더/바디, 정확한 응답 구조(Response JSON)**를 파악합니다.
+   * 먼저 프로젝트의 [KIWOOM_API_REFERENCE.md](../../../docs/KIWOOM_API_REFERENCE.md)를 확인하여 이미 구현된 패턴이 있는지 확인합니다.
+   * 새로운 API를 사용하는 경우 `키움 REST API 문서.pdf` 또는 `키움 REST API 문서.xlsx` 등 문서를 검색하여 **엔드포인트(URL), 요청 헤더/바디, 정확한 응답 구조(Response JSON)**를 파악합니다.
 3. **설계 공유 및 승인**:
    * 리서치 결과를 바탕으로 어떻게 코드를 모듈화(`electron/services/XxxService.ts`)할 것인지, 어떤 이벤트 버스 채널을 사용할 것인지 설계안을 먼저 작성합니다.
    * 사용자(User)에게 설계안을 제시하고 **승인(Confirm)을 받은 후**에만 실제 파일 쓰기(Coding)에 돌입합니다.
@@ -77,3 +82,141 @@ Electron 애플리케이션을 배포용 설치 파일(`.exe`)로 빌드할 때(
 * **백그라운드 창(offscreen) 로드 타임아웃 오류**:
   * 텔레그램 차트 캡처 등을 위해 사용하는 보이지 않는 `BrowserWindow`가 배포 환경에서 작동하지 않는 경우가 있습니다.
   * **해결책**: `loadURL`과 `loadFile`의 분기 처리를 명확히 해야 합니다. 배포 환경(`!process.env.VITE_DEV_SERVER_URL`)에서는 URL 문자열을 직접 조합하지 말고, `win.loadFile(targetPath, { hash: urlHash })` 형식으로 Electron 기본 API를 안전하게 사용해야 리소스를 정상적으로 로드할 수 있습니다.
+
+---
+
+## 7. 개발 지식 체계 (Development Framework)
+
+이 섹션은 프로젝트의 기능을 개발할 때 AI 에이전트가 활용해야 할 '개발 전용' 지식 체계를 정의합니다.
+
+### 7.1. 특화된 AI 에이전트 역할 (Agents)
+개발 중 특정 작업이 필요할 때 해당 페르소나를 소환하여 작업을 수행합니다.
+- **[The Architect]**: 신규 기능 설계 시 `PLAN.md`를 업데이트하고 모듈 구조를 제안합니다.
+- **[UI Auditor]**: Glassmorphism 가이드라인 준수 여부를 검토하고 컴포넌트를 마이그레이션합니다.
+- **[Bug Hunter]**: 로그 분석 및 런타임 에러 수정을 전문적으로 수행합니다.
+
+### 7.2. 반복 숙달 능력 (Skills)
+- **[Skill] IPC-Bridge-Builder**: `main`↔`renderer` 간 통신 채널 구축 시 `preload.ts` 및 `types` 자동 업데이트.
+- **[Skill] Kiwoom-Error-Handler**: 키움 API 전용 에러 코드 대응 로직 자동 주입.
+
+### 7.3. 개발 전용 도구 (Plugins)
+- **`develop/scripts/`**: 독립적 실행이 가능한 테스트 스크립트 모음 (예: `fetch_test.js`).
+- **Mock Data Provider**: 장외 시간 개발을 위한 가짜 시세 데이터 주입 로직.
+
+---
+
+## 8. 구현 교훈 — 급등주 분석 기능 (2026-03-10)
+
+반복적으로 발생했던 오류 유형과 해결 패턴을 기록합니다. 동일한 실수를 반복하지 않도록 합니다.
+
+### 7.1. 키움 API 데이터 조회 vs 주문 실행 단계 구분
+
+**잘못된 패턴:** 급등주 조회(`ka10027`, `ka10030`)를 호출하는 서비스에 `isMarketOpen()` 체크를 적용하여 장외 시간에 빈 배열을 반환함.
+
+**올바른 패턴:**
+- **데이터 조회**: 장중 여부 무관하게 항상 호출 (키움은 장외에도 직전 데이터 반환)
+- **주문 실행**: 반드시 장중 여부 체크 후 실행
+
+```typescript
+// 조회 서비스 — 장중 체크 불필요
+async getTopRisingStocks(): Promise<RisingStock[]> {
+    const res = await this.callApi('ka10027', params)  // 항상 호출
+    return res.data ?? []
+}
+
+// 주문 서비스 — 장중 체크 필수
+async placeOrder(code: string, qty: number): Promise<void> {
+    if (!this.isMarketOpen()) throw new Error('장외 시간에는 주문 불가')
+    await this.callApi('kt00009', orderParams)
+}
+```
+
+---
+
+### 7.2. DART API 메서드 시그니처 주의사항
+
+`DartApiService`에는 단수 조회 메서드가 없습니다. **항상 배치 메서드를 사용**해야 합니다.
+
+```typescript
+// ❌ 존재하지 않는 메서드 (런타임 오류 발생)
+await dartApi.getCorpCodeByStockCode(stockCode)
+
+// ✅ 올바른 사용법 — 단일 종목도 배열로 감싸서 호출
+const map = await dartApi.getCorpCodesByStockCodes([stockCode])
+const corpCode = map[stockCode]  // 결과가 없으면 undefined
+
+// ✅ 공시 요약 — raw 데이터 포함 버전
+const { summary, items } = await dartApi.getDisclosuresSummaryForAiWithRaw(stockCode)
+// items: DartDisclosure[] (원본 공시 목록, DB 저장용)
+// summary: string (AI 요약 텍스트)
+```
+
+---
+
+### 7.3. 새 서비스 파일 생성 시 필수 Import 체크리스트
+
+서비스 파일(`electron/services/XxxService.ts`)을 새로 만들 때 아래 항목 중 필요한 것을 빠뜨리지 말 것:
+
+```typescript
+import { eventBus, SystemEvent } from '../utils/EventBus'      // 이벤트 emit/on 사용 시
+import { DatabaseService } from './DatabaseService'            // DB 접근 시
+import { KiwoomService } from './KiwoomService'                // 키움 API 호출 시
+import { AiService } from './AiService'                        // Gemini AI 호출 시
+import { NaverNewsService } from './NaverNewsService'          // 네이버 뉴스 API 시
+import { DartApiService } from './DartApiService'              // DART API 시
+```
+
+누락 시 `is not a function` 또는 `is not defined` 런타임 오류 발생 (TypeScript 컴파일 단계에서는 안 잡힐 수 있음).
+
+---
+
+### 7.4. React 상태 관리 — 실시간 데이터 + DB 데이터 병합 원칙
+
+급등주 리포트처럼 "실시간 시세(API)" + "분석 결과(DB)" 두 소스를 합쳐 보여줄 때:
+
+**❌ 잘못된 패턴:** DB 로드 시 실시간 리스트를 `setRealtimeStocks([])`처럼 초기화함 → 목록 사라짐
+
+**✅ 올바른 패턴:** 실시간 데이터를 베이스로, DB 데이터를 덮어씌우는 병합
+
+```typescript
+// DB 결과 로드 후 실시간 데이터와 병합
+const mergedStocks = realtimeStocks.map(rt => {
+    const db = dbAnalyzedStocks.find(d => d.code === rt.code)
+    return db ? { ...rt, ...db } : rt   // DB 결과 있으면 병합, 없으면 실시간만
+})
+// realtimeStocks state는 절대 DB 로드 과정에서 초기화하지 말 것
+```
+
+---
+
+### 7.5. 데이터 수집 → AI 분석 → DB 저장 올바른 순서
+
+```typescript
+// 반드시 이 순서를 지킬 것
+const { newsItems, disclosureItems, summary } = await collectAllData(...)
+
+// 1단계: raw 데이터를 AI 호출 전에 먼저 DB 저장
+db.saveRawData({ date, stock_code, news_json: JSON.stringify(newsItems), ... })
+
+// 2단계: AI 분석 (실패해도 raw 데이터는 보존됨)
+const aiResult = await ai.analyze(summary)
+
+// 3단계: 분석 결과 저장
+db.saveAnalysisResult(aiResult)
+```
+
+이 순서를 지키면 AI 호출 실패, 타임아웃, 비용 한도 초과 시에도 수집한 원본 데이터는 DB에 안전하게 보존됩니다.
+
+---
+
+### 7.6. NaverNewsService — searchNews vs getNewsSummaryForAi 구분
+
+```typescript
+// raw 데이터 배열 반환 (DB 저장용)
+const items: NaverNewsItem[] = await naverNews.searchNews(stockName)
+
+// AI용 텍스트 요약 반환 (프롬프트 주입용) — raw 저장 불가
+const summary: string = await naverNews.getNewsSummaryForAi(stockName)
+```
+
+raw 데이터 DB 저장이 필요한 경우 반드시 `searchNews()`를 사용하고, 요약까지 필요하다면 직접 포맷팅할 것.

@@ -22,9 +22,17 @@ You MUST follow these guidelines for EVERY coding task in this project to avoid 
 - **Define success criteria** before starting. Loop until verified.
 - For multi-step tasks, state a brief plan with verification steps.
 
-## 5. API & Dependency Management (NEW/CRITICAL)
+## 5. API & Dependency Management
 - **Prefer Direct API Calls**: Before adding a specialized client library (e.g. `yahoo-finance2`), ALWAYS consider a direct `axios` or `fetch` call to the REST endpoint.
 - **Environment Awareness**: Be wary of ESM-only or Node-native libraries in Electron/Vite environments.
 - **Pre-verification**: Verify raw API responses with a scratch script (`fetch_test.js`) or `curl` before writing integration code.
 - **Stability > Convenience**: Choose the most fundamental way to get data to avoid long-term build/dependency debt.
 - **Library Rule**: If you can do it with an `axios.get()` call, DO NOT install a library.
+
+## 6. Kiwoom Project Development Rules (CRITICAL)
+- **Dev vs User Context**: Maintain a strict separation between "Development Tools/Logs" and "End-User Features". Dev-only code must not leak into production UI.
+- **DART API Batch Rule**: Use ONLY batch methods in `DartApiService`. Single lookup methods are deprecated and cause runtime crashes.
+- **Raw Persistence First**: Always save raw API responses (News, Disclosures) to SQLite BEFORE calling AI analysis. This prevents data loss during AI failures.
+- **Kiwoom Exception Handling**: Map Kiwoom error codes (8005, 8001, etc.) to meaningful UI messages or automatic recovery (token refresh).
+- **Aesthetic Law**: UI must follow the established "Glassmorphism" theme: HSL colors only, `backdrop-blur`, `rounded-xl`, and subtle gradients. Avoid browser defaults.
+- **Event-Driven Only**: Service-to-service communication MUST go through `EventBus`. Direct service cross-imports are forbidden.

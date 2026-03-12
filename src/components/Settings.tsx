@@ -89,6 +89,12 @@ export default function Settings() {
     const [statusYahoo, setStatusYahoo] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageYahoo, setMessageYahoo] = useState('')
 
+    const [naverKeys, setNaverKeys] = useState({ clientId: '', clientSecret: '' })
+    const [isSavingNaver, setIsSavingNaver] = useState(false)
+    const [statusNaver, setStatusNaver] = useState<'idle' | 'success' | 'error'>('idle')
+    const [messageNaver, setMessageNaver] = useState('')
+    const [isTestingNaver, setIsTestingNaver] = useState(false)
+
     useEffect(() => {
         const loadKeys = async () => {
             const savedKeys = await window.electronAPI.getApiKeys()
@@ -141,6 +147,11 @@ export default function Settings() {
                     buyStartTime: savedAiSettings.buyStartTime || '09:10',
                     buyEndTime: savedAiSettings.buyEndTime || '15:00'
                 })
+            }
+
+            const savedNaverKeys = await (window.electronAPI as any).getNaverApiKeys()
+            if (savedNaverKeys) {
+                setNaverKeys(savedNaverKeys)
             }
         }
         loadKeys()
@@ -448,6 +459,55 @@ export default function Settings() {
         } finally {
             setIsTestingTopRising(false)
             setTimeout(() => setStatusTg('idle'), 4000)
+        }
+    }
+
+    const handleSaveNaver = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setIsSavingNaver(true)
+        setStatusNaver('idle')
+        setMessageNaver('네이버 API 키 저장 중...')
+        try {
+            const result = await (window.electronAPI as any).saveNaverApiKeys(naverKeys)
+            if (result.success) {
+                setStatusNaver('success')
+                setMessageNaver('네이버 API 설정이 저장되었습니다.')
+                setTimeout(() => setStatusNaver('idle'), 3000)
+            } else {
+                setStatusNaver('error')
+                setMessageNaver('저장 실패')
+            }
+        } catch (error: any) {
+            setStatusNaver('error')
+            setMessageNaver('저장 중 오류 발생')
+        } finally {
+            setIsSavingNaver(false)
+        }
+    }
+
+    const handleTestNaver = async () => {
+        if (!naverKeys.clientId || !naverKeys.clientSecret) {
+            setStatusNaver('error')
+            setMessageNaver('클라이언트 ID와 Secret을 모두 입력해주세요.')
+            return
+        }
+        setIsTestingNaver(true)
+        setStatusNaver('idle')
+        setMessageNaver('네이버 뉴스 API 연결 테스트 중 (삼성전자 키워드)...')
+        try {
+            const result = await (window.electronAPI as any).testNaverApi(naverKeys)
+            if (result.success) {
+                setStatusNaver('success')
+                setMessageNaver(`연결 성공! 검색 결과 1건 확인: ${result.title}`)
+            } else {
+                setStatusNaver('error')
+                setMessageNaver(`연결 실패: ${result.error}`)
+            }
+        } catch (error: any) {
+            setStatusNaver('error')
+            setMessageNaver(`테스트 중 오류: ${error.message}`)
+        } finally {
+            setIsTestingNaver(false)
         }
     }
 
@@ -1374,6 +1434,92 @@ export default function Settings() {
                                                     <li>글로벌 시황 기반 AI 리포팅</li>
                                                     <li>매크로 지표 변동 알림 (예정)</li>
                                                 </ul>
+                                            </div>
+                                        </div>
+
+                                        <div className="pt-8 border-t border-border/40">
+                                            <div className="flex items-center gap-4 mb-6">
+                                                <div className="p-3 bg-green-500/10 rounded-xl">
+                                                    <Globe className="text-green-500" size={24} />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold">Naver Open API</h3>
+                                                    <p className="text-xs text-muted-foreground">급등주 분석을 위한 최신 뉴스 수집 및 키워드 검색</p>
+                                                </div>
+                                            </div>
+
+                                            <form onSubmit={handleSaveNaver} className="space-y-4">
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-xs font-bold ml-1">Client ID</label>
+                                                        <input
+                                                            type="text"
+                                                            value={naverKeys.clientId}
+                                                            onChange={(e) => setNaverKeys({ ...naverKeys, clientId: e.target.value })}
+                                                            placeholder="네이버 개발자 센터에서 발급받은 ID"
+                                                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <label className="text-xs font-bold ml-1">Client Secret</label>
+                                                        <input
+                                                            type="password"
+                                                            value={naverKeys.clientSecret}
+                                                            onChange={(e) => setNaverKeys({ ...naverKeys, clientSecret: e.target.value })}
+                                                            placeholder="네이버 개발자 센터에서 발급받은 Secret"
+                                                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center justify-between pt-2">
+                                                    <div className="flex items-center gap-2">
+                                                        {isTestingNaver && (
+                                                            <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
+                                                                <RefreshCw size={14} className="animate-spin" /> {messageNaver}
+                                                            </span>
+                                                        )}
+                                                        {statusNaver === 'success' && (
+                                                            <span className="text-xs text-green-500 font-medium flex items-center gap-1 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
+                                                                <ShieldCheck size={14} /> {messageNaver}
+                                                            </span>
+                                                        )}
+                                                        {statusNaver === 'error' && (
+                                                            <span className="text-xs text-destructive font-medium flex items-center gap-1 bg-destructive/10 px-3 py-1.5 rounded-full border border-destructive/20 max-w-[400px]">
+                                                                <AlertCircle size={14} className="shrink-0" /> {messageNaver}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex gap-3">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleTestNaver}
+                                                            disabled={isTestingNaver}
+                                                            className="flex items-center gap-2 text-xs text-green-600 hover:text-green-700 font-bold px-4 py-2 rounded-xl border border-green-200 hover:bg-green-50 transition-colors"
+                                                        >
+                                                            {isTestingNaver ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                            연결 테스트
+                                                        </button>
+                                                        <button
+                                                            type="submit"
+                                                            disabled={isSavingNaver}
+                                                            className="flex items-center gap-2 bg-green-600 text-white px-6 py-2 rounded-xl text-xs font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-600/10"
+                                                        >
+                                                            {isSavingNaver ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                                                            네이버 키 저장
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </form>
+
+                                            <div className="mt-4 bg-muted/20 rounded-xl p-4 flex gap-3 items-start border border-border/40">
+                                                <Info className="text-muted-foreground/60 mt-0.5" size={16} />
+                                                <div className="space-y-1">
+                                                    <p className="text-[10px] font-bold">API 신청 안내</p>
+                                                    <p className="text-[9px] text-muted-foreground leading-relaxed">
+                                                        네이버 개발자 센터(<a href="https://developers.naver.com/" target="_blank" className="text-blue-500 hover:underline">developers.naver.com</a>)에서 '뉴스' 검색 API 권한을 포함한 애플리케이션을 등록하여 키를 발급받을 수 있습니다.
+                                                    </p>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

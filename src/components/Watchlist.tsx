@@ -11,6 +11,7 @@ import { StockChart } from './StockChart'
 import { StockNotes } from './StockNotes'
 import { StockSchedules } from './StockSchedules'
 import { StockFinancials } from './StockFinancials'
+import { StockAiReport } from './StockAiReport'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './ui/Table'
 import { ProfitText } from './ui/ProfitDisplay'
 
@@ -41,7 +42,7 @@ export default function Watchlist() {
     const [searchQuery, setSearchQuery] = useState('')
     const [isSearching, setIsSearching] = useState(false)
     const [selectedStock, setSelectedStock] = useState<{ code: string, name: string } | null>(null)
-    const [activeInfoTab, setActiveInfoTab] = useState<'notes' | 'schedules' | 'financials'>('notes')
+    const [activeInfoTab, setActiveInfoTab] = useState<'report' | 'notes' | 'schedules' | 'financials'>('notes')
     const searchRef = useRef<HTMLDivElement>(null)
 
     const { tags: tagData, getAllTags } = useTagStore()
@@ -543,36 +544,26 @@ export default function Watchlist() {
                     {/* 하단 스크롤 영역: 부가 정보 */}
                     <div className="flex flex-col flex-1 overflow-y-auto min-h-0 bg-background">
                         <div className="flex gap-6 border-b border-border/50 px-4 pt-4 sticky top-0 z-10 bg-background">
-                            <button
-                                onClick={() => setActiveInfoTab('notes')}
-                                className={cn(
-                                    "text-[13px] font-bold pb-3 -mb-[1.5px] transition-all",
-                                    activeInfoTab === 'notes' ? "text-primary border-b-[3px] border-primary" : "text-muted-foreground/60 hover:text-foreground"
-                                )}
-                            >
-                                노트
-                            </button>
-                            <button
-                                onClick={() => setActiveInfoTab('schedules')}
-                                className={cn(
-                                    "text-[13px] font-bold pb-3 -mb-[1.5px] transition-all flex items-center gap-1.5",
-                                    activeInfoTab === 'schedules' ? "text-primary border-b-[3px] border-primary" : "text-muted-foreground/60 hover:text-foreground"
-                                )}
-                            >
-                                DART
-                            </button>
-                            <button
-                                onClick={() => setActiveInfoTab('financials')}
-                                className={cn(
-                                    "text-[13px] font-bold pb-3 -mb-[1.5px] transition-all flex items-center gap-1.5",
-                                    activeInfoTab === 'financials' ? "text-primary border-b-[3px] border-primary" : "text-muted-foreground/60 hover:text-foreground"
-                                )}
-                            >
-                                재무
-                            </button>
-                            <button className="text-[13px] font-bold text-muted-foreground/60 hover:text-foreground pb-3 -mb-[1.5px] transition-colors">예비</button>
+                            {[
+                                { id: 'report', name: 'AI 리포트' },
+                                { id: 'notes', name: '노트' },
+                                { id: 'schedules', name: 'DART' },
+                                { id: 'financials', name: '재무' }
+                            ].map((tab) => (
+                                <button
+                                    key={tab.id}
+                                    onClick={() => setActiveInfoTab(tab.id as any)}
+                                    className={cn(
+                                        "text-[13px] font-bold pb-3 -mb-[1.5px] transition-all",
+                                        activeInfoTab === tab.id ? "text-primary border-b-[3px] border-primary" : "text-muted-foreground/60 hover:text-foreground"
+                                    )}
+                                >
+                                    {tab.name}
+                                </button>
+                            ))}
                         </div>
                         <div className="flex-1 flex flex-col p-4 bg-muted/10 relative">
+                            {activeInfoTab === 'report' && <StockAiReport symbol={selectedStock?.code || ''} name={selectedStock?.name || ''} />}
                             {activeInfoTab === 'notes' && <StockNotes stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />}
                             {activeInfoTab === 'schedules' && <StockSchedules stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />}
                             {activeInfoTab === 'financials' && <StockFinancials stockCode={selectedStock?.code || ''} stockName={selectedStock?.name || ''} />}

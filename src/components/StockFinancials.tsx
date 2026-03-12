@@ -246,7 +246,7 @@ export const StockFinancials: React.FC<StockFinancialsProps> = ({ stockCode, sto
                                         "text-right font-mono text-[11px] font-bold",
                                         row.roe > 10 ? "text-rise" : row.roe < 0 ? "text-fall" : "text-foreground"
                                     )}>
-                                        {row.roe.toFixed(2)}%
+                                        {row.roe !== undefined && row.roe !== null ? row.roe.toFixed(2) : '0.00'}%
                                     </TableCell>
                                 </TableRow>
                             ))}

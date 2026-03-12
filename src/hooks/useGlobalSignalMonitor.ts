@@ -68,7 +68,7 @@ export function useGlobalSignalMonitor() {
                         window.electronAPI.notifyDisparitySlump({
                             code: numericCode,
                             name: stockName,
-                            disparity: Number(disparity.toFixed(2)),
+                            disparity: disparity !== undefined && disparity !== null ? Number(disparity.toFixed(2)) : 0,
                             changeRate
                         })
                     }

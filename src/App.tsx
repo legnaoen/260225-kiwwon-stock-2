@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode, useState, useEffect } from 'react'
-import { Settings as SettingsIcon, AlertTriangle, Moon, Sun } from 'lucide-react'
+import { Settings as SettingsIcon, AlertTriangle, Moon, Sun, AlertCircle, X } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import TitleBar from './components/TitleBar'
@@ -12,6 +12,8 @@ import AutoTrade from './components/AutoTrade'
 import CapturePage from './components/CapturePage'
 import Schedule from './components/Schedule'
 import AiTradeDashboard from './components/AiTrade/AiTradeDashboard'
+import RisingStocksReport from './components/RisingStocksReport'
+import KnowledgeBase from './components/KnowledgeBase'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
 import { useNoteStore } from './store/useNoteStore'
@@ -101,7 +103,7 @@ function AppContent() {
         }
     }, [])
 
-    const { marketStatus, currentTime, tradingDays, setMarketStatus, setTradingDays, updateTime } = useMarketStore()
+    const { marketStatus, currentTime, tradingDays, setMarketStatus, setTradingDays, updateTime, systemError, setSystemError, clearSystemError } = useMarketStore()
     const { isRunning: isAutoTradeRunning, setIsRunning: setIsAutoTradeRunning } = useAutoTradeStore()
     const [status, setStatus] = useState({ connected: false, mockConnected: false, realConnected: false })
 
@@ -227,6 +229,16 @@ function AppContent() {
         }
     }, [])
 
+    useEffect(() => {
+        if (window.electronAPI?.onSystemError) {
+            const unsubscribe = window.electronAPI.onSystemError((error) => {
+                console.error('[App] System error received:', error)
+                setSystemError(error)
+            })
+            return () => unsubscribe()
+        }
+    }, [])
+
     const [activeTab, setActiveTab] = useState('dashboard')
     const [isDarkMode, setIsDarkMode] = useState(() => {
         // Use system theme by default
@@ -322,12 +334,14 @@ function AppContent() {
                         {activeTab === 'dashboard' && <Dashboard />}
                         {activeTab === 'holdings' && <Holdings />}
                         {activeTab === 'watchlist' && <Watchlist />}
+                        {activeTab === 'rising-stocks' && <RisingStocksReport />}
+                        {activeTab === 'knowledge-base' && <KnowledgeBase />}
                         {activeTab === 'auto-trade' && <AutoTrade />}
                         {activeTab === 'schedule' && <Schedule />}
                         {activeTab === 'settings' && <Settings />}
                         {activeTab === 'ai-trade' && <AiTradeDashboard />}
 
-                        {(activeTab !== 'dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade') && (
+                        {(activeTab !== 'dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'rising-stocks' && activeTab !== 'knowledge-base' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />
@@ -341,42 +355,62 @@ function AppContent() {
             </div>
 
             {/* Status Bar */}
-            <footer className="h-6 px-4 bg-muted/80 border-t border-border flex items-center justify-between text-[10px] text-muted-foreground shrink-0">
+            <footer className={cn(
+                "h-6 px-4 border-t flex items-center justify-between text-[10px] shrink-0 transition-colors duration-500",
+                systemError 
+                    ? "bg-red-600 text-white border-red-500 shadow-[0_-4px_12px_rgba(220,38,38,0.2)]" 
+                    : "bg-muted/80 text-muted-foreground border-border"
+            )}>
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1.5 font-medium">
-                        <div className={cn(
-                            "w-2 h-2 rounded-full",
-                            status.connected ? "bg-green-500 shadow-[0_0_5px_rgba(34,197,94,0.5)]" : "bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]"
-                        )} />
-                        <span>{status.connected ? '키움 API 서비스 정상 (실전)' : 'API 서비스 연결오류 또는 대기중'}</span>
-                    </div>
-
-                    {status.connected && isAutoTradeRunning && (
+                    {systemError ? (
+                        <div className="flex items-center gap-2 font-bold animate-pulse">
+                            <AlertCircle size={12} />
+                            <span>{systemError.message} ({systemError.code}) - {systemError.time}</span>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); clearSystemError(); }}
+                                className="ml-2 hover:bg-white/20 rounded-full p-0.5 transition-colors"
+                            >
+                                <X size={10} />
+                            </button>
+                        </div>
+                    ) : (
                         <>
-                            <div className="w-px h-2.5 bg-border mx-1" />
-                            <div className="flex items-center gap-1.5 font-bold text-green-500 animate-pulse">
-                                <Play size={10} fill="currentColor" />
-                                <span>자동매매 Running</span>
-                            </div>
-                        </>
-                    )}
-
-                    {status.connected && (
-                        <>
-                            <div className="w-px h-2.5 bg-border mx-1" />
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 font-medium">
                                 <div className={cn(
-                                    "px-1.5 py-0.5 rounded text-[9px] font-bold border",
-                                    marketStatus.code === '3' ? "bg-green-500/10 text-green-600 border-green-500/20" :
-                                        (marketStatus.code === '0' || marketStatus.code === '2' || marketStatus.code.match(/[a-d]/)) ? "bg-amber-500/10 text-amber-600 border-amber-500/20" :
-                                            "bg-muted text-muted-foreground border-border"
-                                )}>
-                                    {marketStatus.text}
-                                </div>
-                                {marketStatus.time !== '--:--:--' && (
-                                    <span className="font-mono opacity-70">[{marketStatus.time}]</span>
-                                )}
+                                    "w-2 h-2 rounded-full",
+                                    status.connected ? "bg-green-500 shadow-[0_0_5px_rgba(34,197,94,0.5)]" : "bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]"
+                                )} />
+                                <span>{status.connected ? '키움 API 서비스 정상 (실전)' : 'API 서비스 연결오류 또는 대기중'}</span>
                             </div>
+
+                            {status.connected && isAutoTradeRunning && (
+                                <>
+                                    <div className="w-px h-2.5 bg-border mx-1" />
+                                    <div className="flex items-center gap-1.5 font-bold text-green-500 animate-pulse">
+                                        <Play size={10} fill="currentColor" />
+                                        <span>자동매매 Running</span>
+                                    </div>
+                                </>
+                            )}
+
+                            {status.connected && (
+                                <>
+                                    <div className="w-px h-2.5 bg-border mx-1" />
+                                    <div className="flex items-center gap-1.5">
+                                        <div className={cn(
+                                            "px-1.5 py-0.5 rounded text-[9px] font-bold border",
+                                            marketStatus.code === '3' ? "bg-green-500/10 text-green-600 border-green-500/20" :
+                                                (marketStatus.code === '0' || marketStatus.code === '2' || marketStatus.code.match(/[a-d]/)) ? "bg-amber-500/10 text-amber-600 border-amber-500/20" :
+                                                    "bg-muted text-muted-foreground border-border"
+                                        )}>
+                                            {marketStatus.text}
+                                        </div>
+                                        {marketStatus.time !== '--:--:--' && (
+                                            <span className="font-mono opacity-70">[{marketStatus.time}]</span>
+                                        )}
+                                    </div>
+                                </>
+                            )}
                         </>
                     )}
                 </div>
@@ -387,7 +421,7 @@ function AppContent() {
                         {currentTime.toLocaleTimeString('ko-KR', { hour12: false })}
                     </div>
                     {status.connected && (
-                        <span className="opacity-50">v1.2.0</span>
+                        <span className={cn("opacity-50", systemError && "text-white/70")}>v1.2.0</span>
                     )}
                 </div>
             </footer>

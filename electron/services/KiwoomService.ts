@@ -13,6 +13,8 @@ export class KiwoomService {
     private wsManager: KiwoomWebSocketManager | null = null;
     private conditionWsManager: KiwoomConditionWebSocketManager | null = null;
     private apiLogs: any[] = [];
+    private requestQueue: Promise<any> = Promise.resolve();
+    private readonly MIN_REQUEST_INTERVAL = 150; // 150ms gap as per Kiwoom recommendations
 
     private constructor() {
         // Setup axios interceptors for diagnostic logging
@@ -63,6 +65,18 @@ export class KiwoomService {
 
                     this.apiLogs.unshift(logEntry);
                     if (this.apiLogs.length > 50) this.apiLogs.pop();
+
+                    // Emit system error for critical server issues or timeouts
+                    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED' || error.response?.status === 500) {
+                        const message = error.code === 'ETIMEDOUT' ? '키움 서버 연결 타임아웃 (서버 과부하)' : 
+                                      error.response?.status === 500 ? '키움 서버 내부 오류 (Internal Server Error)' : 
+                                      '키움 서버 통신 오류';
+                        eventBus.emit(SystemEvent.SYSTEM_ERROR, { 
+                            message, 
+                            code: error.code || error.response?.status.toString(),
+                            time: logEntry.time 
+                        });
+                    }
                 }
                 throw error;
             }
@@ -99,8 +113,13 @@ export class KiwoomService {
     // Retry wrapper for API calls to handle token expiration (8005 errors)
     // 추후 이 곳에 Queue 및 Throttling 로직을 추가하여 속도 제한을 제어할 수 있습니다.
     private async makeApiRequestWithRetry(apiCallFunc: (token: string) => Promise<any>): Promise<any> {
-        try {
-            let token = await this.tokenManager.getAccessToken()
+        // Simple queue to ensure request throttling (TPS limit defense)
+        return this.requestQueue = this.requestQueue.then(async () => {
+            const now = Date.now();
+            await new Promise(resolve => setTimeout(resolve, this.MIN_REQUEST_INTERVAL));
+
+            try {
+                let token = await this.tokenManager.getAccessToken()
             let response = await apiCallFunc(token)
 
             // Check for Kiwoom specific token errors in HTTP 200 responses
@@ -126,6 +145,11 @@ export class KiwoomService {
             }
             throw err
         }
+    }).catch(err => {
+        // Error in queue should still allow next requests to proceed
+        console.error('[KiwoomService] Request Queue Error:', err.message);
+        throw err;
+    });
     }
 
     public async saveKeys(keys: { appkey: string, secretkey: string }) {
@@ -253,6 +277,15 @@ export class KiwoomService {
         }))
 
         return response.data;
+    }
+
+    /**
+     * AI 분석을 위해 최근 80거래일 일봉 데이터를 가져옵니다.
+     */
+    public async getDailyChartData(stk_cd: string): Promise<any[]> {
+        const data = await this.getChartData(stk_cd);
+        const list = data?.stk_dt_pole_chart_qry || data?.output2 || data?.Body || data?.list || [];
+        return Array.isArray(list) ? list.slice(0, 80) : [];
     }
 
     /**
@@ -534,14 +567,9 @@ export class KiwoomService {
                 'api-id': 'ka10023'
             }
             const body = {
-                mrkt_tp: "000",      // 시장구분: 000(전체)
-                sort_tp: "1",        // 정렬구분: 1(급증량)
-                tm_tp: "1",          // 시간구분: 1(분)
-                trde_qty_tp: "5",    // 거래량구분: 5(5천주이상)
-                tm: "1",             // 시간(분)
-                stk_cnd: "0",        // 종목조건: 0(전체조회)
-                pric_tp: "0",        // 가격구분: 0(전체조회)
-                stex_tp: "3"         // 거래소구분: 3(통합)
+                tm_tp: '1',            // 1: 분 단위
+                tm: '1',               // 1분
+                trde_qty_tp: '5'       // 5천주 이상
             }
             const response = await axios.post(url, body, { headers })
             return response.data
@@ -550,6 +578,13 @@ export class KiwoomService {
 
     /**
      * 거래대금 상위 조회 (ka10030) - 당일 주도 테마 파악용
+     * 응답 키: tdy_trde_qty_upper[]
+     *   - stk_cd: 종목코드
+     *   - stk_nm: 종목명
+     *   - cur_prc: 현재가
+     *   - flu_rt: 등락률
+     *   - trde_qty: 거래량
+     *   - trde_amt: 거래대금 (자연수 문자열)
      */
     public async getTopTradingValueStocks() {
         return this.makeApiRequestWithRetry(async (token) => {
@@ -560,20 +595,90 @@ export class KiwoomService {
                 'api-id': 'ka10030'
             }
             const body = {
-                mrkt_tp: '000',        // 시장구분: 000(전체)
-                sort_tp: '3',          // 정렬구분: 3(거래대금)
-                mang_stk_incls: '1',   // 관리종목 포함 여부: 1(미포함)
-                crd_tp: '0',           // 신용구분: 0(전체조회)
-                trde_qty_tp: '0',      // 거래량구분: 0(전체조회)
-                pric_tp: '8',          // 가격구분: 8(1천원이상) -> 동전주 제외
-                trde_prica_tp: '0',    // 거래대금구분: 0(전체조회)
-                mrkt_open_tp: '0',     // 장운영구분: 0(전체조회)
-                stex_tp: '3'           // 거래소구분: 3(통합)
+                mrkt_tp: '000',
+                sort_tp: '3',          // 3: 거래대금순
+                mang_stk_incls: '1',   // 1: 관리종목 미포함
+                crd_tp: '0',
+                trde_qty_tp: '0',
+                pric_tp: '0',          // 0: 전체 (동전주 포함)
+                trde_prica_tp: '0',
+                mrkt_open_tp: '0',
+                stex_tp: '3'           // 3: 통합거래소
             }
             const response = await axios.post(url, body, { headers })
             return response.data
         })
     }
+
+    /**
+     * ka10027 응답을 정규화 형태로 반환
+     */
+    public async getParsedTopRisingStocks(limit = 25): Promise<{ code: string; name: string; changeRate: number; source: 'RISING' }[]> {
+        try {
+            const raw = await this.getTopRisingStocks()
+            const list: any[] = raw?.bid_req_upper ?? raw?.Body ?? raw?.list ?? []
+            return list.slice(0, limit).map((item: any) => ({
+                code: item.stk_cd || item.stck_shrn_iscd,
+                name: item.stk_nm || item.stck_nm || item.name,
+                changeRate: parseFloat(item.flu_rt || item.prdy_ctrt || '0'),
+                source: 'RISING' as const
+            })).filter(s => s.code && s.name)
+        } catch (e) {
+            console.error('[KiwoomService] getParsedTopRisingStocks error:', e)
+            return []
+        }
+    }
+
+    /**
+     * ka10030 응답을 ka10027과 동일한 정규화 형태로 반환
+     * { code, name, changeRate, tradingValue } 배열
+     */
+    public async getParsedTopTradingValueStocks(limit = 25): Promise<{ code: string; name: string; changeRate: number; tradingValue: number; source: 'TRADING_VALUE' }[]> {
+        try {
+            const raw = await this.getTopTradingValueStocks()
+            const list: any[] = raw?.tdy_trde_qty_upper ?? []
+            return list.slice(0, limit).map((item: any) => ({
+                code: item.stk_cd,
+                name: item.stk_nm,
+                changeRate: parseFloat(item.flu_rt ?? '0'),
+                tradingValue: parseInt(item.trde_amt?.replace(/[^0-9-]/g, '') ?? '0', 10),
+                source: 'TRADING_VALUE' as const
+            })).filter(s => s.code && s.name)
+        } catch (e) {
+            console.error('[KiwoomService] getParsedTopTradingValueStocks error:', e)
+            return []
+        }
+    }
+
+    /**
+     * ka10027(등락률 상위) + ka10030(거래대금 상위) 통합 메서드
+     * 중복 종목은 제거하고, source 필드로 출체 구분
+     */
+    public async getCombinedTopStocks(risingLimit = 25, tradingValueLimit = 25): Promise<{ code: string; name: string; changeRate: number; tradingValue?: number; source: 'RISING' | 'TRADING_VALUE' | 'BOTH' }[]> {
+        const [risingRaw, tradingRaw] = await Promise.allSettled([
+            this.getParsedTopRisingStocks(risingLimit),
+            this.getParsedTopTradingValueStocks(tradingValueLimit)
+        ])
+
+        const risingList = risingRaw.status === 'fulfilled' ? risingRaw.value : []
+        const tradingList = tradingRaw.status === 'fulfilled' ? tradingRaw.value : []
+
+        const map = new Map<string, any>()
+
+        for (const s of risingList) {
+            map.set(s.code, { ...s, source: 'RISING' as const })
+        }
+        for (const s of tradingList) {
+            if (map.has(s.code)) {
+                // 두 소스 모두 등장 → BOTH
+                map.set(s.code, { ...map.get(s.code), tradingValue: s.tradingValue, source: 'BOTH' as const })
+            } else {
+                map.set(s.code, s)
+            }
+        }
+        return Array.from(map.values())
+    }
+
 
     /**
      * 주식 분봉 차트 조회 (ka10070)

@@ -393,7 +393,7 @@ export class TelegramService {
                             }
                         } else {
                             const buffer = await ChartRenderService.captureChart(targetCode, targetName, theme);
-                            const finalCaption = `https://www.tossinvest.com/?focusedProductCode=A${targetCode}` + basicInfoMsg;
+                            const finalCaption = `https://m.stock.naver.com/domestic/stock/${targetCode}` + basicInfoMsg;
                             await ctx.replyWithPhoto({ source: buffer }, { caption: finalCaption });
                         }
 
@@ -751,7 +751,7 @@ export class TelegramService {
                 }
 
                 const sign = data.changeRate > 0 ? '+' : '';
-                this.sendMessage(`📉 ${displayName}  ${sign}${data.changeRate.toFixed(2)}%\nhttps://www.tossinvest.com/?focusedProductCode=A${numericCode}`);
+                this.sendMessage(`📉 ${displayName}  ${sign}${data.changeRate.toFixed(2)}%\nhttps://m.stock.naver.com/domestic/stock/${numericCode}`);
             }
         });
 

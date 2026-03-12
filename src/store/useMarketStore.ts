@@ -10,9 +10,12 @@ interface MarketState {
     marketStatus: MarketStatus;
     currentTime: Date;
     tradingDays: string[];
+    systemError: { message: string, code: string, time: string } | null;
     setMarketStatus: (status: Partial<MarketStatus>) => void;
     setTradingDays: (days: string[]) => void;
     updateTime: () => void;
+    setSystemError: (error: { message: string, code: string, time: string } | null) => void;
+    clearSystemError: () => void;
 }
 
 const getStatusText = (code: string): string => {
@@ -39,6 +42,7 @@ export const useMarketStore = create<MarketState>((set) => ({
     },
     currentTime: new Date(),
     tradingDays: [],
+    systemError: null,
     setMarketStatus: (status) => set((state) => ({
         marketStatus: {
             ...state.marketStatus,
@@ -47,5 +51,7 @@ export const useMarketStore = create<MarketState>((set) => ({
         }
     })),
     setTradingDays: (days) => set({ tradingDays: days }),
-    updateTime: () => set({ currentTime: new Date() })
+    updateTime: () => set({ currentTime: new Date() }),
+    setSystemError: (error) => set({ systemError: error }),
+    clearSystemError: () => set({ systemError: null })
 }))

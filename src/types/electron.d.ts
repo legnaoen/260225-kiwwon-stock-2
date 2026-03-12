@@ -110,6 +110,25 @@ export interface IElectronAPI {
         buyEndTime?: string
     } | null>
     testAiConnection: (settings: { geminiKey: string, modelName: string }) => Promise<{ success: boolean, response?: string, error?: string }>
+
+    // Rising Stocks Report
+    onBatchProgress: (callback: (data: any) => void) => () => void
+    getRawData: (params: { date: string, stockCode: string }) => Promise<{ success: boolean, data?: any }>
+    collectNews: (params: { date: string, stockCode: string, stockName: string }) => Promise<{ success: boolean, data?: any[], error?: string }>
+    collectDisclosures: (params: { date: string, stockCode: string, stockName: string }) => Promise<{ success: boolean, data?: any[], error?: string }>
+    getCombinedTopStocks: (options?: { risingLimit?: number, tradingValueLimit?: number }) => Promise<{ success: boolean, data?: any[] }>
+    getRisingStocksByDate: (date: string) => Promise<{ success: boolean, data?: any[] }>
+    getReportHistory: () => Promise<{ success: boolean, data?: any[] }>
+    getMarketDailyReport: (date: string) => Promise<{ success: boolean, data?: any }>
+    runStockAnalysis: (params: { code: string, name: string, changeRate: number, tradingValue?: number, source?: string }) => Promise<{ success: boolean, data?: any, error?: string }>
+    runMarketReport: (date: string) => Promise<{ success: boolean, data?: any, error?: string }>
+    runBatchReport: () => Promise<{ success: boolean, count?: number, error?: string }>
+
+    // Skills / Knowledge Base
+    skillsGetAll: () => Promise<{ success: boolean, data?: any[] }>
+    skillsGetHistory: (id: string) => Promise<{ success: boolean, data?: any[] }>
+    skillsSave: (options: { fileName: string, content: string, diffSummary: string }) => Promise<{ success: boolean, error?: string }>
+    skillsGetVersion: (options: { fileName: string, version: number }) => Promise<{ success: boolean, data?: any }>
 }
 
 declare global {

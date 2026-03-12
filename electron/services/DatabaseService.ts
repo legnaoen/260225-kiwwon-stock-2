@@ -123,6 +123,72 @@ export class DatabaseService {
             );
         `
 
+        const createMarketDailyReportsTable = `
+            CREATE TABLE IF NOT EXISTS market_daily_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT UNIQUE,
+                market_summary TEXT,
+                report_type TEXT
+            );
+        `
+
+        const createDailyRisingStocksTable = `
+            CREATE TABLE IF NOT EXISTS daily_rising_stocks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT,
+                stock_code TEXT,
+                stock_name TEXT,
+                change_rate REAL,
+                trading_value REAL,
+                source TEXT,
+                ai_score INTEGER,
+                theme_sector TEXT,
+                reason TEXT,
+                chart_insight TEXT,
+                past_reference TEXT,
+                tags TEXT,
+                UNIQUE(date, stock_code)
+            );
+        `
+
+        const createAiLearningLogTable = `
+            CREATE TABLE IF NOT EXISTS ai_learning_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_report_id INTEGER,
+                prediction_accuracy TEXT,
+                actual_performance REAL,
+                learning_point TEXT,
+                sector TEXT,
+                FOREIGN KEY (original_report_id) REFERENCES daily_rising_stocks(id)
+            );
+        `
+
+        const createStockRawDataTable = `
+            CREATE TABLE IF NOT EXISTS stock_raw_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                news_json TEXT,
+                disclosures_json TEXT,
+                collected_at TEXT,
+                UNIQUE(date, stock_code)
+            );
+        `
+
+        const createSkillsFileHistoryTable = `
+            CREATE TABLE IF NOT EXISTS skills_file_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_name TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                diff_summary TEXT,
+                change_type TEXT NOT NULL,
+                trigger_context TEXT,
+                changed_at TEXT NOT NULL
+            );
+        `
+
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
         this.db.exec(createFinancialDataTable)
@@ -132,6 +198,11 @@ export class DatabaseService {
         this.db.exec(createAiStrategiesTable)
         this.db.exec(createAiStrategyHistoryTable)
         this.db.exec(createHoldingHistoryTable)
+        this.db.exec(createMarketDailyReportsTable)
+        this.db.exec(createDailyRisingStocksTable)
+        this.db.exec(createAiLearningLogTable)
+        this.db.exec(createStockRawDataTable)
+        this.db.exec(createSkillsFileHistoryTable)
 
         // Ensure columns exist for migration
         try {
@@ -139,6 +210,17 @@ export class DatabaseService {
         } catch (e) { }
         try {
             this.db.exec("ALTER TABLE schedules ADD COLUMN origin_id TEXT")
+        } catch (e) { }
+        
+        // Migration for daily_rising_stocks missing columns
+        try {
+            this.db.exec("ALTER TABLE daily_rising_stocks ADD COLUMN trading_value REAL")
+        } catch (e) { }
+        try {
+            this.db.exec("ALTER TABLE daily_rising_stocks ADD COLUMN source TEXT")
+        } catch (e) { }
+        try {
+            this.db.exec("ALTER TABLE daily_rising_stocks ADD COLUMN tags TEXT")
         } catch (e) { }
 
         // Add index on origin_id for fast lookup
@@ -419,11 +501,180 @@ export class DatabaseService {
     }
 
 
+    // === Rising Stocks Analysis Methods ===
+    public saveMarketDailyReport(report: { date: string, market_summary: string, report_type: string }) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO market_daily_reports (date, market_summary, report_type)
+            VALUES (?, ?, ?)
+        `)
+        return stmt.run(report.date, report.market_summary, report.report_type)
+    }
+
+    public getMarketDailyReport(date: string) {
+        return this.db.prepare('SELECT * FROM market_daily_reports WHERE date = ?').get(date) as any
+    }
+
+    public saveRisingStockAnalysis(analysis: any) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO daily_rising_stocks (
+                date, stock_code, stock_name, change_rate, trading_value, source, ai_score, 
+                theme_sector, reason, chart_insight, past_reference, tags
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        return stmt.run(
+            analysis.date,
+            analysis.stock_code,
+            analysis.stock_name,
+            analysis.change_rate,
+            analysis.trading_value || 0,
+            analysis.source || '',
+            analysis.ai_score,
+            analysis.theme_sector,
+            analysis.reason,
+            analysis.chart_insight,
+            analysis.past_reference,
+            analysis.tags ? JSON.stringify(analysis.tags) : null
+        )
+    }
+
+    public getRisingStocksByDate(date: string) {
+        return this.db.prepare('SELECT * FROM daily_rising_stocks WHERE date = ? ORDER BY change_rate DESC').all(date) as any[]
+    }
+
+    public getStockAnalysis(stockCode: string) {
+        return this.db.prepare('SELECT * FROM daily_rising_stocks WHERE stock_code = ? ORDER BY date DESC').all(stockCode) as any[]
+    }
+
+    public getDailyReportHistory() {
+        // 급등주 분석 데이터가 있는 날짜 목록을 최신순으로 반환
+        return this.db.prepare('SELECT DISTINCT date FROM daily_rising_stocks ORDER BY date DESC').all() as { date: string }[]
+    }
+
+    public saveAiLearningLog(log: any) {
+        const stmt = this.db.prepare(`
+            INSERT INTO ai_learning_log (
+                original_report_id, prediction_accuracy, actual_performance, learning_point, sector
+            ) VALUES (?, ?, ?, ?, ?)
+        `)
+        return stmt.run(
+            log.original_report_id,
+            log.prediction_accuracy,
+            log.actual_performance,
+            log.learning_point,
+            log.sector
+        )
+    }
+
     public getDb() {
         return this.db
     }
 
     public close() {
         this.db.close()
+    }
+
+    // ─── Raw Data (뉴스 / 공시) ────────────────────────────────────────────
+    public saveRawData(data: {
+        date: string
+        stock_code: string
+        stock_name: string
+        news_json: string          // NaverNewsItem[] JSON 문자열
+        disclosures_json: string   // DART 공시 목록 JSON 문자열
+    }) {
+        const stmt = this.db.prepare(`
+            INSERT INTO stock_raw_data (date, stock_code, stock_name, news_json, disclosures_json, collected_at)
+            VALUES (@date, @stock_code, @stock_name, @news_json, @disclosures_json, @collected_at)
+            ON CONFLICT(date, stock_code) DO UPDATE SET
+                news_json        = excluded.news_json,
+                disclosures_json = excluded.disclosures_json,
+                collected_at     = excluded.collected_at
+        `)
+        stmt.run({ ...data, collected_at: new Date().toISOString() })
+    }
+
+    public getRawData(date: string, stockCode: string): { news_json: string, disclosures_json: string, collected_at: string } | undefined {
+        return this.db.prepare(
+            'SELECT news_json, disclosures_json, collected_at FROM stock_raw_data WHERE date = ? AND stock_code = ?'
+        ).get(date, stockCode) as any
+    }
+
+    public saveNewsRawData(date: string, stockCode: string, stockName: string, news: any[]) {
+        const stmt = this.db.prepare(`
+            INSERT INTO stock_raw_data (date, stock_code, stock_name, news_json, collected_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(date, stock_code) DO UPDATE SET
+                news_json = excluded.news_json,
+                collected_at = excluded.collected_at
+        `)
+        stmt.run(date, stockCode, stockName, JSON.stringify(news), new Date().toISOString())
+    }
+
+    public saveDisclosuresRawData(date: string, stockCode: string, stockName: string, disclosures: any[]) {
+        const stmt = this.db.prepare(`
+            INSERT INTO stock_raw_data (date, stock_code, stock_name, disclosures_json, collected_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(date, stock_code) DO UPDATE SET
+                disclosures_json = excluded.disclosures_json,
+                collected_at = excluded.collected_at
+        `)
+        stmt.run(date, stockCode, stockName, JSON.stringify(disclosures), new Date().toISOString())
+    }
+
+    // ─── Skills File History ────────────────────────────────────────────────
+
+    /** 파일 컨텐츠가 변경됩을 때 스냅샷을 저장합니다. */
+    public saveSkillsSnapshot(data: {
+        file_name: string
+        content: string
+        diff_summary?: string
+        change_type: 'MANUAL' | 'AI_LESSON' | 'AI_BATCH' | 'SYSTEM'
+        trigger_context?: string
+    }) {
+        const lastVersion = (this.db.prepare(
+            'SELECT MAX(version) as v FROM skills_file_history WHERE file_name = ?'
+        ).get(data.file_name) as any)?.v ?? 0
+
+        this.db.prepare(`
+            INSERT INTO skills_file_history
+                (file_name, version, content, diff_summary, change_type, trigger_context, changed_at)
+            VALUES (@file_name, @version, @content, @diff_summary, @change_type, @trigger_context, @changed_at)
+        `).run({
+            file_name: data.file_name,
+            version: lastVersion + 1,
+            content: data.content,
+            diff_summary: data.diff_summary ?? null,
+            change_type: data.change_type,
+            trigger_context: data.trigger_context ?? null,
+            changed_at: new Date().toISOString()
+        })
+    }
+
+    /** 특정 스킬스 파일의 변경 이력 목록 (version, summary, type, date) */
+    public getSkillsHistory(fileName: string, limit = 30) {
+        return this.db.prepare(`
+            SELECT id, version, diff_summary, change_type, trigger_context, changed_at
+            FROM skills_file_history
+            WHERE file_name = ?
+            ORDER BY version DESC
+            LIMIT ?
+        `).all(fileName, limit) as any[]
+    }
+
+    /** 특정 버전의 전체 컨텐츠 조회 */
+    public getSkillsVersionContent(fileName: string, version: number): string | null {
+        const row = this.db.prepare(
+            'SELECT content FROM skills_file_history WHERE file_name = ? AND version = ?'
+        ).get(fileName, version) as any
+        return row?.content ?? null
+    }
+
+    /** 스킬스 파일 목록 (중복 없이) */
+    public getSkillsFileList() {
+        return this.db.prepare(`
+            SELECT file_name, MAX(version) as version, MAX(changed_at) as last_updated
+            FROM skills_file_history
+            GROUP BY file_name
+            ORDER BY file_name
+        `).all() as any[]
     }
 }

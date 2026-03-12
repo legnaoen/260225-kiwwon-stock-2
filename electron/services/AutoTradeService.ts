@@ -19,6 +19,7 @@ export class AutoTradeService {
     private startTime = Date.now();
     private d3SellTimer: NodeJS.Timeout | null = null;
     private liquidationMonitorTimer: NodeJS.Timeout | null = null;
+    private lastMarketOpenCheckTime = 0;
 
     private orderQueue: any[] = [];
     private modifyQueue: any[] = [];
@@ -222,6 +223,10 @@ export class AutoTradeService {
      * 장 시작을 감지하고 D+3 매도 스케줄링 (오늘의 봉 데이터 포착 시)
      */
     private async checkMarketOpenAndScheduleD3Sell(todayStr: string) {
+        // [Throttle] API 호출 부하 방지를 위해 1분에 한 번만 체크
+        if (Date.now() - this.lastMarketOpenCheckTime < 60000) return;
+        this.lastMarketOpenCheckTime = Date.now();
+
         // todayStr가 형식이 안 맞을 수 있으므로 보정 (예: 2026-3-6 -> 2026-03-06)
         if (todayStr.length < 10) {
             const parts = todayStr.split('-');

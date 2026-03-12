@@ -409,7 +409,7 @@ export default function LiveTradeTab() {
                                             <td className="px-2 py-3 text-right font-mono text-red-500/80 font-semibold">{h.stopPrice ? formatPrice(h.stopPrice) : '-'}</td>
                                             <td className="px-2 py-3 text-right font-mono font-bold">{formatPrice(h.currentPrice)}</td>
                                             <td className={`px-2 py-3 text-right font-mono font-bold ${h.pnlRate >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                                {h.pnlRate > 0 ? '+' : ''}{h.pnlRate.toFixed(2)}%
+                                                {h.pnlRate > 0 ? '+' : ''}{h.pnlRate?.toFixed(2)}%
                                             </td>
                                         </tr>
                                     )) : history.length > 0 ? (

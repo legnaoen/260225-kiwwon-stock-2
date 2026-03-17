@@ -1,5 +1,6 @@
 import axios from 'axios'
 import Store from 'electron-store'
+import { IngestionManager } from './IngestionManager'
 
 const store = new Store()
 
@@ -38,6 +39,7 @@ export class NaverNewsService {
             throw new Error('네이버 API 키가 설정되지 않았습니다. 설정 메뉴에서 입력해주세요.')
         }
 
+        const startTime = Date.now()
         try {
             const response = await axios.get('https://openapi.naver.com/v1/search/news.json', {
                 params: {
@@ -48,8 +50,21 @@ export class NaverNewsService {
                 headers: {
                     'X-Naver-Client-Id': keys.clientId,
                     'X-Naver-Client-Secret': keys.clientSecret
-                }
+                },
+                timeout: 10000 // 10초 타임아웃 추가
             })
+
+            const dataLength = JSON.stringify(response.data).length
+            const sizeKb = dataLength / 1024
+
+            // Record to MAIIS Ingestion Manager
+            IngestionManager.getInstance().recordIngestion(
+                'naver_news_top50', 
+                'Naver Open API', 
+                startTime, 
+                response.status, 
+                sizeKb
+            )
 
             if (response.data && response.data.items) {
                 return response.data.items.map((item: any) => ({
@@ -60,6 +75,15 @@ export class NaverNewsService {
             }
             return []
         } catch (error: any) {
+            const statusCode = error.response?.status || 500
+            IngestionManager.getInstance().recordIngestion(
+                'naver_news_top50', 
+                'Naver Open API', 
+                startTime, 
+                statusCode, 
+                0, 
+                error.message
+            )
             console.error('[NaverNewsService] Search Error:', error.response?.data || error.message)
             throw new Error(`네이버 뉴스 검색 실패: ${error.response?.data?.errorMessage || error.message}`)
         }

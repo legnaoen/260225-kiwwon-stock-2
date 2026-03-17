@@ -409,7 +409,13 @@ export default function Watchlist() {
                 <div className="bg-destructive/10 text-destructive p-4 rounded-xl flex items-center gap-3 border border-destructive/20 shrink-0">
                     <AlertCircle size={18} />
                     <p className="text-sm font-medium">{error}</p>
-                    <button onClick={() => fetchData()} className="ml-auto text-xs underline font-bold">다시 시도</button>
+                    <button onClick={async () => {
+                        if (window.electronAPI.resetCircuitBreaker) {
+                            await window.electronAPI.resetCircuitBreaker();
+                        }
+                        setError(null);
+                        fetchData();
+                    }} className="ml-auto text-xs underline font-bold">다시 시도</button>
                 </div>
             )}
 

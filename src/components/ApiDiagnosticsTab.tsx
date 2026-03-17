@@ -87,6 +87,20 @@ export default function ApiDiagnosticsTab() {
                     </button>
 
                     <button
+                        onClick={async () => {
+                            if (window.electronAPI.resetCircuitBreaker) {
+                                await window.electronAPI.resetCircuitBreaker();
+                                alert('회로 차단기가 초기화되었습니다. 다시 요청을 시도할 수 있습니다.');
+                                fetchLogs();
+                            }
+                        }}
+                        className="flex items-center px-4 py-2 bg-rose-50 dark:bg-rose-900/40 border border-rose-200 dark:border-rose-800 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/60 transition font-neo text-sm font-bold text-rose-700 dark:text-rose-400 shadow-sm"
+                    >
+                        <AlertCircle className="w-4 h-4 mr-2" />
+                        회로 차단 해제(긴급)
+                    </button>
+
+                    <button
                         onClick={fetchLogs}
                         className="flex items-center px-4 py-2 bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-700 transition font-neo text-sm font-bold text-slate-700 dark:text-gray-200 shadow-sm"
                     >

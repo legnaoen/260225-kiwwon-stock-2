@@ -13,6 +13,7 @@ import CapturePage from './components/CapturePage'
 import Schedule from './components/Schedule'
 import AiTradeDashboard from './components/AiTrade/AiTradeDashboard'
 import RisingStocksReport from './components/RisingStocksReport'
+import NarrativeInsightTab from './components/NarrativeInsightTab'
 import KnowledgeBase from './components/KnowledgeBase'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
@@ -338,10 +339,11 @@ function AppContent() {
                         {activeTab === 'knowledge-base' && <KnowledgeBase />}
                         {activeTab === 'auto-trade' && <AutoTrade />}
                         {activeTab === 'schedule' && <Schedule />}
-                        {activeTab === 'settings' && <Settings />}
-                        {activeTab === 'ai-trade' && <AiTradeDashboard />}
+                        { activeTab === 'settings' && <Settings />}
+                        { activeTab === 'ai-trade' && <AiTradeDashboard />}
+                        { activeTab === 'narrative-insight' && <NarrativeInsightTab />}
 
-                        {(activeTab !== 'dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'rising-stocks' && activeTab !== 'knowledge-base' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade') && (
+                        {(activeTab !== 'dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'rising-stocks' && activeTab !== 'knowledge-base' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade' && activeTab !== 'narrative-insight') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />
@@ -358,7 +360,9 @@ function AppContent() {
             <footer className={cn(
                 "h-6 px-4 border-t flex items-center justify-between text-[10px] shrink-0 transition-colors duration-500",
                 systemError 
-                    ? "bg-red-600 text-white border-red-500 shadow-[0_-4px_12px_rgba(220,38,38,0.2)]" 
+                    ? (systemError.level === 'warning' 
+                        ? "bg-amber-500 text-black border-amber-400 shadow-[0_-4px_12px_rgba(245,158,11,0.2)]"
+                        : "bg-red-600 text-white border-red-500 shadow-[0_-4px_12px_rgba(220,38,38,0.2)]")
                     : "bg-muted/80 text-muted-foreground border-border"
             )}>
                 <div className="flex items-center gap-4">

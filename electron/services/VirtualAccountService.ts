@@ -1,5 +1,6 @@
 import Store from 'electron-store';
 import { eventBus, SystemEvent } from '../utils/EventBus'
+import { DatabaseService } from './DatabaseService'
 
 const store = new Store();
 
@@ -42,7 +43,7 @@ export class VirtualAccountService {
 
         // Load persisted state
         const saved = store.get('ai_virtual_account') as any;
-        const today = new Date().toISOString().split('T')[0];
+        const today = DatabaseService.getInstance().getKstDate();
 
         if (saved) {
             this.balance = saved.balance ?? initialDefault;
@@ -212,7 +213,7 @@ export class VirtualAccountService {
 
     private saveStateToStore() {
         const holdingsObj = Object.fromEntries(this.holdings);
-        const today = new Date().toISOString().split('T')[0];
+        const today = DatabaseService.getInstance().getKstDate();
         store.set('ai_virtual_account', {
             balance: this.balance,
             holdings: holdingsObj,

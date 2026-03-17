@@ -753,7 +753,7 @@ export class AutoTradeService {
 
                     // 큐 삽입 헬퍼
                     const enqueueModify = (typeStr: string, tStep?: number) => {
-                        if (!this.modifyQueue.find(q => q.orig_ord_no === orig_ord_no)) {
+                        if (!this.modifyQueue || !this.modifyQueue.find(q => q.orig_ord_no === orig_ord_no)) {
                             this.modifyQueue.push({
                                 type: typeStr,
                                 accountNo,

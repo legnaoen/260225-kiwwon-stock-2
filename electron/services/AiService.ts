@@ -34,12 +34,16 @@ export class AiService {
         const url = `${this.baseUrl}/${model}:generateContent?key=${key}`;
         console.log(`[AiService] Calling Gemini API (Model: ${model})...`);
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60초 타임아웃
+
         try {
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                signal: controller.signal,
                 body: JSON.stringify({
                     contents: [
                         {
@@ -58,6 +62,7 @@ export class AiService {
                     }
                 })
             });
+            clearTimeout(timeoutId);
 
             if (!response.ok) {
                 const errorData = (await response.json()) as any;

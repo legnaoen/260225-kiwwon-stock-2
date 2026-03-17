@@ -1,53 +1,25 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const os = require('os');
-const fs = require('fs');
 
-const baseDir = path.join(os.homedir(), 'AppData', 'Roaming', 'kiwoom-trader');
-const dbDir = path.join(baseDir, 'db');
-const dbPath = path.join(dbDir, 'kiwoom.db');
-
-console.log('Target DB Path:', dbPath);
-
-if (!fs.existsSync(dbPath)) {
-    console.log('DB file not found! Checking directory contents...');
-    if (fs.existsSync(baseDir)) {
-        console.log('Contents of', baseDir, ':', fs.readdirSync(baseDir));
-    }
-    if (fs.existsSync(dbDir)) {
-        console.log('Contents of', dbDir, ':', fs.readdirSync(dbDir));
-    }
-    process.exit(1);
-}
+const dbPath = path.join(os.homedir(), 'AppData', 'Roaming', 'kiwoom-trader', 'db', 'kiwoom.db');
+console.log('DB Path:', dbPath);
 
 try {
     const db = new Database(dbPath);
+    const tableInfo = db.prepare('PRAGMA table_info(daily_rising_stocks)').all();
+    console.log('Daily Rising Stocks Columns:', JSON.stringify(tableInfo, null, 2));
+    
+    const countByTiming = db.prepare('SELECT timing, count(*) as count FROM daily_rising_stocks GROUP BY timing').all();
+    console.log('Count by Timing:', countByTiming);
+    
+    const sample = db.prepare('SELECT date, timing FROM daily_rising_stocks LIMIT 5').all();
+    console.log('Sample Data:', sample);
 
-    console.log('--- Samsung Electronics Check (005930 or 5930) ---');
-    const samsung = db.prepare('SELECT * FROM dart_corp_code WHERE stock_code LIKE "%5930%"').all();
-    console.log(samsung);
-
-    console.log('--- Table "dart_corp_code" Count ---');
-    const count = db.prepare('SELECT count(*) as cnt FROM dart_corp_code').get();
-    console.log('Row count:', count.cnt);
-
-    db.close();
-} catch (e) {
-    console.error(e);
-}
-
-try {
-    const db = new Database(dbPath);
-
-    console.log('--- DART Corp Codes (First 2) ---');
-    const corpCodes = db.prepare('SELECT * FROM dart_corp_code LIMIT 2').all();
-    console.log(corpCodes);
-
-    console.log('--- Schedules (DART only) ---');
-    const schedules = db.prepare('SELECT * FROM schedules WHERE source = "DART"').all();
-    console.log(schedules);
+    const reportHistory = db.prepare('SELECT DISTINCT date FROM daily_rising_stocks ORDER BY date DESC').all();
+    console.log('Report History Dates:', reportHistory);
 
     db.close();
-} catch (e) {
-    console.error(e);
+} catch (err) {
+    console.error('Error:', err.message);
 }

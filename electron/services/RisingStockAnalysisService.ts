@@ -26,15 +26,14 @@ export class RisingStockAnalysisService {
     /**
      * 특정 종목에 대한 모든 원시 데이터를 수집합니다.
      */
-    public async collectAllData(stockCodeRaw: string, stockName: string, changeRate: number) {
+    public async collectAllData(stockCodeRaw: string, stockName: string, changeRate: number, date?: string) {
         // 종목 코드 세척 (숫자만 추출)
         const stockCode = String(stockCodeRaw).replace(/[^0-9]/g, '')
-        console.log(`[RisingStockAnalysisService] >>> Start collecting for ${stockName}(${stockCode})`)
-        const today = new Date().toISOString().slice(0, 10)
+        const targetDate = date || this.db.getKstDate()
         
         try {
             // 이미 DB에 데이터가 있는지 먼저 확인
-            const existing = this.db.getRawData(today, stockCode)
+            const existing = this.db.getRawData(targetDate, stockCode)
             
             // 1. 뉴스 raw 목록 수집
             let newsItems: any[] = []
@@ -157,9 +156,10 @@ export class RisingStockAnalysisService {
     /**
      * 대량의 종목을 배치(Batch) 단위로 분석하여 토큰을 절약합니다.
      * @param targetStocks 분석 대상 종목 리스트
+     * @param timing 분석 시점 (MORNING/EVENING/MANUAL)
      */
-    public async analyzeBatchAndSave(targetStocks: { code: string; name: string; rate: number }[]) {
-        const today = new Date().toISOString().slice(0, 10)
+    public async analyzeBatchAndSave(targetStocks: { code: string; name: string; rate: number }[], timing: string = 'MANUAL', date?: string) {
+        const targetDate = date || new Date().toISOString().slice(0, 10)
         
         // 종목 코드 사전 세척
         const cleanedStocks = targetStocks.map(s => ({
@@ -175,30 +175,26 @@ export class RisingStockAnalysisService {
         eventBus.emit(SystemEvent.BATCH_PROGRESS, { step: 'DATA', current: 0, total, message: '기존 분석 결과 확인 및 데이터 수집 중...' })
 
         // 1. 필터링: 이미 신뢰할만한 분석이 있고, Raw 데이터(뉴스/공시)도 이미 수집된 종목은 제외
-        const allExisting = this.db.getRisingStocksByDate(today)
+        // 단, 장 마감(EVENING) 분석 시에는 오전(MORNING) 데이터가 있더라도 재분석을 수행하도록 강제 (업데이트된 차트/등락률 반영)
+        const allExisting = this.db.getRisingStocksByDate(targetDate, timing)
         const existingMap = new Map(allExisting.map((s: any) => [s.stock_code, s]))
 
         const finalTargets = cleanedStocks.filter(s => {
             const existing = existingMap.get(s.code)
-            const isReliable = this.isAnalysisReliable(existing)
             
-            // Raw 데이터 존재 여부 확인
-            const rawData = this.db.getRawData(today, s.code)
+            // MANUAL 분석이거나 이미 해당 타이밍의 신뢰할만한 분석이 있으면 스킵
+            const isReliable = this.isAnalysisReliable(existing)
+            const rawData = this.db.getRawData(targetDate, s.code)
             const hasRawData = rawData && (rawData.news_json !== '[]' || rawData.disclosures_json !== '[]')
             
             if (isReliable && hasRawData) {
                 completed++
-                console.log(`[RisingStockAnalysisService] Skipping ${s.name}(${s.code}) - Reliable analysis exists (${existing.ai_score}pts)`)
                 return false
-            } else if (!isReliable) {
-                console.log(`[RisingStockAnalysisService] Re-analyzing ${s.name}(${s.code}) - Previous analysis unreliable.`)
-            } else if (!hasRawData) {
-                console.log(`[RisingStockAnalysisService] Re-collecting ${s.name}(${s.code}) - Raw data missing.`)
             }
             return true
         })
 
-        console.log(`[RisingStockAnalysisService] Batch targets: Total ${total}, Needs processing: ${finalTargets.length}`)
+        console.log(`[RisingStockAnalysisService] Batch targets (${timing}): Total ${total}, Needs processing: ${finalTargets.length}`)
         
         if (finalTargets.length === 0) {
             eventBus.emit(SystemEvent.BATCH_PROGRESS, { step: 'COMPLETE', current: total, total, message: '모든 종목이 이미 분석되어 있습니다.' })
@@ -215,7 +211,7 @@ export class RisingStockAnalysisService {
             // 병렬 실행하되 하나가 실패해도 나머지는 계속하도록 개별 try-catch 사용
             const results = (await Promise.all(chunk.map(async s => {
                 try {
-                    return await this.collectAllData(s.code, s.name, (s as any).rate || (s as any).changeRate || 0)
+                    return await this.collectAllData(s.code, s.name, (s as any).rate || (s as any).changeRate || 0, targetDate)
                 } catch (e) {
                     console.error(`[RisingStockAnalysisService] Individual collection failed for ${s.name}:`, e)
                     return null
@@ -228,7 +224,7 @@ export class RisingStockAnalysisService {
                 // Raw 데이터 DB 저장
                 results.forEach(res => {
                     this.db.saveRawData({
-                        date: today,
+                        date: targetDate,
                         stock_code: res.stockCode,
                         stock_name: res.stockName,
                         news_json: JSON.stringify(res.rawNews),
@@ -301,7 +297,8 @@ export class RisingStockAnalysisService {
                         if (target) {
                             const originalTarget = cleanedStocks.find(c => String(c.code).replace(/[^0-9]/g, '').padStart(6, '0') === cleanedResCode)
                             this.db.saveRisingStockAnalysis({
-                                date: today,
+                                date: targetDate,
+                                timing: timing,
                                 stock_code: target.stockCode,
                                 stock_name: target.stockName,
                                 change_rate: target.changeRate || (originalTarget as any)?.rate || 0,
@@ -329,8 +326,7 @@ export class RisingStockAnalysisService {
         }
 
         eventBus.emit(SystemEvent.BATCH_PROGRESS, { step: 'SUMMARY', current: total, total, message: '시장 종합 리포트 생성 중...' })
-        await this.generateMarketDailyReport(today)
-
+        await this.generateMarketDailyReport(targetDate, timing)
         eventBus.emit(SystemEvent.BATCH_PROGRESS, { step: 'COMPLETE', current: total, total, message: '일괄 분석이 완료되었습니다.' })
         return { success: true, count: completed }
     }
@@ -338,17 +334,17 @@ export class RisingStockAnalysisService {
     /**
      * 개별 종목 분석 (거래대금 및 출처 정보 포함)
      */
-    public async analyzeAndSave(stockCodeRaw: string, stockName: string, changeRate: number, tradingValue?: number, source?: string) {
-        const stockCode = String(stockCodeRaw).replace(/[^0-9]/g, '')
+    public async runAnalysis(options: { code: string, name: string, changeRate: number, tradingValue?: number, source?: string, timing?: string, date?: string }) {
+        const { code: stockCode, name: stockName, changeRate, tradingValue, source, timing = 'MANUAL', date } = options
+        const targetDate = date || this.db.getKstDate()
         eventBus.emit(SystemEvent.AI_EVALUATION_UPDATE, { isEvaluating: true, stock: { code: stockCode, name: stockName } })
         try {
-            console.log(`[RisingStockAnalysisService] Individual analysis requested for ${stockName}(${stockCode})`)
-            const rawData = await this.collectAllData(stockCode, stockName, changeRate)
-            const today = new Date().toISOString().slice(0, 10)
+            console.log(`[RisingStockAnalysisService] Individual analysis requested for ${stockName}(${stockCode}) on ${targetDate}`)
+            const rawData = await this.collectAllData(stockCode, stockName, changeRate, targetDate)
             
             // Raw 데이터 항상 DB 저장 (수집 시점 업데이트 포함)
             this.db.saveRawData({ 
-                date: today, 
+                date: targetDate, 
                 stock_code: stockCode, 
                 stock_name: stockName, 
                 news_json: JSON.stringify(rawData.rawNews), 
@@ -397,7 +393,8 @@ export class RisingStockAnalysisService {
             }
 
             const finalData = {
-                date: today, 
+                date: targetDate, 
+                timing: timing,
                 stock_code: stockCode, 
                 stock_name: stockName, 
                 change_rate: changeRate,
@@ -423,21 +420,52 @@ export class RisingStockAnalysisService {
 
     /**
      * 당일 시장의 모든 급등주에 대해 일괄 분석을 수행하고 전체 시장 리포트를 생성합니다.
+     * @param date 분석 날짜
+     * @param timing 분석 시점 (MORNING/EVENING/MANUAL)
      */
-    public async generateMarketDailyReport(date: string) {
+    public async generateMarketDailyReport(date?: string, timing: string = 'EVENING') {
+        const targetDate = date || this.db.getKstDate()
         eventBus.emit(SystemEvent.AI_EVALUATION_UPDATE, { isEvaluating: true, stock: { code: 'MARKET', name: '전체 시장' } })
         try {
-            const analyzedStocks = this.db.getRisingStocksByDate(date)
+            const analyzedStocks = this.db.getRisingStocksByDate(targetDate, timing)
             if (analyzedStocks.length === 0) throw new Error('분석된 종목이 없습니다.')
+
+            // === [Self-Reflection Context 구성] ===
+            let reflectionContext = "";
+            let morningReport: any = null;
+            
+            if (timing === 'EVENING') {
+                morningReport = this.db.getMarketDailyReport(targetDate, 'MORNING');
+                const morningStocks = this.db.getRisingStocksByDate(targetDate, 'MORNING');
+                
+                if (morningReport && morningStocks.length > 0) {
+                    reflectionContext = `
+                        [오늘 오전의 당신의 분석 복기]
+                        - 오전 리포트 요약: ${morningReport.market_summary.slice(0, 500)}...
+                        - 오전 주요 분석 종목: ${morningStocks.map(s => `${s.stock_name}(${s.ai_score}점)`).join(', ')}
+                        
+                        [현재 장 마감 결과와 비교]
+                        최종 결과와 오전의 예측을 비교하여, 왜 오전에 강했던 종목이 유지되었는지/무너졌는지, 
+                        혹은 오전에 없던 새로운 주도주가 왜 나타났는지 분석하여 '학습된 교훈'을 포함해 주세요.
+                    `;
+                }
+            }
 
             const stocksContext = analyzedStocks.map((s: any) => {
                 const tagsStr = s.tags ? ` 태그: ${JSON.parse(s.tags).join(',')}` : ''
                 return `- ${s.stock_name} (${s.change_rate}%): [${s.theme_sector}]${tagsStr} ${s.reason} (AI 점수: ${s.ai_score})`
             }).join('\n')
 
-            const systemInstruction = `대한민국 주식 시장 전략가로서 오늘 시장의 핵심 테마와 매매 심리, 내일 전략을 요약하세요.`
-            const prompt = `[${date} 분석 요약 데이터]
+            const typeLabel = timing === 'MORNING' ? '오전 장 초반' : '장 마감 결산';
+            const systemInstruction = `당신은 ${typeLabel} 분석을 수행하는 대한민국 주식 시장 전문 전략가입니다.
+                시장의 맥락(Context)을 꿰뚫어보고, 오늘 벌어진 현상의 인과관계를 논리적으로 분석하세요.
+                ${this.skills.buildSystemInstruction()}
+            `
+
+            const prompt = `[${targetDate} ${timing} 분석 요약 데이터]
 ${stocksContext}
+
+${reflectionContext}
 
 위 데이터를 분석하여 대한민국 주식 시장 분석 리포트를 다음 JSON 구조로만 반환하세요.
 - 불필요한 서술은 제외하고 핵심만 정교하게 분석하세요.
@@ -446,33 +474,50 @@ ${stocksContext}
 
 {
   "summary_lines": [
-    "오늘 시장의 결정적 특징 1",
-    "특기 종목 흐름 2",
-    "기타 특징 3"
+    "결정적 특징 1", "특기 종목 흐름 2", "기타 특징 3"
   ],
   "market_outlook": "기술적 분석 및 글로벌 수급을 토대로 한 내일 시장 전망 및 대응 전략",
+  "self_reflection": "오전 예측 대비 적중률 분석 및 오늘 얻은 새로운 레슨 필드 (EVENING 시점에만 작성. 없으면 빈문자열)",
   "top_themes": [
     {
       "rank": 1,
       "theme_name": "주도 테마명",
-      "issue": "테마 상승의 배경과 핵심 이슈 (3줄 정도로 핵심을 상세히 설명)",
+      "issue": "테마 상승의 배경 (3줄 이내)",
       "leading_stocks": ["대장주1", "주도주2"],
-      "outlook": "향후 전망 및 투자 시나리오",
+      "outlook": "향후 전망",
       "rating": "Good/Normal/Caution"
     }
-    // 최대 5개까지 반복
   ]
 }`
 
             const marketSummaryJsonText = await AiService.getInstance().askGemini(prompt, systemInstruction)
-            let parsedSummary = { market_summary: "오늘 시장의 핵심 정보입니다.", top_themes: [] }
+            let parsedSummary: any = { market_summary: "오늘 시장의 핵심 정보입니다.", top_themes: [] }
             try {
                 parsedSummary = JSON.parse(marketSummaryJsonText.replace(/```json|```/gi, '').trim())
             } catch (e) {
-                console.error("[RisingStockAnalysisService] Failed to parse market report JSON.", e)
+                console.error("[RisingStockAnalysisService] JSON Parse Error in Market Report", e)
             }
-            // market_summary 필드에 통째 JSON 스트링을 넣어서 프론트엔드에서 파싱 가능하게 유지
-            const report = { date, market_summary: JSON.stringify(parsedSummary), report_type: 'DAILY' }
+
+            // === [학습 로그 및 레슨 기록] ===
+            if (timing === 'EVENING' && parsedSummary.self_reflection && parsedSummary.self_reflection.length > 10) {
+                try {
+                    if (analyzedStocks.length > 0) {
+                        this.db.saveAiLearningLog({
+                            original_report_id: analyzedStocks[0].id,
+                            prediction_accuracy: "종합 판단",
+                            actual_performance: analyzedStocks[0].change_rate,
+                            learning_point: parsedSummary.self_reflection,
+                            sector: analyzedStocks[0].theme_sector
+                        });
+                        
+                        this.skills.appendLesson('prediction_track_record.md', parsedSummary.self_reflection, `Analyze date: ${targetDate}`);
+                    }
+                } catch (lErr) {
+                    console.error("[RisingStockAnalysisService] Learning log save failed", lErr);
+                }
+            }
+
+            const report = { date: targetDate, timing, market_summary: JSON.stringify(parsedSummary), report_type: 'DAILY' }
             this.db.saveMarketDailyReport(report)
             return { success: true, data: report }
         } catch (error: any) {

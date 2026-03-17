@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import { app } from 'electron'
 import fs from 'fs'
+// Removed external DateUtils import
 
 export class DatabaseService {
     private static instance: DatabaseService
@@ -26,6 +27,31 @@ export class DatabaseService {
         return DatabaseService.instance
     }
 
+    public getKstDate(date?: Date): string {
+        const now = date || new Date();
+        const formatter = new Intl.DateTimeFormat('sv-SE', {
+            timeZone: 'Asia/Seoul',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+        return formatter.format(now);
+    }
+
+    public getKstTimestamp(date?: Date): string {
+        const now = date || new Date();
+        return new Intl.DateTimeFormat('sv-SE', {
+            timeZone: 'Asia/Seoul',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        }).format(now).replace(' ', 'T');
+    }
+
     private initTables() {
         const createDartCorpTable = `
             CREATE TABLE IF NOT EXISTS dart_corp_code (
@@ -48,6 +74,16 @@ export class DatabaseService {
                 is_market_event INTEGER DEFAULT 0,
                 source TEXT DEFAULT 'MANUAL',
                 origin_id TEXT
+            );
+        `
+
+        const createStockMasterTable = `
+            CREATE TABLE IF NOT EXISTS stocks_master (
+                stock_code TEXT PRIMARY KEY,
+                stock_name TEXT NOT NULL,
+                market_type TEXT,
+                corp_code TEXT,
+                updated_at TEXT
             );
         `
 
@@ -126,9 +162,11 @@ export class DatabaseService {
         const createMarketDailyReportsTable = `
             CREATE TABLE IF NOT EXISTS market_daily_reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT UNIQUE,
+                date TEXT,
+                timing TEXT DEFAULT 'EVENING',
                 market_summary TEXT,
-                report_type TEXT
+                report_type TEXT,
+                UNIQUE(date, timing)
             );
         `
 
@@ -136,6 +174,7 @@ export class DatabaseService {
             CREATE TABLE IF NOT EXISTS daily_rising_stocks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT,
+                timing TEXT DEFAULT 'EVENING',
                 stock_code TEXT,
                 stock_name TEXT,
                 change_rate REAL,
@@ -147,7 +186,7 @@ export class DatabaseService {
                 chart_insight TEXT,
                 past_reference TEXT,
                 tags TEXT,
-                UNIQUE(date, stock_code)
+                UNIQUE(date, stock_code, timing)
             );
         `
 
@@ -189,6 +228,116 @@ export class DatabaseService {
             );
         `
 
+        const createMaiisInventoryTable = `
+            CREATE TABLE IF NOT EXISTS maiis_data_inventory (
+                data_key TEXT PRIMARY KEY,
+                source_api TEXT NOT NULL,
+                category TEXT NOT NULL,
+                last_freshness_at TEXT NOT NULL,
+                next_check_at TEXT,
+                refresh_interval_sec INTEGER,
+                status TEXT DEFAULT 'IDLE',
+                meta_json TEXT
+            );
+        `
+
+        const createMaiisStatsTable = `
+            CREATE TABLE IF NOT EXISTS maiis_ingestion_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data_key TEXT NOT NULL,
+                api_name TEXT NOT NULL,
+                latency_ms INTEGER,
+                status_code INTEGER,
+                data_size_kb REAL,
+                error_msg TEXT,
+                created_at TEXT NOT NULL
+            );
+        `
+
+        const createSectorIndexHistoryTable = `
+            CREATE TABLE IF NOT EXISTS sector_index_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                sector_code TEXT NOT NULL,
+                sector_name TEXT NOT NULL,
+                index_value REAL,
+                change_rate REAL,
+                trading_value REAL,
+                trading_volume REAL,
+                UNIQUE(date, sector_code)
+            );
+        `
+
+        const createSectorInvestorFlowTable = `
+            CREATE TABLE IF NOT EXISTS sector_investor_flow (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                sector_code TEXT NOT NULL,
+                foreigner_net REAL,
+                institution_net REAL,
+                individual_net REAL,
+                UNIQUE(date, sector_code)
+            );
+        `
+
+        const createYoutubeChannelsTable = `
+            CREATE TABLE IF NOT EXISTS youtube_channels (
+                channel_id TEXT PRIMARY KEY,
+                channel_name TEXT NOT NULL,
+                description TEXT,
+                trust_score REAL DEFAULT 1.0,
+                last_collected_at TEXT
+            );
+        `
+
+        const createYoutubeNarrativeLogsTable = `
+            CREATE TABLE IF NOT EXISTS youtube_narrative_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                video_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                published_at TEXT NOT NULL,
+                title TEXT NOT NULL,
+                thumbnail TEXT,
+                transcript TEXT,
+                summary_json TEXT, -- AI 정제 결과 (섹터, 바이어스 등)
+                collected_at TEXT NOT NULL,
+                UNIQUE(video_id)
+            );
+        `
+
+        const createYoutubeDailyConsensusTable = `
+            CREATE TABLE IF NOT EXISTS youtube_daily_consensus (
+                date TEXT PRIMARY KEY,
+                consensus_report TEXT, -- 전문가 통합 의견 요약
+                pivot_analysis TEXT, -- 어제 대비 주요 변화
+                sources_json TEXT, -- 분석에 사용된 영상 정보 (JSON)
+                created_at TEXT NOT NULL
+            );
+        `
+
+        const createYoutubeNarrativeTrendsTable = `
+            CREATE TABLE IF NOT EXISTS youtube_narrative_trends (
+                date TEXT PRIMARY KEY,
+                sector_rankings_json TEXT, -- 섹터별 점수 및 요약 (JSON)
+                sentiment_score REAL,      -- 통합 시장 심리 점수 (0~1)
+                hot_keywords_json TEXT,    -- 주요 키워드 및 점수 (JSON)
+                created_at TEXT NOT NULL
+            );
+        `
+
+        const createMarketNewsConsensusTable = `
+            CREATE TABLE IF NOT EXISTS market_news_consensus (
+                date TEXT PRIMARY KEY,
+                summary_json TEXT, -- 뉴스 통합 요약 및 시장 온도
+                pivot_analysis TEXT, -- 어제 대비 주요 변화
+                keywords_used TEXT, -- 분석에 사용된 키워드들
+                source_news TEXT, -- 분석 소스가 된 뉴스 제목 리스트 (JSON)
+                sentiment_score REAL, -- 시장 심리 점수 (-1.0 ~ 1.0)
+                hot_keywords_json TEXT, -- 데일리 핵심 키워드 순위 및 점수 (JSON)
+                created_at TEXT NOT NULL
+            );
+        `
+
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
         this.db.exec(createFinancialDataTable)
@@ -203,6 +352,31 @@ export class DatabaseService {
         this.db.exec(createAiLearningLogTable)
         this.db.exec(createStockRawDataTable)
         this.db.exec(createSkillsFileHistoryTable)
+        this.db.exec(createStockMasterTable)
+        this.db.exec(createMaiisInventoryTable)
+        this.db.exec(createMaiisStatsTable)
+        this.db.exec(createSectorIndexHistoryTable)
+        this.db.exec(createSectorInvestorFlowTable)
+        this.db.exec(createYoutubeChannelsTable)
+        this.db.exec(createYoutubeNarrativeLogsTable)
+        this.db.exec(createYoutubeDailyConsensusTable)
+        this.db.exec(createYoutubeNarrativeTrendsTable)
+        this.db.exec(createMarketNewsConsensusTable)
+        
+        // Ensure source_news column exists for migration
+        try {
+            this.db.exec("ALTER TABLE market_news_consensus ADD COLUMN source_news TEXT")
+        } catch (e) { }
+        
+        // Ensure columns exist for migration
+        try {
+            this.db.exec("ALTER TABLE youtube_narrative_logs ADD COLUMN thumbnail TEXT")
+        } catch (e) { }
+
+        // Ensure indices for MAIIS stats
+        try {
+            this.db.exec("CREATE INDEX IF NOT EXISTS idx_maiis_stats_key_date ON maiis_ingestion_stats(data_key, created_at)")
+        } catch (e) { }
 
         // Ensure columns exist for migration
         try {
@@ -235,12 +409,72 @@ export class DatabaseService {
         try { this.db.exec("ALTER TABLE ai_strategies ADD COLUMN max_positions INTEGER DEFAULT 2") } catch (e) { }
         try { this.db.exec("ALTER TABLE ai_strategies ADD COLUMN scoring_weights TEXT") } catch (e) { }
         try { this.db.exec("ALTER TABLE ai_strategies ADD COLUMN master_prompt TEXT") } catch (e) { }
+        
+        // --- Timing Column Migrations ---
+        try {
+            this.db.exec("ALTER TABLE market_daily_reports ADD COLUMN timing TEXT DEFAULT 'EVENING'")
+        } catch (e) { }
+        try {
+            this.db.exec("ALTER TABLE daily_rising_stocks ADD COLUMN timing TEXT DEFAULT 'EVENING'")
+        } catch (e) { }
+
+        // Ensure existing NULL values are filled for backward compatibility
+        try {
+            this.db.exec("UPDATE market_daily_reports SET timing = 'EVENING' WHERE timing IS NULL")
+            this.db.exec("UPDATE daily_rising_stocks SET timing = 'EVENING' WHERE timing IS NULL")
+        } catch (e) { }
+
+        // Migration for Market News Consensus (Schema Expansion)
+        try {
+            const check = this.db.prepare("PRAGMA table_info(market_news_consensus)").all() as any[];
+            if (check.length > 0 && !check.find(c => c.name === 'sentiment_score')) {
+                console.log('[DatabaseService] Migrating market_news_consensus to new schema...');
+                this.db.exec("ALTER TABLE market_news_consensus ADD COLUMN sentiment_score REAL");
+                this.db.exec("ALTER TABLE market_news_consensus ADD COLUMN hot_keywords_json TEXT");
+            }
+        } catch (e) {}
 
         // Ensure v1 Factory Strategy exists
         this.ensureV1Strategy();
 
         // Ensure v1 Factory Strategy exists
         this.ensureV1Strategy();
+
+        // Migration for YouTube Narrative Tables (Schema Expansion)
+        try {
+            const check = this.db.prepare("PRAGMA table_info(youtube_daily_consensus)").all() as any[];
+            if (check.length > 0 && !check.find(c => c.name === 'consensus_report')) {
+                console.log('[DatabaseService] Migrating youtube_daily_consensus to new schema...');
+                this.db.exec("DROP TABLE youtube_daily_consensus");
+                // The table will be recreated on next run or I can run it here
+                this.db.exec(`
+                    CREATE TABLE IF NOT EXISTS youtube_daily_consensus (
+                        date TEXT PRIMARY KEY,
+                        consensus_report TEXT,
+                        pivot_analysis TEXT,
+                        sources_json TEXT,
+                        created_at TEXT NOT NULL
+                    )
+                `);
+            }
+        } catch (e) {}
+
+        try {
+            const check = this.db.prepare("PRAGMA table_info(youtube_narrative_trends)").all() as any[];
+            if (check.length > 0 && !check.find(c => c.name === 'sector_rankings_json')) {
+                console.log('[DatabaseService] Migrating youtube_narrative_trends to new schema...');
+                this.db.exec("DROP TABLE youtube_narrative_trends");
+                this.db.exec(`
+                    CREATE TABLE IF NOT EXISTS youtube_narrative_trends (
+                        date TEXT PRIMARY KEY,
+                        sector_rankings_json TEXT,
+                        sentiment_score REAL,
+                        hot_keywords_json TEXT,
+                        created_at TEXT NOT NULL
+                    )
+                `);
+            }
+        } catch (e) {}
     }
 
 
@@ -281,6 +515,42 @@ export class DatabaseService {
         })
 
         insertMany(codes)
+    }
+
+    public insertStockMaster(stocks: { stock_code: string, stock_name: string, market_type: string, corp_code?: string, updated_at: string }[]) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO stocks_master (stock_code, stock_name, market_type, corp_code, updated_at)
+            VALUES (@stock_code, @stock_name, @market_type, @corp_code, @updated_at)
+        `)
+
+        const insertMany = this.db.transaction((items) => {
+            for (const item of items) {
+                stmt.run(item)
+            }
+        })
+        insertMany(stocks)
+    }
+
+    public searchStocks(query: string, limit: number = 20) {
+        const stmt = this.db.prepare(`
+            SELECT * FROM stocks_master 
+            WHERE stock_name LIKE ? OR stock_code LIKE ? 
+            LIMIT ?
+        `)
+        return stmt.all(`%${query}%`, `%${query}%`, limit) as any[]
+    }
+
+    public getStockByCode(code: string) {
+        return this.db.prepare('SELECT * FROM stocks_master WHERE stock_code = ?').get(code) as any
+    }
+
+    public getAllStocks() {
+        return this.db.prepare('SELECT * FROM stocks_master').all() as any[]
+    }
+
+    public getLatestStockUpdate() {
+        const row = this.db.prepare('SELECT MAX(updated_at) as last_update FROM stocks_master').get() as any
+        return row?.last_update || null
     }
 
     public getCorpCodesByStockCodes(stockCodes: string[]): Record<string, string> {
@@ -466,7 +736,7 @@ export class DatabaseService {
             return;
         }
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.getKstDate();
         const insertStmt = this.db.prepare('INSERT OR IGNORE INTO holding_history (stock_code, first_seen_date) VALUES (?, ?)');
         const deleteStmt = this.db.prepare('DELETE FROM holding_history WHERE stock_code = ?');
         const getAllStmt = this.db.prepare("SELECT stock_code FROM holding_history WHERE stock_code NOT LIKE 'internal-%'");
@@ -502,27 +772,28 @@ export class DatabaseService {
 
 
     // === Rising Stocks Analysis Methods ===
-    public saveMarketDailyReport(report: { date: string, market_summary: string, report_type: string }) {
+    public saveMarketDailyReport(report: { date: string, timing: string, market_summary: string, report_type: string }) {
         const stmt = this.db.prepare(`
-            INSERT OR REPLACE INTO market_daily_reports (date, market_summary, report_type)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO market_daily_reports (date, timing, market_summary, report_type)
+            VALUES (?, ?, ?, ?)
         `)
-        return stmt.run(report.date, report.market_summary, report.report_type)
+        return stmt.run(report.date, report.timing || 'EVENING', report.market_summary, report.report_type)
     }
 
-    public getMarketDailyReport(date: string) {
-        return this.db.prepare('SELECT * FROM market_daily_reports WHERE date = ?').get(date) as any
+    public getMarketDailyReport(date: string, timing: string = 'EVENING') {
+        return this.db.prepare('SELECT * FROM market_daily_reports WHERE date = ? AND timing = ?').get(date, timing) as any
     }
 
     public saveRisingStockAnalysis(analysis: any) {
         const stmt = this.db.prepare(`
             INSERT OR REPLACE INTO daily_rising_stocks (
-                date, stock_code, stock_name, change_rate, trading_value, source, ai_score, 
+                date, timing, stock_code, stock_name, change_rate, trading_value, source, ai_score, 
                 theme_sector, reason, chart_insight, past_reference, tags
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         return stmt.run(
             analysis.date,
+            analysis.timing || 'EVENING',
             analysis.stock_code,
             analysis.stock_name,
             analysis.change_rate,
@@ -533,21 +804,22 @@ export class DatabaseService {
             analysis.reason,
             analysis.chart_insight,
             analysis.past_reference,
-            analysis.tags ? JSON.stringify(analysis.tags) : null
+            analysis.tags ? (typeof analysis.tags === 'string' ? analysis.tags : JSON.stringify(analysis.tags)) : null
         )
     }
 
-    public getRisingStocksByDate(date: string) {
-        return this.db.prepare('SELECT * FROM daily_rising_stocks WHERE date = ? ORDER BY change_rate DESC').all(date) as any[]
+    public getRisingStocksByDate(date: string, timing: string = 'EVENING') {
+        // AI 점수 높은 순으로 정렬하여 반환 (UI 우선순위)
+        return this.db.prepare('SELECT * FROM daily_rising_stocks WHERE date = ? AND timing = ? ORDER BY ai_score DESC, change_rate DESC').all(date, timing) as any[]
     }
 
     public getStockAnalysis(stockCode: string) {
-        return this.db.prepare('SELECT * FROM daily_rising_stocks WHERE stock_code = ? ORDER BY date DESC').all(stockCode) as any[]
+        return this.db.prepare('SELECT * FROM daily_rising_stocks WHERE stock_code = ? ORDER BY date DESC, timing DESC').all(stockCode) as any[]
     }
 
-    public getDailyReportHistory() {
-        // 급등주 분석 데이터가 있는 날짜 목록을 최신순으로 반환
-        return this.db.prepare('SELECT DISTINCT date FROM daily_rising_stocks ORDER BY date DESC').all() as { date: string }[]
+    public getDailyReportHistory(limit = 100) {
+        // 시장 총평이 있는 날짜 목록을 최신순으로 반환
+        return this.db.prepare('SELECT DISTINCT date FROM market_daily_reports ORDER BY date DESC LIMIT ?').all(limit) as { date: string }[]
     }
 
     public saveAiLearningLog(log: any) {
@@ -565,21 +837,13 @@ export class DatabaseService {
         )
     }
 
-    public getDb() {
-        return this.db
-    }
-
-    public close() {
-        this.db.close()
-    }
-
     // ─── Raw Data (뉴스 / 공시) ────────────────────────────────────────────
     public saveRawData(data: {
         date: string
         stock_code: string
         stock_name: string
-        news_json: string          // NaverNewsItem[] JSON 문자열
-        disclosures_json: string   // DART 공시 목록 JSON 문자열
+        news_json: string          
+        disclosures_json: string   
     }) {
         const stmt = this.db.prepare(`
             INSERT INTO stock_raw_data (date, stock_code, stock_name, news_json, disclosures_json, collected_at)
@@ -589,7 +853,7 @@ export class DatabaseService {
                 disclosures_json = excluded.disclosures_json,
                 collected_at     = excluded.collected_at
         `)
-        stmt.run({ ...data, collected_at: new Date().toISOString() })
+        stmt.run({ ...data, collected_at: this.getKstTimestamp() })
     }
 
     public getRawData(date: string, stockCode: string): { news_json: string, disclosures_json: string, collected_at: string } | undefined {
@@ -606,7 +870,7 @@ export class DatabaseService {
                 news_json = excluded.news_json,
                 collected_at = excluded.collected_at
         `)
-        stmt.run(date, stockCode, stockName, JSON.stringify(news), new Date().toISOString())
+        stmt.run(date, stockCode, stockName, JSON.stringify(news), this.getKstTimestamp())
     }
 
     public saveDisclosuresRawData(date: string, stockCode: string, stockName: string, disclosures: any[]) {
@@ -617,7 +881,7 @@ export class DatabaseService {
                 disclosures_json = excluded.disclosures_json,
                 collected_at = excluded.collected_at
         `)
-        stmt.run(date, stockCode, stockName, JSON.stringify(disclosures), new Date().toISOString())
+        stmt.run(date, stockCode, stockName, JSON.stringify(disclosures), this.getKstTimestamp())
     }
 
     // ─── Skills File History ────────────────────────────────────────────────
@@ -676,5 +940,189 @@ export class DatabaseService {
             GROUP BY file_name
             ORDER BY file_name
         `).all() as any[]
+    }
+    // ─── MAIIS Ingestion Pipeline Monitoring ─────────────────────────────
+
+    // MAIIS Inventory is handled below in the dedicated section to avoid duplicates.
+
+    public saveSectorIndexHistory(data: any[]) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO sector_index_history (
+                date, sector_code, sector_name, index_value, change_rate, trading_value, trading_volume
+            ) VALUES (@date, @sector_code, @sector_name, @index_value, @change_rate, @trading_value, @trading_volume)
+        `)
+        const insertMany = this.db.transaction((items) => {
+            for (const item of items) stmt.run(item)
+        })
+        insertMany(data)
+    }
+
+    public saveSectorInvestorFlow(data: any[]) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO sector_investor_flow (
+                date, sector_code, foreigner_net, institution_net, individual_net
+            ) VALUES (@date, @sector_code, @foreigner_net, @institution_net, @individual_net)
+        `)
+        const insertMany = this.db.transaction((items) => {
+            for (const item of items) stmt.run(item)
+        })
+        insertMany(data)
+    }
+
+    public getLatestSectorPerformance(date: string) {
+        return this.db.prepare('SELECT * FROM sector_index_history WHERE date = ?').all(date) as any[]
+    }
+
+    public recordIngestionStat(stat: {
+        data_key: string
+        api_name: string
+        latency_ms: number
+        status_code: number
+        data_size_kb: number
+        error_msg?: string
+    }) {
+        const stmt = this.db.prepare(`
+            INSERT INTO maiis_ingestion_stats (
+                data_key, api_name, latency_ms, status_code, data_size_kb, error_msg, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `)
+        stmt.run(
+            stat.data_key,
+            stat.api_name,
+            stat.latency_ms,
+            stat.status_code,
+            stat.data_size_kb,
+            stat.error_msg || null,
+            this.getKstTimestamp()
+        )
+
+        // Update inventory freshness concurrently
+        const updateFreshness = this.db.prepare(`
+            UPDATE maiis_data_inventory 
+            SET last_freshness_at = ?, status = ?
+            WHERE data_key = ?
+        `)
+        updateFreshness.run(this.getKstTimestamp(), stat.status_code === 200 ? 'SUCCESS' : 'ERROR', stat.data_key)
+    }
+
+    public getRecentMaiisStats(limit = 100) {
+        return this.db.prepare(`
+            SELECT * FROM maiis_ingestion_stats 
+            ORDER BY created_at DESC 
+            LIMIT ?
+        `).all(limit) as any[]
+    }
+
+    /** 오래된 통계 데이터 정리 (30일 경과) */
+    public pruneMaiisStats(days = 30) {
+        const date = new Date()
+        date.setDate(date.getDate() - days)
+        const stmt = this.db.prepare('DELETE FROM maiis_ingestion_stats WHERE created_at < ?')
+        return stmt.run(date.toISOString())
+    }
+
+    // === MAIIS Inventory Methods ===
+    public getMaiisInventory() {
+        try {
+            const rows = this.db.prepare('SELECT * FROM maiis_data_inventory ORDER BY category, data_key').all() as any[]
+            return (rows || []).map(r => ({
+                ...r,
+                meta_json: r.meta_json ? JSON.parse(r.meta_json) : {}
+            }))
+        } catch (e) {
+            console.error('[DatabaseService] getMaiisInventory error:', e)
+            return []
+        }
+    }
+
+    public upsertMaiisInventory(item: any) {
+        try {
+            const stmt = this.db.prepare(`
+                INSERT OR REPLACE INTO maiis_data_inventory (
+                    data_key, source_api, category, last_freshness_at, next_check_at, refresh_interval_sec, status, meta_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `)
+            return stmt.run(
+                item.data_key,
+                item.source_api,
+                item.category,
+                item.last_freshness_at,
+                item.next_check_at,
+                item.refresh_interval_sec,
+                item.status,
+                typeof item.meta_json === 'string' ? item.meta_json : JSON.stringify(item.meta_json || {})
+            )
+        } catch (e) {
+            console.error('[DatabaseService] upsertMaiisInventory error:', e)
+        }
+    }
+
+
+    public getDb() {
+        return this.db
+    }
+
+    public close() {
+        this.db.close()
+    }
+
+    // === Market News Consensus Methods ===
+    public saveMarketNewsConsensus(data: { 
+        date: string, 
+        summary_json: string, 
+        pivot_analysis: string, 
+        keywords_used: string, 
+        source_news?: string,
+        sentiment_score?: number,
+        hot_keywords_json?: string 
+    }) {
+        const sql = `
+            INSERT OR REPLACE INTO market_news_consensus (
+                date, summary_json, pivot_analysis, keywords_used, source_news, sentiment_score, hot_keywords_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, DATETIME('now', 'localtime'))
+        `;
+        this.db.prepare(sql).run(
+            data.date, 
+            data.summary_json, 
+            data.pivot_analysis, 
+            data.keywords_used, 
+            data.source_news || null,
+            data.sentiment_score ?? null,
+            data.hot_keywords_json || null
+        );
+    }
+
+    public getLatestMarketNewsConsensus(limit: number = 20) {
+        return this.db.prepare('SELECT * FROM market_news_consensus ORDER BY date DESC LIMIT ?').all(limit);
+    }
+
+    public getLatestMarketNewsTrends(limit: number = 30) {
+        // News trends are currently stored within the consensus table itself
+        return this.db.prepare('SELECT date, sentiment_score, hot_keywords_json FROM market_news_consensus ORDER BY date DESC LIMIT ?').all(limit);
+    }
+
+    // === Youtube Multi-Agent Ingestion Methods ===
+    public saveYoutubeNarrativeTrends(data: { date: string, sector_rankings_json: string, sentiment_score: number, hot_keywords_json: string }) {
+        const sql = `
+            INSERT OR REPLACE INTO youtube_narrative_trends (date, sector_rankings_json, sentiment_score, hot_keywords_json, created_at)
+            VALUES (?, ?, ?, ?, DATETIME('now', 'localtime'))
+        `;
+        this.db.prepare(sql).run(data.date, data.sector_rankings_json, data.sentiment_score, data.hot_keywords_json);
+    }
+
+    public getLatestYoutubeNarrativeTrends(limit: number = 30) {
+        return this.db.prepare('SELECT * FROM youtube_narrative_trends ORDER BY date DESC LIMIT ?').all(limit);
+    }
+
+    public saveYoutubeDailyConsensus(data: { date: string, consensus_report: string, pivot_analysis: string, sources_json: string }) {
+        const sql = `
+            INSERT OR REPLACE INTO youtube_daily_consensus (date, consensus_report, pivot_analysis, sources_json, created_at)
+            VALUES (?, ?, ?, ?, DATETIME('now', 'localtime'))
+        `;
+        this.db.prepare(sql).run(data.date, data.consensus_report, data.pivot_analysis, data.sources_json);
+    }
+
+    public getLatestYoutubeDailyConsensus(limit: number = 20) {
+        return this.db.prepare('SELECT * FROM youtube_daily_consensus ORDER BY date DESC LIMIT ?').all(limit);
     }
 }

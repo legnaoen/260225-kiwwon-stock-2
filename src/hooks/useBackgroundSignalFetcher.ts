@@ -12,62 +12,64 @@ export function useBackgroundSignalFetcher() {
         if (isBackgroundFetching || backgroundQueue.size === 0) return
         isBackgroundFetching = true
 
-        const symbolsToFetch = Array.from(backgroundQueue)
+        try {
+            const symbolsToFetch = Array.from(backgroundQueue)
 
-        for (const code of symbolsToFetch) {
-            // Check again if it was loaded during the process
-            if (previous19DaysSum[code] !== undefined) {
-                backgroundQueue.delete(code)
-                continue
-            }
-
-            try {
-                // Fetch the chart data (daily)
-                const result = await window.electronAPI.getChartData({ stk_cd: code })
-                if (result.success) {
-                    const rawData = result.data?.stk_dt_pole_chart_qry || result.data?.output2 || result.data?.Body || result.data?.list || []
-
-                    if (rawData.length >= 20) {
-                        let sum = 0
-                        let validDaysCount = 0
-
-                        // We sum index 1 to 19 (which are the 19 days BEFORE today).
-                        for (let i = 1; i <= 19; i++) {
-                            const day = rawData[i]
-                            if (day) {
-                                const close = Number(day.cur_prc || day.stck_clpr || day.clpr || day.stck_clsprc || day.cls_prc || day.close || 0)
-                                sum += close
-                                validDaysCount++
-                            }
-                        }
-
-                        if (validDaysCount === 19) {
-                            // Update the global store state
-                            useSignalStore.getState().setPrevious19DaysSum(code, sum)
-                        } else {
-                            // If not enough data (e.g. newly listed stock), we save an invalid marker so we don't fetch it again
-                            useSignalStore.getState().setPrevious19DaysSum(code, -1)
-                        }
-                    } else {
-                        // Not enough data
-                        useSignalStore.getState().setPrevious19DaysSum(code, -1)
-                    }
+            for (const code of symbolsToFetch) {
+                // Check again if it was loaded during the process
+                if (previous19DaysSum[code] !== undefined) {
+                    backgroundQueue.delete(code)
+                    continue
                 }
 
-                // Remove from queue
-                backgroundQueue.delete(code)
+                try {
+                    // Fetch the chart data (daily)
+                    const result = await window.electronAPI.getChartData({ stk_cd: code })
+                    if (result.success) {
+                        const rawData = result.data?.stk_dt_pole_chart_qry || result.data?.output2 || result.data?.Body || result.data?.list || []
 
-                // Wait 1.5 seconds before next fetch to avoid 429 Too Many Requests
-                await new Promise(resolve => setTimeout(resolve, 1500))
+                        if (rawData.length >= 20) {
+                            let sum = 0
+                            let validDaysCount = 0
 
-            } catch (err) {
-                console.error(`Background fetch failed for ${code}:`, err)
-                backgroundQueue.delete(code)
-                await new Promise(resolve => setTimeout(resolve, 1500))
+                            // We sum index 1 to 19 (which are the 19 days BEFORE today).
+                            for (let i = 1; i <= 19; i++) {
+                                const day = rawData[i]
+                                if (day) {
+                                    const close = Number(day.cur_prc || day.stck_clpr || day.clpr || day.stck_clsprc || day.cls_prc || day.close || 0)
+                                    sum += close
+                                    validDaysCount++
+                                }
+                            }
+
+                            if (validDaysCount === 19) {
+                                // Update the global store state
+                                useSignalStore.getState().setPrevious19DaysSum(code, sum)
+                            } else {
+                                // If not enough data (e.g. newly listed stock), we save an invalid marker so we don't fetch it again
+                                useSignalStore.getState().setPrevious19DaysSum(code, -1)
+                            }
+                        } else {
+                            // Not enough data
+                            useSignalStore.getState().setPrevious19DaysSum(code, -1)
+                        }
+                    }
+
+                    // Remove from queue
+                    backgroundQueue.delete(code)
+
+                    // Wait 1.5 seconds before next fetch to avoid 429 Too Many Requests
+                    await new Promise(resolve => setTimeout(resolve, 1500))
+
+                } catch (err) {
+                    console.error(`Background fetch failed for ${code}:`, err)
+                    backgroundQueue.delete(code)
+                    await new Promise(resolve => setTimeout(resolve, 1500))
+                }
             }
+        } finally {
+            isBackgroundFetching = false
         }
-
-        isBackgroundFetching = false
     }
 
     const enqueueSymbols = (symbols: string[]) => {

@@ -10,11 +10,11 @@ interface MarketState {
     marketStatus: MarketStatus;
     currentTime: Date;
     tradingDays: string[];
-    systemError: { message: string, code: string, time: string } | null;
+    systemError: { message: string, code: string, time: string, level?: 'error' | 'warning' } | null;
     setMarketStatus: (status: Partial<MarketStatus>) => void;
     setTradingDays: (days: string[]) => void;
     updateTime: () => void;
-    setSystemError: (error: { message: string, code: string, time: string } | null) => void;
+    setSystemError: (error: { message: string, code: string, time: string, level?: 'error' | 'warning' } | null) => void;
     clearSystemError: () => void;
 }
 

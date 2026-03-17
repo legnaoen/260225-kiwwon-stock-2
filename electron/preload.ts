@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveWatchlistSymbols: (symbols: string[]) => ipcRenderer.invoke('kiwoom:save-watchlist-symbols', symbols),
     getWatchlistSymbols: () => ipcRenderer.invoke('kiwoom:get-watchlist-symbols'),
     getConnectionStatus: () => ipcRenderer.invoke('kiwoom:get-connection-status'),
+    resetCircuitBreaker: () => ipcRenderer.invoke('kiwoom:reset-circuit'),
     analyzeStock: (stockCode: string) => ipcRenderer.invoke('kiwoom:analyze-stock', stockCode),
     getHoldingHistory: () => ipcRenderer.invoke('holding:get-history'),
     getTradingDays: () => ipcRenderer.invoke('kiwoom:get-trading-days'),
@@ -144,6 +145,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance?: number, buyStartTime?: string, buyEndTime?: string }) => ipcRenderer.invoke('ai:save-settings', settings),
     getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
     testAiConnection: (settings: { geminiKey: string, modelName: string }) => ipcRenderer.invoke('ai:test-connection', settings),
+    
+    // YouTube
+    saveYoutubeApiKey: (key: string) => ipcRenderer.invoke('youtube:save-key', key),
+    getYoutubeApiKey: () => ipcRenderer.invoke('youtube:get-key'),
+    getYoutubeChannels: () => ipcRenderer.invoke('youtube:get-channels'),
+    getLatestYoutubeInsights: (limit: number) => ipcRenderer.invoke('youtube:get-latest-insights', limit),
+    testYoutubeApi: (key: string) => ipcRenderer.invoke('youtube:test-api', key),
+    addYoutubeChannel: (args: { id: string, name: string }) => ipcRenderer.invoke('youtube:add-channel', args),
+    updateYoutubeTrust: (args: { id: string, score: number }) => ipcRenderer.invoke('youtube:update-trust', args),
+    collectYoutubeNow: (channelId?: string) => ipcRenderer.invoke('youtube:collect-now', channelId),
+    removeYoutubeChannel: (channelId: string) => ipcRenderer.invoke('youtube:remove-channel', channelId),
+    onYoutubeProgress: (callback: (data: { stage: string, message: string, current: number, total: number }) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('youtube:progress', listener)
+        return () => ipcRenderer.removeListener('youtube:progress', listener)
+    },
+    reanalyzeYoutubeVideo: (videoId: string) => ipcRenderer.invoke('youtube:reanalyze-video', videoId),
+    getYoutubeTrends: (limit?: number) => ipcRenderer.invoke('youtube:get-trends', limit),
+    getYoutubeConsensus: (limit?: number) => ipcRenderer.invoke('youtube:get-consensus', limit),
+    syncYoutubeVideos: () => ipcRenderer.invoke('youtube:sync-videos'),
+    getYoutubeSettings: () => ipcRenderer.invoke('youtube:get-settings'),
+    saveYoutubeSettings: (settings: any) => ipcRenderer.invoke('youtube:save-settings', settings),
+
     onMarketOpenedDetected: (callback: (data: { date: string, tradingDays: string[] }) => void) => {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('kiwoom:market-opened-detected', listener)
@@ -153,16 +177,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getNaverApiKeys: () => ipcRenderer.invoke('naver:get-keys'),
     testNaverApi: (keys: { clientId: string, clientSecret: string }) => ipcRenderer.invoke('naver:test-api', keys),
 
+    // Market News Briefing
+    getNewsSettings: () => ipcRenderer.invoke('market-news:get-settings'),
+    saveNewsSettings: (settings: any) => ipcRenderer.invoke('market-news:save-settings', settings),
+    getLatestBriefings: (limit: number) => ipcRenderer.invoke('market-news:get-latest-briefings', limit),
+    generateNewsBriefingNow: () => ipcRenderer.invoke('market-news:generate-now'),
+    getNewsTrends: (limit?: number) => ipcRenderer.invoke('market-news:get-trends', limit),
+
     // Rising Stocks Analysis
     saveMarketDailyReport: (report: any) => ipcRenderer.invoke('analysis:save-market-report', report),
-    getMarketDailyReport: (date: string) => ipcRenderer.invoke('analysis:get-market-report', date),
+    getMarketDailyReport: (options: { date: string, timing?: string }) => ipcRenderer.invoke('analysis:get-market-report', options),
     saveRisingStockAnalysis: (analysis: any) => ipcRenderer.invoke('analysis:save-stock-analysis', analysis),
-    getRisingStocksByDate: (date: string) => ipcRenderer.invoke('analysis:get-stocks-by-date', date),
+    getRisingStocksByDate: (options: { date: string, timing?: string }) => ipcRenderer.invoke('analysis:get-stocks-by-date', options),
     getStockAnalysis: (stockCode: string) => ipcRenderer.invoke('analysis:get-stock-analysis', stockCode),
-    runStockAnalysis: (options: { code: string, name: string, changeRate: number }) => ipcRenderer.invoke('analysis:run-stock-analysis', options),
-    runMarketReport: (date: string) => ipcRenderer.invoke('analysis:run-market-report', date),
+    runStockAnalysis: (options: { code: string, name: string, changeRate: number, tradingValue?: number, source?: string, timing?: string }) => ipcRenderer.invoke('analysis:run-stock-analysis', options),
+    runMarketReport: (options: { date: string, timing?: string }) => ipcRenderer.invoke('analysis:run-market-report', options),
     getReportHistory: () => ipcRenderer.invoke('analysis:get-report-history'),
-    runBatchReport: () => ipcRenderer.invoke('analysis:run-batch-report'),
+    runBatchReport: (timing?: string) => ipcRenderer.invoke('analysis:run-batch-report', timing),
     onBatchProgress: (callback: (data: { step: string, current: number, total: number, message: string }) => void) => {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('analysis:batch-progress', listener)
@@ -171,11 +202,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getRawData: (options: { date: string, stockCode: string }) => ipcRenderer.invoke('analysis:get-raw-data', options),
     collectNews: (options: { date: string, stockCode: string, stockName: string }) => ipcRenderer.invoke('naver:collect-news', options),
     collectDisclosures: (options: { date: string, stockCode: string, stockName: string }) => ipcRenderer.invoke('dart:collect-disclosures', options),
+    saveAiScheduleSettings: (settings: any) => ipcRenderer.invoke('analysis:save-ai-schedule-settings', settings),
+    getAiScheduleSettings: () => ipcRenderer.invoke('analysis:get-ai-schedule-settings'),
     // Skills
     skillsGetAll: () => ipcRenderer.invoke('skills:get-all'),
     skillsGetHistory: (fileName: string) => ipcRenderer.invoke('skills:get-history', fileName),
     skillsGetVersion: (options: { fileName: string, version: number }) => ipcRenderer.invoke('skills:get-version', options),
     skillsSave: (options: { fileName: string, content: string, diffSummary: string }) => ipcRenderer.invoke('skills:save', options),
+    // MAIIS Pipeline Monitoring
+    getMaiisInventory: () => ipcRenderer.invoke('maiis:get-inventory'),
+    getMaiisStats: (limit?: number) => ipcRenderer.invoke('maiis:get-stats', limit),
+    triggerMaiisSync: (providerId: string, options?: any) => ipcRenderer.invoke('maiis:trigger-sync', { providerId, options }),
     onSystemError: (callback: (error: { message: string, code: string, time: string }) => void) => {
         const listener = (_event: any, error: any) => callback(error)
         ipcRenderer.on('system:error', listener)

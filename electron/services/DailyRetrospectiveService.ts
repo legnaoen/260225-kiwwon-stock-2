@@ -64,7 +64,7 @@ export class DailyRetrospectiveService {
 
         // 2. Generate new strategy reasoning
         let reason = '';
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.db.getKstDate();
 
         try {
             const prompt = `당일 매매 데이터와 AI 의사결정 로그를 정밀 분석하여 다음 분기를 위한 전략 보정안을 제안해줘.
@@ -172,6 +172,6 @@ ${passSamples.map(s => `- ${s.name}: ${s.reason}`).join('\n')}
     private shiftDate(dateString: string, days: number): string {
         const d = new Date(dateString);
         d.setDate(d.getDate() + days);
-        return d.toISOString().split('T')[0];
+        return this.db.getKstDate(d);
     }
 }

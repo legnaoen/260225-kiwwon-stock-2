@@ -10,6 +10,7 @@ import { ChartRenderService } from './ChartRenderService';
 import { DatabaseService } from './DatabaseService';
 import { CompanyAnalysisService } from './CompanyAnalysisService';
 import { DartApiService } from './DartApiService';
+import { StockMasterService } from './StockMasterService';
 
 const store = new Store();
 
@@ -19,7 +20,6 @@ export class TelegramService {
     private botToken: string | null = null;
     private chatId: string | null = null;
     private disparityCache: Map<string, string> = new Map();
-    private stockSearchCache: Array<{ code: string, name: string }> = [];
     private isWaitingForLiquidation = false;
     private liquidationWaitTimer: NodeJS.Timeout | null = null;
     private scheduleSummaryJob: cron.ScheduledTask | null = null;
@@ -35,7 +35,7 @@ export class TelegramService {
         this.setupDailyTopRisingCron();
         this.setupWeeklyTopRisingCron();
         this.setupMonthlyTopRisingCron();
-        this.buildStockSearchCache();
+        // this.buildStockSearchCache(); // Removed: Using StockMasterService instead
 
         // Startup check for missed schedule summary
         setTimeout(() => this.checkMissedScheduleSummary(), 10000);
@@ -77,8 +77,7 @@ export class TelegramService {
                 // 텔레그램 명령어 메뉴 (자동완성) 세팅
                 this.bot.telegram.setMyCommands([
                     { command: 'menu', description: '자동매매 메뉴 제어 UI 열기' },
-                    { command: 'panic', description: '🚨 비상 일괄 매도 청산' },
-                    { command: '청산', description: '🚨 비상 일괄 매도 청산' }
+                    { command: 'panic', description: '🚨 비상 일괄 매도 청산' }
                 ]).catch(err => console.error('[TelegramService] setMyCommands Error:', err));
 
                 // 종합 메뉴 커맨드
@@ -200,42 +199,31 @@ export class TelegramService {
                         text = text.replace(/^@[a-zA-Z0-9_]+\s*/, '').trim();
                     }
 
-                    if (!text) return; // 멘션만 하고 종목명을 안 쓴 경우 ము시
+                    if (!text) return; // 멘션만 하고 종목명을 안 쓴 경우 મુ시
 
+                    const stockMaster = StockMasterService.getInstance();
+                    const results = await stockMaster.search(text);
 
-                    // 1. 매핑 캐시가 비어있다면 대기
-                    if (this.stockSearchCache.length === 0) {
-                        return ctx.reply('⚠️ 주식 종목 데이터를 안전하게 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
+                    if (results.length === 0) {
+                        return ctx.reply(`🚫 [종목 검색 실패] '${text}' 에 해당하는 종목을 찾을 수 없습니다.`);
                     }
 
-                    // 2. 완전 일치 (Exact Match) 검색
-                    let exactMatch = this.stockSearchCache.find(s => s.name.toLowerCase() === text.toLowerCase());
                     let targetCode = '';
                     let targetName = '';
 
+                    // 1. 완전 일치 여부 확인
+                    const exactMatch = results.find(s => s.stock_name.toLowerCase() === text.toLowerCase());
                     if (exactMatch) {
-                        targetCode = exactMatch.code;
-                        targetName = exactMatch.name;
+                        targetCode = exactMatch.stock_code;
+                        targetName = exactMatch.stock_name;
+                    } else if (results.length === 1) {
+                        // 2. 검색 결과가 하나뿐이면 그것으로 진행
+                        targetCode = results[0].stock_code;
+                        targetName = results[0].stock_name;
                     } else {
-                        // 3. 부분 일치 (Fuzzy Match) 검색
-                        const partialMatches = this.stockSearchCache.filter(s => s.name.toLowerCase().includes(text.toLowerCase()));
-
-                        if (partialMatches.length === 0) {
-                            return ctx.reply(`🚫 [종목 검색 실패] '${text}' 에 해당하는 종목을 찾을 수 없습니다.`);
-                        }
-
-                        if (partialMatches.length === 1) {
-                            // 딱 하나만 매칭되면 그걸로 진행
-                            targetCode = partialMatches[0].code;
-                            targetName = partialMatches[0].name;
-                        } else {
-                            // 여러 개 매칭되면 선택 유도
-                            const maxResults = 10;
-                            const optionsList = partialMatches.slice(0, maxResults).map((s, idx) => `${idx + 1}. ${s.name} (${s.code})`).join('\n');
-                            const moreTxt = partialMatches.length > maxResults ? `\n...외 ${partialMatches.length - maxResults}개 더 있음` : '';
-
-                            return ctx.reply(`🕵️ [유사 종목 검색 결과]\n'${text}' 에 해당하는 종목이 여러 개 발견되었습니다. 정확한 이름을 입력해주세요.\n\n${optionsList}${moreTxt}`);
-                        }
+                        // 3. 여러 건이면 선택 유도
+                        const optionsList = results.map((s, idx) => `${idx + 1}. ${s.stock_name} (${s.stock_code})`).join('\n');
+                        return ctx.reply(`🕵️ [유사 종목 검색 결과]\n'${text}' 에 해당하는 종목이 여러 개 발견되었습니다. 정확한 이름을 입력해주세요.\n\n${optionsList}`);
                     }
 
                     // 4. 종목 식별 성공, 차트 준비 알림
@@ -724,6 +712,7 @@ export class TelegramService {
 
         // [2] 시스템 오류 발생 시 알림 발송
         eventBus.on(SystemEvent.SYSTEM_ERROR, (error) => {
+            if (error.level === 'warning') return; // 경고 단계는 텔레그램 발송 생략
             this.sendMessage(`🚨 [시스템 오류]\n${error.message || error}`);
         });
 
@@ -734,7 +723,7 @@ export class TelegramService {
 
         // [3] 이격침체 조건 감지 (일 1회 제한)
         eventBus.on(SystemEvent.DISPARITY_SLUMP_DETECTED, (data: { code: string, name: string, disparity: number, changeRate: number }) => {
-            const today = new Date().toISOString().split('T')[0];
+            const today = DatabaseService.getInstance().getKstDate();
             const numericCode = data.code.replace(/[^0-9]/g, '');
             const cacheKey = numericCode;
 
@@ -744,9 +733,9 @@ export class TelegramService {
                 let displayName = data.name;
                 // 이름 데이터가 날아오지 않았거나 코드와 동일한 경우 캐시에서 종목명 찾기
                 if (!displayName || displayName === numericCode || displayName === data.code || displayName === '알 수 없음') {
-                    const match = this.stockSearchCache.find(s => s.code === numericCode || s.code.replace(/[^0-9]/g, '') === numericCode);
+                    const match = StockMasterService.getInstance().getStock(numericCode);
                     if (match) {
-                        displayName = match.name;
+                        displayName = match.stock_name;
                     }
                 }
 
@@ -882,31 +871,5 @@ export class TelegramService {
             this.setupWeeklyTopRisingCron();
             this.setupMonthlyTopRisingCron();
         }, 1500);
-    }
-
-    private async buildStockSearchCache() {
-        try {
-            const kiwoom = KiwoomService.getInstance();
-            // Wait briefly to ensure KiwoomService has token
-            setTimeout(async () => {
-                try {
-                    console.log('[TelegramService] 주식 종목 검색 캐시 구축 시작...');
-                    const kospi = await kiwoom.getAllStocks('0');
-                    const kosdaq = await kiwoom.getAllStocks('10');
-                    if (kospi && Array.isArray(kospi)) {
-                        this.stockSearchCache.push(...kospi);
-                    }
-                    if (kosdaq && Array.isArray(kosdaq)) {
-                        this.stockSearchCache.push(...kosdaq);
-                    }
-                    console.log(`[TelegramService] 검색 캐시 완료. 총 ${this.stockSearchCache.length} 종목 대상`);
-                } catch (err) {
-                    console.error('[TelegramService] 종목 검색 캐시 생성 실패:', err);
-                }
-            }, 5000); // 5 seconds after startup to let login finish
-
-        } catch (error) {
-            console.error('[TelegramService] buildStockCache setup failed:', error);
-        }
     }
 }

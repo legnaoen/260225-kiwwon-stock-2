@@ -137,7 +137,7 @@ ${trackRecord ? `## 과거 예측 적중률 참고\n${trackRecord}` : ''}
         const filePath = path.join(SKILLS_DIR, fileName)
         const current = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : ''
         
-        const today = new Date().toISOString().slice(0, 10)
+        const today = this.db.getKstDate()
         const newSection = `\n\n---\n## AI 학습 교훈 (${today})\n\n${lessonContent}`
         const updated = current + newSection
 

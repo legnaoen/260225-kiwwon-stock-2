@@ -14,6 +14,8 @@ import { DailyRetrospectiveService } from './services/DailyRetrospectiveService'
 import { AiService } from './services/AiService'
 import { VirtualAccountService } from './services/VirtualAccountService'
 import { SchedulerService } from './services/SchedulerService'
+import { StockMasterService } from './services/StockMasterService'
+import { IngestionManager } from './services/IngestionManager'
 import { eventBus, SystemEvent } from './utils/EventBus'
 
 const store = new Store()
@@ -23,6 +25,7 @@ const telegramService = TelegramService.getInstance()
 const marketScannerService = MarketScannerService.getInstance()
 const aiDecisionService = AiDecisionService.getInstance()
 const schedulerService = SchedulerService.getInstance()
+const ingestionManager = IngestionManager.getInstance()
 // DataLoggingService is now lazily instantiated.
 
 // Load initial settings to the service
@@ -45,17 +48,37 @@ import('./services/SkillsService').then(({ SkillsService }) => {
     SkillsService.getInstance().initSnapshots()
 }).catch(console.error)
 
+// Global Error Handling
+process.on('uncaughtException', (error) => {
+    console.error('CRITICAL: Uncaught Exception:', error);
+    if (win && !win.isDestroyed()) {
+        win.webContents.send('system:error', { message: error.message, stack: error.stack });
+    }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 function createWindow() {
     win = new BrowserWindow({
-        width: 1200,
-        height: 800,
+        width: 1400,
+        height: 1000,
+        minWidth: 1400,
+        minHeight: 1000,
+        center: true,
         frame: false,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
         },
     })
 
-    kiwoomService.initWebSocket(win)
+    if (win) {
+        console.log('[Main] Window created with size: 1400x1000')
+        const size = win.getSize()
+        console.log(`[Main] Actual window size: ${size[0]}x${size[1]}`)
+        kiwoomService.initWebSocket(win)
+    }
 
     // Forward AutoTrade logs to renderer
     eventBus.on(SystemEvent.AUTO_TRADE_LOG, (logInfo) => {
@@ -98,6 +121,13 @@ function createWindow() {
         }
     })
 
+    // Forward YouTube Progress
+    eventBus.on(SystemEvent.YOUTUBE_PROGRESS, (data) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('youtube:progress', data)
+        }
+    })
+
     // Forward System Error
     eventBus.on(SystemEvent.SYSTEM_ERROR, (errorInfo) => {
         if (win && !win.isDestroyed()) {
@@ -136,11 +166,14 @@ app.whenReady().then(() => {
     // Startup DART Sync after 5 seconds
     setTimeout(async () => {
         try {
-            console.log('[Main] Starting startup DART sync...')
+            console.log('[Main] Starting startup Stock Master & DART sync...')
+            // 종목 마스터 동기화 (내부에서 오늘 날짜 체크함)
+            await StockMasterService.getInstance().checkAndUpdate()
+            
             await DartApiService.getInstance().syncWatchlistSchedules()
-            console.log('[Main] Startup DART sync completed.')
+            console.log('[Main] Startup sync completed.')
         } catch (err) {
-            console.error('[Main] Startup DART sync failed:', err)
+            console.error('[Main] Startup sync failed:', err)
         }
 
         // Start Market Scanner
@@ -183,6 +216,57 @@ ipcMain.on('kiwoom:notify-disparity-slump', (_event, data: { code: string, name:
     eventBus.emit(SystemEvent.DISPARITY_SLUMP_DETECTED, data)
 })
 
+// ─── Critical Infrastructure IPC Handlers ───────────────────────────
+
+ipcMain.handle('kiwoom:get-connection-status', () => {
+    try {
+        return kiwoomService.getConnectionStatus()
+    } catch (error) {
+        return { connected: false, realConnected: false }
+    }
+})
+
+ipcMain.handle('kiwoom:reset-circuit', () => {
+    kiwoomService.resetCircuitBreaker()
+    return { success: true }
+})
+
+ipcMain.handle('kiwoom:get-api-logs', () => {
+    return kiwoomService.getApiLogs()
+})
+
+ipcMain.handle('maiis:get-inventory', () => {
+    try {
+        return IngestionManager.getInstance().getInventory()
+    } catch (e) {
+        console.error('[Main] Failed to get MAIIS inventory:', e)
+        return []
+    }
+})
+
+ipcMain.handle('maiis:get-stats', (_event, limit) => {
+    try {
+        return IngestionManager.getInstance().getRecentStats(limit)
+    } catch (e) {
+        console.error('[Main] Failed to get MAIIS stats:', e)
+        return []
+    }
+})
+
+ipcMain.handle('maiis:trigger-sync', async (_event, { providerId, options }) => {
+    try {
+        return await IngestionManager.getInstance().triggerSync(providerId, options)
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.on('chart-render-complete', (_event, code) => {
+    eventBus.emit(SystemEvent.CHART_RENDER_COMPLETE, code)
+})
+
+// ─── Existing IPC Handlers ─────────────────────────────────────────
+
 // IPC Handlers: Features mapped to KiwoomService
 ipcMain.handle('kiwoom:save-keys', async (_event, keys: { appkey: string, secretkey: string }) => {
     try {
@@ -203,14 +287,6 @@ ipcMain.handle('kiwoom:save-keys', async (_event, keys: { appkey: string, secret
 
 ipcMain.handle('kiwoom:get-keys', () => {
     return store.get('kiwoom_keys') || null
-})
-
-ipcMain.handle('kiwoom:get-connection-status', async () => {
-    try {
-        return await kiwoomService.getConnectionStatus()
-    } catch (error) {
-        return { connected: false, mode: 'none' }
-    }
 })
 
 ipcMain.handle('kiwoom:get-accounts', async () => {
@@ -264,12 +340,9 @@ ipcMain.handle('kiwoom:get-trading-days', async () => {
             return dateStr.length === 8 ? `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}` : dateStr;
         }).filter((d: string) => d.length === 10).sort();
 
-        const today = new Date().toISOString().split('T')[0];
-        if (!tradingDays.includes(today)) tradingDays.push(today);
-        tradingDays.sort();
-
         return { success: true, data: tradingDays };
     } catch (err: any) {
+        console.error('[Main] get-trading-days Error:', err.message);
         return { success: false, error: err.message };
     }
 })
@@ -308,10 +381,6 @@ ipcMain.handle('kiwoom:save-watchlist-symbols', async (_event, symbols: string[]
 
 ipcMain.handle('kiwoom:get-watchlist-symbols', () => {
     return store.get('watchlist_symbols') || []
-})
-
-ipcMain.handle('kiwoom:get-api-logs', () => {
-    return kiwoomService.getApiLogs()
 })
 
 ipcMain.handle('kiwoom:test-market-scanner', async () => {
@@ -706,10 +775,203 @@ ipcMain.handle('naver:test-api', async (_event, { clientId, clientSecret }) => {
         }
         return { success: false, error: '검색 결과가 없습니다.' }
     } catch (err: any) {
-        console.error('[Main] Naver API Test Error:', err.response?.data || err.message)
         return { success: false, error: err.response?.data?.errorMessage || err.message }
     }
 })
+
+// === Market News Briefing Handlers ===
+ipcMain.handle('market-news:get-settings', () => {
+    return store.get('market_briefing_settings') || {
+        keywords: ['코스피 코스닥 시황', '뉴욕증시 마감', '미국 금리 환율'],
+        enabled: true,
+        reportTime: '08:20',
+        telegramTime: '08:30',
+        max_total_keywords: 5,
+        ai_keywords_pool: []
+    }
+})
+
+ipcMain.handle('market-news:save-settings', (_event, settings: any) => {
+    store.set('market_briefing_settings', settings)
+    return { success: true }
+})
+
+ipcMain.handle('market-news:get-latest-briefings', async (_event, limit) => {
+    try {
+        const { MarketNewsService } = await import('./services/MarketNewsService')
+        return await MarketNewsService.getInstance().getLatestBriefings(limit)
+    } catch (err: any) {
+        console.error('[Main] get-latest-briefings Error:', err.message)
+        return []
+    }
+})
+
+ipcMain.handle('market-news:generate-now', async () => {
+    try {
+        const { MarketNewsService } = await import('./services/MarketNewsService')
+        return await MarketNewsService.getInstance().generateMarketBriefing()
+    } catch (err: any) {
+        console.error('[Main] generate-now Error:', err.message)
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('market-news:get-trends', async (_event, limit: number = 30) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const trends = DatabaseService.getInstance().getLatestMarketNewsTrends(limit);
+        return { success: true, data: trends };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+})
+
+// === YouTube API Handlers ===
+ipcMain.handle('youtube:save-key', (_event, key: string) => {
+    store.set('youtube_api_key', key)
+    return { success: true }
+})
+
+ipcMain.handle('youtube:get-key', () => {
+    return store.get('youtube_api_key') || ''
+})
+
+ipcMain.handle('youtube:get-channels', async () => {
+    try {
+        const { YoutubeService } = await import('./services/YoutubeService')
+        return await YoutubeService.getInstance().getChannels()
+    } catch (err: any) {
+        console.error('[Main] get-youtube-channels Error:', err.message)
+        return []
+    }
+})
+
+ipcMain.handle('youtube:get-latest-insights', async (_event, limit) => {
+    try {
+        const { YoutubeService } = await import('./services/YoutubeService')
+        return await YoutubeService.getInstance().getLatestInsights(limit)
+    } catch (err: any) {
+        console.error('[Main] get-latest-youtube-insights Error:', err.message)
+        return []
+    }
+})
+
+ipcMain.handle('youtube:test-api', async (_event, key: string) => {
+    try {
+        const axios = (await import('axios')).default
+        // Test with a simple search for the keyword 'KOSPI'
+        const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+            params: {
+                part: 'snippet',
+                q: 'KOSPI',
+                maxResults: 1,
+                key: key.trim()
+            }
+        })
+        if (response.data && response.data.items) {
+            return { success: true, message: 'YouTube API 연결 성공!' }
+        }
+        return { success: false, error: '검색 결과가 없습니다.' }
+    } catch (err: any) {
+        console.error('[Main] YouTube API Test Error:', err.response?.data || err.message)
+        const errorMsg = err.response?.data?.error?.message || err.message
+        return { success: false, error: errorMsg }
+    }
+})
+
+ipcMain.handle('youtube:add-channel', async (_event, { id, name }) => {
+    try {
+        const { YoutubeService } = await import('./services/YoutubeService')
+        await YoutubeService.getInstance().addChannel(id, name)
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('youtube:update-trust', async (_event, { id, score }) => {
+    try {
+        const { YoutubeService } = await import('./services/YoutubeService')
+        await YoutubeService.getInstance().updateChannelTrust(id, score)
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('youtube:remove-channel', async (_event, channelId: string) => {
+    try {
+        const { YoutubeService } = await import('./services/YoutubeService')
+        await YoutubeService.getInstance().removeChannel(channelId)
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('youtube:sync-videos', async () => {
+    try {
+        const apiKey = store.get('youtube_api_key') as string;
+        if (!apiKey) return { success: false, error: '유튜브 API 키가 설정되지 않았습니다.' };
+        const { YoutubeService } = await import('./services/YoutubeService');
+        return await YoutubeService.getInstance().collectLatestVideos(apiKey, undefined, { skipAnalysis: true });
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('youtube:collect-now', async (_event, channelId?: string) => {
+    try {
+        const apiKey = store.get('youtube_api_key') as string
+        if (!apiKey) return { success: false, error: '유튜브 API 키가 설정되지 않았습니다.' }
+
+        const { YoutubeService } = await import('./services/YoutubeService')
+        return await YoutubeService.getInstance().collectLatestVideos(apiKey, channelId)
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('youtube:reanalyze-video', async (_event, videoId: string) => {
+    try {
+        const { YoutubeService } = await import('./services/YoutubeService')
+        return await YoutubeService.getInstance().reanalyzeVideo(videoId)
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('youtube:get-trends', async (_event, limit: number = 30) => {
+    try {
+        const trends = DatabaseService.getInstance().getLatestYoutubeNarrativeTrends(limit);
+        return { success: true, data: trends };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+})
+
+ipcMain.handle('youtube:get-consensus', async (_event, limit: number = 20) => {
+    try {
+        const consensus = DatabaseService.getInstance().getLatestYoutubeDailyConsensus(limit);
+        return { success: true, data: consensus };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+})
+
+ipcMain.handle('youtube:get-settings', () => {
+    return store.get('youtube_settings') || {
+        enabled: true,
+        collectTime: '08:30'
+    };
+});
+
+ipcMain.handle('youtube:save-settings', async (_event, settings: any) => {
+    store.set('youtube_settings', settings);
+    const { SchedulerService } = await import('./services/SchedulerService');
+    SchedulerService.getInstance().initSchedules();
+    return { success: true };
+});
 
 // === Rising Stocks Analysis DB Handlers ===
 ipcMain.handle('analysis:save-market-report', async (_event, report) => {
@@ -721,9 +983,9 @@ ipcMain.handle('analysis:save-market-report', async (_event, report) => {
     }
 })
 
-ipcMain.handle('analysis:get-market-report', async (_event, date) => {
+ipcMain.handle('analysis:get-market-report', async (_event, { date, timing }) => {
     try {
-        const report = DatabaseService.getInstance().getMarketDailyReport(date)
+        const report = DatabaseService.getInstance().getMarketDailyReport(date, timing)
         return { success: true, data: report }
     } catch (err: any) {
         return { success: false, error: err.message }
@@ -739,9 +1001,9 @@ ipcMain.handle('analysis:save-stock-analysis', async (_event, analysis) => {
     }
 })
 
-ipcMain.handle('analysis:get-stocks-by-date', async (_event, date) => {
+ipcMain.handle('analysis:get-stocks-by-date', async (_event, { date, timing }) => {
     try {
-        const stocks = DatabaseService.getInstance().getRisingStocksByDate(date)
+        const stocks = DatabaseService.getInstance().getRisingStocksByDate(date, timing)
         return { success: true, data: stocks }
     } catch (err: any) {
         return { success: false, error: err.message }
@@ -757,29 +1019,51 @@ ipcMain.handle('analysis:get-stock-analysis', async (_event, stockCode) => {
     }
 })
 
-ipcMain.handle('analysis:run-stock-analysis', async (_event, { code, name, changeRate, tradingValue, source }) => {
+ipcMain.handle('analysis:run-stock-analysis', async (_event, options) => {
     try {
-        const result = await (await import('./services/RisingStockAnalysisService')).RisingStockAnalysisService.getInstance().analyzeAndSave(code, name, changeRate, tradingValue, source)
+        const service = (await import('./services/RisingStockAnalysisService')).RisingStockAnalysisService.getInstance()
+        const result = await service.runAnalysis(options)
         return result
     } catch (err: any) {
         return { success: false, error: err.message }
     }
 })
 
-ipcMain.handle('analysis:run-market-report', async (_event, date) => {
+ipcMain.handle('analysis:run-market-report', async (_event, { date, timing }) => {
     try {
-        const result = await (await import('./services/RisingStockAnalysisService')).RisingStockAnalysisService.getInstance().generateMarketDailyReport(date)
+        const result = await (await import('./services/RisingStockAnalysisService')).RisingStockAnalysisService.getInstance().generateMarketDailyReport(date, timing)
         return result
     } catch (err: any) {
         return { success: false, error: err.message }
     }
 })
 
-ipcMain.handle('analysis:run-batch-report', async (_event) => {
+ipcMain.handle('analysis:run-batch-report', async (_event, { timing, date }) => {
     try {
         const { SchedulerService } = await import('./services/SchedulerService')
-        const result = await SchedulerService.getInstance().runManualBatchAnalysis('MANUAL')
+        const result = await SchedulerService.getInstance().runManualBatchAnalysis(timing || 'MANUAL', date)
         return result
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:save-ai-schedule-settings', async (_event, settings) => {
+    try {
+        store.set('ai_schedule_settings', settings)
+        // 스케줄러 즉시 반영
+        const { SchedulerService } = await import('./services/SchedulerService')
+        SchedulerService.getInstance().initSchedules()
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('analysis:get-ai-schedule-settings', async () => {
+    try {
+        const settings = store.get('ai_schedule_settings')
+        return { success: true, data: settings }
     } catch (err: any) {
         return { success: false, error: err.message }
     }
@@ -880,3 +1164,5 @@ ipcMain.handle('skills:save', async (_event, { fileName, content, diffSummary }:
         return { success: false, error: err.message }
     }
 })
+
+// End of Handlers

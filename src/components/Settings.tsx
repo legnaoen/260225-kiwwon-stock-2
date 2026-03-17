@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database, Globe, BrainCircuit, Info, Activity } from 'lucide-react'
 import { useScheduleStore } from '../store/useScheduleStore'
 import ApiDiagnosticsTab from './ApiDiagnosticsTab'
+import MaiisMonitorTab from './MaiisMonitorTab'
 
 export default function Settings() {
     const [keys, setKeys] = useState({ appkey: '', secretkey: '' })
@@ -83,7 +84,7 @@ export default function Settings() {
     const [messageAi, setMessageAi] = useState('')
     const [isTestingAi, setIsTestingAi] = useState(false)
 
-    const [activeTab, setActiveTab] = useState<'kiwoom' | 'telegram' | 'schedule' | 'dart' | 'external' | 'ai' | 'diagnostics'>('kiwoom')
+    const [activeTab, setActiveTab] = useState<'monitor' | 'accounts' | 'strategy' | 'system' | 'diagnostics'>('monitor')
 
     const [isTestingYahoo, setIsTestingYahoo] = useState(false)
     const [statusYahoo, setStatusYahoo] = useState<'idle' | 'success' | 'error'>('idle')
@@ -94,6 +95,12 @@ export default function Settings() {
     const [statusNaver, setStatusNaver] = useState<'idle' | 'success' | 'error'>('idle')
     const [messageNaver, setMessageNaver] = useState('')
     const [isTestingNaver, setIsTestingNaver] = useState(false)
+
+    const [youtubeKey, setYoutubeKey] = useState('')
+    const [isSavingYoutube, setIsSavingYoutube] = useState(false)
+    const [statusYoutube, setStatusYoutube] = useState<'idle' | 'success' | 'error'>('idle')
+    const [messageYoutube, setMessageYoutube] = useState('')
+    const [isTestingYoutube, setIsTestingYoutube] = useState(false)
 
     useEffect(() => {
         const loadKeys = async () => {
@@ -152,6 +159,11 @@ export default function Settings() {
             const savedNaverKeys = await (window.electronAPI as any).getNaverApiKeys()
             if (savedNaverKeys) {
                 setNaverKeys(savedNaverKeys)
+            }
+
+            const savedYoutubeKey = await (window.electronAPI as any).getYoutubeApiKey()
+            if (savedYoutubeKey) {
+                setYoutubeKey(savedYoutubeKey)
             }
         }
         loadKeys()
@@ -394,6 +406,93 @@ export default function Settings() {
         }
     }
 
+    const handleSaveNaver = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setIsSavingNaver(true)
+        setStatusNaver('idle')
+        setMessageNaver('네이버 API 키 저장 중...')
+        try {
+            const result = await (window.electronAPI as any).saveNaverApiKeys(naverKeys)
+            if (result.success) {
+                setStatusNaver('success')
+                setMessageNaver('네이버 설정이 저장되었습니다.')
+                setTimeout(() => setStatusNaver('idle'), 3000)
+            }
+        } catch (error: any) {
+            setStatusNaver('error')
+            setMessageNaver('저장 오류')
+        } finally {
+            setIsSavingNaver(false)
+        }
+    }
+
+    const handleTestNaver = async () => {
+        setIsTestingNaver(true)
+        setStatusNaver('idle')
+        setMessageNaver('네이버 API 연결 테스트 중...')
+        try {
+            const result = await (window.electronAPI as any).testNaverApi(naverKeys)
+            if (result.success) {
+                setStatusNaver('success')
+                setMessageNaver(`연결 성공! 최신 뉴스: ${result.title}`)
+            } else {
+                setStatusNaver('error')
+                setMessageNaver(`연결 실패: ${result.error}`)
+            }
+        } catch (error: any) {
+            setStatusNaver('error')
+            setMessageNaver(`테스트 오류: ${error.message}`)
+        } finally {
+            setIsTestingNaver(false)
+        }
+    }
+
+    const handleSaveYoutube = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setIsSavingYoutube(true)
+        setStatusYoutube('idle')
+        setMessageYoutube('유튜브 API 키 저장 중...')
+        try {
+            const result = await (window.electronAPI as any).saveYoutubeApiKey(youtubeKey.trim())
+            if (result.success) {
+                setStatusYoutube('success')
+                setMessageYoutube('유튜브 API 설정이 저장되었습니다.')
+                setTimeout(() => setStatusYoutube('idle'), 3000)
+            }
+        } catch (error: any) {
+            setStatusYoutube('error')
+            setMessageYoutube('저장 오류')
+        } finally {
+            setIsSavingYoutube(false)
+        }
+    }
+
+    const handleTestYoutube = async () => {
+        if (!youtubeKey) {
+            setStatusYoutube('error')
+            setMessageYoutube('API 키를 먼저 입력해주세요.')
+            return
+        }
+        setIsTestingYoutube(true)
+        setStatusYoutube('idle')
+        setMessageYoutube('유튜브 API 연결 테스트 중...')
+        try {
+            const result = await (window.electronAPI as any).testYoutubeApi(youtubeKey.trim())
+            if (result.success) {
+                setStatusYoutube('success')
+                setMessageYoutube(result.message || '연결 성공!')
+            } else {
+                setStatusYoutube('error')
+                setMessageYoutube(`연결 실패: ${result.error}`)
+            }
+        } catch (error: any) {
+            setStatusYoutube('error')
+            setMessageYoutube(`테스트 오류: ${error.message}`)
+        } finally {
+            setIsTestingYoutube(false)
+        }
+    }
+
     const handleSaveSchedule = async (e: React.FormEvent) => {
         e.preventDefault()
         setIsSavingSchedule(true)
@@ -462,55 +561,6 @@ export default function Settings() {
         }
     }
 
-    const handleSaveNaver = async (e: React.FormEvent) => {
-        e.preventDefault()
-        setIsSavingNaver(true)
-        setStatusNaver('idle')
-        setMessageNaver('네이버 API 키 저장 중...')
-        try {
-            const result = await (window.electronAPI as any).saveNaverApiKeys(naverKeys)
-            if (result.success) {
-                setStatusNaver('success')
-                setMessageNaver('네이버 API 설정이 저장되었습니다.')
-                setTimeout(() => setStatusNaver('idle'), 3000)
-            } else {
-                setStatusNaver('error')
-                setMessageNaver('저장 실패')
-            }
-        } catch (error: any) {
-            setStatusNaver('error')
-            setMessageNaver('저장 중 오류 발생')
-        } finally {
-            setIsSavingNaver(false)
-        }
-    }
-
-    const handleTestNaver = async () => {
-        if (!naverKeys.clientId || !naverKeys.clientSecret) {
-            setStatusNaver('error')
-            setMessageNaver('클라이언트 ID와 Secret을 모두 입력해주세요.')
-            return
-        }
-        setIsTestingNaver(true)
-        setStatusNaver('idle')
-        setMessageNaver('네이버 뉴스 API 연결 테스트 중 (삼성전자 키워드)...')
-        try {
-            const result = await (window.electronAPI as any).testNaverApi(naverKeys)
-            if (result.success) {
-                setStatusNaver('success')
-                setMessageNaver(`연결 성공! 검색 결과 1건 확인: ${result.title}`)
-            } else {
-                setStatusNaver('error')
-                setMessageNaver(`연결 실패: ${result.error}`)
-            }
-        } catch (error: any) {
-            setStatusNaver('error')
-            setMessageNaver(`테스트 중 오류: ${error.message}`)
-        } finally {
-            setIsTestingNaver(false)
-        }
-    }
-
     const handleTestPeriodRising = async (label: string, days: number) => {
         setIsTestingPeriodRising(true)
         setStatusTg('idle')
@@ -534,13 +584,10 @@ export default function Settings() {
     }
 
     const menuItems = [
-        { id: 'kiwoom', label: '키움증권 API', icon: ShieldCheck, color: 'text-primary' },
-        { id: 'telegram', label: '텔레그램 연동', icon: Send, color: 'text-blue-500' },
-        { id: 'ai', label: 'AI 인공지능', icon: BrainCircuit, color: 'text-indigo-500' },
-        { id: 'schedule', label: '일정 알림', icon: Bell, color: 'text-amber-500' },
-        { id: 'dart', label: 'DART 공시', icon: Database, color: 'text-green-600' },
-        { id: 'external', label: '외부 API', icon: Globe, color: 'text-purple-500' },
-        { id: 'diagnostics', label: '시스템 진단', icon: Activity, color: 'text-rose-500' },
+        { id: 'monitor', label: '📊 MAIIS 관제 센터', icon: Activity, color: 'text-primary' },
+        { id: 'accounts', label: '🔑 계정 및 인프라', icon: ShieldCheck, color: 'text-blue-500' },
+        { id: 'strategy', label: '⚖️ 자동매매 및 전략', icon: BrainCircuit, color: 'text-indigo-500' },
+        { id: 'diagnostics', label: '🔍 원천 데이터 진단', icon: Info, color: 'text-rose-500' },
     ] as const
 
     return (
@@ -570,14 +617,18 @@ export default function Settings() {
             </aside>
 
             {/* Content Area */}
-            <main className={`flex-1 overflow-y-auto bg-background/50 backdrop-blur-3xl ${activeTab === 'diagnostics' ? 'h-full p-0 relative' : 'p-12'}`}>
+            <main className={`flex-1 overflow-y-auto bg-background/50 backdrop-blur-3xl ${activeTab === 'diagnostics' || activeTab === 'monitor' ? 'h-full p-0 relative' : 'p-12'}`}>
                 {activeTab === 'diagnostics' ? (
                     <ApiDiagnosticsTab />
+                ) : activeTab === 'monitor' ? (
+                    <MaiisMonitorTab />
                 ) : (
                     <div className="max-w-3xl mx-auto space-y-10 animate-in slide-in-from-right-4 fade-in duration-500 delay-75">
 
-                        {activeTab === 'kiwoom' && (
-                            <div className="space-y-8">
+                        {activeTab === 'accounts' && (
+                            <div className="space-y-12">
+                                {/* Kiwoom Section */}
+                                <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">키움증권 API</h2>
                                     <p className="text-muted-foreground">키움증권 REST API 연동 정보를 설정합니다.</p>
@@ -648,10 +699,12 @@ export default function Settings() {
                                     </div>
                                 </div>
                             </div>
-                        )}
+                        </div>
+                    )}
 
-                        {activeTab === 'telegram' && (
-                            <div className="space-y-8">
+                        {activeTab === 'accounts' && (
+                            <div className="pt-12 border-t border-border/40">
+                                <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">텔레그램 연동</h2>
                                     <p className="text-muted-foreground">알림 및 차트 전송을 위한 텔레그램 설정을 구성합니다.</p>
@@ -932,9 +985,10 @@ export default function Settings() {
                                     </div>
                                 </div>
                             </div>
-                        )}
+                        </div>
+                    )}
 
-                        {activeTab === 'schedule' && (
+                        {activeTab === 'strategy' && (
                             <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">일정 알림</h2>
@@ -1032,7 +1086,7 @@ export default function Settings() {
                             </div>
                         )}
 
-                        {activeTab === 'dart' && (
+                        {activeTab === 'accounts' && (
                             <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">DART 공시</h2>
@@ -1202,8 +1256,10 @@ export default function Settings() {
                                     </div>
                                 </div>
                             </div>
-                        )}                    {activeTab === 'ai' && (
-                            <div className="space-y-8">
+                        )}
+                        {activeTab === 'strategy' && (
+                            <div className="pt-12 border-t border-border/40">
+                                <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">AI 인공지능 설정</h2>
                                     <p className="text-muted-foreground">자동매매 전략 복기 및 종목 분석을 위한 AI 모델을 설정합니다.</p>
@@ -1350,10 +1406,12 @@ export default function Settings() {
                                     </form>
                                 </div>
                             </div>
-                        )}
+                        </div>
+                    )}
 
-                        {activeTab === 'external' && (
-                            <div className="space-y-8">
+                        {activeTab === 'accounts' && (
+                            <div className="pt-12 border-t border-border/40">
+                                <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">외부 API 연동</h2>
                                     <p className="text-muted-foreground">매크로 및 차트 분석을 위한 글로벌 데이터 소스를 관리합니다.</p>
@@ -1522,10 +1580,85 @@ export default function Settings() {
                                                 </div>
                                             </div>
                                         </div>
+
+                                        <div className="pt-8 border-t border-border/40">
+                                            <div className="flex items-center gap-4 mb-6">
+                                                <div className="p-3 bg-red-500/10 rounded-xl">
+                                                    <Globe className="text-red-500" size={24} />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold">YouTube Data API (v3)</h3>
+                                                    <p className="text-xs text-muted-foreground">시장 내러티브 분석을 위한 전문가 채널 영상 정보 및 자막 수집</p>
+                                                </div>
+                                            </div>
+
+                                            <form onSubmit={handleSaveYoutube} className="space-y-4">
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-bold ml-1">YouTube API Key</label>
+                                                    <input
+                                                        type="password"
+                                                        value={youtubeKey}
+                                                        onChange={(e) => setYoutubeKey(e.target.value)}
+                                                        placeholder="Google Cloud Console에서 발급받은 API 키를 입력하세요"
+                                                        className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none transition-all font-mono"
+                                                    />
+                                                </div>
+
+                                                <div className="flex items-center justify-between pt-2">
+                                                    <div className="flex items-center gap-2">
+                                                        {isTestingYoutube && (
+                                                            <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
+                                                                <RefreshCw size={14} className="animate-spin" /> {messageYoutube}
+                                                            </span>
+                                                        )}
+                                                        {statusYoutube === 'success' && (
+                                                            <span className="text-xs text-green-500 font-medium flex items-center gap-1 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
+                                                                <ShieldCheck size={14} /> {messageYoutube}
+                                                            </span>
+                                                        )}
+                                                        {statusYoutube === 'error' && (
+                                                            <span className="text-xs text-destructive font-medium flex items-center gap-1 bg-destructive/10 px-3 py-1.5 rounded-full border border-destructive/20 max-w-[400px]">
+                                                                <AlertCircle size={14} className="shrink-0" /> {messageYoutube}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex gap-3">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleTestYoutube}
+                                                            disabled={isTestingYoutube}
+                                                            className="flex items-center gap-2 text-xs text-red-600 hover:text-red-700 font-bold px-4 py-2 rounded-xl border border-red-200 hover:bg-red-50 transition-colors"
+                                                        >
+                                                            {isTestingYoutube ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                            연결 테스트
+                                                        </button>
+                                                        <button
+                                                            type="submit"
+                                                            disabled={isSavingYoutube}
+                                                            className="flex items-center gap-2 bg-red-600 text-white px-6 py-2 rounded-xl text-xs font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-600/10"
+                                                        >
+                                                            {isSavingYoutube ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                                                            유튜브 키 저장
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </form>
+
+                                            <div className="mt-4 bg-muted/20 rounded-xl p-4 flex gap-3 items-start border border-border/40">
+                                                <Info className="text-muted-foreground/60 mt-0.5" size={16} />
+                                                <div className="space-y-1">
+                                                    <p className="text-[10px] font-bold">API 신청 안내</p>
+                                                    <p className="text-[9px] text-muted-foreground leading-relaxed">
+                                                        Google Cloud Console(<a href="https://console.cloud.google.com/" target="_blank" className="text-blue-500 hover:underline">console.cloud.google.com</a>)에서 'YouTube Data API v3'를 활성화하고 사용자 인증 정보에서 API 키를 생성할 수 있습니다.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        )}
+                        </div>
+                    )}
                     </div>
                 )}
             </main>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { TrendingUp, RefreshCw, Calendar, FileText, BarChart2, PieChart, Info, ShieldCheck, AlertCircle, Beaker, CheckCircle2, Newspaper, Rss } from 'lucide-react'
+import { TrendingUp, RefreshCw, Calendar, FileText, BarChart2, PieChart, Info, ShieldCheck, AlertCircle, Beaker, CheckCircle2, Newspaper, Rss, Settings, Clock, Bell, Save, Trash2, X } from 'lucide-react'
 import { cn } from '../utils'
 import { StockChart } from './StockChart'
 import { StockNotes } from './StockNotes'
@@ -32,8 +32,16 @@ interface DailyReport {
 }
 
 export default function RisingStocksReport() {
-    const today = new Date().toISOString().split('T')[0]
+    const getLocalDate = () => {
+        const d = new Date()
+        const offset = d.getTimezoneOffset() * 60000
+        return new Date(d.getTime() - offset).toISOString().split('T')[0]
+    }
+    const today = getLocalDate()
     const [selectedDate, setSelectedDate] = useState<string>(today)
+    const [selectedTiming, setSelectedTiming] = useState<'MORNING' | 'EVENING'>(
+        new Date().getHours() < 14 ? 'MORNING' : 'EVENING'
+    )
     const [selectedStock, setSelectedStock] = useState<{ code: string, name: string } | null>(null)
     const [activeTab, setActiveTab] = useState<'report' | 'news' | 'dart' | 'notes' | 'financials'>('report')
     const [sortOrder, setSortOrder] = useState<'score' | 'rate' | 'value'>('score')
@@ -46,7 +54,35 @@ export default function RisingStocksReport() {
     const [isTesting, setIsTesting] = useState(false)
     const [rawData, setRawData] = useState<{ news: any[], disclosures: any[], collectedAt?: string } | null>(null)
     const [rawDataLoading, setRawDataLoading] = useState(false)
+    const [aiReportRefreshTrigger, setAiReportRefreshTrigger] = React.useState(0)
     const [batchStatus, setBatchStatus] = useState<{ step: string, current: number, total: number, message: string } | null>(null)
+    const [marketStatus, setMarketStatus] = useState<{ isLive: boolean, message: string }>({ isLive: false, message: '확인 중...' })
+    
+    // 장 상태 체크 (운영 원칙 9.3)
+    const checkMarketStatus = () => {
+        const now = new Date()
+        const day = now.getDay()
+        const hour = now.getHours()
+        const minute = now.getMinutes()
+        const timeVal = hour * 100 + minute
+
+        const isWeekend = day === 0 || day === 6
+        const isBeforeMarket = timeVal < 900
+        const isAfterMarket = timeVal >= 1530
+
+        if (isWeekend) return { isLive: false, message: '주말 (장 마감)' }
+        if (isBeforeMarket) return { isLive: false, message: '장 시작 전' }
+        if (isAfterMarket) return { isLive: false, message: '장 마감' }
+        return { isLive: true, message: '실시간 (장중)' }
+    }
+    // 스케줄 설정 상태
+    const [showSettings, setShowSettings] = useState(false)
+    const [scheduleConfig, setScheduleConfig] = useState({
+        enabled: true,
+        morningTime: '10:00',
+        eveningTime: '15:40',
+        telegramNotify: true
+    })
 
     const { chartHeight, setChartHeight } = useLayoutStore()
     const { tags: tagStoreData } = useTagStore()
@@ -101,6 +137,30 @@ export default function RisingStocksReport() {
         return () => unsubscribe()
     }, [])
 
+    // 스케줄 설정 로드
+    React.useEffect(() => {
+        const loadSettings = async () => {
+            if (window.electronAPI?.getAiScheduleSettings) {
+                const res = await window.electronAPI.getAiScheduleSettings()
+                if (res.success && res.data) {
+                    setScheduleConfig(res.data)
+                }
+            }
+        }
+        loadSettings()
+    }, [])
+
+    const saveScheduleSettings = async () => {
+        if (window.electronAPI?.saveAiScheduleSettings) {
+            const res = await window.electronAPI.saveAiScheduleSettings(scheduleConfig)
+            if (res.success) {
+                setShowSettings(false)
+            } else {
+                alert(`설정 저장 실패: ${res.error}`)
+            }
+        }
+    }
+
     // 일괄 분석 진행률 구독
     React.useEffect(() => {
         if (!window.electronAPI?.onBatchProgress) return
@@ -108,11 +168,11 @@ export default function RisingStocksReport() {
             setBatchStatus(data)
             if (data.step === 'COMPLETE') {
                 setTimeout(() => setBatchStatus(null), 5000)
-                loadReportDetails(selectedDate)
+                loadReportDetails(selectedDate, selectedTiming)
             }
         })
         return () => unsubscribe()
-    }, [selectedDate])
+    }, [selectedDate, selectedTiming])
 
     // selectedStock 변경 시 원본 데이터(뉴스/공시) 로드 및 없을 경우 자동 수집
     React.useEffect(() => {
@@ -162,10 +222,17 @@ export default function RisingStocksReport() {
 
     // 실시간 주도주 가져오기 (키움 API - 통합)
     const fetchRealtimeStocks = async (): Promise<RisingStock[]> => {
+        const status = checkMarketStatus()
+        setMarketStatus(status)
+        
         setIsLoading(true)
         try {
+            // 운영 원칙 9.1 & 9.2: 백엔드에서 강제 캐싱된 데이터를 가져옴
             const result = await window.electronAPI.getCombinedTopStocks({ risingLimit: 50, tradingValueLimit: 50 })
             const rawList: any[] = result.data || []
+            
+            // 캐시에서 가져왔는지 여부 (KiwoomService에서 fromCache 플래그를 보냄)
+            const isCached = (result as any).fromCache
 
             const etfKeywords = ['ETF', 'ETN', 'KODEX', 'TIGER', 'ACE', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'KOSEF', 'KINDEX', 'KB스타', '스팩', 'SPAC']
             const mapped: RisingStock[] = rawList
@@ -185,7 +252,7 @@ export default function RisingStocksReport() {
             // DB에서 오늘 분석된 데이터도 함께 가져와서 병합
             let dbAnalysisMap = new Map<string, any>()
             try {
-                const dbRes = await window.electronAPI.getRisingStocksByDate(today)
+                const dbRes = await window.electronAPI.getRisingStocksByDate({ date: today, timing: selectedTiming })
                 if (dbRes.success && dbRes.data) {
                     dbRes.data.forEach((s: any) => {
                         const cleanCode = String(s.stock_code).replace(/[^0-9]/g, '')
@@ -202,7 +269,12 @@ export default function RisingStocksReport() {
                 let parsedTags: string[] = []
                 if (analyzed) {
                     try { parsedTags = analyzed.tags ? JSON.parse(analyzed.tags) : [] } catch (e) { }
-                    parsedTags.forEach(t => useTagStore.getState().addTag(cleanCode, t))
+                    const currentTags = useTagStore.getState().tags[cleanCode] || [];
+                    parsedTags.forEach(t => {
+                        if (!currentTags.includes(t)) {
+                            useTagStore.getState().addTag(cleanCode, t);
+                        }
+                    });
                 }
                 return analyzed ? { 
                     ...m, 
@@ -215,14 +287,34 @@ export default function RisingStocksReport() {
 
             setRealtimeRisingStocks(merged)
             
+            // [핵심 개선] 실제 거래일 기반 날짜 결정
+            let reportDate = today
+            if (window.electronAPI?.getTradingDays) {
+                const trRes = await window.electronAPI.getTradingDays()
+                if (trRes.success && trRes.data && trRes.data.length > 0) {
+                    const tradingDays = trRes.data
+                    if (!tradingDays.includes(today)) {
+                        reportDate = tradingDays[tradingDays.length - 1]
+                    }
+                }
+            }
+            
             setReports(prev => {
-                const existing = prev.find(r => r.date === today)
+                const existing = prev.find(r => r.date === reportDate)
+                const isPreMarket = !status.isLive && status.message === '장 시작 전'
+                
                 const todayReport: DailyReport = {
-                    date: today,
-                    summary: existing?.summary || '당일 실시간 주도주 정보입니다.',
+                    date: reportDate,
+                    // 장 시작 전일 경우 요약 문구 수정 (운영 원칙 9.3)
+                    // 기존 리포트가 있더라도(DB에서 로드된 것 등), 장 시작 전이면 안내 문구를 우선시하거나 유지함
+                    summary: (existing?.summary && existing.summary.startsWith('{')) 
+                        ? existing.summary 
+                        : (isPreMarket 
+                            ? '장 시작 전입니다. 현재 보고 계신 목록은 직전 거래일 기준 급등주입니다.' 
+                            : '당일 실시간 주도주 정보입니다.'),
                     stocks: merged
                 }
-                const others = prev.filter(r => r.date !== today)
+                const others = prev.filter(r => r.date !== reportDate)
                 return [todayReport, ...others]
             })
 
@@ -240,10 +332,10 @@ export default function RisingStocksReport() {
         if (!window.electronAPI?.getReportHistory) return
         try {
             const result = await window.electronAPI.getReportHistory()
-            if (result.success && result.data) {
+            if (result.success && result.data && result.data.length > 0) {
                 const dates = result.data.map((d: any) => d.date)
                 
-                // 각 날짜별로 기본 구조 생성 (상세 데이터는 선택 시 로드)
+                // 각 날짜별로 기본 구조 생성
                 const historyReports: DailyReport[] = dates.map((date: string) => ({
                     date,
                     summary: '데이터 로딩 중...',
@@ -251,10 +343,32 @@ export default function RisingStocksReport() {
                 }))
                 
                 setReports(prev => {
-                    // 오늘 데이터(실시간)는 유지하면서 히스토리 합치기
                     const todayData = prev.find(r => r.date === today)
-                    const filteredHistory = historyReports.filter(r => r.date !== today)
-                    return todayData ? [todayData, ...filteredHistory] : filteredHistory
+                    
+                    // 기존에 로드된 상세 정보가 있는 리포트들을 보존하면서 새로운 목록과 병합
+                    const merged = historyReports.map(history => {
+                        const existing = prev.find(p => p.date === history.date);
+                        // 기존에 이미 내용({로 시작하는 JSON)이 들어있다면 그것을 유지
+                        if (existing && existing.summary && existing.summary.startsWith('{')) {
+                            return existing;
+                        }
+                        return history;
+                    });
+
+                    // 오늘 데이터 처리
+                    const final = todayData && !merged.find(m => m.date === today) 
+                        ? [todayData, ...merged] 
+                        : merged;
+
+                    // [핵심 개선] 앱 시작 시 데이터가 있는 가장 최근 날짜를 자동으로 선택
+                    if (selectedDate === today && (!todayData || todayData.stocks.every(s => !s.aiScore))) {
+                        const lastAnalyzedDate = dates.find(d => d !== today) || today
+                        if (lastAnalyzedDate !== today) {
+                            setSelectedDate(lastAnalyzedDate)
+                        }
+                    }
+
+                    return final.sort((a, b) => b.date.localeCompare(a.date));
                 })
             }
         } catch (err) {
@@ -263,28 +377,61 @@ export default function RisingStocksReport() {
     }
 
     // 특정 날짜의 상세 데이터(리포트 & 종목리스트) 로드
-    const loadReportDetails = async (date: string) => {
+    const loadReportDetails = async (date: string, timing: string = selectedTiming) => {
         if (!window.electronAPI) return
         
         try {
-            const marketRes = await window.electronAPI.getMarketDailyReport(date)
-            const stocksRes = await window.electronAPI.getRisingStocksByDate(date)
+            const marketRes = await window.electronAPI.getMarketDailyReport({ date, timing })
+            const stocksRes = await window.electronAPI.getRisingStocksByDate({ date, timing })
             
-            setReports(prev => {
-                const existing = prev.find(r => r.date === date)
-                
-                // DB에서 가져온 AI 분석 완료 종목
-                const dbStocks: RisingStock[] = stocksRes.success && stocksRes.data
-                    ? stocksRes.data.map((s: any) => {
-                        const cleanCode = String(s.stock_code).replace(/[^0-9]/g, '')
-                        let parsedTags: string[] = []
-                        try { parsedTags = s.tags ? JSON.parse(s.tags) : [] } catch (e) { }
-                        
-                        // 자동 태그 저장
-                        if (parsedTags.length > 0) {
-                            parsedTags.forEach(t => useTagStore.getState().addTag(cleanCode, t))
-                        }
+            // 1. 데이터 파싱 및 가공 (setReports 외부에서 수행)
+            const dbStocks: RisingStock[] = stocksRes.success && stocksRes.data
+                ? stocksRes.data.map((s: any) => {
+                    const cleanCode = String(s.stock_code).replace(/[^0-9]/g, '')
+                    let parsedTags: string[] = []
+                    try { parsedTags = s.tags ? JSON.parse(s.tags) : [] } catch (e) { }
 
+                    // 자동 태그 저장
+                    if (parsedTags.length > 0) {
+                        const currentTags = useTagStore.getState().tags[cleanCode] || [];
+                        parsedTags.forEach(t => {
+                            if (!currentTags.includes(t)) {
+                                useTagStore.getState().addTag(cleanCode, t);
+                            }
+                        });
+                    }
+
+                    return {
+                        code: cleanCode,
+                        name: s.stock_name,
+                        changeRate: s.change_rate,
+                        tradingValue: s.trading_value,
+                        source: s.source,
+                        aiScore: s.ai_score,
+                        reason: s.reason,
+                        sector: s.theme_sector,
+                        tags: parsedTags
+                    }
+                })
+                : []
+
+            // 병합 로직을 위해 현재 상태를 잠시 참조 (함수형 업데이트 내부에서 수행하기 위함)
+            
+            // 2. 타이밍 보정 로직 (데이터가 없을 경우 다른 타이밍 확인)
+            if (dbStocks.length === 0 && marketRes.success && !marketRes.data) {
+                const otherTiming = timing === 'MORNING' ? 'EVENING' : 'MORNING';
+                console.log(`[RisingStocksReport] No data for ${timing}, checking ${otherTiming}...`);
+                
+                const otherMarketRes = await window.electronAPI.getMarketDailyReport({ date, timing: otherTiming });
+                const otherStocksRes = await window.electronAPI.getRisingStocksByDate({ date, timing: otherTiming });
+                
+                if (otherMarketRes.success && otherMarketRes.data) {
+                    console.log(`[RisingStocksReport] Found data in ${otherTiming}.`);
+                    
+                    const otherDbStocks = otherStocksRes.success && otherStocksRes.data ? otherStocksRes.data.map((s: any) => {
+                        const cleanCode = String(s.stock_code).replace(/[^0-9]/g, '');
+                        let tags: string[] = [];
+                        try { tags = s.tags ? JSON.parse(s.tags) : []; } catch(e) {}
                         return {
                             code: cleanCode,
                             name: s.stock_name,
@@ -294,14 +441,32 @@ export default function RisingStocksReport() {
                             aiScore: s.ai_score,
                             reason: s.reason,
                             sector: s.theme_sector,
-                            tags: parsedTags
+                            tags
                         }
-                    })
-                    : []
+                    }) : [];
 
+                    const finalReport: DailyReport = {
+                        date,
+                        summary: otherMarketRes.data.market_summary,
+                        stocks: otherDbStocks
+                    };
+
+                    setReports(prev => {
+                        const others = prev.filter(r => r.date !== date);
+                        return [finalReport, ...others].sort((a, b) => b.date.localeCompare(a.date));
+                    });
+                    
+                    setSelectedTiming(otherTiming);
+                    return;
+                }
+            }
+
+            // 3. 최종 상태 업데이트
+            setReports(prev => {
+                const existing = prev.find(r => r.date === date)
+                
                 let mergedStocks: RisingStock[]
                 if (date === today && existing && existing.stocks.length > 0) {
-                    // 오늘 날짜 + 실시간 데이터가 이미 있는 경우: 실시간 목록에 DB AI 데이터를 병합
                     mergedStocks = existing.stocks.map(realtime => {
                         const analyzed = dbStocks.find(d => d.code === realtime.code)
                         return analyzed ? { 
@@ -312,18 +477,21 @@ export default function RisingStocksReport() {
                             tags: analyzed.tags
                         } : realtime
                     })
-                    // DB에만 있고 실시간에 없는 종목도 누락없이 병합
                     const realtimeCodes = new Set(existing.stocks.map(s => s.code))
                     const extraFromDb = dbStocks.filter(d => !realtimeCodes.has(d.code))
                     mergedStocks = [...mergedStocks, ...extraFromDb]
                 } else {
-                    // 과거 날짜이거나 실시간 데이터가 없는 경우: DB 데이터 그대로 사용
                     mergedStocks = dbStocks
                 }
 
+                const status = checkMarketStatus()
+                const isPreMarket = date === today && !status.isLive && status.message === '장 시작 전'
+
                 const summary = marketRes.success && marketRes.data
                     ? marketRes.data.market_summary
-                    : (date === today ? '당일 실시간 급등주 정보입니다.' : '저장된 시장 총평이 없습니다.')
+                    : (isPreMarket 
+                        ? '장 시작 전입니다. 현재 보고 계신 목록은 직전 거래일 기준 급등주입니다.' 
+                        : (date === today ? '당일 실시간 급등주 정보입니다.' : '저장된 시장 총평이 없습니다.'))
 
                 const newReport: DailyReport = {
                     date,
@@ -331,12 +499,13 @@ export default function RisingStocksReport() {
                     stocks: mergedStocks
                 }
 
-                if (existing) {
-                    return prev.map(r => r.date === date ? newReport : r)
-                } else {
-                    // 기존에 없던 날짜면 추가 (날짜순 정렬 유지하면 좋음)
-                    return [...prev, newReport].sort((a, b) => b.date.localeCompare(a.date))
+                // 기존 상세 리포트 보존 로직 추가
+                if (existing && existing.summary && existing.summary.startsWith('{') && (!newReport.summary || !newReport.summary.startsWith('{'))) {
+                    return prev
                 }
+
+                const others = prev.filter(r => r.date !== date)
+                return [newReport, ...others].sort((a, b) => b.date.localeCompare(a.date))
             })
         } catch (err) {
             console.error(`Failed to load details for ${date}:`, err)
@@ -344,15 +513,36 @@ export default function RisingStocksReport() {
     }
 
     React.useEffect(() => {
-        fetchRealtimeStocks()
-        fetchSavedReports()
+        const init = async () => {
+            // 초기 리얼타임 데이터 로드
+            await fetchRealtimeStocks()
+            
+            // 저장된 리포트 날짜 목록 로드
+            await fetchSavedReports()
+            
+            // [추가] 실제 거래일 목록을 가져와서 오늘이 장 운영일이 아닐 경우 보정
+            if (window.electronAPI?.getTradingDays) {
+                const res = await window.electronAPI.getTradingDays()
+                if (res.success && res.data && res.data.length > 0) {
+                    const tradingDays = res.data
+                    const latestTradingDay = tradingDays[tradingDays.length - 1]
+                    
+                    // 오늘 날짜가 거래일 목록에 없고, 현재 선택된 날짜가 오늘이라면 최근 거래일로 자동 변경
+                    if (!tradingDays.includes(today) && selectedDate === today) {
+                        console.log(`[RisingStocksReport] 오늘(${today})은 비영업일입니다. 최근 거래일(${latestTradingDay})로 전환합니다.`);
+                        setSelectedDate(latestTradingDay)
+                    }
+                }
+            }
+        }
+        init()
     }, [])
 
     React.useEffect(() => {
         if (selectedDate) {
-            loadReportDetails(selectedDate)
+            loadReportDetails(selectedDate, selectedTiming)
         }
-    }, [selectedDate])
+    }, [selectedDate, selectedTiming])
 
     // 개별 종목 AI 분석 실행
     const handleRunAnalysis = async (stock: RisingStock) => {
@@ -365,12 +555,15 @@ export default function RisingStocksReport() {
                 name: stock.name,
                 changeRate: stock.changeRate,
                 tradingValue: stock.tradingValue,
-                source: stock.source
+                source: stock.source,
+                timing: selectedTiming,
+                date: selectedDate
             })
 
             if (result.success) {
                 // 분석 성공 시 해당 날짜 데이터 다시 로드
-                loadReportDetails(selectedDate)
+                loadReportDetails(selectedDate, selectedTiming)
+                setAiReportRefreshTrigger(prev => prev + 1)
             } else {
                 alert(`분석 실패: ${result.error}`)
             }
@@ -385,9 +578,9 @@ export default function RisingStocksReport() {
         if (evaluatingStock) return
 
         try {
-            const result = await window.electronAPI.runMarketReport(selectedDate)
+            const result = await window.electronAPI.runMarketReport({ date: selectedDate, timing: selectedTiming })
             if (result.success) {
-                loadReportDetails(selectedDate)
+                loadReportDetails(selectedDate, selectedTiming)
             } else {
                 alert(`시장 총평 생성 실패: ${result.error}`)
             }
@@ -402,7 +595,10 @@ export default function RisingStocksReport() {
         if (batchStatus || evaluatingStock) return
 
         try {
-            const result = await window.electronAPI.runBatchReport()
+            const result = await window.electronAPI.runBatchReport({ 
+                timing: selectedTiming,
+                date: selectedDate
+            })
             if (!result.success) {
                 alert(`일괄 분석 중 오류: ${result.error}`)
             }
@@ -496,7 +692,7 @@ export default function RisingStocksReport() {
                 name: target.name,
                 changeRate: target.changeRate
             })
-            
+
             if (!analysisResult.success) throw new Error(analysisResult.error)
             await loadReportDetails(today)
             await new Promise(resolve => setTimeout(resolve, 1000))
@@ -504,10 +700,10 @@ export default function RisingStocksReport() {
             // STEP 4: 시장 총평 생성 테스트
             setTestStatus("단계 4/4: 당일 시장 전체 요약 리포트 생성 중...")
             const marketResult = await window.electronAPI.runMarketReport(today)
-            
+
             if (!marketResult.success) throw new Error(marketResult.error)
             await loadReportDetails(today)
-            
+
             setTestStatus("✅ 모든 시스템 테스트가 성공적으로 완료되었습니다!")
         } catch (err: any) {
             console.error('Test system error:', err)
@@ -523,35 +719,125 @@ export default function RisingStocksReport() {
     return (
         <div className="flex h-full overflow-hidden">
             {/* 왼쪽 패널: 리포트 리스트 */}
-            <div className="w-[320px] shrink-0 border-r border-border bg-card flex flex-col overflow-hidden">
-                <div className="p-4 border-b border-border flex items-center justify-between bg-muted/20">
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                            <TrendingUp size={18} className="text-primary" />
-                            <h2 className="text-sm font-bold">급등주 리포트</h2>
-                        </div>
+            <div className="w-[320px] shrink-0 border-r border-border bg-card flex flex-col min-h-0">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background">
+                <div className="flex items-center gap-2">
+                    {/* 타이틀 제거됨 */}
+                </div>
+                <div className="flex items-center gap-1">
+                    {/* 설정 버튼 */}
+                    <div className="relative">
                         <button 
-                            onClick={runSystemTest}
-                            disabled={isTesting || isLoading || !!evaluatingStock}
+                            onClick={() => setShowSettings(!showSettings)}
                             className={cn(
-                                "flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold transition-all border",
-                                isTesting 
-                                    ? "bg-primary/10 border-primary/30 text-primary animate-pulse" 
-                                    : "bg-muted/50 border-border text-muted-foreground hover:bg-primary/10 hover:border-primary/30 hover:text-primary"
+                                "p-1.5 rounded-lg transition-colors group",
+                                showSettings ? "bg-primary/10 text-primary" : "hover:bg-muted text-muted-foreground"
                             )}
+                            title="AI 분석 스케줄 설정"
                         >
-                            <Beaker size={12} />
-                            테스트
+                            <Settings size={14} className={cn(showSettings && "animate-spin-slow")} />
                         </button>
+
+                        {/* 설정 팝오버 */}
+                        {showSettings && (
+                            <div className="absolute right-[-20px] top-10 z-[100] w-72 bg-background border border-border rounded-2xl shadow-2xl p-5 animate-in fade-in zoom-in-95 duration-200">
+                                <div className="flex items-center justify-between mb-5">
+                                    <h3 className="text-[13px] font-black flex items-center gap-2">
+                                        <Clock size={14} className="text-primary" />
+                                        AI 분석 스케줄링
+                                    </h3>
+                                    <button onClick={() => setShowSettings(false)} className="text-muted-foreground hover:text-foreground">
+                                        <X size={14} />
+                                    </button>
+                                </div>
+
+                                <div className="space-y-5">
+                                    {/* 활성화 토글 */}
+                                    <div className="flex items-center justify-between p-3 bg-muted/30 rounded-xl border border-border/50">
+                                        <div className="space-y-0.5">
+                                            <p className="text-[11px] font-bold">자동 분석 활성</p>
+                                            <p className="text-[9px] text-muted-foreground">정해진 시간에 자동 실행</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => setScheduleConfig(prev => ({ ...prev, enabled: !prev.enabled }))}
+                                            className={cn(
+                                                "w-10 h-5 rounded-full transition-colors relative",
+                                                scheduleConfig.enabled ? "bg-primary" : "bg-muted-foreground/30"
+                                            )}
+                                        >
+                                            <div className={cn(
+                                                "absolute top-1 w-3 h-3 bg-white rounded-full transition-all",
+                                                scheduleConfig.enabled ? "left-6" : "left-1"
+                                            )} />
+                                        </button>
+                                    </div>
+
+                                    <div className={cn("space-y-4 transition-opacity", !scheduleConfig.enabled && "opacity-40 pointer-events-none")}>
+                                        {/* 시간 설정 */}
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-black text-muted-foreground uppercase flex items-center gap-1">
+                                                    <TrendingUp size={10} className="text-orange-500" />
+                                                    오전 분석
+                                                </label>
+                                                <input 
+                                                    type="time" 
+                                                    value={scheduleConfig.morningTime}
+                                                    onChange={(e) => setScheduleConfig(prev => ({ ...prev, morningTime: e.target.value }))}
+                                                    className="w-full bg-muted/50 border border-border rounded-lg px-2 py-1.5 text-xs font-mono outline-none focus:border-primary"
+                                                />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-black text-muted-foreground uppercase flex items-center gap-1">
+                                                    <BarChart2 size={10} className="text-blue-500" />
+                                                    장마감 분석
+                                                </label>
+                                                <input 
+                                                    type="time" 
+                                                    value={scheduleConfig.eveningTime}
+                                                    onChange={(e) => setScheduleConfig(prev => ({ ...prev, eveningTime: e.target.value }))}
+                                                    className="w-full bg-muted/50 border border-border rounded-lg px-2 py-1.5 text-xs font-mono outline-none focus:border-primary"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* 텔레그램 알림 */}
+                                        <div className="flex items-center justify-between px-3 py-2 bg-muted/20 rounded-lg">
+                                            <div className="flex items-center gap-2">
+                                                <Bell size={12} className="text-primary/70" />
+                                                <span className="text-[10px] font-bold">텔레그램 결과 발송</span>
+                                            </div>
+                                            <input 
+                                                type="checkbox" 
+                                                checked={scheduleConfig.telegramNotify}
+                                                onChange={(e) => setScheduleConfig(prev => ({ ...prev, telegramNotify: e.target.checked }))}
+                                                className="w-3 h-3 rounded border-border"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <button 
+                                        onClick={saveScheduleSettings}
+                                        className="w-full py-2.5 bg-primary text-white rounded-xl text-[11px] font-black flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all"
+                                    >
+                                        <Save size={14} />
+                                        설정 저장 및 적용
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
+
                     <button 
                         onClick={() => fetchRealtimeStocks()}
                         disabled={isLoading || isTesting}
                         className="p-1.5 hover:bg-muted rounded-lg transition-colors group"
+                        title="새로고침"
                     >
                         <RefreshCw size={14} className={cn("text-muted-foreground group-active:rotate-180 transition-transform", isLoading && "animate-spin")} />
                     </button>
                 </div>
+            </div>
 
                 <div className="px-4 py-2 border-b border-border bg-muted/5 flex flex-col gap-2">
                     <div className="flex items-center justify-between">
@@ -786,7 +1072,13 @@ export default function RisingStocksReport() {
                             </div>
 
                             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-background">
-                                {activeTab === 'report' && <StockAiReport symbol={selectedStock.code} name={selectedStock.name} />}
+                                {activeTab === 'report' && (
+                                    <StockAiReport 
+                                        symbol={selectedStock.code} 
+                                        name={selectedStock.name} 
+                                        refreshTrigger={aiReportRefreshTrigger}
+                                    />
+                                )}
                                 {activeTab === 'notes' && <StockNotes stockCode={selectedStock.code} stockName={selectedStock.name} />}
                                 {activeTab === 'financials' && <StockFinancials stockCode={selectedStock.code} stockName={selectedStock.name} />}
 
@@ -915,7 +1207,36 @@ export default function RisingStocksReport() {
                         <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-400">
                              {/* 슬림 헤더 & 빠른 내비게이션 */}
                              <div className="sticky top-[-16px] z-30 bg-background/95 backdrop-blur-sm border-b border-border/40 py-2 -mx-4 px-4 flex items-center justify-between mb-6 shadow-sm">
-                                 <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                                 <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
+                                     <div className="flex bg-muted/30 p-0.5 rounded-lg border border-border/50 shrink-0">
+                                         <button 
+                                             onClick={() => setSelectedTiming('MORNING')}
+                                             className={cn(
+                                                 "px-3 py-1 rounded-md text-[10px] font-black transition-all flex items-center gap-1.5",
+                                                 selectedTiming === 'MORNING' 
+                                                     ? "bg-background text-primary shadow-sm ring-1 ring-border" 
+                                                     : "text-muted-foreground hover:text-foreground"
+                                             )}
+                                         >
+                                             <Clock size={10} />
+                                             오전
+                                         </button>
+                                         <button 
+                                             onClick={() => setSelectedTiming('EVENING')}
+                                             className={cn(
+                                                 "px-3 py-1 rounded-md text-[10px] font-black transition-all flex items-center gap-1.5",
+                                                 selectedTiming === 'EVENING' 
+                                                     ? "bg-background text-primary shadow-sm ring-1 ring-border" 
+                                                     : "text-muted-foreground hover:text-foreground"
+                                             )}
+                                         >
+                                             <Clock size={10} />
+                                             오후
+                                         </button>
+                                     </div>
+
+                                     <div className="w-[1px] h-3 bg-border mx-1" />
+
                                      {[
                                          { label: '마켓 서머리', ref: summaryRef, icon: FileText },
                                          { label: '시황 전망', ref: outlookRef, icon: TrendingUp },
@@ -980,18 +1301,51 @@ export default function RisingStocksReport() {
                                     <div className="space-y-12 pb-20">
                                         {/* 섹션 1: 마켓 서머리 - 고밀도 넘버링 리스트 */}
                                         <section ref={summaryRef} className="scroll-mt-20">
-                                            <div className="flex items-center gap-2 mb-4">
-                                                <div className="w-1.5 h-4 bg-indigo-500 rounded-full" />
-                                                <h3 className="text-base font-black">Today's Market 3-Line Summary</h3>
-                                            </div>
-                                            <div className="bg-indigo-500/[0.03] border-l-2 border-indigo-500/30 py-4 px-6 space-y-3">
-                                                {parsed.summary_lines.length > 0 ? parsed.summary_lines.map((line: string, i: number) => (
-                                                    <div key={i} className="flex gap-3 text-[14px] leading-relaxed">
-                                                        <span className="text-indigo-500 font-black font-mono">0{i+1}</span>
-                                                        <p className="text-foreground/95 font-semibold tracking-tight">{line}</p>
+                                            <div className="flex items-center justify-between mb-4">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-1.5 h-4 bg-indigo-500 rounded-full" />
+                                                    <h3 className="text-base font-black">Today's Market 3-Line Summary</h3>
+                                                </div>
+                                                {marketStatus.message && (
+                                                    <div className={cn(
+                                                        "px-2 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1",
+                                                        marketStatus.isLive ? "bg-emerald-500/10 text-emerald-600 animate-pulse" : "bg-muted text-muted-foreground"
+                                                    )}>
+                                                        <div className={cn("w-1 h-1 rounded-full", marketStatus.isLive ? "bg-emerald-500" : "bg-muted-foreground")} />
+                                                        {marketStatus.message}
                                                     </div>
-                                                )) : <p className="text-muted-foreground text-xs italic">리포트가 작성되지 않았습니다.</p>}
+                                                )}
                                             </div>
+                                            
+                                            {!currentReport.summary || !currentReport.summary.startsWith('{') ? (
+                                                <div className="bg-indigo-500/[0.03] border border-indigo-500/10 rounded-2xl p-8 text-center space-y-4">
+                                                    <div className="bg-indigo-500/10 w-12 h-12 rounded-2xl flex items-center justify-center mx-auto">
+                                                        <Beaker size={24} className="text-indigo-600" />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                         <h4 className="text-sm font-black">시장 분석 리포트가 없습니다</h4>
+                                                         <p className="text-xs text-muted-foreground leading-relaxed">
+                                                             {currentReport.summary || '당일 시장 상황을 종합적으로 분석하려면 아래 버튼을 누르세요.'}
+                                                         </p>
+                                                     </div>
+                                                     <button 
+                                                         onClick={handleRunBatchAnalysis}
+                                                         className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 transition-all flex items-center gap-2 mx-auto"
+                                                     >
+                                                         <RefreshCw size={14} className={cn(batchStatus && "animate-spin")} />
+                                                         AI 일괄 분석 및 리포트 생성 시작
+                                                     </button>
+                                                </div>
+                                            ) : (
+                                                <div className="bg-indigo-500/[0.03] border-l-2 border-indigo-500/30 py-4 px-6 space-y-3">
+                                                    {parsed.summary_lines.length > 0 ? parsed.summary_lines.map((line: string, i: number) => (
+                                                        <div key={i} className="flex gap-3 text-[14px] leading-relaxed">
+                                                            <span className="text-indigo-500 font-black font-mono">0{i+1}</span>
+                                                            <p className="text-foreground/95 font-semibold tracking-tight">{line}</p>
+                                                        </div>
+                                                    )) : <p className="text-muted-foreground text-xs italic">리포트가 작성되지 않았습니다.</p>}
+                                                </div>
+                                            )}
                                         </section>
 
                                         {/* 섹션 2: 시황 전망 */}
@@ -1015,7 +1369,28 @@ export default function RisingStocksReport() {
                                              </div>
                                         </section>
 
-                                        {/* 섹션 3: 주도 테마 - 고밀도 랭킹 리스트 */}
+                                         {/* 섹션 3: AI 자아 성찰 (피드백 루프) */}
+                                         {parsed.self_reflection && parsed.self_reflection.length > 5 && (
+                                             <section className="scroll-mt-20">
+                                                 <div className="flex items-center gap-2 mb-4">
+                                                     <div className="w-1.5 h-4 bg-purple-500 rounded-full" />
+                                                     <h3 className="text-base font-black">AI Self-Reflection & Lessons</h3>
+                                                 </div>
+                                                 <div className="bg-purple-500/[0.03] border-l-2 border-purple-500/30 py-4 px-6">
+                                                     <div className="flex gap-4">
+                                                         <div className="bg-purple-500/10 p-2 rounded-xl h-fit">
+                                                             <Beaker size={20} className="text-purple-600" />
+                                                         </div>
+                                                         <div className="text-[13px] text-foreground/90 leading-relaxed font-semibold">
+                                                             <p className="mb-2 text-purple-600 font-black">지난 분석에 대한 피드백 및 오늘의 교훈:</p>
+                                                             <p className="whitespace-pre-wrap italic opacity-80">{parsed.self_reflection}</p>
+                                                         </div>
+                                                     </div>
+                                                 </div>
+                                             </section>
+                                         )}
+
+                                         {/* 섹션 4: 주도 테마 - 고밀도 랭킹 리스트 */}
                                         <section ref={themesRef} className="scroll-mt-20">
                                             <div className="flex items-center gap-2 mb-5">
                                                 <div className="w-1.5 h-4 bg-emerald-500 rounded-full" />
@@ -1083,7 +1458,7 @@ export default function RisingStocksReport() {
                                             </div>
                                         </section>
 
-                                        {/* 섹션 4: 주요 종목별 특징 */}
+                                        {/* 섹션 5: 주요 종목별 특징 */}
                                         <section ref={stocksRef} className="scroll-mt-20">
                                             <div className="flex items-center gap-2 mb-6">
                                                 <div className="w-1.5 h-4 bg-primary/60 rounded-full" />

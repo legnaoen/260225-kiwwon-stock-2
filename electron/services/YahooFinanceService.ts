@@ -1,9 +1,13 @@
 import axios from 'axios'
 import { DatabaseService } from './DatabaseService'
+import { IngestionManager } from './IngestionManager'
 
 export class YahooFinanceService {
     private static instance: YahooFinanceService
     private db = DatabaseService.getInstance()
+    private get ingestionManager() {
+        return IngestionManager.getInstance()
+    }
 
     // Cache TTL (Time to Live) in milliseconds: e.g., 24 hours
     private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000
@@ -49,6 +53,7 @@ export class YahooFinanceService {
             }
         }
 
+        const startTime = Date.now();
         // 2. Fetch via Direct API Call (Yahoo v8 Chart)
         try {
             console.log(`[YahooFinanceService] Fetching historical data from Yahoo API for ${symbol}...`)
@@ -62,6 +67,8 @@ export class YahooFinanceService {
                 headers: { 'User-Agent': this.USER_AGENT },
                 timeout: 5000
             })
+
+            const dataSizeKb = JSON.stringify(response.data).length / 1024;
 
             if (response.data && response.data.chart && response.data.chart.result) {
                 const result = response.data.chart.result[0]
@@ -81,12 +88,18 @@ export class YahooFinanceService {
 
                 // 3. Save to Cache
                 this.db.saveYahooFinanceCache(symbol, JSON.stringify(mappedData))
+                
+                // Record Ingestion (using individual symbol for granularity or generic key)
+                this.ingestionManager.recordIngestion('yahoo_historical_stock', 'Yahoo Finance', startTime, 200, dataSizeKb);
+
                 return mappedData
             }
 
+            this.ingestionManager.recordIngestion('yahoo_historical_stock', 'Yahoo Finance', startTime, 404, 0, 'No data in result');
             return null
         } catch (error: any) {
             console.error(`[YahooFinanceService] API Fetch Failed (${symbol}):`, error.message)
+            this.ingestionManager.recordIngestion('yahoo_historical_stock', 'Yahoo Finance', startTime, error.response?.status || 500, 0, error.message);
             return null
         }
     }
@@ -108,6 +121,7 @@ export class YahooFinanceService {
             }
         }
 
+        const startTime = Date.now();
         try {
             console.log(`[YahooFinanceService] Fetching macro data from Yahoo API for ${symbol}...`)
             const now = Math.floor(Date.now() / 1000)
@@ -119,6 +133,8 @@ export class YahooFinanceService {
                 headers: { 'User-Agent': this.USER_AGENT },
                 timeout: 5000
             })
+
+            const dataSizeKb = JSON.stringify(response.data).length / 1024;
 
             if (response.data && response.data.chart && response.data.chart.result) {
                 const result = response.data.chart.result[0]
@@ -132,11 +148,16 @@ export class YahooFinanceService {
                 }
 
                 this.db.saveYahooMacroCache(symbol, JSON.stringify(mappedData))
+                
+                this.ingestionManager.recordIngestion('yahoo_global_macro', 'Yahoo Finance', startTime, 200, dataSizeKb);
+                
                 return mappedData
             }
+            this.ingestionManager.recordIngestion('yahoo_global_macro', 'Yahoo Finance', startTime, 404, 0, 'No data in result');
             return null
         } catch (error: any) {
             console.error(`[YahooFinanceService] Macro API Fetch Failed (${symbol}):`, error.message)
+            this.ingestionManager.recordIngestion('yahoo_global_macro', 'Yahoo Finance', startTime, error.response?.status || 500, 0, error.message);
             return null
         }
     }

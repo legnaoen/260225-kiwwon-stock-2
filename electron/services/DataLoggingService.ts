@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { DatabaseService } from './DatabaseService'
 
 export class DataLoggingService {
     private static instance: DataLoggingService;
@@ -197,7 +198,7 @@ export class DataLoggingService {
     public getTodayDecisions() {
         if (!this.db) return [];
         try {
-            const today = new Date().toISOString().split('T')[0];
+            const today = DatabaseService.getInstance().getKstDate();
             const stmt = this.db.prepare(`
                 SELECT * FROM ai_decisions 
                 WHERE timestamp >= ? 

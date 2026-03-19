@@ -9,8 +9,9 @@ export class YahooFinanceService {
         return IngestionManager.getInstance()
     }
 
-    // Cache TTL (Time to Live) in milliseconds: e.g., 24 hours
-    private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000
+    // Cache TTL (Time to Live) in milliseconds
+    // 매크로 지표는 장중 급변할 수 있으므로 캐시 주기를 기존 24시간에서 1시간으로 대폭 축소합니다.
+    private readonly CACHE_TTL_MS = 1 * 60 * 60 * 1000;
 
     // Typical Browser-like User-Agent to avoid blocking
     private readonly USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'

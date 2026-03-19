@@ -338,6 +338,32 @@ export class DatabaseService {
             );
         `
 
+        const createMaiisDomainInsightsTable = `
+            CREATE TABLE IF NOT EXISTS maiis_domain_insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                domain_type TEXT NOT NULL,
+                raw_input_text TEXT,
+                used_prompt TEXT,
+                generated_json TEXT,
+                created_at TEXT NOT NULL
+            );
+        `
+
+        const createMaiisWorldStateTable = `
+            CREATE TABLE IF NOT EXISTS maiis_world_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                sentiment_score REAL,
+                market_frame TEXT,
+                top_keywords_json TEXT,
+                expected_sectors_json TEXT,
+                macro_indicators_json TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(date)
+            );
+        `
+
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
         this.db.exec(createFinancialDataTable)
@@ -362,6 +388,13 @@ export class DatabaseService {
         this.db.exec(createYoutubeDailyConsensusTable)
         this.db.exec(createYoutubeNarrativeTrendsTable)
         this.db.exec(createMarketNewsConsensusTable)
+        this.db.exec(createMaiisDomainInsightsTable)
+        this.db.exec(createMaiisWorldStateTable)
+
+        // Ensure macro_indicators_json exists in world state
+        try {
+            this.db.exec("ALTER TABLE maiis_world_state ADD COLUMN macro_indicators_json TEXT")
+        } catch (e) { }
         
         // Ensure source_news column exists for migration
         try {
@@ -1124,5 +1157,30 @@ export class DatabaseService {
 
     public getLatestYoutubeDailyConsensus(limit: number = 20) {
         return this.db.prepare('SELECT * FROM youtube_daily_consensus ORDER BY date DESC LIMIT ?').all(limit);
+    }
+
+    // === MAIIS Pipeline Core Methods ===
+    public saveMaiisDomainInsight(data: { date: string, domain_type: string, raw_input_text: string, used_prompt: string, generated_json: string }) {
+        const sql = `
+            INSERT INTO maiis_domain_insights (date, domain_type, raw_input_text, used_prompt, generated_json, created_at)
+            VALUES (?, ?, ?, ?, ?, DATETIME('now', 'localtime'))
+        `;
+        this.db.prepare(sql).run(data.date, data.domain_type, data.raw_input_text, data.used_prompt, data.generated_json);
+    }
+
+    public getMaiisDomainInsights(date: string) {
+        return this.db.prepare('SELECT * FROM maiis_domain_insights WHERE date = ? ORDER BY created_at DESC').all(date);
+    }
+
+    public saveMaiisWorldState(data: { date: string, sentiment_score: number, market_frame: string, top_keywords_json: string, expected_sectors_json: string, macro_indicators_json?: string }) {
+        const sql = `
+            INSERT OR REPLACE INTO maiis_world_state (date, sentiment_score, market_frame, top_keywords_json, expected_sectors_json, macro_indicators_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, DATETIME('now', 'localtime'))
+        `;
+        this.db.prepare(sql).run(data.date, data.sentiment_score, data.market_frame, data.top_keywords_json, data.expected_sectors_json, data.macro_indicators_json || '[]');
+    }
+
+    public getMaiisWorldState(date: string) {
+        return this.db.prepare('SELECT * FROM maiis_world_state WHERE date = ?').get(date);
     }
 }

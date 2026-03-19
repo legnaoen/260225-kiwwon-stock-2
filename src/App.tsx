@@ -11,10 +11,12 @@ import Settings from './components/Settings'
 import AutoTrade from './components/AutoTrade'
 import CapturePage from './components/CapturePage'
 import Schedule from './components/Schedule'
+import MaiisCommandCenter from './components/MaiisCommandCenter'
 import AiTradeDashboard from './components/AiTrade/AiTradeDashboard'
 import RisingStocksReport from './components/RisingStocksReport'
 import NarrativeInsightTab from './components/NarrativeInsightTab'
 import KnowledgeBase from './components/KnowledgeBase'
+import MacroDashboard from './components/MacroDashboard'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
 import { useNoteStore } from './store/useNoteStore'
@@ -342,8 +344,10 @@ function AppContent() {
                         { activeTab === 'settings' && <Settings />}
                         { activeTab === 'ai-trade' && <AiTradeDashboard />}
                         { activeTab === 'narrative-insight' && <NarrativeInsightTab />}
+                        { activeTab === 'maiis-command' && <MaiisCommandCenter />}
+                        { activeTab === 'macro-dashboard' && <MacroDashboard />}
 
-                        {(activeTab !== 'dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'rising-stocks' && activeTab !== 'knowledge-base' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade' && activeTab !== 'narrative-insight') && (
+                        {(activeTab !== 'dashboard' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'rising-stocks' && activeTab !== 'knowledge-base' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade' && activeTab !== 'narrative-insight') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

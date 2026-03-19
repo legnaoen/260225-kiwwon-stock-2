@@ -117,6 +117,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testScheduleSummary: () => ipcRenderer.invoke('schedule:test-summary'),
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
     testYahooFinance: () => ipcRenderer.invoke('yahoo:test-connection'),
+    getYahooMacros: (symbols: string[]) => ipcRenderer.invoke('yahoo:get-macros', symbols),
 
     // AI Trade
     onAiTradeStream: (callback: (data: any) => void) => {
@@ -194,6 +195,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runMarketReport: (options: { date: string, timing?: string }) => ipcRenderer.invoke('analysis:run-market-report', options),
     getReportHistory: () => ipcRenderer.invoke('analysis:get-report-history'),
     runBatchReport: (timing?: string) => ipcRenderer.invoke('analysis:run-batch-report', timing),
+    // MAIIS Agent Tester & World State
+    analyzeDomain: (options: { domain: 'YOUTUBE' | 'NEWS', date?: string }) => ipcRenderer.invoke('maiis:analyze-domain', options),
+    getDomainInsights: (date?: string) => ipcRenderer.invoke('maiis:get-domain-insights', date),
+    getMaiisWorldState: (date?: string) => ipcRenderer.invoke('maiis:get-world-state', date),
+    getMacroSnapshot: () => ipcRenderer.invoke('maiis:get-macro-snapshot'),
+
     onBatchProgress: (callback: (data: { step: string, current: number, total: number, message: string }) => void) => {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('analysis:batch-progress', listener)

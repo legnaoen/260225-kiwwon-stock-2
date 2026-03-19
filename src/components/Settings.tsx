@@ -586,6 +586,7 @@ export default function Settings() {
     const menuItems = [
         { id: 'monitor', label: '📊 MAIIS 관제 센터', icon: Activity, color: 'text-primary' },
         { id: 'accounts', label: '🔑 계정 및 인프라', icon: ShieldCheck, color: 'text-blue-500' },
+        { id: 'telegram', label: '💬 텔레그램 통합 설정', icon: MessageCircle, color: 'text-sky-500' },
         { id: 'strategy', label: '⚖️ 자동매매 및 전략', icon: BrainCircuit, color: 'text-indigo-500' },
         { id: 'diagnostics', label: '🔍 원천 데이터 진단', icon: Info, color: 'text-rose-500' },
     ] as const
@@ -702,9 +703,8 @@ export default function Settings() {
                         </div>
                     )}
 
-                        {activeTab === 'accounts' && (
-                            <div className="pt-12 border-t border-border/40">
-                                <div className="space-y-8">
+                        {activeTab === 'telegram' && (
+                            <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">텔레그램 연동</h2>
                                     <p className="text-muted-foreground">알림 및 차트 전송을 위한 텔레그램 설정을 구성합니다.</p>
@@ -984,12 +984,12 @@ export default function Settings() {
                                         </div>
                                     </div>
                                 </div>
-                            </div>
                         </div>
                     )}
 
-                        {activeTab === 'strategy' && (
-                            <div className="space-y-8">
+                        {activeTab === 'telegram' && (
+                            <div className="pt-12 border-t border-border/40">
+                                <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">일정 알림</h2>
                                     <p className="text-muted-foreground">매일 지정된 시간에 텔레그램으로 주요 정보를 받아봅니다.</p>
@@ -1083,11 +1083,13 @@ export default function Settings() {
                                         </div>
                                     </form>
                                 </div>
+                                </div>
                             </div>
                         )}
 
                         {activeTab === 'accounts' && (
-                            <div className="space-y-8">
+                            <div className="pt-12 border-t border-border/40">
+                                <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">DART 공시</h2>
                                     <p className="text-muted-foreground">Open DART 연동 및 기업 고유번호 매핑을 관리합니다.</p>
@@ -1255,11 +1257,11 @@ export default function Settings() {
                                         </div>
                                     </div>
                                 </div>
+                                </div>
                             </div>
                         )}
                         {activeTab === 'strategy' && (
-                            <div className="pt-12 border-t border-border/40">
-                                <div className="space-y-8">
+                            <div className="space-y-8">
                                 <div className="space-y-1">
                                     <h2 className="text-3xl font-bold tracking-tight">AI 인공지능 설정</h2>
                                     <p className="text-muted-foreground">자동매매 전략 복기 및 종목 분석을 위한 AI 모델을 설정합니다.</p>
@@ -1404,7 +1406,6 @@ export default function Settings() {
                                             </ul>
                                         </div>
                                     </form>
-                                </div>
                             </div>
                         </div>
                     )}

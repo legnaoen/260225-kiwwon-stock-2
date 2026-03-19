@@ -212,6 +212,16 @@ ipcMain.handle('yahoo:test-connection', async () => {
     }
 })
 
+ipcMain.handle('yahoo:get-macros', async (_event, symbols: string[]) => {
+    try {
+        const { YahooFinanceService } = await import('./services/YahooFinanceService')
+        const results = await Promise.all(symbols.map(s => YahooFinanceService.getInstance().getMacroIndicator(s)))
+        return { success: true, data: results }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
 ipcMain.on('kiwoom:notify-disparity-slump', (_event, data: { code: string, name: string, disparity: number, changeRate: number }) => {
     eventBus.emit(SystemEvent.DISPARITY_SLUMP_DETECTED, data)
 })
@@ -258,6 +268,41 @@ ipcMain.handle('maiis:trigger-sync', async (_event, { providerId, options }) => 
         return await IngestionManager.getInstance().triggerSync(providerId, options)
     } catch (err: any) {
         return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('maiis:analyze-domain', async (_event, { domain, date }) => {
+    try {
+        const { MaiisDomainService } = await import('./services/MaiisDomainService')
+        return domain === 'YOUTUBE' 
+            ? await MaiisDomainService.getInstance().analyzeYoutubeDomain(date)
+            : await MaiisDomainService.getInstance().analyzeNewsDomain(date)
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('maiis:get-domain-insights', async (_event, date) => {
+    const { DatabaseService } = await import('./services/DatabaseService');
+    const db = DatabaseService.getInstance();
+    const targetDate = date || db.getKstDate()
+    return db.getMaiisDomainInsights(targetDate)
+})
+
+ipcMain.handle('maiis:get-world-state', async (_event, date) => {
+    const { DatabaseService } = await import('./services/DatabaseService');
+    const db = DatabaseService.getInstance();
+    const targetDate = date || db.getKstDate()
+    return db.getMaiisWorldState(targetDate)
+})
+
+ipcMain.handle('maiis:get-macro-snapshot', async () => {
+    try {
+        const { MaiisMacroService } = await import('./services/MaiisMacroService');
+        const snapshots = await MaiisMacroService.getInstance().getDailyMacroSnapshot();
+        return { success: true, data: snapshots };
+    } catch (err: any) {
+        return { success: false, error: err.message };
     }
 })
 

@@ -76,6 +76,15 @@
   @apply bg-background/60 backdrop-blur-md border border-white/10;
 }
 
+/* Scrollbar Hide Utility */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 .titlebar {
   -webkit-app-region: drag;
 }

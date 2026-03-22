@@ -306,8 +306,140 @@ ipcMain.handle('maiis:get-macro-snapshot', async () => {
     }
 })
 
+ipcMain.handle('maiis:get-rising-stocks-summary', async (_event, date) => {
+    try {
+        const { MaiisDomainService } = await import('./services/MaiisDomainService');
+        const summary = MaiisDomainService.getInstance().getRisingStocksSummary(date);
+        return { success: true, data: summary };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+})
+
+ipcMain.handle('maiis:generate-master-state', async (_event, params: { timing: '0845' | '0930' | '1530', date?: string }) => {
+    try {
+        const { MasterAiService } = await import('./services/MasterAiService')
+        return await MasterAiService.getInstance().generateWorldState(params.timing, params.date)
+    } catch (error: any) {
+        console.error('[MasterAi] Error:', error)
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('maiis:get-command-center-dashboard', async (_e, date: string) => {
+    try {
+        const { MaiisDashboardService } = await import('./services/MaiisDashboardService')
+        const data = MaiisDashboardService.getInstance().getCommandCenterData(date)
+        return { success: true, data }
+    } catch (error: any) {
+        console.error('[MaiisDashboard] Error:', error)
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('maiis:run-ranking-aggregation', async (_e, date: string) => {
+    try {
+        console.log('[Main] Running aggregation pipeline for date:', date);
+        const { MaiisRankingAggregator } = await import('./services/MaiisRankingAggregator')
+        const data = await MaiisRankingAggregator.getInstance().runDailyAggregation(date)
+        return { success: true, data }
+    } catch (error: any) {
+        console.error('[MaiisRankingAggregator] Error:', error)
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('maiis:run-portfolio-review', async () => {
+    try {
+        const { PortfolioManagerService } = await import('./services/PortfolioManagerService')
+        return await PortfolioManagerService.getInstance().runPortfolioReview()
+    } catch (error: any) {
+        console.error('[PortfolioManager] Error:', error)
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('maiis:get-portfolio-tracker', async () => {
+    try {
+        const db = DatabaseService.getInstance()
+        return {
+            success: true,
+            data: {
+                active: db.getActivePortfolio(),
+                closed: db.getClosedPortfolio(),
+                stats: db.getPortfolioStats(),
+                dailyHistory: db.getDailySnapshots(365),
+            }
+        }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+// ─── Strategy Profiles & Portfolio Review ──────────
+ipcMain.handle('pm:get-strategy-profiles', async () => {
+    try {
+        const { StrategyProfileService } = await import('./services/StrategyProfileService')
+        return { success: true, data: StrategyProfileService.getInstance().getProfiles() }
+    } catch (error: any) { return { success: false, error: error.message } }
+})
+
+ipcMain.handle('pm:save-strategy-profiles', async (_event, profiles) => {
+    try {
+        const { StrategyProfileService } = await import('./services/StrategyProfileService')
+        StrategyProfileService.getInstance().saveProfiles(profiles)
+        return { success: true }
+    } catch (error: any) { return { success: false, error: error.message } }
+})
+
+ipcMain.handle('pm:reset-strategy-profiles', async () => {
+    try {
+        const { StrategyProfileService } = await import('./services/StrategyProfileService')
+        return { success: true, data: StrategyProfileService.getInstance().resetToDefaults() }
+    } catch (error: any) { return { success: false, error: error.message } }
+})
+
+ipcMain.handle('pm:get-review-schedule', async () => {
+    try {
+        const { StrategyProfileService } = await import('./services/StrategyProfileService')
+        return { success: true, data: StrategyProfileService.getInstance().getReviewSchedule() }
+    } catch (error: any) { return { success: false, error: error.message } }
+})
+
+ipcMain.handle('pm:save-review-schedule', async (_event, schedule) => {
+    try {
+        const { StrategyProfileService } = await import('./services/StrategyProfileService')
+        StrategyProfileService.getInstance().saveReviewSchedule(schedule)
+        return { success: true }
+    } catch (error: any) { return { success: false, error: error.message } }
+})
+
+ipcMain.handle('pm:run-review', async (_event, mode: string) => {
+    try {
+        const { PortfolioReviewEngine } = await import('./services/PortfolioReviewEngine')
+        const result = await PortfolioReviewEngine.getInstance().runReviewLoop(mode as 'INTRADAY' | 'CLOSING')
+        return { success: true, data: result }
+    } catch (error: any) { return { success: false, error: error.message } }
+})
+
 ipcMain.on('chart-render-complete', (_event, code) => {
     eventBus.emit(SystemEvent.CHART_RENDER_COMPLETE, code)
+})
+
+// ─── Pipeline Monitor IPC ─────────────────────────────────────────
+ipcMain.handle('pipeline:get-latest-runs', () => {
+    const { PipelineLogger } = require('./services/PipelineLogger')
+    return PipelineLogger.getInstance().getLatestRuns()
+})
+
+ipcMain.handle('pipeline:get-run-detail', (_event, runId: string) => {
+    const { PipelineLogger } = require('./services/PipelineLogger')
+    return PipelineLogger.getInstance().getRunDetail(runId)
+})
+
+ipcMain.handle('pipeline:get-all-runs', (_event, date?: string) => {
+    const { PipelineLogger } = require('./services/PipelineLogger')
+    return PipelineLogger.getInstance().getAllRuns(date)
 })
 
 // ─── Existing IPC Handlers ─────────────────────────────────────────

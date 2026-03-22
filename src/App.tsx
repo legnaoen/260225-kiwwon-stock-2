@@ -15,8 +15,8 @@ import MaiisCommandCenter from './components/MaiisCommandCenter'
 import AiTradeDashboard from './components/AiTrade/AiTradeDashboard'
 import RisingStocksReport from './components/RisingStocksReport'
 import NarrativeInsightTab from './components/NarrativeInsightTab'
-import KnowledgeBase from './components/KnowledgeBase'
 import MacroDashboard from './components/MacroDashboard'
+import PmTracker from './components/PmTracker'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
 import { useNoteStore } from './store/useNoteStore'
@@ -338,7 +338,6 @@ function AppContent() {
                         {activeTab === 'holdings' && <Holdings />}
                         {activeTab === 'watchlist' && <Watchlist />}
                         {activeTab === 'rising-stocks' && <RisingStocksReport />}
-                        {activeTab === 'knowledge-base' && <KnowledgeBase />}
                         {activeTab === 'auto-trade' && <AutoTrade />}
                         {activeTab === 'schedule' && <Schedule />}
                         { activeTab === 'settings' && <Settings />}
@@ -346,8 +345,9 @@ function AppContent() {
                         { activeTab === 'narrative-insight' && <NarrativeInsightTab />}
                         { activeTab === 'maiis-command' && <MaiisCommandCenter />}
                         { activeTab === 'macro-dashboard' && <MacroDashboard />}
+                        { activeTab === 'pm-tracker' && <PmTracker />}
 
-                        {(activeTab !== 'dashboard' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'rising-stocks' && activeTab !== 'knowledge-base' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade' && activeTab !== 'narrative-insight') && (
+                        {(activeTab !== 'dashboard' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'pm-tracker' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'rising-stocks' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade' && activeTab !== 'narrative-insight') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

@@ -13,7 +13,7 @@ interface InsightRecord {
 }
 
 export function MaiisAgentTester({ onClose }: { onClose: () => void }) {
-    const [activeTab, setActiveTab] = useState<'YOUTUBE' | 'NEWS' | 'MACRO'>('YOUTUBE');
+    const [activeTab, setActiveTab] = useState<'YOUTUBE' | 'NEWS' | 'MACRO' | 'RISING' | 'MASTER'>('YOUTUBE');
     const [isLoading, setIsLoading] = useState(false);
     const [records, setRecords] = useState<InsightRecord[]>([]);
     const [selectedRecord, setSelectedRecord] = useState<InsightRecord | null>(null);
@@ -62,6 +62,25 @@ export function MaiisAgentTester({ onClose }: { onClose: () => void }) {
                 } else {
                     alert(`오류 발생: ${res.error}`);
                 }
+            } else if (activeTab === 'RISING') {
+                // daily_rising_stocks는 YYYY-MM-DD 포맷을 사용하므로 replace 없이 원래 포맷 전달
+                const res = await window.electronAPI.getRisingStocksSummary(targetDate);
+                if (res.success) {
+                    alert('당일 주도주 요약 데이터를 가져왔습니다!');
+                    const dummyRecord: InsightRecord = {
+                        id: 9998,
+                        date: targetDate,
+                        domain_type: 'RISING',
+                        raw_input_text: "Target DB:\ndaily_rising_stocks (SQLite)\n[수집경로] 키움증권 조건검색 종목\n※ [급등/테마주 15종목] 및 [우량/수급주 10종목]을 이원화 수집하여 백엔드에서 테마별로 그룹핑",
+                        used_prompt: "DB 어댑터 변환 (초과 트래픽 억제 / AI 개입 없음)",
+                        generated_json: JSON.stringify(res.data, null, 2),
+                        created_at: new Date().toISOString()
+                    };
+                    setRecords(prev => [dummyRecord, ...prev.filter(r => r.domain_type !== 'RISING')]);
+                    setSelectedRecord(dummyRecord);
+                } else {
+                    alert(`오류 발생: ${res.error}`);
+                }
             } else {
                 const res = await window.electronAPI.analyzeDomain({ domain: activeTab, date: targetDate.replace(/-/g, '') });
                 if (res.success) {
@@ -70,6 +89,64 @@ export function MaiisAgentTester({ onClose }: { onClose: () => void }) {
                 } else {
                     alert(`오류 발생: ${res.error}`);
                 }
+            }
+        } catch (error: any) {
+            alert(`API 호출 오류: ${error.message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleRunMaster = async (timing: '0845' | '0930' | '1530') => {
+        setIsLoading(true);
+        try {
+            const parsedDate = targetDate.replace(/-/g, '');
+            const res = await window.electronAPI.generateMasterState(timing, parsedDate);
+            if (res.success) {
+                alert(`Master AI [${timing}] 분석 완료!`);
+                const dummyRecord: InsightRecord = {
+                    id: 10000 + parseInt(timing),
+                    date: targetDate,
+                    domain_type: 'MASTER',
+                    raw_input_text: `Timing: ${timing}\n[Phase3] 4대 도메인 융합 및 시맨틱 매핑(50대 테마) 완료`,
+                    used_prompt: `World State Generator Framework`,
+                    generated_json: JSON.stringify(res.data, null, 2),
+                    created_at: new Date().toISOString()
+                };
+                setRecords(prev => [dummyRecord, ...prev.filter(r => r.domain_type !== 'MASTER' || r.id !== dummyRecord.id)]);
+                setSelectedRecord(dummyRecord);
+            } else {
+                alert(`오류 발생: ${res.error}`);
+            }
+        } catch (error: any) {
+            alert(`API 호출 오류: ${error.message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleRunAggregation = async () => {
+        setIsLoading(true);
+        try {
+            const res = await window.electronAPI.runRankingAggregation(targetDate);
+            if (res.success) {
+                alert(`${targetDate} 랭킹 취합 성공! 테스터 목록에 결과가 추가되었습니다.`);
+                
+                // 취합된 결과를 화면에 보여주기 위해 가짜 레코드를 생성합니다.
+                const aggRecord: InsightRecord = {
+                    id: 20000 + Date.now(),
+                    date: targetDate,
+                    domain_type: 'MASTER', // 편의상 MASTER 탭에 보이게 조치
+                    raw_input_text: `Data Aggregation Pipeline for ${targetDate}\n- 테마 합산\n- 키워드 추출\n- 보유목록 수익률 업데이트`,
+                    used_prompt: `Mechanical Aggregator Engine`,
+                    generated_json: JSON.stringify(res.data || res, null, 2),
+                    created_at: new Date().toISOString()
+                };
+                setRecords(prev => [aggRecord, ...prev]);
+                setSelectedRecord(aggRecord);
+                setActiveTab('MASTER'); // MASTER 탭으로 즉시 이동하여 보여줌
+            } else {
+                alert(`오류 발생: ${res.error}`);
             }
         } catch (error: any) {
             alert(`API 호출 오류: ${error.message}`);
@@ -126,6 +203,25 @@ export function MaiisAgentTester({ onClose }: { onClose: () => void }) {
                             >
                                 <Database size={18} /> 시장 지표 실데이터 가져오기
                             </button>
+                            <button 
+                                onClick={() => setActiveTab('RISING')}
+                                className={`w-full flex items-center gap-2 px-3 py-3 rounded-md text-sm font-bold text-left transition-colors mt-2 ${activeTab === 'RISING' ? 'bg-purple-500/10 text-purple-500' : 'hover:bg-muted text-foreground'}`}
+                            >
+                                <Database size={18} /> 당일 주도주 요약 가져오기
+                            </button>
+                            <button 
+                                onClick={handleRunAggregation}
+                                disabled={isLoading}
+                                className={`w-full flex items-center justify-center gap-2 px-3 py-3 rounded-md text-sm font-bold text-center mt-4 bg-zinc-800 text-zinc-100 hover:bg-zinc-700 disabled:opacity-50 shadow-sm`}
+                            >
+                                <Database size={16} /> Data Aggregation (08:00)
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('MASTER')}
+                                className={`w-full flex items-center justify-between px-3 py-3 rounded-md text-sm font-bold text-left transition-colors mt-2 border ${activeTab === 'MASTER' ? 'bg-amber-500/20 border-amber-500/50 text-amber-500' : 'bg-amber-500/5 border-amber-500/20 text-amber-500/70 hover:bg-amber-500/10'}`}
+                            >
+                                <span className="flex items-center gap-2"><BrainCircuit size={18} /> Master AI (최상위)</span>
+                            </button>
 
                             <div className="mt-8 px-2">
                                 <h3 className="text-xs font-bold text-muted-foreground mb-3 flex items-center gap-1"><Database size={14}/> DB 기록 (Insight DB)</h3>
@@ -146,15 +242,23 @@ export function MaiisAgentTester({ onClose }: { onClose: () => void }) {
                                 )}
                             </div>
                         </div>
-                        <div className="p-4 border-t border-border">
-                            <button 
-                                onClick={handleRunAgent}
-                                disabled={isLoading}
-                                className="w-full flex justify-center items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-3 rounded-lg shadow disabled:opacity-50"
-                            >
-                                {isLoading ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
-                                {activeTab === 'MACRO' ? 'API 수집 실행' : `${activeTab} AI 실행`}
-                            </button>
+                        <div className="p-4 border-t border-border flex flex-col gap-2">
+                            {activeTab === 'MASTER' ? (
+                                <>
+                                    <button onClick={() => handleRunMaster('0845')} disabled={isLoading} className="w-full bg-slate-700 hover:bg-slate-600 border border-slate-500 rounded-md text-white font-bold py-2 text-sm transition-colors disabled:opacity-50 flex justify-center items-center gap-2"><Play size={16}/> 08:45 장전 대전제</button>
+                                    <button onClick={() => handleRunMaster('0930')} disabled={isLoading} className="w-full bg-blue-700 hover:bg-blue-600 border border-blue-500 rounded-md text-white font-bold py-2 text-sm transition-colors disabled:opacity-50 flex justify-center items-center gap-2"><Play size={16}/> 09:30 알파 픽 뷰</button>
+                                    <button onClick={() => handleRunMaster('1530')} disabled={isLoading} className="w-full bg-amber-700 hover:bg-amber-600 border border-amber-500 rounded-md text-white font-bold py-2 text-sm transition-colors disabled:opacity-50 flex justify-center items-center gap-2"><Play size={16}/> 15:30 오답 노트</button>
+                                </>
+                            ) : (
+                                <button 
+                                    onClick={handleRunAgent}
+                                    disabled={isLoading}
+                                    className="w-full flex justify-center items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-3 rounded-lg shadow disabled:opacity-50"
+                                >
+                                    {isLoading ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
+                                    {(activeTab === 'MACRO' || activeTab === 'RISING') ? 'API/DB 수집 실행' : `${activeTab} AI 실행`}
+                                </button>
+                            )}
                         </div>
                     </div>
 

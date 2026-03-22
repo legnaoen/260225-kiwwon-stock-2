@@ -364,6 +364,71 @@ export class DatabaseService {
             );
         `
 
+        // Phase 3 Master AI 전용: 시간대별 분기 및 지식망(Reflection) 지원 테이블
+        const createMaiisWorldStateV2Table = `
+            CREATE TABLE IF NOT EXISTS maiis_world_state_v2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                timing TEXT NOT NULL,
+                market_thesis TEXT,
+                sentiment_score REAL,
+                top_themes_json TEXT, -- v3부터는 Legacy 호환용
+                alpha_picks_json TEXT, -- v3부터는 Legacy 호환용
+                score_adjustments_json TEXT, -- v3 추가: AI의 강제 조정치 (Delta)
+                new_alpha_picks_json TEXT,   -- v3 추가: 신규 편입 종목
+                drop_alpha_picks_json TEXT,  -- v3 추가: 편출(손절/익절) 종목
+                self_reflection TEXT,
+                raw_json TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(date, timing)
+            );
+        `
+
+        // Phase 3 기계적 랭킹 추적 (Stateful DB)
+        const createMaiisThemeRankingsTable = `
+            CREATE TABLE IF NOT EXISTS maiis_theme_rankings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                theme_name TEXT NOT NULL,
+                base_score REAL DEFAULT 0,
+                ai_adjustment REAL DEFAULT 0,
+                final_score REAL DEFAULT 0,
+                ai_reason TEXT,
+                rank INTEGER DEFAULT 0,
+                UNIQUE(date, theme_name)
+            );
+        `
+
+        // Phase 3 키워드 랭킹 추적
+        const createMaiisKeywordRankingsTable = `
+            CREATE TABLE IF NOT EXISTS maiis_keyword_rankings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                frequency INTEGER DEFAULT 0,
+                score REAL DEFAULT 0,
+                UNIQUE(date, keyword)
+            );
+        `
+
+        // Phase 3 능동적 알파 픽 포트폴리오 (Stateful DB)
+        const createMaiisActivePicksTable = `
+            CREATE TABLE IF NOT EXISTS maiis_active_picks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                recommend_date TEXT NOT NULL,
+                reco_price REAL DEFAULT 0,
+                current_price REAL DEFAULT 0,
+                profit_rate REAL DEFAULT 0,
+                status TEXT DEFAULT 'ACTIVE', -- ACTIVE, DROPPED
+                ai_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(stock_code)
+            );
+        `
+
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
         this.db.exec(createFinancialDataTable)
@@ -390,6 +455,79 @@ export class DatabaseService {
         this.db.exec(createMarketNewsConsensusTable)
         this.db.exec(createMaiisDomainInsightsTable)
         this.db.exec(createMaiisWorldStateTable)
+        this.db.exec(createMaiisWorldStateV2Table)
+        this.db.exec(createMaiisThemeRankingsTable)
+        this.db.exec(createMaiisKeywordRankingsTable)
+        this.db.exec(createMaiisActivePicksTable)
+
+        // Phase 2: Portfolio State Machine
+        const createMaiisPortfolioTable = `
+            CREATE TABLE IF NOT EXISTS maiis_portfolio (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                status TEXT DEFAULT 'WATCHLIST',
+                strategy TEXT DEFAULT 'SWING',
+                conviction_score INTEGER DEFAULT 50,
+                theme TEXT,
+                entry_price REAL DEFAULT 0,
+                current_price REAL DEFAULT 0,
+                target_price REAL DEFAULT 0,
+                stop_loss_price REAL DEFAULT 0,
+                profit_rate REAL DEFAULT 0,
+                position_size REAL DEFAULT 0,
+                weight_pct REAL DEFAULT 0,
+                max_weight_pct REAL DEFAULT 10,
+                entry_date TEXT,
+                last_signal TEXT,
+                last_signal_reason TEXT,
+                last_reviewed_at TEXT,
+                days_held INTEGER DEFAULT 0,
+                source TEXT DEFAULT 'PM_AI',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(stock_code)
+            );
+        `
+        this.db.exec(createMaiisPortfolioTable)
+
+        // Phase 2 Tracker: maiis_portfolio columns for NAV engine
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN closed_date TEXT") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN closed_price REAL DEFAULT 0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN closed_profit_rate REAL DEFAULT 0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN actual_entry_price REAL DEFAULT 0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN entry_shares INTEGER DEFAULT 0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN invested_amount REAL DEFAULT 0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN entry_pending INTEGER DEFAULT 0") } catch (e) { }
+
+        // Phase 2 Tracker: Daily NAV snapshot table
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS maiis_portfolio_daily (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                nav REAL DEFAULT 10000000,
+                cash REAL DEFAULT 10000000,
+                invested REAL DEFAULT 0,
+                portfolio_return REAL DEFAULT 0,
+                daily_return REAL DEFAULT 0,
+                kospi_close REAL DEFAULT 0,
+                kospi_base REAL DEFAULT 0,
+                kospi_return REAL DEFAULT 0,
+                alpha REAL DEFAULT 0,
+                active_count INTEGER DEFAULT 0,
+                total_trades INTEGER DEFAULT 0,
+                win_count INTEGER DEFAULT 0,
+                lose_count INTEGER DEFAULT 0,
+                snapshot_json TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(date)
+            );
+        `)
+
+        // Phase 2 Tracker: Strategy rule columns
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN high_price REAL DEFAULT 0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN extension_used INTEGER DEFAULT 0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN deadline_date TEXT") } catch (e) { }
 
         // Ensure macro_indicators_json exists in world state
         try {
@@ -430,6 +568,11 @@ export class DatabaseService {
             this.db.exec("ALTER TABLE daily_rising_stocks ADD COLUMN tags TEXT")
         } catch (e) { }
 
+        // Migration for maiis_world_state_v2 Phase 3 v3 columns (Delta 구조)
+        try { this.db.exec("ALTER TABLE maiis_world_state_v2 ADD COLUMN score_adjustments_json TEXT") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_world_state_v2 ADD COLUMN new_alpha_picks_json TEXT") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_world_state_v2 ADD COLUMN drop_alpha_picks_json TEXT") } catch (e) { }
+
         // Add index on origin_id for fast lookup
         try {
             this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_schedules_origin_id ON schedules(origin_id) WHERE origin_id IS NOT NULL")
@@ -466,6 +609,9 @@ export class DatabaseService {
                 this.db.exec("ALTER TABLE market_news_consensus ADD COLUMN hot_keywords_json TEXT");
             }
         } catch (e) {}
+
+        // Migration for maiis_keyword_rankings reason column
+        try { this.db.exec("ALTER TABLE maiis_keyword_rankings ADD COLUMN reason TEXT") } catch (e) { }
 
         // Ensure v1 Factory Strategy exists
         this.ensureV1Strategy();
@@ -1182,5 +1328,214 @@ export class DatabaseService {
 
     public getMaiisWorldState(date: string) {
         return this.db.prepare('SELECT * FROM maiis_world_state WHERE date = ?').get(date);
+    }
+
+    // ==========================================
+    // Master AI (Phase 3) 전용 DB 메서드
+    // ==========================================
+
+    public saveMasterWorldState(date: string, timing: string, data: any) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO maiis_world_state_v2 
+            (date, timing, market_thesis, sentiment_score, 
+             score_adjustments_json, new_alpha_picks_json, drop_alpha_picks_json, 
+             self_reflection, raw_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        stmt.run(
+            date, 
+            timing, 
+            data.market_thesis || null, 
+            data.sentiment_score || null,
+            JSON.stringify(data.score_adjustments || []),
+            JSON.stringify(data.new_alpha_picks || []),
+            JSON.stringify(data.drop_alpha_picks || []),
+            data.self_reflection || null,
+            JSON.stringify(data),
+            new Date().toISOString()
+        );
+    }
+
+    public getMasterWorldState(date: string, timing: string) {
+        return this.db.prepare(`SELECT * FROM maiis_world_state_v2 WHERE date = ? AND timing = ?`).get(date, timing) as any;
+    }
+
+    public getActiveThemeRankings(date: string) {
+        return this.db.prepare(`SELECT * FROM maiis_theme_rankings WHERE date = ? ORDER BY final_score DESC LIMIT 10`).all(date) as any[];
+    }
+
+    public getActivePicks() {
+        return this.db.prepare(`SELECT * FROM maiis_active_picks WHERE status = 'ACTIVE'`).all() as any[];
+    }
+
+    /**
+     * 어제(혹은 가장 최근 영업일)의 장마감(1530) 오답 노트(Reflection)를 반환합니다.
+     */
+    public getRecentReflection(date: string) {
+        return this.db.prepare(`
+            SELECT * FROM maiis_world_state_v2 
+            WHERE date < ? AND timing = '1530' 
+            ORDER BY date DESC LIMIT 1
+        `).get(date) as any || null;
+    }
+
+    // ──────────────────────────────────────────────
+    // Phase 2: Portfolio State Machine CRUD
+    // ──────────────────────────────────────────────
+
+    public getPortfolio() {
+        return this.db.prepare('SELECT * FROM maiis_portfolio ORDER BY conviction_score DESC').all() as any[];
+    }
+
+    public getPortfolioByStatus(status: string) {
+        return this.db.prepare('SELECT * FROM maiis_portfolio WHERE status = ? ORDER BY conviction_score DESC').all(status) as any[];
+    }
+
+    public getPortfolioItem(stockCode: string) {
+        return this.db.prepare('SELECT * FROM maiis_portfolio WHERE stock_code = ?').get(stockCode) as any | undefined;
+    }
+
+    public upsertPortfolioItem(item: any) {
+        const now = new Date().toISOString();
+        return this.db.prepare(`
+            INSERT INTO maiis_portfolio (
+                stock_code, stock_name, status, strategy, conviction_score, theme,
+                entry_price, current_price, target_price, stop_loss_price,
+                profit_rate, position_size, weight_pct, max_weight_pct,
+                entry_date, last_signal, last_signal_reason, last_reviewed_at,
+                days_held, source, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(stock_code) DO UPDATE SET
+                status = excluded.status,
+                strategy = excluded.strategy,
+                conviction_score = excluded.conviction_score,
+                theme = excluded.theme,
+                current_price = excluded.current_price,
+                target_price = excluded.target_price,
+                stop_loss_price = excluded.stop_loss_price,
+                profit_rate = excluded.profit_rate,
+                last_signal = excluded.last_signal,
+                last_signal_reason = excluded.last_signal_reason,
+                last_reviewed_at = excluded.last_reviewed_at,
+                days_held = excluded.days_held,
+                updated_at = excluded.updated_at
+        `).run(
+            item.stock_code, item.stock_name, item.status || 'WATCHLIST',
+            item.strategy || 'SWING', item.conviction_score || 50, item.theme || '',
+            item.entry_price || 0, item.current_price || 0,
+            item.target_price || 0, item.stop_loss_price || 0,
+            item.profit_rate || 0, item.position_size || 0,
+            item.weight_pct || 0, item.max_weight_pct || 10,
+            item.entry_date || '', item.last_signal || '',
+            item.last_signal_reason || '', now,
+            item.days_held || 0, item.source || 'PM_AI',
+            now, now
+        );
+    }
+
+    public updatePortfolioStatus(stockCode: string, status: string, reason?: string) {
+        const now = new Date().toISOString();
+        return this.db.prepare(`
+            UPDATE maiis_portfolio 
+            SET status = ?, last_signal = ?, last_signal_reason = ?, updated_at = ?
+            WHERE stock_code = ?
+        `).run(status, status, reason || '', now, stockCode);
+    }
+
+    // ──────────────────────────────────────────────
+    // Phase 2 Tracker: NAV & Daily Snapshot CRUD
+    // ──────────────────────────────────────────────
+
+    public getActivePortfolio() {
+        return this.db.prepare(
+            "SELECT * FROM maiis_portfolio WHERE status NOT IN ('CLOSED') ORDER BY conviction_score DESC"
+        ).all() as any[];
+    }
+
+    public getClosedPortfolio() {
+        return this.db.prepare(
+            "SELECT * FROM maiis_portfolio WHERE status = 'CLOSED' ORDER BY closed_date DESC"
+        ).all() as any[];
+    }
+
+    public closePortfolioItem(stockCode: string, closedPrice: number, closedDate: string) {
+        const now = new Date().toISOString();
+        const item = this.getPortfolioItem(stockCode);
+        if (!item) return;
+        const entryPrice = item.actual_entry_price || item.entry_price || 0;
+        const closedProfitRate = entryPrice > 0 ? ((closedPrice / entryPrice) - 1) * 100 : 0;
+        return this.db.prepare(`
+            UPDATE maiis_portfolio SET
+                status = 'CLOSED', closed_date = ?, closed_price = ?,
+                closed_profit_rate = ?, current_price = ?, profit_rate = ?,
+                last_signal = 'SELL', updated_at = ?
+            WHERE stock_code = ?
+        `).run(closedDate, closedPrice, closedProfitRate, closedPrice, closedProfitRate, now, stockCode);
+    }
+
+    public upsertDailySnapshot(snap: any) {
+        const now = new Date().toISOString();
+        return this.db.prepare(`
+            INSERT INTO maiis_portfolio_daily (
+                date, nav, cash, invested, portfolio_return, daily_return,
+                kospi_close, kospi_base, kospi_return, alpha,
+                active_count, total_trades, win_count, lose_count,
+                snapshot_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(date) DO UPDATE SET
+                nav = excluded.nav, cash = excluded.cash, invested = excluded.invested,
+                portfolio_return = excluded.portfolio_return, daily_return = excluded.daily_return,
+                kospi_close = excluded.kospi_close, kospi_return = excluded.kospi_return,
+                alpha = excluded.alpha, active_count = excluded.active_count,
+                total_trades = excluded.total_trades, win_count = excluded.win_count,
+                lose_count = excluded.lose_count, snapshot_json = excluded.snapshot_json
+        `).run(
+            snap.date, snap.nav, snap.cash, snap.invested,
+            snap.portfolio_return, snap.daily_return,
+            snap.kospi_close, snap.kospi_base, snap.kospi_return, snap.alpha,
+            snap.active_count, snap.total_trades, snap.win_count, snap.lose_count,
+            snap.snapshot_json || null, now
+        );
+    }
+
+    public getDailySnapshots(limit = 90) {
+        return this.db.prepare(
+            'SELECT * FROM maiis_portfolio_daily ORDER BY date ASC LIMIT ?'
+        ).all(limit) as any[];
+    }
+
+    public getLatestDailySnapshot() {
+        return this.db.prepare(
+            'SELECT * FROM maiis_portfolio_daily ORDER BY date DESC LIMIT 1'
+        ).get() as any | undefined;
+    }
+
+    public getPortfolioStats() {
+        const closed = this.getClosedPortfolio();
+        const active = this.getActivePortfolio();
+        const latestSnap = this.getLatestDailySnapshot();
+        const wins = closed.filter(c => (c.closed_profit_rate || 0) > 0).length;
+        const losses = closed.filter(c => (c.closed_profit_rate || 0) <= 0).length;
+        const avgHoldDays = closed.length > 0
+            ? closed.reduce((sum: number, c: any) => sum + (c.days_held || 0), 0) / closed.length
+            : 0;
+        const bestTrade = closed.reduce((best: any, c: any) => 
+            (!best || (c.closed_profit_rate || 0) > (best.closed_profit_rate || 0)) ? c : best, null);
+        const worstTrade = closed.reduce((worst: any, c: any) => 
+            (!worst || (c.closed_profit_rate || 0) < (worst.closed_profit_rate || 0)) ? c : worst, null);
+
+        return {
+            totalReturn: latestSnap?.portfolio_return || 0,
+            currentNAV: latestSnap?.nav || 10_000_000,
+            alpha: latestSnap?.alpha || 0,
+            winRate: (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0,
+            wins,
+            losses,
+            avgHoldDays: Math.round(avgHoldDays * 10) / 10,
+            activeCount: active.length,
+            totalTrades: closed.length,
+            bestTrade: bestTrade ? { name: bestTrade.stock_name, profit: bestTrade.closed_profit_rate } : null,
+            worstTrade: worstTrade ? { name: worstTrade.stock_name, profit: worstTrade.closed_profit_rate } : null,
+        };
     }
 }

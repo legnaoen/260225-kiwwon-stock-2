@@ -129,6 +129,24 @@ export interface IElectronAPI {
     skillsGetHistory: (id: string) => Promise<{ success: boolean, data?: any[] }>
     skillsSave: (options: { fileName: string, content: string, diffSummary: string }) => Promise<{ success: boolean, error?: string }>
     skillsGetVersion: (options: { fileName: string, version: number }) => Promise<{ success: boolean, data?: any }>
+
+    // MAIIS AI Pipeline
+    analyzeDomain: (options: { domain: 'YOUTUBE' | 'NEWS', date?: string }) => Promise<{ success: boolean, error?: string }>
+    getDomainInsights: (date?: string) => Promise<any[]>
+    getMaiisWorldState: (date?: string) => Promise<any>
+    getMacroSnapshot: () => Promise<{ success: boolean, data?: any, error?: string }>
+    getRisingStocksSummary: (date?: string) => Promise<{ success: boolean, data?: any, error?: string }>
+    generateMasterState: (timing: '0845' | '0930' | '1530', date?: string) => Promise<{ success: boolean, data?: any, error?: string }>
+    getCommandCenterDashboard: (date?: string) => Promise<{ success: boolean, data?: any, error?: string }>
+    runRankingAggregation: (date?: string) => Promise<{ success: boolean, error?: string }>
+
+    // MAIIS Pipeline Monitoring
+    getMaiisInventory: () => Promise<any[]>
+    getMaiisStats: (limit?: number) => Promise<any[]>
+    triggerMaiisSync: (providerId: string, options?: any) => Promise<{ success: boolean, count?: number, error?: string }>
+    getLatestPipelineRuns: () => Promise<Record<string, any>>
+    getPipelineRunDetail: (runId: string) => Promise<any>
+    getAllPipelineRuns: (date?: string) => Promise<any[]>
 }
 
 declare global {

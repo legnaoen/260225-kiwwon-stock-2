@@ -200,6 +200,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDomainInsights: (date?: string) => ipcRenderer.invoke('maiis:get-domain-insights', date),
     getMaiisWorldState: (date?: string) => ipcRenderer.invoke('maiis:get-world-state', date),
     getMacroSnapshot: () => ipcRenderer.invoke('maiis:get-macro-snapshot'),
+    getRisingStocksSummary: (date?: string) => ipcRenderer.invoke('maiis:get-rising-stocks-summary', date),
+    generateMasterState: (timing: '0845' | '0930' | '1530', date?: string) => ipcRenderer.invoke('maiis:generate-master-state', { timing, date }),
+    getCommandCenterDashboard: (date?: string) => ipcRenderer.invoke('maiis:get-command-center-dashboard', date),
+    runRankingAggregation: (date?: string) => ipcRenderer.invoke('maiis:run-ranking-aggregation', date),
+    runPortfolioReview: () => ipcRenderer.invoke('maiis:run-portfolio-review'),
+    getPortfolioTracker: () => ipcRenderer.invoke('maiis:get-portfolio-tracker'),
+    getStrategyProfiles: () => ipcRenderer.invoke('pm:get-strategy-profiles'),
+    saveStrategyProfiles: (profiles: any) => ipcRenderer.invoke('pm:save-strategy-profiles', profiles),
+    resetStrategyProfiles: () => ipcRenderer.invoke('pm:reset-strategy-profiles'),
+    getReviewSchedule: () => ipcRenderer.invoke('pm:get-review-schedule'),
+    saveReviewSchedule: (schedule: any) => ipcRenderer.invoke('pm:save-review-schedule', schedule),
+    runPortfolioReview2: (mode: string) => ipcRenderer.invoke('pm:run-review', mode),
 
     onBatchProgress: (callback: (data: { step: string, current: number, total: number, message: string }) => void) => {
         const listener = (_event: any, data: any) => callback(data)
@@ -220,6 +232,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMaiisInventory: () => ipcRenderer.invoke('maiis:get-inventory'),
     getMaiisStats: (limit?: number) => ipcRenderer.invoke('maiis:get-stats', limit),
     triggerMaiisSync: (providerId: string, options?: any) => ipcRenderer.invoke('maiis:trigger-sync', { providerId, options }),
+    getLatestPipelineRuns: () => ipcRenderer.invoke('pipeline:get-latest-runs'),
+    getPipelineRunDetail: (runId: string) => ipcRenderer.invoke('pipeline:get-run-detail', runId),
+    getAllPipelineRuns: (date?: string) => ipcRenderer.invoke('pipeline:get-all-runs', date),
+    
     onSystemError: (callback: (error: { message: string, code: string, time: string }) => void) => {
         const listener = (_event: any, error: any) => callback(error)
         ipcRenderer.on('system:error', listener)

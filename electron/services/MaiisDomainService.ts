@@ -2,6 +2,7 @@ import { DatabaseService } from './DatabaseService';
 import { AiService } from './AiService';
 import { eventBus, SystemEvent } from '../utils/EventBus';
 import { JsonUtils } from '../utils/JsonUtils';
+import { MEGA_THEMES } from './MaiisThemeConstants';
 
 export class MaiisDomainService {
     private static instance: MaiisDomainService;
@@ -48,6 +49,11 @@ export class MaiisDomainService {
 주어진 데이터는 주식 전문 유튜버들의 최신 영상 자막 및 제목입니다.
 유튜버들이 지금 "무엇을 사라고 선동하는지", 혹은 "무엇을 두려워하고 패닉 셀을 조장하는지"를 분석하십시오.
 
+[테마명 표준화 룰 - 반드시 준수]
+theme_name에는 아래 표준 테마 목록에서 가장 가까운 이름을 선택하여 사용하십시오. 신조어나 자의적 명칭을 사용하지 마십시오.
+표준 테마 목록: ${MEGA_THEMES.join(', ')}
+어떤 테마 목록에도 해당하지 않는 완전히 새로운 테마만 자유 명명 허용.
+
 [출력 요구사항 - 반드시 아래 JSON 규격으로만 응답할 것]
 {
   "domain_summary": "현재 개인 투자자들의 투자 심리와 시장을 바라보는 관점 전반에 대한 깊이 있는 분석 (최소 3~5문장 이상 구체적으로 상세 서술)",
@@ -56,7 +62,7 @@ export class MaiisDomainService {
   "vocal_risks": ["유튜버들이 공통적으로 경고하거나 우려하고 있는 시장의 꼬리 리스크 요인 1", "리스크 요인 2"],
   "top_themes": [
     {
-      "theme_name": "개미들이 열광하거나 패닉에 빠진 주도 테마명 (관련된 증시 표준 섹터명)",
+      "theme_name": "표준 테마 목록에서 선택한 테마명",
       "intensity": 테마의 강도/관심도 점수 (0~100),
       "evidence": "관련 영상들에서 뽑아낸 상징적 인용구 또는 주장의 핵심 논리 (2~3문장 이상 상세 서술)",
       "bullish_arguments": ["상승 또는 하락을 주장하는 구체적 근거 1", "구체적 근거 2"],
@@ -66,7 +72,9 @@ export class MaiisDomainService {
           "context": "해당 종목을 콕 집어 언급한 구체적인 이유와 기대감/공포"
         }
       ],
-      "related_keywords": ["세부 키워드1", "세부 키워드2", "세부 키워드3"]
+      "related_keywords": [
+        { "keyword": "세부 키워드", "impact_score": 해당 키워드의 시장 주도력 점수 (0~100, 빈도가 아닌 실제 시장 영향력 기준) }
+      ]
     }
   ] // 영상 내용을 종합하여 최소 4개 ~ 최대 6개의 테마/섹터 도출
 }
@@ -125,6 +133,11 @@ export class MaiisDomainService {
 주어진 데이터는 오늘의 주요 경제/주식 시장 뉴스 헤드라인입니다.
 주관적 예측이나 유행어는 철저히 배제하고, "거시 지표, 금리, 환율, 기업의 확정적 실적발표, 정부 정책" 등 '확인된 팩트'가 시장에 미칠 영향을 분석하십시오.
 
+[테마명 표준화 룰 - 반드시 준수]
+theme_name에는 아래 표준 테마 목록에서 가장 가까운 이름을 선택하여 사용하십시오. 신조어나 자의적 명칭을 사용하지 마십시오.
+표준 테마 목록: ${MEGA_THEMES.join(', ')}
+어떤 테마 목록에도 해당하지 않는 완전히 새로운 테마만 자유 명명 허용.
+
 [출력 요구사항 - 반드시 아래 JSON 규격으로만 응답할 것]
 {
   "domain_summary": "현재 쏟아지는 뉴스 헤드라인들을 종합하여 거시 경제 환경을 관통하는 하나의 거대한 팩트 시나리오 작성 (최소 3~5문장 이상 상세 서술)",
@@ -139,7 +152,7 @@ export class MaiisDomainService {
   ],
   "top_themes": [
     {
-      "theme_name": "호재/악재 팩트가 직접적으로 꽂히는 테마명 (가급적 증시 표준 섹터명 사용)",
+      "theme_name": "표준 테마 목록에서 선택한 테마명",
       "intensity": 해당 팩트의 시장 영향력 및 자금 쏠림 파급력 (0~100),
       "evidence": "뉴스가 전달하는 팩트(숫자, 일정, 정부 정책, 기업 실적 등)와 향후 전개 방향 (2~3문장 이상 상세 서술)",
       "factual_catalysts": ["언급된 구체적인 촉매 변수 (예: FOMC 일자, 법안 통과 등)"],
@@ -149,7 +162,9 @@ export class MaiisDomainService {
           "context": "이 기사의 팩트로 인해 직접적으로 수혜/피해를 입게 되는 정확한 비즈니스 논리"
         }
       ],
-      "related_keywords": ["세부 키워드1", "세부 키워드2", "세부 키워드3"]
+      "related_keywords": [
+        { "keyword": "세부 키워드", "impact_score": 해당 키워드의 시장 주도력 점수 (0~100, 빈도가 아닌 실제 시장 영향력 기준) }
+      ]
     }
   ] // 시장의 핵심 동인이 되는 주요 테마 최소 4개 ~ 최대 6개 도출
 }
@@ -177,5 +192,67 @@ export class MaiisDomainService {
             console.error('[MaiisDomainService] News Analysis Failed:', error);
             return { success: false, error: error.message };
         }
+    }
+
+    /**
+     * 마스터 AI 연동을 위한 [당일 급등주 및 수급주 테마별 요약] 어댑터
+     * AI 연산을 생략하고 기존 DB 기록(daily_rising_stocks)을 읽어 백엔드에서 객체로 묶어줍니다.
+     */
+    public getRisingStocksSummary(date?: string): any {
+        const targetDate = date || this.db.getKstDate();
+        const getRecords = (timing: string) => this.db.getDb().prepare(`SELECT * FROM daily_rising_stocks WHERE date = ? AND timing = ?`).all(targetDate, timing) as any[];
+        
+        let stocks = getRecords('EVENING');
+        if (stocks.length === 0) stocks = getRecords('MORNING');
+        if (stocks.length === 0) stocks = getRecords('MANUAL');
+        
+        if (stocks.length === 0) {
+            return { success: false, message: `${targetDate} 기준 분석된 급등주/수급주 리포트 데이터가 없습니다. 먼저 [단일/일괄 분석]을 수행해 주세요.` };
+        }
+
+        // 마스터 AI에게 전달할 장중 수급 변화(Intra-day Shift) 압축 텍스트 추출
+        const eveningReport = this.db.getMarketDailyReport(targetDate, 'EVENING');
+        let intraDayShiftInsight = "장중 특이 수급 변화 기록 없음";
+        if (eveningReport && eveningReport.market_summary) {
+            try {
+                const parsed = JSON.parse(eveningReport.market_summary);
+                if (parsed.self_reflection && parsed.self_reflection.trim().length > 0) {
+                    intraDayShiftInsight = parsed.self_reflection;
+                } else if (parsed.summary_lines && parsed.summary_lines.length > 0) {
+                    intraDayShiftInsight = parsed.summary_lines.join(" / ");
+                }
+            } catch (e) {
+                // JSON 파싱 실패 시 단순 텍스트로 간주
+                intraDayShiftInsight = "형식 오류로 추출 실패";
+            }
+        }
+
+        const risers = stocks.filter(s => s.source === 'RISING' || s.source === 'BOTH');
+        const volumes = stocks.filter(s => s.source === 'TRADING_VALUE' || !s.source);
+
+        const groupThemes = (list: any[]) => {
+            const map = new Map<string, any[]>();
+            list.forEach(s => {
+                const key = s.theme_sector || '기타 개별이슈';
+                if (!map.has(key)) map.set(key, []);
+                map.get(key)!.push(s);
+            });
+            return Array.from(map.entries())
+                .sort((a, b) => b[1].reduce((acc, curr) => acc + (curr.ai_score || 0), 0) - a[1].reduce((acc, curr) => acc + (curr.ai_score || 0), 0))
+                .map(([theme, items]) => ({
+                    theme_name: theme,
+                    total_strength: items.reduce((acc, curr) => acc + (curr.ai_score || 0), 0),
+                    stocks: items.map(i => `${i.stock_name} (+${i.change_rate}%, ${i.trading_value ? Math.round(i.trading_value/100) : 0}억)`),
+                    catalysts: Array.from(new Set(items.map(i => i.reason)))
+                }));
+        };
+
+        return {
+            target_date: targetDate,
+            total_stocks_analyzed: stocks.length,
+            intra_day_shift_insight: intraDayShiftInsight,
+            pure_rising_themes: groupThemes(risers),
+            institutional_volume_themes: groupThemes(volumes)
+        };
     }
 }

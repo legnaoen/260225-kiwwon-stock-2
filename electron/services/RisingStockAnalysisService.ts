@@ -65,41 +65,9 @@ export class RisingStockAnalysisService {
                 ? newsItems.map((item, idx) => `[기사 ${idx + 1}] ${item.title}\n내용: ${this.cleanText(item.description)}`).join('\n\n')
                 : '관련 뉴스가 없습니다.'
 
-            // 2. 공시 raw 목록 수집
-            let disclosureItems: any[] = []
-            let dartSummary = '공시 없음'
-            
-            // 기존 데이터가 있고 공시 정보가 이미 존재하면 재사용
-            if (existing && existing.disclosures_json && existing.disclosures_json !== '[]') {
-                try {
-                    disclosureItems = JSON.parse(existing.disclosures_json)
-                    console.log(`[RisingStockAnalysisService] Using existing disclosures for ${stockName}: ${disclosureItems.length} items`)
-                    // 요약 텍스트 재생성
-                    if (disclosureItems.length > 0) {
-                        dartSummary = disclosureItems.slice(0, 10).map((item, idx) => 
-                            `[공시 ${idx + 1}] ${item.rcept_dt.slice(4, 6)}/${item.rcept_dt.slice(6, 8)} - ${item.report_nm}`
-                        ).join('\n')
-                    }
-                } catch (e) {
-                    console.error('[RisingStockAnalysisService] Failed to parse existing disclosures_json')
-                }
-            }
-
-            // 공시 정보가 없는 경우 새로 수집
-            if (disclosureItems.length === 0) {
-                try {
-                    const result = await this.dartApi.getDisclosuresSummaryForAiWithRaw(stockCode)
-                    disclosureItems = result.items || []
-                    dartSummary = result.summary
-                    console.log(`[RisingStockAnalysisService] Disclosures fetched from DART for ${stockName}: ${disclosureItems.length} items`)
-                } catch (e) {
-                    try {
-                        dartSummary = await this.dartApi.getDisclosuresSummaryForAi(stockCode)
-                    } catch (e2) {
-                        console.warn(`[RisingStockAnalysisService] DART fetch failed for ${stockCode}:`, e2)
-                    }
-                }
-            }
+            // [변경사항] DART 공시 조회 로직 제거: 공시는 제목만 제공되어 AI 판단에 실효성이 부족하며 노이즈만 유발함
+            const disclosureItems: any[] = []
+            const dartSummary = '공시 데이터 수집 제외'
             
             // 3. 차트 데이터 (Kiwoom)
             let chartSummary = '차트 데이터 없음'
@@ -258,7 +226,6 @@ export class RisingStockAnalysisService {
                 [
                     { 
                         "stock_code": "005930", 
-                        "ai_score": 85, 
                         "theme_sector": "섹터", 
                         "tags": ["태그1", "태그2"],
                         "reason": "사유", 
@@ -268,12 +235,18 @@ export class RisingStockAnalysisService {
                 ]
 
                 [대상 데이터]
-                ${chunk.map((s, idx) => `
-                # ${idx+1}. ${s.stockName} (${s.stockCode}) [등락: ${s.changeRate}%]
+                ${chunk.map((s, idx) => {
+                    const pastRecords = this.db.getStockAnalysis(s.stockCode);
+                    const historicalContext = pastRecords.filter(r => r.date !== targetDate).slice(0, 3).map(r => 
+                        `[${r.date}] 테마: ${r.theme_sector}, 사유: ${r.reason}`
+                    ).join('\n                ');
+                    const pastText = historicalContext ? `\n                - 최근 DB 급등 히스토리:\n                ${historicalContext}` : `\n                - 최근 당사 DB 기록 없음`;
+
+                    return `
+                # ${idx+1}. ${s.stockName} (${s.stockCode}) [등락: ${s.changeRate}%]${pastText}
                 - 뉴스: ${s.news}
-                - 공시: ${s.disclosures}
                 - 차트 요약: ${s.chart.slice(0, 300)}...
-                `).join('\n\n')}
+                `}).join('\n\n')}
             `
 
             try {
@@ -295,16 +268,20 @@ export class RisingStockAnalysisService {
                         const target = chunk.find(c => String(c.stockCode).replace(/[^0-9]/g, '').padStart(6, '0') === cleanedResCode)
                         
                         if (target) {
-                            const originalTarget = cleanedStocks.find(c => String(c.code).replace(/[^0-9]/g, '').padStart(6, '0') === cleanedResCode)
+                            // 객관적 점수 산출: 등락률 비중 + 거래대금 비중 (100점 만점 스케일로 대략 조정)
+                            const rateScore = Math.min((target.changeRate || 0) * 3, 40); // 13% 상한 최대 40점
+                            const volumeScore = Math.min(((target as any)?.trading_value || (target as any)?.tradingValue || 0) / 1000, 60); // 600억 기준 60점
+                            const objectiveScore = Math.round(rateScore + volumeScore);
+
                             this.db.saveRisingStockAnalysis({
                                 date: targetDate,
                                 timing: timing,
                                 stock_code: target.stockCode,
                                 stock_name: target.stockName,
-                                change_rate: target.changeRate || (originalTarget as any)?.rate || 0,
-                                trading_value: (originalTarget as any)?.trading_value || (originalTarget as any)?.tradingValue || 0,
-                                source: (originalTarget as any)?.source || '',
-                                ai_score: res.ai_score,
+                                change_rate: target.changeRate || (target as any)?.rate || 0,
+                                trading_value: (target as any)?.trading_value || (target as any)?.tradingValue || 0,
+                                source: (target as any)?.source || '',
+                                ai_score: objectiveScore, // AI 주관 점수 대신 객관적 점수 삽입
                                 theme_sector: res.theme_sector,
                                 reason: res.reason,
                                 chart_insight: res.chart_insight,
@@ -357,7 +334,6 @@ export class RisingStockAnalysisService {
                 - 뉴스나 공시에서 확실한 근거를 찾으세요. 없으면 '이슈 미포착'이라 하지 말고, 섹터 전체의 흐름이나 차트상의 특징(전고점 돌파 등)을 언급하세요.
                 - 반드시 아래 포맷의 JSON 객체 형식으로만 응답하세요. (tags는 이 종목의 핵심 테마/이슈 키워드 1~3개 배열)
                 {
-                    "ai_score": 85,
                     "theme_sector": "테마/섹터명",
                     "tags": ["태그1", "태그2"],
                     "reason": "상승/하락 상세 사유",
@@ -365,16 +341,20 @@ export class RisingStockAnalysisService {
                     "past_reference": "과거 유사 사례 및 참고사항"
                 }
             `
+            const pastRecords = this.db.getStockAnalysis(stockCode);
+            const historicalContext = pastRecords.filter(r => r.date !== targetDate).slice(0, 3).map(r => 
+                `[${r.date}] 테마: ${r.theme_sector}, 사유: ${r.reason}`
+            ).join('\n');
+            const pastText = historicalContext ? `\n[당사 DB 최근 3회 급등 이력]\n${historicalContext}\n\n-> 위 과거 기록을 반드시 참고하여, 금일 새로운 테마로 편입되었는지, 기존 모멘텀의 확장인지 등을 past_reference 란에 명시하세요.` : ``;
+
             const promptParts = [
                 `종목: ${stockName}(${stockCode})`,
                 `당일 등락률: ${changeRate}%`,
                 `거래대금: ${tradingValue ? Math.round(tradingValue / 100) : '0'}억`,
+                pastText,
                 '',
                 '[수집된 뉴스]',
                 rawData.news,
-                '',
-                '[수집된 공시]',
-                rawData.disclosures,
                 '',
                 '[최근 차트 데이터]',
                 rawData.chart.slice(0, 500),
@@ -392,6 +372,11 @@ export class RisingStockAnalysisService {
                 throw new Error(`AI 응답 형식 오류 (JSON 파싱 불가)`)
             }
 
+            // 객관적 점수 산출
+            const rateScore = Math.min((changeRate || 0) * 3, 40);
+            const volumeScore = Math.min((tradingValue || 0) / 1000, 60);
+            const objectiveScore = Math.round(rateScore + volumeScore);
+
             const finalData = {
                 date: targetDate, 
                 timing: timing,
@@ -400,7 +385,7 @@ export class RisingStockAnalysisService {
                 change_rate: changeRate,
                 trading_value: tradingValue || 0,
                 source: source || '',
-                ai_score: analysis.ai_score, 
+                ai_score: objectiveScore, 
                 theme_sector: analysis.theme_sector, 
                 reason: analysis.reason,
                 chart_insight: analysis.chart_insight, 
@@ -408,7 +393,7 @@ export class RisingStockAnalysisService {
                 tags: analysis.tags || []
             }
             this.db.saveRisingStockAnalysis(finalData)
-            console.log(`[RisingStockAnalysisService] Successfully analyzed ${stockName}. Score: ${analysis.ai_score}`)
+            console.log(`[RisingStockAnalysisService] Successfully analyzed ${stockName}. Score: ${objectiveScore}`)
             return { success: true, data: finalData }
         } catch (error: any) {
             console.error(`[RisingStockAnalysisService] Individual analysis failed for ${stockName}:`, error)

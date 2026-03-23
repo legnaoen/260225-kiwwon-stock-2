@@ -359,6 +359,25 @@ ipcMain.handle('maiis:run-portfolio-review', async () => {
     }
 })
 
+ipcMain.handle('maiis:run-pipeline-manual', async (_event, pipelineId: string) => {
+    try {
+        console.log(`[Main] Manual pipeline trigger: ${pipelineId}`)
+        switch (pipelineId) {
+            case 'PRE_MARKET':    await schedulerService.runPreMarketAnalysis(); break
+            case 'AM_EXECUTION':  await schedulerService.runPendingExecution(); break
+            case 'MORNING':       await schedulerService.runMorningPipeline(); break
+            case 'INTRADAY':      await schedulerService.runIntradayReview(); break
+            case 'EVENING':       await schedulerService.runEveningPipeline(); break
+            case 'CLOSING':       await schedulerService.runClosingReview(); break
+            default: return { success: false, error: `Unknown pipeline: ${pipelineId}` }
+        }
+        return { success: true }
+    } catch (error: any) {
+        console.error(`[Main] Manual pipeline ${pipelineId} error:`, error)
+        return { success: false, error: error.message }
+    }
+})
+
 ipcMain.handle('maiis:get-portfolio-tracker', async () => {
     try {
         const db = DatabaseService.getInstance()
@@ -409,7 +428,10 @@ ipcMain.handle('pm:get-review-schedule', async () => {
 ipcMain.handle('pm:save-review-schedule', async (_event, schedule) => {
     try {
         const { StrategyProfileService } = await import('./services/StrategyProfileService')
+        const { SchedulerService } = await import('./services/SchedulerService')
         StrategyProfileService.getInstance().saveReviewSchedule(schedule)
+        // 설정이 저장되면 백그라운드 스케줄러(cron) 즉각 리셋 및 재시동
+        SchedulerService.getInstance().initSchedules()
         return { success: true }
     } catch (error: any) { return { success: false, error: error.message } }
 })
@@ -427,18 +449,18 @@ ipcMain.on('chart-render-complete', (_event, code) => {
 })
 
 // ─── Pipeline Monitor IPC ─────────────────────────────────────────
-ipcMain.handle('pipeline:get-latest-runs', () => {
-    const { PipelineLogger } = require('./services/PipelineLogger')
+ipcMain.handle('pipeline:get-latest-runs', async () => {
+    const { PipelineLogger } = await import('./services/PipelineLogger')
     return PipelineLogger.getInstance().getLatestRuns()
 })
 
-ipcMain.handle('pipeline:get-run-detail', (_event, runId: string) => {
-    const { PipelineLogger } = require('./services/PipelineLogger')
+ipcMain.handle('pipeline:get-run-detail', async (_event, runId: string) => {
+    const { PipelineLogger } = await import('./services/PipelineLogger')
     return PipelineLogger.getInstance().getRunDetail(runId)
 })
 
-ipcMain.handle('pipeline:get-all-runs', (_event, date?: string) => {
-    const { PipelineLogger } = require('./services/PipelineLogger')
+ipcMain.handle('pipeline:get-all-runs', async (_event, date?: string) => {
+    const { PipelineLogger } = await import('./services/PipelineLogger')
     return PipelineLogger.getInstance().getAllRuns(date)
 })
 

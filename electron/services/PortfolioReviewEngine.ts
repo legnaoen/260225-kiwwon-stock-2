@@ -46,11 +46,54 @@ export class PortfolioReviewEngine {
         const aiReviews: HardRuleResult[] = []
 
         for (const item of active) {
-            if ((item.entry_shares || 0) <= 0) continue // 가상 매수 미확정 종목 skip
-
-            const profile = this.profileService.getProfile(item.strategy || 'SWING')
+            const hasShares = (item.entry_shares || 0) > 0
             const profitRate = item.profit_rate || 0
             const daysHeld = item.days_held || 0
+
+            // ─── 0. 0주 보유(미체결/관심) 종목 TTL 및 가격 이탈 검증 ───
+            if (!hasShares) {
+                // 1) 생명주기(TTL) 만료 확인 (편입 후 3일 초과)
+                const createdDate = item.created_at ? new Date(item.created_at) : new Date()
+                const daysSinceCreation = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24))
+                if (daysSinceCreation > 3) {
+                    forceSells.push({
+                        action: 'FORCE_SELL',
+                        reason: `편입 후 3일 경과 미체결 (타이밍 만료)`,
+                        ruleType: 'HOLD_LIMIT',
+                        item,
+                        profitRate: 0,
+                    })
+                    continue
+                }
+
+                // 2) 극단적 가격 이탈 확인 (목표가/손절가 터치 시 투자 시나리오 무효화)
+                const currentPrice = item.current_price || 0
+                if (currentPrice > 0) {
+                    if (item.target_price > 0 && currentPrice >= item.target_price * 0.98) {
+                        forceSells.push({
+                            action: 'FORCE_SELL',
+                            reason: `목표가 도달/근접으로 인한 편입 취소`,
+                            ruleType: 'TAKE_PROFIT',
+                            item,
+                            profitRate: 0,
+                        })
+                        continue
+                    }
+                    if (item.stop_loss_price > 0 && currentPrice <= item.stop_loss_price) {
+                        forceSells.push({
+                            action: 'FORCE_SELL',
+                            reason: `손절가 이탈로 인한 편입 취소`,
+                            ruleType: 'STOP_LOSS',
+                            item,
+                            profitRate: 0,
+                        })
+                        continue
+                    }
+                }
+                continue // 이하 일반 하드룰은 건너뜀
+            }
+
+            const profile = this.profileService.getProfile(item.strategy || 'SWING')
 
             // ─── 1. 비상 손절 (모든 전략, 최우선) ───
             if (profitRate <= profile.hardStopLoss) {
@@ -154,6 +197,24 @@ export class PortfolioReviewEngine {
         for (const result of forceSells) {
             const item = result.item
             const sellPrice = item.current_price || 0
+
+            if ((item.entry_shares || 0) <= 0) {
+                // 0주 종목 (가비지 컬렉터 대상) 즉시 DROP
+                this.db.closePortfolioItem(item.stock_code, sellPrice, today)
+                this.db.getDb().prepare("UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ? WHERE stock_code = ?")
+                    .run(`[자동 파기] ${result.reason}`, new Date().toISOString(), item.stock_code)
+                executed++
+
+                const log = `[가비지 컬렉터] ${item.stock_name}(${item.stock_code}) ${result.reason} → 관리 제외`
+                console.log(log)
+                eventBus.emit(SystemEvent.AUTO_TRADE_LOG, {
+                    time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+                    message: log,
+                    level: 'WARNING',
+                })
+                continue
+            }
+
             if (sellPrice <= 0) continue
 
             // VPE 매도
@@ -296,8 +357,37 @@ export class PortfolioReviewEngine {
                     const priceData = await kiwoom.getCurrentPrice(item.stock_code)
                     const rawPrice = priceData?.cur_prc || priceData?.stck_prpr || priceData?.Body?.cur_prc || 0
                     const openPrice = Math.abs(Number(rawPrice))
+                    const targetPrice = item.target_price || 0
+                    const stopPrice = item.stop_loss_price || 0
 
                     if (openPrice > 0) {
+                        // 가격 기반의 위험 방어벽 (추격매수, 폭락장 매수 억제)
+                        let cancelReason = ''
+                        if (targetPrice > 0 && openPrice >= targetPrice * 0.97) {
+                            cancelReason = '목표가에 너무 근접(여력 3% 미만)'
+                        } else if (stopPrice > 0 && openPrice <= stopPrice) {
+                            cancelReason = '안전 마진 붕괴(손절가 하회)'
+                        } else if (targetPrice > 0 && openPrice > targetPrice) {
+                            cancelReason = '이미 목표가 돌파'
+                        }
+
+                        if (cancelReason) {
+                            this.db.getDb().prepare(`
+                                UPDATE maiis_portfolio 
+                                SET status = 'DROPPED', entry_pending = 0, last_signal_reason = ?, updated_at = ?
+                                WHERE stock_code = ?
+                            `).run(`예약 매수 취소: ${cancelReason}`, new Date().toISOString(), item.stock_code)
+                            
+                            const logMsg = `[매수취소] ${item.stock_name}(${item.stock_code}) - ${cancelReason} (시가: ₩${openPrice.toLocaleString()})`
+                            console.log(logMsg)
+                            eventBus.emit(SystemEvent.AUTO_TRADE_LOG, {
+                                time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+                                message: logMsg,
+                                level: 'WARNING',
+                            })
+                            continue
+                        }
+
                         const result = this.vpe.confirmPendingEntry(item.stock_code, openPrice)
                         if (result.success) {
                             this.db.getDb().prepare(`

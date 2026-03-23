@@ -106,7 +106,7 @@ export class PortfolioManagerService {
             }
 
             // 7. 포트폴리오 상태 업데이트
-            const results = this.applyDecisions(decisions)
+            const results = await this.applyDecisions(decisions)
 
             console.log(`[PortfolioManager] === PM AI Review 완료: ${results.updated}건 갱신, ${results.newEntries}건 신규 ===`)
             
@@ -246,11 +246,11 @@ ${candidateSummary}
     }
 
     /**
-     * AI 판단 결과를 DB에 반영
+     * AI 판단 결과를 DB에 반영 (키움 API로 현재가 조회 연동)
      */
-    private applyDecisions(decisions: any[]): {
+    private async applyDecisions(decisions: any[]): Promise<{
         updated: number, newEntries: number, buySignals: number, sellSignals: number
-    } {
+    }> {
         let updated = 0, newEntries = 0, buySignals = 0, sellSignals = 0
         const vpe = VirtualPortfolioEngine.getInstance()
         const isMarketOpen = vpe.isMarketOpen()
@@ -280,7 +280,17 @@ ${candidateSummary}
                     newStatus = 'HOLDING'
                 } else {
                     // 신규 매수
-                    const price = decision.current_price || decision.entry_price || 0
+                    let price = decision.current_price || decision.entry_price || 0
+                    if (price <= 0) {
+                        try {
+                            const { KiwoomService } = await import('./KiwoomService')
+                            const pData = await KiwoomService.getInstance().getCurrentPrice(decision.stock_code)
+                            const rawPrice = pData?.cur_prc || pData?.stck_prpr || pData?.Body?.cur_prc || 0
+                            price = Math.abs(Number(rawPrice))
+                        } catch (e) {
+                            console.warn(`[PM] 가격 조회 실패: ${decision.stock_code}`)
+                        }
+                    }
                     const buyResult = vpe.executeBuy(decision.stock_code, decision.stock_name, price, isMarketOpen)
 
                     if (buyResult.success) {
@@ -307,7 +317,15 @@ ${candidateSummary}
             } else if (action === 'SELL') {
                 sellSignals++
                 if (existing && existing.entry_shares > 0) {
-                    const sellPrice = decision.current_price || existing.current_price || 0
+                    let sellPrice = decision.current_price || existing.current_price || 0
+                    if (sellPrice <= 0) {
+                        try {
+                            const { KiwoomService } = await import('./KiwoomService')
+                            const pData = await KiwoomService.getInstance().getCurrentPrice(decision.stock_code)
+                            const rawPrice = pData?.cur_prc || pData?.stck_prpr || pData?.Body?.cur_prc || 0
+                            sellPrice = Math.abs(Number(rawPrice))
+                        } catch (e) { }
+                    }
                     if (sellPrice > 0) {
                         const sellResult = vpe.executeSell(decision.stock_code, sellPrice)
                         if (sellResult.success) {

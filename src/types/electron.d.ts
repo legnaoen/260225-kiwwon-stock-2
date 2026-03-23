@@ -147,6 +147,7 @@ export interface IElectronAPI {
     getLatestPipelineRuns: () => Promise<Record<string, any>>
     getPipelineRunDetail: (runId: string) => Promise<any>
     getAllPipelineRuns: (date?: string) => Promise<any[]>
+    runPipelineManual: (pipelineId: string) => Promise<{ success: boolean, error?: string }>
 }
 
 declare global {

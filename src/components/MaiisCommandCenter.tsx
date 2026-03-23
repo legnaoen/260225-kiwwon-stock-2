@@ -8,61 +8,87 @@ function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-/**
- * 참고 이미지 스타일의 멀티 라인 센티먼트 차트
- * sentimentData: number[] (0~1 범위의 sentiment_score 배열, 최신이 마지막)
- * labels: string[] (각 데이터 포인트의 날짜 라벨)
- */
 const SentimentTrendChart = ({ sentimentData, labels }: { sentimentData: number[], labels: string[] }) => {
-    const W = 240, H = 100, PAD_X = 30, PAD_Y = 15;
+    // ... 생략 (기존 컴포넌트 유지 필요 시 주석 후 생략, 혹은 그대로 유지)
+    return null; // 사용 안함
+};
+
+/**
+ * 일별 마켓 센티먼트 캔들 차트 (OHLC)
+ */
+const SentimentCandleChart = ({ candles }: { candles: { date: string, open: number, high: number, low: number, close: number, timings: any[] }[] }) => {
+    const W = 280, H = 100, PAD_X = 20, PAD_Y = 15;
     const chartW = W - PAD_X * 2;
     const chartH = H - PAD_Y * 2;
-    const n = sentimentData.length;
+    const n = candles.length;
+    
     if (n === 0) return <div className="flex items-center justify-center h-full text-xs text-muted-foreground">데이터 수집 중...</div>;
 
+    // 0 ~ 1 범위 기준
     const toX = (i: number) => PAD_X + (i / Math.max(n - 1, 1)) * chartW;
     const toY = (v: number) => PAD_Y + chartH - (v * chartH);
 
-    const points = sentimentData.map((v, i) => `${toX(i)},${toY(v)}`);
-    const lineStr = points.join(' ');
-    const areaStr = `${toX(0)},${toY(0)} ${lineStr} ${toX(n - 1)},${H - PAD_Y} ${toX(0)},${H - PAD_Y}`;
-    
-    // 0.5 기준선
     const midY = toY(0.5);
+    const bodyW = Math.max(3, Math.min(12, (chartW / Math.max(n, 1)) * 0.5));
 
     return (
         <svg className="w-full h-full" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-            <defs>
-                <linearGradient id="sentGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
-                    <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.02" />
-                </linearGradient>
-            </defs>
-            {/* 배경 그리드 */}
+            {/* 위험/과열 구간 배경색 */}
+            <rect x="0" y={toY(1.0)} width={W} height={toY(0.8) - toY(1.0)} fill="#ef4444" fillOpacity="0.03" />
+            <rect x="0" y={toY(0.4)} width={W} height={toY(0.0) - toY(0.4)} fill="#3b82f6" fillOpacity="0.03" />
+
+            {/* 수평선들 */}
             <line x1={PAD_X} y1={midY} x2={W - PAD_X} y2={midY} stroke="currentColor" strokeOpacity="0.1" strokeDasharray="3,3" />
-            <text x={PAD_X - 4} y={toY(1) + 4} fontSize="7" fill="currentColor" fillOpacity="0.3" textAnchor="end">1.0</text>
-            <text x={PAD_X - 4} y={midY + 2} fontSize="7" fill="currentColor" fillOpacity="0.3" textAnchor="end">0.5</text>
-            <text x={PAD_X - 4} y={toY(0) + 4} fontSize="7" fill="currentColor" fillOpacity="0.3" textAnchor="end">0.0</text>
-            {/* X축 라벨 */}
-            {labels.map((label, i) => (
-                <text key={i} x={toX(i)} y={H - 2} fontSize="6" fill="currentColor" fillOpacity="0.35" textAnchor="middle">{label}</text>
-            ))}
-            {/* 영역 + 라인 */}
-            <polygon points={areaStr} fill="url(#sentGrad)" />
-            <polyline points={lineStr} fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-            {/* 데이터 포인트 */}
-            {sentimentData.map((v, i) => (
-                <circle key={i} cx={toX(i)} cy={toY(v)} r="3" fill="#3b82f6" stroke="white" strokeWidth="1.5" />
-            ))}
-            {/* 최신 값 라벨 */}
-            {n > 0 && (
-                <text x={toX(n - 1) + 6} y={toY(sentimentData[n - 1]) + 3} fontSize="8" fontWeight="bold" fill="#3b82f6">
-                    {sentimentData[n - 1]?.toFixed(2)}
-                </text>
-            )}
+            <text x={PAD_X - 4} y={toY(1) + 3} fontSize="6.5" fill="currentColor" fillOpacity="0.4" textAnchor="end" fontWeight="500">1.0</text>
+            <text x={PAD_X - 4} y={midY + 2} fontSize="6.5" fill="currentColor" fillOpacity="0.4" textAnchor="end" fontWeight="500">0.5</text>
+            <text x={PAD_X - 4} y={toY(0) + 2} fontSize="6.5" fill="currentColor" fillOpacity="0.4" textAnchor="end" fontWeight="500">0.0</text>
+
+            {/* X축 */}
+            <line x1={PAD_X} y1={H - PAD_Y} x2={W - PAD_X} y2={H - PAD_Y} stroke="currentColor" strokeOpacity="0.15" />
+            
+            {candles.map((c, i) => {
+                const cx = toX(i);
+                // 상승(빨강) vs 하락(파랑)
+                const isUp = c.close >= c.open;
+                const color = isUp ? "#ef4444" : "#3b82f6";
+                
+                const topY = toY(Math.max(c.open, c.close));
+                const botY = toY(Math.min(c.open, c.close));
+                const highY = toY(c.high);
+                const lowY = toY(c.low);
+                
+                // 음봉/양봉 바디(몸통)가 너무 작으면 1px 선으로
+                const bodyH = Math.max(1, botY - topY);
+
+                return (
+                    <g key={`candle-${i}`} className="group cursor-default">
+                        {/* Shadow (위/아래 꼬리) */}
+                        <line x1={cx} y1={highY} x2={cx} y2={lowY} stroke={color} strokeWidth="1.2" opacity="0.8" />
+                        
+                        {/* Body (몸통) */}
+                        <rect x={cx - bodyW / 2} y={topY} width={bodyW} height={bodyH} fill={color} stroke={color} strokeWidth="0.5" />
+                        
+                        {/* X축 날짜 */}
+                        <text x={cx} y={H - 2} fontSize="6.5" fill="currentColor" fillOpacity="0.5" textAnchor="middle" fontWeight="500">
+                            {c.date}
+                        </text>
+
+                        {/* 값 라벨 (가장 마지막 날짜만 표시하거나, Hover 시 표시) */}
+                        {i === n - 1 && (
+                            <text x={cx + bodyW / 2 + 4} y={toY(c.close) + 3} fontSize="7" fontWeight="bold" fill={color}>
+                                {c.close.toFixed(2)}
+                            </text>
+                        )}
+                        
+                        {/* 투박한 SVG 타이틀 넘버링 (툴팁 대체) */}
+                        <title>{`${c.date} 센티먼트\n시초: ${c.open.toFixed(2)}\n고점: ${c.high.toFixed(2)}\n저점: ${c.low.toFixed(2)}\n마감: ${c.close.toFixed(2)}\n\n[타임라인]\n${c.timings.map((t:any) => t.time + ': ' + t.score.toFixed(2)).join('\n')}`}</title>
+                    </g>
+                )
+            })}
         </svg>
-    );
-};
+    )
+}
+
 
 /** 네러티브 페이지의 Leading Keywords 스타일 멀티라인 트렌드 차트 */
 const TREND_COLORS = ['#ef4444', '#3b82f6', '#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#f97316'];
@@ -118,8 +144,11 @@ const useUpcomingPipelineSchedules = (count: number = 2) => {
 
     const computeNext = useCallback(async () => {
         try {
-            const aiSettings = await window.electronAPI.getAiScheduleSettings();
-            const pmSettings = await window.electronAPI.getReviewSchedule();
+            const aiRes = await window.electronAPI.getAiScheduleSettings();
+            const pmRes = await window.electronAPI.getReviewSchedule();
+            
+            const aiSettings = aiRes?.data || {};
+            const pmSettings = pmRes?.data || {};
             
             const schedules = [];
             if (aiSettings?.enabled !== false) {
@@ -357,7 +386,20 @@ const PipelineMonitorModal = ({ onClose }: { onClose: () => void }) => {
             md += `\n`;
         });
 
-        navigator.clipboard.writeText(md);
+        // Electron에서 navigator.clipboard가 동작하지 않을 수 있으므로 fallback 사용
+        try {
+            const textarea = document.createElement('textarea');
+            textarea.value = md;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+        } catch {
+            // 최후 수단으로 navigator.clipboard 시도
+            navigator.clipboard?.writeText(md);
+        }
         alert('AI 에이전트와의 디버깅용으로 최적화된 마크다운 텍스트가 클립보드에 복사되었습니다.\n대화창에 바로 붙여넣어 논의를 시작하세요.');
     };
 
@@ -380,6 +422,54 @@ const PipelineMonitorModal = ({ onClose }: { onClose: () => void }) => {
                 <div className="flex flex-1 overflow-hidden">
                     {/* Left Panel: List */}
                     <div className="w-64 border-r border-border bg-muted/10 overflow-y-auto p-4 flex flex-col gap-2">
+                        {/* Manual Pipeline Trigger */}
+                        <div className="mb-2">
+                            <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                <Sparkles size={11} /> 수동 실행
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                {([
+                                    { id: 'PRE_MARKET', label: 'PRE_MARKET', desc: '매크로+서브+마스터+PM', icon: '🌅' },
+                                    { id: 'AM_EXECUTION', label: 'AM_EXEC', desc: '예약 매수 확정', icon: '💸' },
+                                    { id: 'MORNING', label: 'MORNING', desc: '급등주+마스터+PM', icon: '☀️' },
+                                    { id: 'INTRADAY', label: 'INTRADAY', desc: '하드룰 체크', icon: '📊' },
+                                    { id: 'EVENING', label: 'EVENING', desc: '장마감+마스터+PM', icon: '🌙' },
+                                    { id: 'CLOSING', label: 'CLOSING', desc: 'NAV 스냅샷', icon: '📝' },
+                                ] as const).map(pipe => {
+                                    const isRunning = runs.some(r => r.pipeline === pipe.id && r.status === 'RUNNING');
+                                    return (
+                                        <button
+                                            key={pipe.id}
+                                            disabled={isRunning}
+                                            onClick={async () => {
+                                                if (!confirm(`${pipe.label} 파이프라인을 수동 실행합니다.\n진행하시겠습니까?`)) return;
+                                                try {
+                                                    await (window as any).electronAPI.runPipelineManual(pipe.id);
+                                                    // 실행 후 목록 새로고침
+                                                    setTimeout(async () => {
+                                                        const fresh = await (window as any).electronAPI.getLatestPipelineRuns();
+                                                        if (fresh) setRuns(Object.values(fresh).flat().sort((a: any, b: any) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()));
+                                                    }, 2000);
+                                                } catch (e) { console.error(e); }
+                                            }}
+                                            className={cn(
+                                                "flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-semibold transition-all border",
+                                                isRunning
+                                                    ? "bg-blue-500/10 border-blue-500/30 text-blue-500 cursor-not-allowed"
+                                                    : "bg-background border-border hover:bg-primary/10 hover:border-primary/40 hover:text-primary text-foreground/80"
+                                            )}
+                                        >
+                                            {isRunning ? <Loader2 size={12} className="animate-spin" /> : <span className="text-[11px]">{pipe.icon}</span>}
+                                            <span className="flex-1 text-left">{pipe.label}</span>
+                                            {!isRunning && <Activity size={10} className="opacity-40" />}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="h-px bg-border my-1" />
+
                         {[...upcomingRuns].reverse().map(run => {
                             const isUpcoming = true;
                             const Icon = Clock;
@@ -640,15 +730,12 @@ export default function MaiisCommandCenter() {
 
                     {/* Middle Row: Charts & Summary Panels (3 Columns) */}
                     <div className="grid grid-cols-3 gap-6">
-                        {/* 1. 마켓 센티먼트 - 멀티라인 차트 */}
+                        {/* 1. 마켓 센티먼트 - 캔들스틱 차트 */}
                         <div className="flex flex-col gap-2">
-                            <h2 className="text-sm font-bold flex items-center gap-1.5 h-[26px]"><Activity size={16} className="text-primary"/> 마켓 센티먼트</h2>
+                            <h2 className="text-sm font-bold flex items-center gap-1.5 h-[26px]"><Activity size={16} className="text-primary"/> 마켓 센티먼트 캔들</h2>
                             <div className="bg-card border border-border rounded-xl p-4 h-[160px] shadow-sm flex flex-col overflow-hidden">
-                                <div className="flex-1 w-full">
-                                    <SentimentTrendChart 
-                                        sentimentData={data.sentimentChart || []} 
-                                        labels={(data.sentimentLabels || data.sentimentChart?.map((_: any, i: number) => `D-${(data.sentimentChart?.length || 1) - 1 - i}`) || [])}
-                                    />
+                                <div className="flex-1 w-full pt-1">
+                                    <SentimentCandleChart candles={data.sentimentCandles || []} />
                                 </div>
                             </div>
                         </div>
@@ -896,6 +983,23 @@ export default function MaiisCommandCenter() {
                                                         {item.last_signal_reason}
                                                     </p>
                                                 )}
+                                                {item.last_reviewed_at && (() => {
+                                                    const diff = Date.now() - new Date(item.last_reviewed_at).getTime();
+                                                    const mins = Math.floor(diff / 60000);
+                                                    const isRecentReview = mins < 60;
+                                                    const isNewlyCreated = item.created_at ? (Date.now() - new Date(item.created_at).getTime()) < 60000 * 60 : false;
+                                                    const timeText = mins < 1 ? '방금' : mins < 60 ? `${mins}분 전` : mins < 1440
+                                                        ? new Date(item.last_reviewed_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+                                                        : new Date(item.last_reviewed_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) + ' ' + new Date(item.last_reviewed_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                                                    return (
+                                                        <div className="ml-[22px] flex items-center gap-1.5 mt-0.5">
+                                                            <span className={cn("text-[10px] font-medium", isRecentReview ? "text-primary/80" : "text-muted-foreground/60")}>
+                                                                🕐 {timeText} 갱신
+                                                            </span>
+                                                            {isNewlyCreated && <span className="text-[9px] font-black px-1.5 py-0 rounded bg-primary/15 text-primary">NEW</span>}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         );
                                     }) : (

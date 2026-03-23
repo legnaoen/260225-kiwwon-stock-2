@@ -235,6 +235,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getLatestPipelineRuns: () => ipcRenderer.invoke('pipeline:get-latest-runs'),
     getPipelineRunDetail: (runId: string) => ipcRenderer.invoke('pipeline:get-run-detail', runId),
     getAllPipelineRuns: (date?: string) => ipcRenderer.invoke('pipeline:get-all-runs', date),
+    runPipelineManual: (pipelineId: string) => ipcRenderer.invoke('maiis:run-pipeline-manual', pipelineId),
     
     onSystemError: (callback: (error: { message: string, code: string, time: string }) => void) => {
         const listener = (_event: any, error: any) => callback(error)

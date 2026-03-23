@@ -58,109 +58,15 @@ export class SchedulerService {
         }, { timezone: 'Asia/Seoul' })
 
         // 1-5. 예약 매수(PENDING_ENTRY) 확정 체결 스케줄러 (09:15 고정)
-        const pendingExecutionJob = cron.schedule('15 09 * * 1-5', async () => {
-            const log = PipelineLogger.getInstance()
-            const runId = log.startPipeline('AM_EXECUTION')
-            console.log('[SchedulerService] ═══ 오전 예약 매수(PENDING) 확정 연산 시작 (09:15) ═══')
-            
-            const p0 = log.startPhase(runId, '예약 주문 체결', 'PortfolioReviewEngine', 'processPendingOrders')
-            try {
-                const { PortfolioReviewEngine } = await import('./PortfolioReviewEngine')
-                const processed = await PortfolioReviewEngine.getInstance().processPendingOrders()
-                log.endPhase(runId, p0, 'SUCCESS', `💸 예약 매수 체결 완료: ${processed}건 확정`)
-            } catch (e: any) {
-                log.endPhase(runId, p0, 'FAILED', undefined, e.message)
-            }
-            log.endPipeline(runId)
-        }, { timezone: 'Asia/Seoul' })
+        const pendingExecutionJob = cron.schedule('15 09 * * 1-5', () => this.runPendingExecution(), { timezone: 'Asia/Seoul' })
 
         // 2. 오전 급등주/주도주 분석 + 마스터 AI 장초반 + PM 리뷰 (Step 4)
         const [mHour, mMinute] = settings.morningTime.split(':')
-        const morningJob = cron.schedule(`${mMinute} ${mHour} * * 1-5`, async () => {
-            const log = PipelineLogger.getInstance()
-            const runId = log.startPipeline('MORNING')
-            console.log(`[SchedulerService] ═══ MORNING 파이프라인 시작 (${settings.morningTime}) ═══`)
-            
-            const p0 = log.startPhase(runId, '급등주 분석', 'RisingStockAnalysis', 'analyzeBatchAndSave')
-            try {
-                const res = await this.runManualBatchAnalysis('MORNING') as any
-                if (res?.success === false) {
-                    log.endPhase(runId, p0, 'FAILED', undefined, res.error)
-                } else {
-                    log.endPhase(runId, p0, 'SUCCESS', '당일 장초반 주도주 및 테마 분석 완료')
-                }
-            } catch (e: any) { log.endPhase(runId, p0, 'FAILED', undefined, e.message) }
-            
-            const p1 = log.startPhase(runId, '마스터 AI 0930', 'MasterAiService', 'generateWorldState')
-            try {
-                const { MasterAiService } = await import('./MasterAiService')
-                const masterRes = await MasterAiService.getInstance().generateWorldState('0930')
-                if (masterRes.success && masterRes.data) {
-                    const summary = masterRes.data.market_thesis || '마스터 AI 컨센서스 생성 완료';
-                    log.endPhase(runId, p1, 'SUCCESS', `🧠 [마스터 AI 대전제]\n${summary}\n(센티먼트: ${masterRes.data.sentiment_score})`)
-                } else {
-                    log.endPhase(runId, p1, 'FAILED', undefined, masterRes.error)
-                }
-            } catch (e: any) { log.endPhase(runId, p1, 'FAILED', undefined, e.message) }
-
-            const p2 = log.startPhase(runId, 'PM AI 리뷰', 'PortfolioManagerService', 'runPortfolioReview')
-            try {
-                const { PortfolioManagerService } = await import('./PortfolioManagerService')
-                const pmRes = await PortfolioManagerService.getInstance().runPortfolioReview()
-                if (pmRes.success && pmRes.data) {
-                    log.endPhase(runId, p2, 'SUCCESS', `📊 [포트폴리오 리뷰 반영 완료]\n갱신: ${pmRes.data.updated}건, 신규: ${pmRes.data.newEntries}건\nBUY 판단: ${pmRes.data.buySignals}건, SELL 판단: ${pmRes.data.sellSignals}건`)
-                } else {
-                    log.endPhase(runId, p2, 'FAILED', undefined, pmRes.error)
-                }
-            } catch (e: any) { log.endPhase(runId, p2, 'FAILED', undefined, e.message) }
-            
-            log.endPipeline(runId)
-            console.log('[SchedulerService] ═══ MORNING 파이프라인 완료 ═══')
-        }, { timezone: 'Asia/Seoul' })
+        const morningJob = cron.schedule(`${mMinute} ${mHour} * * 1-5`, () => this.runMorningPipeline(), { timezone: 'Asia/Seoul' })
 
         // 3. 장 마감 급등주 분석 + 마스터 AI 장마감 + PM 리뷰 (Step 6)
         const [eHour, eMinute] = settings.eveningTime.split(':')
-        const eveningJob = cron.schedule(`${eMinute} ${eHour} * * 1-5`, async () => {
-            const log = PipelineLogger.getInstance()
-            const runId = log.startPipeline('EVENING')
-            console.log(`[SchedulerService] ═══ EVENING 파이프라인 시작 (${settings.eveningTime}) ═══`)
-            
-            const p0 = log.startPhase(runId, '급등주 분석', 'RisingStockAnalysis', 'analyzeBatchAndSave')
-            try {
-                const res = await this.runManualBatchAnalysis('EVENING') as any
-                if (res?.success === false) {
-                    log.endPhase(runId, p0, 'FAILED', undefined, res.error)
-                } else {
-                    log.endPhase(runId, p0, 'SUCCESS', '당일 장마감 주도주 및 테마 분석 완료')
-                }
-            } catch (e: any) { log.endPhase(runId, p0, 'FAILED', undefined, e.message) }
-            
-            const p1 = log.startPhase(runId, '마스터 AI 1530', 'MasterAiService', 'generateWorldState')
-            try {
-                const { MasterAiService } = await import('./MasterAiService')
-                const masterRes = await MasterAiService.getInstance().generateWorldState('1530')
-                if (masterRes.success && masterRes.data) {
-                    const summary = masterRes.data.market_thesis || '마스터 AI 컨센서스 생성 완료';
-                    log.endPhase(runId, p1, 'SUCCESS', `🧠 [마스터 AI 대전제]\n${summary}\n(센티먼트: ${masterRes.data.sentiment_score})`)
-                } else {
-                    log.endPhase(runId, p1, 'FAILED', undefined, masterRes.error)
-                }
-            } catch (e: any) { log.endPhase(runId, p1, 'FAILED', undefined, e.message) }
-
-            const p2 = log.startPhase(runId, 'PM AI 리뷰', 'PortfolioManagerService', 'runPortfolioReview')
-            try {
-                const { PortfolioManagerService } = await import('./PortfolioManagerService')
-                const pmRes = await PortfolioManagerService.getInstance().runPortfolioReview()
-                if (pmRes.success && pmRes.data) {
-                    log.endPhase(runId, p2, 'SUCCESS', `📊 [포트폴리오 리뷰 반영 완료]\n갱신: ${pmRes.data.updated}건, 신규: ${pmRes.data.newEntries}건\nBUY 판단: ${pmRes.data.buySignals}건, SELL 판단: ${pmRes.data.sellSignals}건`)
-                } else {
-                    log.endPhase(runId, p2, 'FAILED', undefined, pmRes.error)
-                }
-            } catch (e: any) { log.endPhase(runId, p2, 'FAILED', undefined, e.message) }
-            
-            log.endPipeline(runId)
-            console.log('[SchedulerService] ═══ EVENING 파이프라인 완료 ═══')
-        }, { timezone: 'Asia/Seoul' })
+        const eveningJob = cron.schedule(`${eMinute} ${eHour} * * 1-5`, () => this.runEveningPipeline(), { timezone: 'Asia/Seoul' })
 
         this.scheduledJobs.push(preMarketJob, pendingExecutionJob, morningJob, eveningJob)
 
@@ -198,82 +104,47 @@ export class SchedulerService {
         const reviewSchedule = StrategyProfileService.getInstance().getReviewSchedule()
         if (reviewSchedule.autoEnabled) {
             const [iHour, iMinute] = reviewSchedule.intradayTime.split(':')
-            const intradayJob = cron.schedule(`${iMinute} ${iHour} * * 1-5`, async () => {
-                const log = PipelineLogger.getInstance()
-                const runId = log.startPipeline('INTRADAY')
-                
-                const p0 = log.startPhase(runId, '현재가 갱신', 'PortfolioReviewEngine', 'refreshCurrentPrices')
-                try {
-                    const { PortfolioReviewEngine } = await import('./PortfolioReviewEngine')
-                    const engine = PortfolioReviewEngine.getInstance()
-                    const cnt = await engine.refreshCurrentPrices()
-                    log.endPhase(runId, p0, 'SUCCESS', `${cnt}건 갱신`)
-                    
-                    const p1 = log.startPhase(runId, '하드룰 체크', 'PortfolioReviewEngine', 'runReviewLoop')
-                    const result = await engine.runReviewLoop('INTRADAY')
-                    log.endPhase(runId, p1, 'SUCCESS', `강제청산 ${result.forceSellCount}건, AI재심사 ${result.aiReviewCount}건`)
-                } catch (e: any) {
-                    log.endPhase(runId, p0, 'FAILED', undefined, e.message)
-                }
-                log.endPipeline(runId)
-            }, { timezone: 'Asia/Seoul' })
+            const intradayJob = cron.schedule(`${iMinute} ${iHour} * * 1-5`, () => this.runIntradayReview(), { timezone: 'Asia/Seoul' })
             this.scheduledJobs.push(intradayJob)
 
             // 7. PM CLOSING 최종 리뷰 + NAV 스냅샷 (Step 7: 16:00)
             const [cHour, cMinute] = reviewSchedule.closingTime.split(':')
-            const closingJob = cron.schedule(`${cMinute} ${cHour} * * 1-5`, async () => {
-                const log = PipelineLogger.getInstance()
-                const runId = log.startPipeline('CLOSING')
-
-                const p0 = log.startPhase(runId, '현재가 갱신', 'PortfolioReviewEngine', 'refreshCurrentPrices')
-                try {
-                    const { PortfolioReviewEngine } = await import('./PortfolioReviewEngine')
-                    const engine = PortfolioReviewEngine.getInstance()
-                    const cnt = await engine.refreshCurrentPrices()
-                    log.endPhase(runId, p0, 'SUCCESS', `${cnt}건 갱신`)
-                    
-                    const p1 = log.startPhase(runId, '하드룰 최종 체크', 'PortfolioReviewEngine', 'runReviewLoop')
-                    const result = await engine.runReviewLoop('CLOSING')
-                    log.endPhase(runId, p1, 'SUCCESS', `강제청산 ${result.forceSellCount}건`)
-                } catch (e: any) {
-                    log.endPhase(runId, p0, 'FAILED', undefined, e.message)
-                }
-
-                const p2 = log.startPhase(runId, 'NAV 스냅샷', 'VirtualPortfolioEngine', 'recordDailySnapshot')
-                try {
-                    const { VirtualPortfolioEngine } = await import('./VirtualPortfolioEngine')
-                    const { KiwoomService } = await import('./KiwoomService')
-                    const vpe = VirtualPortfolioEngine.getInstance()
-                    const db = DatabaseService.getInstance()
-                    const today = db.getKstDate().replace(/-/g, '')
-                    
-                    let kospiClose = 0
-                    try {
-                        const kospiData = await KiwoomService.getInstance().getCurrentPrice('001')
-                        kospiClose = Math.abs(Number(kospiData?.cur_prc || kospiData?.stck_prpr || 0))
-                    } catch (_) {}
-                    
-                    const active = db.getActivePortfolio()
-                    const closingPrices = new Map<string, number>()
-                    for (const item of active) {
-                        if (item.current_price && item.current_price > 0) {
-                            closingPrices.set(item.stock_code, item.current_price)
-                        }
-                    }
-                    vpe.recordDailySnapshot(closingPrices, kospiClose, today)
-                    log.endPhase(runId, p2, 'SUCCESS', `NAV 기록 (KOSPI=${kospiClose})`)
-                } catch (e: any) {
-                    log.endPhase(runId, p2, 'FAILED', undefined, e.message)
-                }
-                
-                log.endPipeline(runId)
-            }, { timezone: 'Asia/Seoul' })
+            const closingJob = cron.schedule(`${cMinute} ${cHour} * * 1-5`, () => this.runClosingReview(), { timezone: 'Asia/Seoul' })
             this.scheduledJobs.push(closingJob)
             
             console.log(`[SchedulerService] PM Review schedules: INTRADAY=${reviewSchedule.intradayTime}, CLOSING=${reviewSchedule.closingTime}`)
         }
 
+        // 8. 시스템 재기동 시 놓친 PENDING 가비지/주문 Catch-up
+        this.catchUpMissedOrders()
+
         console.log(`[SchedulerService] Automated analysis schedules (PRE: ${settings.preMarketTime}, AM: ${settings.morningTime}, PM: ${settings.eveningTime}, NEWS: ${newsSettings.reportTime}, YT: ${ytSettings.collectTime}) initialized.`)
+    }
+
+    /**
+     * Recovery Catch-up: 앱 구동 시 장중이라면 처리되지 못하고 쌓여있는 PENDING 주문을 파악해 즉결 처리합니다.
+     */
+    private async catchUpMissedOrders() {
+        try {
+            const { VirtualPortfolioEngine } = await import('./VirtualPortfolioEngine')
+            const vpe = VirtualPortfolioEngine.getInstance()
+            
+            // 장중일 때만 강제 처리 (비장중에는 예약 상태 유지)
+            if (vpe.isMarketOpen()) {
+                const db = DatabaseService.getInstance().getDb()
+                const pendingCount = db.prepare(`SELECT COUNT(*) as cnt FROM maiis_portfolio WHERE entry_pending = 1 AND status NOT IN ('CLOSED', 'DROPPED')`).get() as any
+                
+                if (pendingCount && pendingCount.cnt > 0) {
+                    console.log(`[SchedulerService] 🚀 Recovery Catch-up: ${pendingCount.cnt}건의 미체결 대기주문 발견. 처리 스케줄 편입...`)
+                    // 키움 API 연결 등의 시간을 위해 15초 뒤에 백그라운드로 실행
+                    setTimeout(() => {
+                        this.runPendingExecution()
+                    }, 15000)
+                }
+            }
+        } catch (e) {
+            console.error('[SchedulerService] Catch-up 복원 실패:', e)
+        }
     }
 
     private async runMarketNewsAnalysis() {
@@ -328,12 +199,11 @@ export class SchedulerService {
         const runId = log.startPipeline('PRE_MARKET')
         console.log('[SchedulerService] ═══ PRE_MARKET 전체 파이프라인 시작 ═══');
         
-        const p0 = log.startPhase(runId, '기초 데이터 수집', 'YahooFinanceService', 'updateGlobalMacroData')
+        const p0 = log.startPhase(runId, '기초 데이터 수집', 'MaiisMacroService', 'getDailyMacroSnapshot')
         try {
-            const { YahooFinanceService } = await import('./YahooFinanceService')
+            const { MaiisMacroService } = await import('./MaiisMacroService')
             const { YoutubeService } = await import('./YoutubeService')
-            const macro = YahooFinanceService.getInstance()
-            await macro.updateGlobalMacroData()
+            await MaiisMacroService.getInstance().getDailyMacroSnapshot()
             const youtube = YoutubeService.getInstance()
             const apiKey = store.get('youtube_api_key') as string;
             if (apiKey) { await youtube.collectLatestVideos(apiKey) }
@@ -395,8 +265,214 @@ export class SchedulerService {
             log.endPhase(runId, p3, 'FAILED', undefined, e.message)
         }
 
+        const p4 = log.startPhase(runId, '테마/키워드 랭킹 집계', 'MaiisRankingAggregator', 'runDailyAggregation')
+        try {
+            const { MaiisRankingAggregator } = await import('./MaiisRankingAggregator')
+            const aggResult = await MaiisRankingAggregator.getInstance().runDailyAggregation()
+            log.endPhase(runId, p4, 'SUCCESS', `📈 섹터 ${aggResult.themes?.length || 0}건, 키워드 ${aggResult.keywords?.length || 0}건 집계 완료`)
+        } catch (e: any) {
+            log.endPhase(runId, p4, 'FAILED', undefined, e.message)
+        }
+
         log.endPipeline(runId)
         console.log(`[SchedulerService] ═══ PRE_MARKET 파이프라인 완료 (${log.getRunDetail(runId)?.durationMs}ms) ═══`);
+    }
+
+    /**
+     * AM_EXECUTION: 예약 매수(PENDING_ENTRY) 확정 체결 (09:15)
+     */
+    public async runPendingExecution() {
+        const log = PipelineLogger.getInstance()
+        const runId = log.startPipeline('AM_EXECUTION')
+        console.log('[SchedulerService] ═══ 오전 예약 매수(PENDING) 확정 연산 시작 ═══')
+        
+        const p0 = log.startPhase(runId, '예약 주문 체결', 'PortfolioReviewEngine', 'processPendingOrders')
+        try {
+            const { PortfolioReviewEngine } = await import('./PortfolioReviewEngine')
+            const processed = await PortfolioReviewEngine.getInstance().processPendingOrders()
+            log.endPhase(runId, p0, 'SUCCESS', `💸 예약 매수 체결 완료: ${processed}건 확정`)
+        } catch (e: any) {
+            log.endPhase(runId, p0, 'FAILED', undefined, e.message)
+        }
+        log.endPipeline(runId)
+    }
+
+    /**
+     * MORNING: 급등주 분석 → 마스터 AI(0930) → PM 리뷰
+     */
+    public async runMorningPipeline() {
+        const log = PipelineLogger.getInstance()
+        const runId = log.startPipeline('MORNING')
+        console.log('[SchedulerService] ═══ MORNING 파이프라인 시작 ═══')
+        
+        const p0 = log.startPhase(runId, '급등주 분석', 'RisingStockAnalysis', 'analyzeBatchAndSave')
+        try {
+            const res = await this.runManualBatchAnalysis('MORNING') as any
+            if (res?.success === false) {
+                log.endPhase(runId, p0, 'FAILED', undefined, res.error)
+            } else {
+                log.endPhase(runId, p0, 'SUCCESS', '당일 장초반 주도주 및 테마 분석 완료')
+            }
+        } catch (e: any) { log.endPhase(runId, p0, 'FAILED', undefined, e.message) }
+        
+        const p1 = log.startPhase(runId, '마스터 AI 0930', 'MasterAiService', 'generateWorldState')
+        try {
+            const { MasterAiService } = await import('./MasterAiService')
+            const masterRes = await MasterAiService.getInstance().generateWorldState('0930')
+            if (masterRes.success && masterRes.data) {
+                const summary = masterRes.data.market_thesis || '마스터 AI 컨센서스 생성 완료';
+                log.endPhase(runId, p1, 'SUCCESS', `🧠 [마스터 AI 대전제]\n${summary}\n(센티먼트: ${masterRes.data.sentiment_score})`)
+            } else {
+                log.endPhase(runId, p1, 'FAILED', undefined, masterRes.error)
+            }
+        } catch (e: any) { log.endPhase(runId, p1, 'FAILED', undefined, e.message) }
+
+        const p2 = log.startPhase(runId, 'PM AI 리뷰', 'PortfolioManagerService', 'runPortfolioReview')
+        try {
+            const { PortfolioManagerService } = await import('./PortfolioManagerService')
+            const pmRes = await PortfolioManagerService.getInstance().runPortfolioReview()
+            if (pmRes.success && pmRes.data) {
+                log.endPhase(runId, p2, 'SUCCESS', `📊 [포트폴리오 리뷰 반영 완료]\n갱신: ${pmRes.data.updated}건, 신규: ${pmRes.data.newEntries}건\nBUY 판단: ${pmRes.data.buySignals}건, SELL 판단: ${pmRes.data.sellSignals}건`)
+            } else {
+                log.endPhase(runId, p2, 'FAILED', undefined, pmRes.error)
+            }
+        } catch (e: any) { log.endPhase(runId, p2, 'FAILED', undefined, e.message) }
+
+        const p3 = log.startPhase(runId, '테마/키워드 랭킹 집계', 'MaiisRankingAggregator', 'runDailyAggregation')
+        try {
+            const { MaiisRankingAggregator } = await import('./MaiisRankingAggregator')
+            const aggResult = await MaiisRankingAggregator.getInstance().runDailyAggregation()
+            log.endPhase(runId, p3, 'SUCCESS', `📈 섹터 ${aggResult.themes?.length || 0}건, 키워드 ${aggResult.keywords?.length || 0}건 집계 완료`)
+        } catch (e: any) { log.endPhase(runId, p3, 'FAILED', undefined, e.message) }
+        
+        log.endPipeline(runId)
+        console.log('[SchedulerService] ═══ MORNING 파이프라인 완료 ═══')
+    }
+
+    /**
+     * EVENING: 급등주 분석 → 마스터 AI(1530) → PM 리뷰
+     */
+    public async runEveningPipeline() {
+        const log = PipelineLogger.getInstance()
+        const runId = log.startPipeline('EVENING')
+        console.log('[SchedulerService] ═══ EVENING 파이프라인 시작 ═══')
+        
+        const p0 = log.startPhase(runId, '급등주 분석', 'RisingStockAnalysis', 'analyzeBatchAndSave')
+        try {
+            const res = await this.runManualBatchAnalysis('EVENING') as any
+            if (res?.success === false) {
+                log.endPhase(runId, p0, 'FAILED', undefined, res.error)
+            } else {
+                log.endPhase(runId, p0, 'SUCCESS', '당일 장마감 주도주 및 테마 분석 완료')
+            }
+        } catch (e: any) { log.endPhase(runId, p0, 'FAILED', undefined, e.message) }
+        
+        const p1 = log.startPhase(runId, '마스터 AI 1530', 'MasterAiService', 'generateWorldState')
+        try {
+            const { MasterAiService } = await import('./MasterAiService')
+            const masterRes = await MasterAiService.getInstance().generateWorldState('1530')
+            if (masterRes.success && masterRes.data) {
+                const summary = masterRes.data.market_thesis || '마스터 AI 컨센서스 생성 완료';
+                log.endPhase(runId, p1, 'SUCCESS', `🧠 [마스터 AI 대전제]\n${summary}\n(센티먼트: ${masterRes.data.sentiment_score})`)
+            } else {
+                log.endPhase(runId, p1, 'FAILED', undefined, masterRes.error)
+            }
+        } catch (e: any) { log.endPhase(runId, p1, 'FAILED', undefined, e.message) }
+
+        const p2 = log.startPhase(runId, 'PM AI 리뷰', 'PortfolioManagerService', 'runPortfolioReview')
+        try {
+            const { PortfolioManagerService } = await import('./PortfolioManagerService')
+            const pmRes = await PortfolioManagerService.getInstance().runPortfolioReview()
+            if (pmRes.success && pmRes.data) {
+                log.endPhase(runId, p2, 'SUCCESS', `📊 [포트폴리오 리뷰 반영 완료]\n갱신: ${pmRes.data.updated}건, 신규: ${pmRes.data.newEntries}건\nBUY 판단: ${pmRes.data.buySignals}건, SELL 판단: ${pmRes.data.sellSignals}건`)
+            } else {
+                log.endPhase(runId, p2, 'FAILED', undefined, pmRes.error)
+            }
+        } catch (e: any) { log.endPhase(runId, p2, 'FAILED', undefined, e.message) }
+
+        const p3 = log.startPhase(runId, '테마/키워드 랭킹 집계', 'MaiisRankingAggregator', 'runDailyAggregation')
+        try {
+            const { MaiisRankingAggregator } = await import('./MaiisRankingAggregator')
+            const aggResult = await MaiisRankingAggregator.getInstance().runDailyAggregation()
+            log.endPhase(runId, p3, 'SUCCESS', `📈 섹터 ${aggResult.themes?.length || 0}건, 키워드 ${aggResult.keywords?.length || 0}건 집계 완료`)
+        } catch (e: any) { log.endPhase(runId, p3, 'FAILED', undefined, e.message) }
+        
+        log.endPipeline(runId)
+        console.log('[SchedulerService] ═══ EVENING 파이프라인 완료 ═══')
+    }
+
+    /**
+     * INTRADAY: 현재가 갱신 → 하드룰 체크 (손절/익절/트레일링 스탑)
+     */
+    public async runIntradayReview() {
+        const log = PipelineLogger.getInstance()
+        const runId = log.startPipeline('INTRADAY')
+        
+        const p0 = log.startPhase(runId, '현재가 갱신', 'PortfolioReviewEngine', 'refreshCurrentPrices')
+        try {
+            const { PortfolioReviewEngine } = await import('./PortfolioReviewEngine')
+            const engine = PortfolioReviewEngine.getInstance()
+            const cnt = await engine.refreshCurrentPrices()
+            log.endPhase(runId, p0, 'SUCCESS', `${cnt}건 갱신`)
+            
+            const p1 = log.startPhase(runId, '하드룰 체크', 'PortfolioReviewEngine', 'runReviewLoop')
+            const result = await engine.runReviewLoop('INTRADAY')
+            log.endPhase(runId, p1, 'SUCCESS', `강제청산 ${result.forceSellCount}건, AI재심사 ${result.aiReviewCount}건`)
+        } catch (e: any) {
+            log.endPhase(runId, p0, 'FAILED', undefined, e.message)
+        }
+        log.endPipeline(runId)
+    }
+
+    /**
+     * CLOSING: 현재가 갱신 → 하드룰 최종 → NAV 일간 스냅샷
+     */
+    public async runClosingReview() {
+        const log = PipelineLogger.getInstance()
+        const runId = log.startPipeline('CLOSING')
+
+        const p0 = log.startPhase(runId, '현재가 갱신', 'PortfolioReviewEngine', 'refreshCurrentPrices')
+        try {
+            const { PortfolioReviewEngine } = await import('./PortfolioReviewEngine')
+            const engine = PortfolioReviewEngine.getInstance()
+            const cnt = await engine.refreshCurrentPrices()
+            log.endPhase(runId, p0, 'SUCCESS', `${cnt}건 갱신`)
+            
+            const p1 = log.startPhase(runId, '하드룰 최종 체크', 'PortfolioReviewEngine', 'runReviewLoop')
+            const result = await engine.runReviewLoop('CLOSING')
+            log.endPhase(runId, p1, 'SUCCESS', `강제청산 ${result.forceSellCount}건`)
+        } catch (e: any) {
+            log.endPhase(runId, p0, 'FAILED', undefined, e.message)
+        }
+
+        const p2 = log.startPhase(runId, 'NAV 스냅샷', 'VirtualPortfolioEngine', 'recordDailySnapshot')
+        try {
+            const { VirtualPortfolioEngine } = await import('./VirtualPortfolioEngine')
+            const { KiwoomService } = await import('./KiwoomService')
+            const vpe = VirtualPortfolioEngine.getInstance()
+            const db = DatabaseService.getInstance()
+            const today = db.getKstDate().replace(/-/g, '')
+            
+            let kospiClose = 0
+            try {
+                const kospiData = await KiwoomService.getInstance().getCurrentPrice('001')
+                kospiClose = Math.abs(Number(kospiData?.cur_prc || kospiData?.stck_prpr || 0))
+            } catch (_) {}
+            
+            const active = db.getActivePortfolio()
+            const closingPrices = new Map<string, number>()
+            for (const item of active) {
+                if (item.current_price && item.current_price > 0) {
+                    closingPrices.set(item.stock_code, item.current_price)
+                }
+            }
+            vpe.recordDailySnapshot(closingPrices, kospiClose, today)
+            log.endPhase(runId, p2, 'SUCCESS', `NAV 기록 (KOSPI=${kospiClose})`)
+        } catch (e: any) {
+            log.endPhase(runId, p2, 'FAILED', undefined, e.message)
+        }
+        
+        log.endPipeline(runId)
     }
 
     /**

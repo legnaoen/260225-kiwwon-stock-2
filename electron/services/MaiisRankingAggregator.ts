@@ -27,19 +27,22 @@ export class MaiisRankingAggregator {
      * 메인 취합 파이프라인. 3단계 모두 실행.
      */
     public async runDailyAggregation(targetDate?: string) {
-        // 날짜 형식 정규화: UI에서 '2026-03-20' 형태로 올 수 있으므로 DB 형식 'YYYYMMDD'로 통일
-        let date = targetDate || this.db.getKstDate();
-        date = date.replace(/-/g, ''); // '2026-03-20' -> '20260320'
-        console.log(`[MaiisRankingAggregator] ${date} 기준 상태 취합 파이프라인 시작...`);
+        // 날짜 형식 정규화: 
+        // - DB 저장용 (theme/keyword rankings): 'YYYYMMDD'
+        // - domain_insights 조회용: 'YYYY-MM-DD' (saveMaiisDomainInsight이 하이픈 형식으로 저장)
+        let rawDate = targetDate || this.db.getKstDate();
+        const dateCompact = rawDate.replace(/-/g, '');  // '20260323' 형식
+        const dateHyphen = dateCompact.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'); // '2026-03-23' 형식
+        console.log(`[MaiisRankingAggregator] ${dateCompact} 기준 상태 취합 파이프라인 시작... (insights 조회: ${dateHyphen})`);
 
-        const themeRes = await this.aggregateThemes(date);
-        const keywordRes = await this.aggregateKeywords(date);
-        const pickRes = await this.updateActivePicksProfit(date);
+        const themeRes = await this.aggregateThemes(dateCompact, dateHyphen);
+        const keywordRes = await this.aggregateKeywords(dateCompact, dateHyphen);
+        const pickRes = await this.updateActivePicksProfit(dateCompact);
 
-        console.log(`[MaiisRankingAggregator] ${date} 파이프라인 종료.`);
+        console.log(`[MaiisRankingAggregator] ${dateCompact} 파이프라인 종료.`);
         return {
-            themes_aggregated: themeRes,
-            keywords_extracted: keywordRes,
+            themes: themeRes,
+            keywords: keywordRes,
             picks_updated: pickRes
         };
     }
@@ -47,11 +50,14 @@ export class MaiisRankingAggregator {
     /**
      * 1. 테마 점수 병합 (Youtube + News + RisingStocks)
      */
-    private async aggregateThemes(date: string) {
-        const insights = this.db.getMaiisDomainInsights(date);
+    private async aggregateThemes(date: string, dateHyphen: string) {
+        // domain_insights는 하이픈 형식으로 저장되어 있으므로 dateHyphen으로 조회
+        const insights = this.db.getMaiisDomainInsights(dateHyphen);
+        console.log(`[MaiisRankingAggregator] Themes: ${insights.length}건의 domain_insights 로드 (date: ${dateHyphen})`);
         const youtube = insights.find(i => i.domain_type === 'YOUTUBE');
         const news = insights.find(i => i.domain_type === 'NEWS');
-        const rising = this.domainService.getRisingStocksSummary(date);
+        // rising stocks는 자체적으로 날짜 변환을 처리
+        const rising = this.domainService.getRisingStocksSummary(dateHyphen);
 
         const themeScores = new Map<string, { youtube: number, news: number, rising: number }>();
         const themeEvidence = new Map<string, string>(); // 테마별 핵심 설명 수집
@@ -133,8 +139,9 @@ export class MaiisRankingAggregator {
     /**
      * 2. 핵심 키워드 점수 추출 (AI impact_score 기반)
      */
-    private async aggregateKeywords(date: string) {
-        const insights = this.db.getMaiisDomainInsights(date);
+    private async aggregateKeywords(date: string, dateHyphen: string) {
+        // domain_insights는 하이픈 형식으로 저장되어 있으므로 dateHyphen으로 조회
+        const insights = this.db.getMaiisDomainInsights(dateHyphen);
         // 키워드별 최고 impact_score와 등장 횟수, 설명을 추적
         const keywordScores = new Map<string, { maxImpact: number, frequency: number, reason: string }>();
 

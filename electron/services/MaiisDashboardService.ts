@@ -25,13 +25,20 @@ export class MaiisDashboardService {
         let date = rawDate.replace(/-/g, '');
         
         // --- Zero-State 방지: 당일 데이터가 없을 경우 가장 최근 영업일 데이터로 Fallback ---
+        // 피벗 기준: maiis_world_state_v2 (마스터 AI 결과가 가장 먼저 생성되므로 이 테이블이 가장 신뢰도 높음)
         let isFallbackDate = false;
         try {
-            const latestTheme = this.db.getDb().prepare(`SELECT date FROM maiis_theme_rankings WHERE date <= ? ORDER BY date DESC LIMIT 1`).get(date) as any;
-            if (latestTheme && latestTheme.date !== date) {
-                console.log(`[MaiisDashboard] ⚠️ 당일 데이터 없음. ${date} -> ${latestTheme.date} (가장 최근 영업일) 기준으로 조회합니다.`);
-                date = latestTheme.date;
-                isFallbackDate = true;
+            const latestData = this.db.getDb().prepare(
+                `SELECT date FROM maiis_world_state_v2 WHERE date <= ? ORDER BY date DESC LIMIT 1`
+            ).get(date) as any;
+            if (latestData && latestData.date !== date) {
+                console.log(`[MaiisDashboard] ⚠️ 당일 데이터 없음. ${date} -> ${latestData.date} (가장 최근 영업일) 기준으로 조회합니다.`);
+                date = latestData.date;
+                // 평일(월~금)이면 단순히 아직 파이프라인이 안 돌아간 것이므로 "휴무일" 배너를 표시하지 않음
+                const now = new Date();
+                const dayOfWeek = now.getDay(); // 0=일, 6=토
+                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                isFallbackDate = isWeekend; // 주말일 때만 "휴무일 자동 전환" 배너 노출
             }
         } catch (e) {
             console.warn(`[MaiisDashboard] Fallback check failed:`, e);
@@ -355,6 +362,28 @@ export class MaiisDashboardService {
                 const timingLabel = r.timing === '0845' ? '아침' : r.timing === '0930' ? '장중' : '마감';
                 return `${d.slice(4,6)}/${d.slice(6,8)} ${timingLabel}`;
             }).reverse(),
+            sentimentCandles: (() => {
+                const groups: Record<string, any[]> = {};
+                recentStates.forEach(r => {
+                    if (!groups[r.date]) groups[r.date] = [];
+                    groups[r.date].push(r);
+                });
+                return Object.keys(groups).sort().map(date => {
+                    const dayStates = groups[date].sort((a, b) => a.timing.localeCompare(b.timing));
+                    const scores = dayStates.map(d => d.sentiment_score || 0);
+                    return {
+                        date: `${date.slice(4,6)}/${date.slice(6,8)}`,
+                        open: scores[0],
+                        close: scores[scores.length - 1],
+                        high: Math.max(...scores),
+                        low: Math.min(...scores),
+                        timings: dayStates.map(d => ({
+                            time: d.timing === '0845' ? '장전' : d.timing === '0930' ? '장중' : d.timing === '1530' ? '장마감' : d.timing,
+                            score: d.sentiment_score || 0
+                        }))
+                    };
+                });
+            })(),
             themeTrend,
             keywordTrend
         };

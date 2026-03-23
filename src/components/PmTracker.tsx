@@ -583,6 +583,7 @@ export default function PmTracker() {
                                             <th className="py-2.5 px-3 text-center">상태</th>
                                             <th className="py-2.5 px-3 text-center">전략</th>
                                             <th className="py-2.5 px-3 text-left">매수 사유</th>
+                                            <th className="py-2.5 px-3 text-center">갱신일</th>
                                             <th className="py-2.5 px-3 text-right">수익률</th>
                                             <th className="py-2.5 px-3 text-right">보유일</th>
                                         </tr>
@@ -615,6 +616,23 @@ export default function PmTracker() {
                                                         </span>
                                                     </td>
                                                     <td className="py-3 px-3 text-muted-foreground max-w-[200px] truncate">{item.last_signal_reason || '-'}</td>
+                                                    <td className="py-3 px-3 text-center">
+                                                        {item.last_reviewed_at && (() => {
+                                                            const diff = Date.now() - new Date(item.last_reviewed_at).getTime();
+                                                            const mins = Math.floor(diff / 60000);
+                                                            const isRecentReview = mins < 60;
+                                                            const isNewlyCreated = item.created_at ? (Date.now() - new Date(item.created_at).getTime()) < 60000 * 60 : false;
+                                                            const timeText = mins < 1 ? '방금' : mins < 60 ? `${mins}분 전` : mins < 1440
+                                                                ? new Date(item.last_reviewed_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+                                                                : new Date(item.last_reviewed_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) + ' ' + new Date(item.last_reviewed_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                                                            return (
+                                                                <div className="flex items-center justify-center gap-1">
+                                                                    <span className={cn("text-[10px] font-medium whitespace-nowrap", isRecentReview ? "text-primary/80" : "text-muted-foreground/60")}>{timeText}</span>
+                                                                    {isNewlyCreated && <span className="text-[8px] font-black px-1 rounded bg-primary/15 text-primary">NEW</span>}
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </td>
                                                     <td className={cn("py-3 px-3 text-right font-bold tabular-nums", profit > 0 ? 'text-red-500' : profit < 0 ? 'text-blue-500' : 'text-muted-foreground')}>
                                                         {profit > 0 ? '+' : ''}{profit.toFixed(1)}%
                                                     </td>

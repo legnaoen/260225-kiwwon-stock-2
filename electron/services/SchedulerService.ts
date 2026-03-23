@@ -93,7 +93,7 @@ export class SchedulerService {
         // 8. 시스템 재기동 시 놓친 PENDING 가비지/주문 Catch-up
         this.catchUpMissedOrders()
 
-        console.log(`[SchedulerService] Automated analysis schedules (PRE: ${settings.preMarketTime}, AM: ${settings.morningTime}, PM: ${settings.eveningTime}, NEWS: ${newsSettings.reportTime}, YT: ${ytSettings.collectTime}) initialized.`)
+        console.log(`[SchedulerService] Automated MAIIS Main Pipeline schedules (PRE: ${settings.preMarketTime}, AM: ${settings.morningTime}, PM: ${settings.eveningTime}) initialized.`)
     }
 
     /**

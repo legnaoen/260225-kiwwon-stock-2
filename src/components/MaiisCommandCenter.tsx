@@ -48,9 +48,11 @@ const SentimentCandleChart = ({ candles }: { candles: { date: string, open: numb
             
             {candles.map((c, i) => {
                 const cx = toX(i);
+                // 변화가 전혀 없는 완전한 플랫 상태일 경우 무채색(검은계열) 처리
+                const isDojiFlat = c.open === c.close && c.high === c.low && c.open === c.high;
                 // 상승(빨강) vs 하락(파랑)
-                const isUp = c.close >= c.open;
-                const color = isUp ? "#ef4444" : "#3b82f6";
+                const isUp = c.close > c.open;
+                const color = isDojiFlat ? "currentColor" : (isUp ? "#ef4444" : "#3b82f6");
                 
                 const topY = toY(Math.max(c.open, c.close));
                 const botY = toY(Math.min(c.open, c.close));
@@ -615,8 +617,9 @@ export default function MaiisCommandCenter() {
     const [isTesterOpen, setIsTesterOpen] = useState(false);
     const [isPipelineModalOpen, setIsPipelineModalOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<'theme' | 'keyword'>('theme');
-    const [stockTab, setStockTab] = useState<'portfolio' | 'rising'>('portfolio');
+
     const [isPmRunning, setIsPmRunning] = useState(false);
+    const [expandedReports, setExpandedReports] = useState<number[]>([0]);
     const [latestPipelineRun, setLatestPipelineRun] = useState<any>(null);
     const [data, setData] = useState<any>({
         marketReports: [],
@@ -811,25 +814,44 @@ export default function MaiisCommandCenter() {
                             </div>
                             <div className="flex flex-col gap-6 pt-2 flex-1 min-h-0 overflow-y-auto scrollbar-hide">
                                 {(() => {
-                                    return marketReports.length > 0 ? marketReports.map((item: any, i: number) => (
+                                    const toggleReport = (index: number) => {
+                                        if (expandedReports.includes(index)) {
+                                            setExpandedReports(expandedReports.filter(i => i !== index));
+                                        } else {
+                                            setExpandedReports([...expandedReports, index]);
+                                        }
+                                    };
+
+                                    return marketReports.length > 0 ? marketReports.map((item: any, i: number) => {
+                                        const isExpanded = expandedReports.includes(i);
+                                        return (
                                         <div key={i} className="flex flex-col gap-2 pb-5 border-b border-border/50 last:border-0 hover:bg-card/50 px-2 -mx-2 rounded-lg transition-colors group">
-                                            <div className="flex justify-between items-center">
+                                            <div 
+                                                className="flex justify-between items-center cursor-pointer select-none"
+                                                onClick={() => toggleReport(i)}
+                                            >
                                                 <div className="flex items-center gap-2">
                                                     <span className="font-extrabold text-[15px] tabular-nums whitespace-nowrap">{item.date}</span>
                                                     <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-sm uppercase tracking-wider", 
-                                                        item.mode === 'Risk On' ? "bg-green-500/20 text-green-600" : 
-                                                        item.mode === 'Risk Off' ? "bg-red-500/20 text-red-600" : "bg-muted text-foreground"
+                                                        item.mode === '공격적으로' ? "bg-green-500/20 text-green-600" : 
+                                                        item.mode === '방어적으로' ? "bg-red-500/20 text-red-600" : "bg-yellow-500/20 text-yellow-600"
                                                     )}>
                                                         {item.mode}
                                                     </span>
                                                 </div>
-                                                <span className="font-mono text-sm font-bold text-muted-foreground">{item.score}</span>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="font-mono text-sm font-bold text-muted-foreground">{item.score}</span>
+                                                    <span className="text-[10px] text-muted-foreground/50 transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+                                                </div>
                                             </div>
-                                            <p className="text-[13px] leading-relaxed text-foreground font-medium line-clamp-3 mt-1">
+                                            <p 
+                                                className={cn("text-[13px] leading-relaxed text-foreground font-medium mt-1 cursor-text", isExpanded ? "" : "line-clamp-2")}
+                                                onClick={(e) => { if (!isExpanded) toggleReport(i); }} // 축소 상태일땐 본문 눌러도 펴지게
+                                            >
                                                 {item.text}
                                             </p>
                                         </div>
-                                    )) : (
+                                    )}) : (
                                         <div className="text-sm text-muted-foreground py-6 text-center">
                                             <p className="mb-2">시황 리포트가 없습니다.</p>
                                             <p className="text-xs">마스터 AI를 실행하면 자동으로 상성됩니다.</p>
@@ -893,55 +915,37 @@ export default function MaiisCommandCenter() {
                             </div>
                         </div>
 
-                        {/* 3. 종목 (탭: PM 포트폴리오 / 급등주 분석) */}
+                        {/* 3. 종목 (PM 포트폴리오) */}
                         <div className="flex flex-col gap-4 min-h-0 overflow-hidden">
                             <div className="flex justify-between items-end border-b-[3px] border-border pb-2 relative">
                                 <div className="flex items-center gap-3">
-                                    <h2 
-                                        onClick={() => setStockTab('portfolio')}
-                                        className={cn("text-base font-extrabold cursor-pointer transition-colors pb-1 -mb-[11px] border-b-[3px]",
-                                            stockTab === 'portfolio' ? 'text-foreground border-foreground' : 'text-muted-foreground border-transparent hover:text-foreground/70'
+                                    <h2 className="text-base font-extrabold pb-1 -mb-[11px] border-b-[3px] border-foreground text-foreground">
+                                        PM 포트폴리오
+                                    </h2>
+                                    <button
+                                        onClick={handleRunPm}
+                                        disabled={isPmRunning}
+                                        className={cn(
+                                            "flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-bold border transition-colors",
+                                            isPmRunning
+                                                ? "bg-primary/10 border-primary/30 text-primary cursor-wait"
+                                                : "bg-violet-500/10 border-violet-500/30 text-violet-500 hover:bg-violet-500/20"
                                         )}
-                                    >PM 포트폴리오</h2>
-                                    <h2 
-                                        onClick={() => setStockTab('rising')}
-                                        className={cn("text-base font-extrabold cursor-pointer transition-colors pb-1 -mb-[11px] border-b-[3px]",
-                                            stockTab === 'rising' ? 'text-foreground border-foreground' : 'text-muted-foreground border-transparent hover:text-foreground/70'
-                                        )}
-                                    >급등주 분석</h2>
-                                    {stockTab === 'portfolio' && (
-                                        <button
-                                            onClick={handleRunPm}
-                                            disabled={isPmRunning}
-                                            className={cn(
-                                                "flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-bold border transition-colors",
-                                                isPmRunning
-                                                    ? "bg-primary/10 border-primary/30 text-primary cursor-wait"
-                                                    : "bg-violet-500/10 border-violet-500/30 text-violet-500 hover:bg-violet-500/20"
-                                            )}
-                                        >
-                                            {isPmRunning ? <Loader2 size={12} className="animate-spin" /> : <Brain size={12} />}
-                                            {isPmRunning ? '분석 중...' : 'PM 실행'}
-                                        </button>
-                                    )}
+                                    >
+                                        {isPmRunning ? <Loader2 size={12} className="animate-spin" /> : <Brain size={12} />}
+                                        {isPmRunning ? '분석 중...' : 'PM 실행'}
+                                    </button>
                                 </div>
                                 <div className="text-[10px] text-muted-foreground flex gap-3 font-semibold mb-0.5">
-                                    {stockTab === 'portfolio' ? (
-                                        <span className="flex items-center gap-1">
-                                            <span className="text-violet-500 font-bold">{(portfolio || []).length}</span>종목
-                                        </span>
-                                    ) : (
-                                        <>
-                                            <span className="hover:text-foreground cursor-pointer flex items-center gap-0.5">AI점수순 <ChevronDown size={12}/></span>
-                                            <span>등락률</span>
-                                        </>
-                                    )}
+                                    <span className="flex items-center gap-1">
+                                        <span className="text-violet-500 font-bold">{(portfolio || []).length}</span>종목
+                                    </span>
                                 </div>
                             </div>
                             
                             <div className="flex flex-col gap-3 pt-1 flex-1 min-h-0 overflow-y-auto scrollbar-hide">
-                                {stockTab === 'portfolio' ? (
-                                    /* ── PM 포트폴리오 탭 ── */
+                                {
+                                    /* ── PM 포트폴리오 리스트 ── */
                                     (portfolio || []).length > 0 ? (portfolio || []).map((item: any, i: number) => {
                                         const getPhysicalState = (item: any) => {
                                             if (item.entry_shares > 0 || item.status === 'HOLDING') return { label: `📦 보유중`, cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' };
@@ -1009,68 +1013,7 @@ export default function MaiisCommandCenter() {
                                             <p className="text-xs mt-1">[PM 실행] 버튼을 눌러 AI 포트폴리오 리뷰를 시작하세요.</p>
                                         </div>
                                     )
-                                ) : (
-                                    /* ── 급등주 분석 탭 (기존) ── */
-                                    recommendedStocks.length > 0 ? recommendedStocks.map((item: any, i: number) => (
-                                        <div key={i} className="flex flex-col gap-1 pb-4 border-b border-border/50 last:border-0 hover:bg-card/50 px-2 -mx-2 rounded-lg transition-colors">
-                                            <div className="flex justify-between items-center w-full pt-1">
-                                                <div className="flex items-center gap-1 min-w-0 pr-2">
-                                                    <span className="font-extrabold text-[15px] w-[14px] tabular-nums">{item.rank}</span>
-                                                    <div className="flex items-center w-[20px] justify-start">
-                                                        {item.change !== 0 ? (
-                                                            <span className={cn("text-[10px] font-bold flex items-center", item.isUp ? "text-red-500" : "text-blue-500")}>
-                                                                {item.isUp ? <ChevronUp size={12} strokeWidth={4}/> : <ChevronDown size={12} strokeWidth={4}/>}
-                                                                {Math.abs(item.change)}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-muted-foreground font-bold text-lg leading-none mb-1">-</span>
-                                                        )}
-                                                    </div>
-                                                    <span className="font-bold text-[14px] truncate">{item.name}</span>
-                                                    <span className="ml-1 px-2 h-[18px] flex items-center justify-center bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-extrabold text-[10px] rounded-full tabular-nums shrink-0">{item.score}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                    {item.statusTag && (
-                                                        <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-md whitespace-nowrap",
-                                                            item.statusTag.includes('마스터') ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' :
-                                                            item.statusTag.includes('보유') ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400' :
-                                                            item.statusTag.includes('매도') ? 'bg-red-500/15 text-red-500' :
-                                                            'bg-muted text-muted-foreground'
-                                                        )}>{item.statusTag}</span>
-                                                    )}
-                                                    <span className={cn("font-bold font-mono text-sm min-w-[50px] text-right", 
-                                                        (item.profit || '').startsWith('-') ? "text-blue-500" : 
-                                                        (item.profit || '') === '-' ? "text-muted-foreground" : "text-red-500"
-                                                    )}>
-                                                        {item.profit}
-                                                    </span>
-                                                    {item.days && (
-                                                        <span className="font-mono text-xs font-bold text-muted-foreground w-6 text-right tabular-nums bg-muted/30 px-1 py-0.5 rounded">{item.days}</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            {item.theme && (
-                                                <span className="text-[10px] text-muted-foreground font-semibold ml-[35px]">{item.theme}</span>
-                                            )}
-                                            <p className="text-[13px] leading-relaxed text-foreground font-medium line-clamp-2 ml-[35px]">
-                                                {item.reason}
-                                            </p>
-                                        </div>
-                                    )) : (
-                                        <div className="text-sm text-muted-foreground py-4">
-                                            <div className="text-center mb-4">
-                                                <Sparkles size={20} className="mx-auto mb-2 text-primary/40" />
-                                                <p className="font-semibold text-foreground/60">아직 분석된 종목이 없습니다</p>
-                                            </div>
-                                            <div className="text-xs space-y-2 bg-muted/30 rounded-lg p-3">
-                                                <p className="font-semibold text-foreground/70 mb-1">종목 목록이 생성되려면:</p>
-                                                <p>1. 급등주/주도주 분석 실행 (장중 수급 스캔)</p>
-                                                <p>2. AI 종목 분석 완료</p>
-                                                <p className="text-primary/70 font-medium mt-2">→ 분석된 종목이 AI 점수 순으로 자동 표시됩니다.</p>
-                                            </div>
-                                        </div>
-                                    )
-                                )}
+                                }
                             </div>
                         </div>
 

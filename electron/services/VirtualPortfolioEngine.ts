@@ -64,22 +64,10 @@ export class VirtualPortfolioEngine {
         }
 
         const cash = this.getCurrentCash()
-        const active = this.db.getActivePortfolio()
-        // 자신을 포함한 활성 종목 수 (이미 존재하는 종목이면 +0, 아니면 +1)
-        const alreadyExists = active.some((a: any) => a.stock_code === stockCode)
-        const activeCount = alreadyExists ? active.length : active.length + 1
         
-        if (activeCount <= 0) {
-            return { success: false, shares: 0, investedAmount: 0, remainingCash: cash, pending: false }
-        }
-
-        const allocAmount = cash / activeCount
-        const minAmount = 100_000 // 최소 10만원
-        
-        if (allocAmount < minAmount) {
-            console.warn(`[VPE] Insufficient cash for ${stockCode}. Cash: ${cash}, Alloc: ${allocAmount}`)
-            return { success: false, shares: 0, investedAmount: 0, remainingCash: cash, pending: false }
-        }
+        // --- 가상 금액 제약 철폐 (AI 트래킹 목적) ---
+        // 기존의 잔액 기반 배분에서 종목당 고정 100만 원 예산 배정으로 변경 (최소 1주 보장)
+        const allocAmount = 1_000_000
 
         if (!isMarketOpen) {
             // 비장중: pending 상태로 등록, 다음 거래일 시가로 확정 예정
@@ -88,10 +76,8 @@ export class VirtualPortfolioEngine {
         }
 
         // 장중: 즉시 매수 확정
-        const shares = Math.floor(allocAmount / price)
-        if (shares <= 0) {
-            return { success: false, shares: 0, investedAmount: 0, remainingCash: cash, pending: false }
-        }
+        let shares = Math.floor(allocAmount / price)
+        if (shares <= 0) shares = 1 // 고가 주식도 최소 1주는 매입
 
         const investedAmount = shares * price
         const remainingCash = cash - investedAmount
@@ -109,16 +95,10 @@ export class VirtualPortfolioEngine {
         shares: number
         investedAmount: number
     } {
-        const cash = this.getCurrentCash()
-        const active = this.db.getActivePortfolio()
-        const activeCount = active.length
-
-        const allocAmount = cash / Math.max(activeCount, 1)
-        const shares = Math.floor(allocAmount / openPrice)
-        
-        if (shares <= 0) {
-            return { success: false, shares: 0, investedAmount: 0 }
-        }
+        // --- 가상 금액 제약 철폐 ---
+        const allocAmount = 1_000_000
+        let shares = Math.floor(allocAmount / openPrice)
+        if (shares <= 0) shares = 1
 
         const investedAmount = shares * openPrice
         console.log(`[VPE] CONFIRM ${stockCode}: ${shares}주 × ₩${openPrice} = ₩${investedAmount.toLocaleString()}`)

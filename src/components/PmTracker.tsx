@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { LineChart, TrendingUp, TrendingDown, Activity, Target, Award, Brain, Loader2, Settings, Save, RotateCcw, Cpu, Clock, X } from 'lucide-react'
+import { LineChart, TrendingUp, TrendingDown, Activity, Target, Award, Brain, Loader2, Settings, Save, RotateCcw, Cpu, Clock, X, CalendarDays, ArrowRight } from 'lucide-react'
 import { cn } from '../utils'
 
 // ──────────────────────────────────────────────
@@ -44,6 +44,8 @@ function NumberInput({ value, onChange, suffix = '%', min = -100, max = 100, ste
     )
 }
 
+// ──────────────────────────────────────────────
+// ... (나머지 생략된 기존 차트/모달 컴포넌트 코드유지를 위해 replace 범위를 최소화합니다)
 // ──────────────────────────────────────────────
 // Mini SVG Line Chart Component
 // ──────────────────────────────────────────────
@@ -356,7 +358,8 @@ function StrategySettingsModal({ profiles, reviewSchedule, onProfileChange, onSc
 export default function PmTracker() {
     const [data, setData] = useState<any>(null)
     const [loading, setLoading] = useState(true)
-    const [activeListTab, setActiveListTab] = useState<'active' | 'closed'>('active')
+    const [activeListTab, setActiveListTab] = useState<'holding' | 'watching' | 'closed' | 'log'>('holding')
+    const [logFilter, setLogFilter] = useState<'all' | 'trades'>('all')
     const [chartRange, setChartRange] = useState<'7' | '30' | '90' | 'all'>('30')
     const [profiles, setProfiles] = useState({} as Record<string, StrategyProfile>)
     const [reviewSchedule, setReviewSchedule] = useState({ intradayTime: '14:50', closingTime: '15:45', autoEnabled: false })
@@ -426,6 +429,9 @@ export default function PmTracker() {
     const closed = data?.closed || []
     const dailyHistory = data?.dailyHistory || []
 
+    const holdingItems = active.filter((item: any) => item.entry_shares > 0 || item.status === 'HOLDING');
+    const watchingItems = active.filter((item: any) => !(item.entry_shares > 0 || item.status === 'HOLDING'));
+
     const chartData = (() => {
         const mapped = dailyHistory.map((d: any) => ({
             date: `${d.date.slice(4, 6)}/${d.date.slice(6, 8)}`,
@@ -457,6 +463,62 @@ export default function PmTracker() {
         'POSITION': '포지션',
         'LONGTERM': '장기',
     }
+
+    const activityLog = (() => {
+        const events: any[] = [];
+        const allItems = [...active, ...closed];
+
+        allItems.forEach((item: any) => {
+            if (item.created_at) {
+                events.push({
+                    id: `${item.stock_code}-watch-${item.created_at}`, type: 'WATCH',
+                    date: item.created_at.split('T')[0].replace(/-/g, ''), 
+                    timestamp: new Date(item.created_at).getTime(),
+                    stock_name: item.stock_name, reason: item.last_signal_reason || '조건 검색 편입', strategy: item.strategy
+                });
+            }
+            if (item.entry_date && item.entry_date.length === 8) {
+                const y = item.entry_date.slice(0,4), m = item.entry_date.slice(4,6), d = item.entry_date.slice(6,8)
+                events.push({
+                    id: `${item.stock_code}-buy-${item.entry_date}`, type: 'BUY',
+                    date: item.entry_date,
+                    timestamp: new Date(`${y}-${m}-${d}T09:00:00`).getTime(),
+                    stock_name: item.stock_name, reason: item.last_signal_reason || '조건 달성 (매수)', strategy: item.strategy
+                });
+            }
+            if (item.status === 'CLOSED' && item.closed_date && item.closed_date.length === 8) {
+                const y = item.closed_date.slice(0,4), m = item.closed_date.slice(4,6), d = item.closed_date.slice(6,8)
+                events.push({
+                    id: `${item.stock_code}-sell-${item.closed_date}`, type: 'SELL',
+                    date: item.closed_date,
+                    timestamp: new Date(`${y}-${m}-${d}T15:30:00`).getTime(),
+                    stock_name: item.stock_name, reason: item.last_signal_reason || '청산 규칙 도달',
+                    profit: item.closed_profit_rate, strategy: item.strategy
+                });
+            }
+        });
+
+        events.sort((a, b) => b.timestamp - a.timestamp);
+        const groups: Record<string, any[]> = {};
+        events.forEach(e => {
+            if (!groups[e.date]) groups[e.date] = [];
+            groups[e.date].push(e);
+        });
+
+        return Object.keys(groups).sort((a, b) => b.localeCompare(a)).map(date => ({
+            date, events: groups[date]
+        }));
+    })();
+
+    const weeklyTurnover = (() => {
+        const d = new Date(); d.setDate(d.getDate() - 7);
+        const last7 = d.toISOString().split('T')[0].replace(/-/g, '');
+        const wCount = [...active, ...closed].filter((c: any) => 
+            (c.entry_date && c.entry_date >= last7) || 
+            (c.closed_date && c.closed_date >= last7)
+        ).length;
+        return wCount;
+    })();
 
     return (
         <div className="flex-1 flex flex-col h-full overflow-hidden">
@@ -539,14 +601,14 @@ export default function PmTracker() {
                     <KpiCard
                         label="평균 보유일"
                         value={`${stats.avgHoldDays || 0}일`}
-                        subValue={`총 ${stats.totalTrades || 0}건 청산`}
+                        subValue={`최근 7일 교체: ${weeklyTurnover}건`}
                         icon={Activity}
                         color="text-muted-foreground"
                     />
                     <KpiCard
-                        label="활성 종목"
-                        value={`${stats.activeCount || 0}종목`}
-                        subValue={stats.bestTrade ? `Best: ${stats.bestTrade.name} +${(stats.bestTrade.profit || 0).toFixed(1)}%` : '아직 기록 없음'}
+                        label="실보유 현황"
+                        value={`${holdingItems.length}종목 체결`}
+                        subValue={`+ ${watchingItems.length}종목 관심/대기 중`}
                         icon={Award}
                         color="text-violet-500"
                     />
@@ -555,7 +617,7 @@ export default function PmTracker() {
                 {/* ── Active / Closed Tabs ── */}
                 <div className="rounded-xl border border-border overflow-hidden">
                     <div className="flex border-b border-border bg-muted/20">
-                        {(['active', 'closed'] as const).map(tab => (
+                        {(['holding', 'watching', 'closed', 'log'] as const).map(tab => (
                             <button
                                 key={tab}
                                 onClick={() => setActiveListTab(tab)}
@@ -566,16 +628,85 @@ export default function PmTracker() {
                                         : "border-transparent text-muted-foreground hover:text-foreground"
                                 )}
                             >
-                                {tab === 'active' ? `📌 활성 포트폴리오 (${active.length})` : `📜 청산 이력 (${closed.length})`}
+                                {tab === 'holding' ? `📦 보유 종목 (${holdingItems.length})` 
+                                : tab === 'watching' ? `👀 AI 관심 종목 (${watchingItems.length})` 
+                                : tab === 'closed' ? `📜 청산 이력 (${closed.length})` 
+                                : `📝 AI 활동 로그`}
                             </button>
                         ))}
                     </div>
 
-                    <div className="max-h-[400px] overflow-y-auto">
-                        {activeListTab === 'active' ? (
-                            active.length > 0 ? (
+                    <div className="pb-8">
+                        {activeListTab === 'log' ? (() => {
+                            const filteredLog = logFilter === 'trades' 
+                                ? activityLog.map(g => ({ ...g, events: g.events.filter((e: any) => e.type !== 'WATCH') })).filter(g => g.events.length > 0)
+                                : activityLog;
+
+                            return (
+                            <div className="p-5 space-y-6">
+                                <div className="flex justify-end mb-2">
+                                    <div className="bg-muted/50 p-1 rounded-lg flex inline-flex">
+                                        <button 
+                                            onClick={() => setLogFilter('all')} 
+                                            className={cn("px-3 py-1.5 text-xs font-bold rounded-md transition-colors", logFilter === 'all' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                        >
+                                            전체 보기
+                                        </button>
+                                        <button 
+                                            onClick={() => setLogFilter('trades')} 
+                                            className={cn("px-3 py-1.5 text-xs font-bold rounded-md transition-colors", logFilter === 'trades' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                        >
+                                            실체결만 보기
+                                        </button>
+                                    </div>
+                                </div>
+                                {filteredLog.map((group, i) => (
+                                    <div key={i} className="relative pl-4 border-l-2 border-border/50 space-y-3">
+                                        <div className="absolute -left-[9px] top-0 bg-background px-1">
+                                            <CalendarDays size={14} className="text-muted-foreground" />
+                                        </div>
+                                        <h3 className="text-sm font-black -translate-y-1">{group.date.replace(/(\d{4})(\d{2})(\d{2})/, '$1년 $2월 $3일')}</h3>
+                                        <div className="space-y-2">
+                                            {group.events.map((ev: any) => (
+                                                <div key={ev.id} className="flex items-center gap-3 p-3 rounded-lg border border-border/50 bg-card/30">
+                                                    <span className={cn(
+                                                        "px-2 py-1 rounded text-[10px] font-black w-14 text-center shrink-0",
+                                                        ev.type === 'BUY' ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" :
+                                                        ev.type === 'SELL' ? "bg-red-500/15 text-red-500" :
+                                                        "bg-muted text-muted-foreground"
+                                                    )}>
+                                                        {ev.type === 'BUY' ? '🟢 편입' : ev.type === 'SELL' ? '🔴 청산' : '👀 관심'}
+                                                    </span>
+                                                    <span className="font-bold text-sm w-24 shrink-0 truncate">{ev.stock_name}</span>
+                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-500 shrink-0">{strategyLabels[ev.strategy] || ev.strategy}</span>
+                                                    <ArrowRight size={14} className="text-muted-foreground/30 shrink-0" />
+                                                    <span className="text-xs text-muted-foreground truncate flex-1">{ev.reason}</span>
+                                                    {ev.profit !== undefined && (
+                                                        <span className={cn(
+                                                            "text-xs font-bold tabular-nums ml-2 shrink-0 w-16 text-right",
+                                                            ev.profit > 0 ? "text-red-500" : ev.profit < 0 ? "text-blue-500" : "text-muted-foreground"
+                                                        )}>
+                                                            {ev.profit > 0 ? '+' : ''}{parseFloat(ev.profit).toFixed(1)}%
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                                {filteredLog.length === 0 && (
+                                    <div className="py-16 text-center text-muted-foreground">
+                                        <Activity size={28} className="mx-auto mb-3 opacity-30" />
+                                        <p className="text-sm font-semibold">최근 동작 내역이 없습니다</p>
+                                    </div>
+                                )}
+                            </div>
+                            )
+                        })() : activeListTab === 'holding' || activeListTab === 'watching' ? (() => {
+                            const targetList = activeListTab === 'holding' ? holdingItems : watchingItems;
+                            return targetList.length > 0 ? (
                                 <table className="w-full text-sm">
-                                    <thead className="sticky top-0 bg-muted/40 backdrop-blur">
+                                    <thead className="bg-muted/40">
                                         <tr className="text-xs text-muted-foreground uppercase">
                                             <th className="py-2.5 px-3 text-left w-8">#</th>
                                             <th className="py-2.5 px-3 text-left">종목명</th>
@@ -589,70 +720,78 @@ export default function PmTracker() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {active.map((item: any, i: number) => {
-                                            const profit = item.profit_rate || 0
+                                        {(() => {
+                                            const renderRow = (item: any, i: number) => {
+                                                const profit = item.profit_rate || 0
+                                                return (
+                                                    <tr key={item.stock_code} className="border-t border-border/30 hover:bg-muted/20 transition-colors">
+                                                        <td className="py-3 px-3 font-bold text-muted-foreground tabular-nums">{i + 1}</td>
+                                                        <td className="py-3 px-3 font-bold">{item.stock_name}</td>
+                                                        <td className="py-3 px-3 text-center">
+                                                            <span className="px-2.5 py-0.5 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-400 font-extrabold text-xs">
+                                                                {item.conviction_score}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-3 px-3">
+                                                            <div className="flex justify-center items-center gap-1.5">
+                                                                <span className={cn("text-[10.5px] font-black px-2 py-0.5 rounded-md whitespace-nowrap", getPhysicalState(item).cls)}>
+                                                                    {getPhysicalState(item).label}
+                                                                </span>
+                                                                <span className={cn("text-[10.5px] font-black px-2 py-0.5 rounded-md whitespace-nowrap", getLogicalSignal(item).cls)}>
+                                                                    {getLogicalSignal(item).label}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-3 px-3 text-center">
+                                                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-muted text-muted-foreground">
+                                                                {strategyLabels[item.strategy] || item.strategy}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-3 px-3 text-muted-foreground max-w-[200px] truncate">{item.last_signal_reason || '-'}</td>
+                                                        <td className="py-3 px-3 text-center">
+                                                            {item.last_reviewed_at && (() => {
+                                                                const diff = Date.now() - new Date(item.last_reviewed_at).getTime();
+                                                                const mins = Math.floor(diff / 60000);
+                                                                const isRecentReview = mins < 60;
+                                                                const isNewlyCreated = item.created_at ? (Date.now() - new Date(item.created_at).getTime()) < 60000 * 60 : false;
+                                                                const timeText = mins < 1 ? '방금' : mins < 60 ? `${mins}분 전` : mins < 1440
+                                                                    ? new Date(item.last_reviewed_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+                                                                    : new Date(item.last_reviewed_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) + ' ' + new Date(item.last_reviewed_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                                                                return (
+                                                                    <div className="flex items-center justify-center gap-1">
+                                                                        <span className={cn("text-[10px] font-medium whitespace-nowrap", isRecentReview ? "text-primary/80" : "text-muted-foreground/60")}>{timeText}</span>
+                                                                        {isNewlyCreated && <span className="text-[8px] font-black px-1 rounded bg-primary/15 text-primary">NEW</span>}
+                                                                    </div>
+                                                                );
+                                                            })()}
+                                                        </td>
+                                                        <td className={cn("py-3 px-3 text-right font-bold tabular-nums", profit > 0 ? 'text-red-500' : profit < 0 ? 'text-blue-500' : 'text-muted-foreground')}>
+                                                            {profit > 0 ? '+' : ''}{profit.toFixed(1)}%
+                                                        </td>
+                                                        <td className="py-3 px-3 text-right text-muted-foreground font-mono">{item.days_held || 0}</td>
+                                                    </tr>
+                                                )
+                                            }
+
                                             return (
-                                                <tr key={item.stock_code} className="border-t border-border/30 hover:bg-muted/20 transition-colors">
-                                                    <td className="py-3 px-3 font-bold text-muted-foreground tabular-nums">{i + 1}</td>
-                                                    <td className="py-3 px-3 font-bold">{item.stock_name}</td>
-                                                    <td className="py-3 px-3 text-center">
-                                                        <span className="px-2.5 py-0.5 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-400 font-extrabold text-xs">
-                                                            {item.conviction_score}
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-3 px-3">
-                                                        <div className="flex justify-center items-center gap-1.5">
-                                                            <span className={cn("text-[10.5px] font-black px-2 py-0.5 rounded-md whitespace-nowrap", getPhysicalState(item).cls)}>
-                                                                {getPhysicalState(item).label}
-                                                            </span>
-                                                            <span className={cn("text-[10.5px] font-black px-2 py-0.5 rounded-md whitespace-nowrap", getLogicalSignal(item).cls)}>
-                                                                {getLogicalSignal(item).label}
-                                                            </span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="py-3 px-3 text-center">
-                                                        <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-muted text-muted-foreground">
-                                                            {strategyLabels[item.strategy] || item.strategy}
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-3 px-3 text-muted-foreground max-w-[200px] truncate">{item.last_signal_reason || '-'}</td>
-                                                    <td className="py-3 px-3 text-center">
-                                                        {item.last_reviewed_at && (() => {
-                                                            const diff = Date.now() - new Date(item.last_reviewed_at).getTime();
-                                                            const mins = Math.floor(diff / 60000);
-                                                            const isRecentReview = mins < 60;
-                                                            const isNewlyCreated = item.created_at ? (Date.now() - new Date(item.created_at).getTime()) < 60000 * 60 : false;
-                                                            const timeText = mins < 1 ? '방금' : mins < 60 ? `${mins}분 전` : mins < 1440
-                                                                ? new Date(item.last_reviewed_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-                                                                : new Date(item.last_reviewed_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) + ' ' + new Date(item.last_reviewed_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-                                                            return (
-                                                                <div className="flex items-center justify-center gap-1">
-                                                                    <span className={cn("text-[10px] font-medium whitespace-nowrap", isRecentReview ? "text-primary/80" : "text-muted-foreground/60")}>{timeText}</span>
-                                                                    {isNewlyCreated && <span className="text-[8px] font-black px-1 rounded bg-primary/15 text-primary">NEW</span>}
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </td>
-                                                    <td className={cn("py-3 px-3 text-right font-bold tabular-nums", profit > 0 ? 'text-red-500' : profit < 0 ? 'text-blue-500' : 'text-muted-foreground')}>
-                                                        {profit > 0 ? '+' : ''}{profit.toFixed(1)}%
-                                                    </td>
-                                                    <td className="py-3 px-3 text-right text-muted-foreground font-mono">{item.days_held || 0}</td>
-                                                </tr>
+                                                <>
+                                                    {targetList.map((item: any, i: number) => renderRow(item, i))}
+                                                </>
                                             )
-                                        })}
+                                        })()}
                                     </tbody>
                                 </table>
                             ) : (
                                 <div className="py-16 text-center text-muted-foreground">
                                     <Brain size={28} className="mx-auto mb-3 opacity-30" />
-                                    <p className="text-sm font-semibold">활성 포트폴리오가 없습니다</p>
+                                    <p className="text-sm font-semibold">{activeListTab === 'holding' ? '보유중인 종목이 없습니다' : '관심 종목이 없습니다'}</p>
                                     <p className="text-xs mt-1">종합 관제에서 PM AI를 실행하세요.</p>
                                 </div>
                             )
-                        ) : (
+                        })() : (
                             closed.length > 0 ? (
                                 <table className="w-full text-sm">
-                                    <thead className="sticky top-0 bg-muted/40 backdrop-blur">
+                                    <thead className="bg-muted/40">
                                         <tr className="text-xs text-muted-foreground uppercase">
                                             <th className="py-2.5 px-3 text-center w-8">결과</th>
                                             <th className="py-2.5 px-3 text-left">종목명</th>

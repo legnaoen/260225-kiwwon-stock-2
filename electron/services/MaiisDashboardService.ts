@@ -62,9 +62,10 @@ export class MaiisDashboardService {
         
         const marketReports = recentStates.map(state => {
             const dateStr = state.date.slice(4,6) + '/' + state.date.slice(6,8);
-            let mode = 'Neutral';
-            if (state.sentiment_score > 0.6) mode = 'Risk On';
-            else if (state.sentiment_score < 0.4) mode = 'Risk Off';
+            let mode = '중립';
+            if (state.sentiment_score > 0.6) mode = '공격적으로';
+            else if (state.sentiment_score < 0.4) mode = '방어적으로';
+
             
             const timingLabel = state.timing === '0845' ? '장전' : state.timing === '0930' ? '장중' : '장마감';
             

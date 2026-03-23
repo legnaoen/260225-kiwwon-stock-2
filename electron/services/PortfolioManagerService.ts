@@ -80,6 +80,47 @@ export class PortfolioManagerService {
             const marketThesis = masterState?.market_thesis || '정보 없음'
             const sentimentScore = masterState?.sentiment_score || 0.5
 
+            // 3.5. 기존 포트폴리오 종목에 대한 실시간 정보 갱신 (차트/뉴스)
+            console.log(`[PortfolioManager] 포트폴리오 종목(${currentPortfolio.length}건) 실시간 컨텍스트 수집 시작...`)
+            eventBus.emit(SystemEvent.AUTO_TRADE_LOG, {
+                time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+                message: `[PM AI] 기존 종목 ${currentPortfolio.length}건의 최신 뉴스 및 차트 정보 수집 중...`,
+                level: 'INFO'
+            })
+
+            const { KiwoomService } = await import('./KiwoomService');
+            const { NaverNewsService } = await import('./NaverNewsService');
+            const kiwoom = KiwoomService.getInstance();
+            const naverNews = NaverNewsService.getInstance();
+
+            for (const item of currentPortfolio) {
+                try {
+                    // 뉴스 (최신 3개 요약 결합, 타임아웃 방지)
+                    try {
+                        const newsList = await naverNews.searchNews(item.stock_name, 3);
+                        if (newsList && newsList.length > 0) {
+                            item.fresh_news = newsList.map(n => n.title.replace(/<[^>]*>?/gm, '')).join(', ');
+                        } else {
+                            item.fresh_news = '특별한 뉴스 없음';
+                        }
+                    } catch (e) {
+                        item.fresh_news = '뉴스 수집 실패';
+                    }
+
+                    // 가격/차트 추이 (등락률)
+                    try {
+                        const pData = await kiwoom.getCurrentPrice(item.stock_code);
+                        const curPrice = pData?.cur_prc || pData?.stck_prpr || pData?.Body?.cur_prc || 0;
+                        const changeRate = pData?.prc_rt || pData?.Body?.prc_rt || 0;
+                        item.fresh_chart = `현재가 ${Math.abs(Number(curPrice))}원 (등락률: ${Number(changeRate) > 0 ? '+' : ''}${changeRate}%)`;
+                    } catch(e) {
+                        item.fresh_chart = '가격 수집 실패';
+                    }
+                } catch (e) {
+                    console.warn(`[PortfolioManager] ${item.stock_name} 데이터 수집 중 예외 발생`);
+                }
+            }
+
             // 4. PM AI 프롬프트 구성
             const prompt = this.buildPmPrompt(currentPortfolio, candidates, marketThesis, sentimentScore)
             
@@ -141,10 +182,11 @@ export class PortfolioManagerService {
     ): string {
         const portfolioSummary = portfolio.length > 0
             ? portfolio.map(p => 
-                `  - ${p.stock_name}(${p.stock_code}): 상태=${p.status}, conviction=${p.conviction_score}, ` +
-                `전략=${p.strategy}, 수익률=${p.profit_rate?.toFixed(1)}%, 보유일=${p.days_held}일, ` +
-                `사유=${p.last_signal_reason || '없음'}`
-            ).join('\n')
+                `  - [${p.stock_name}] 상태=${p.status}, 수익률=${p.profit_rate?.toFixed(1)}%, 보유일=${p.days_held}일\n` +
+                `    * 과거사유: ${p.last_signal_reason || '없음'}\n` +
+                `    * 차트추이: ${p.fresh_chart || '정보 없음'}\n` +
+                `    * 최신뉴스: ${p.fresh_news || '정보 없음'}`
+            ).join('\n\n')
             : '  (보유 종목 없음)'
 
         const candidateSummary = candidates.slice(0, 15).map(c =>

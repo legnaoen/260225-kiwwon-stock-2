@@ -1,7 +1,19 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Youtube, MessageSquare, TrendingUp, AlertCircle, PlayCircle, Search, Settings as SettingsIcon, Filter, RefreshCw, Info, Activity, X, Trash2, Zap, Plus, BrainCircuit, Calendar, BarChart3, LayoutList, Clock, Users, Send } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, AreaChart, Area } from 'recharts';
+import { cn } from '../utils';
 
+// 랭킹 컬러 유틸리티 (1위~5위: 빨주노초파, 그 외: 그레이 닷)
+export const getRankDotClass = (idx: number) => {
+    switch(idx) {
+        case 0: return 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]'; // 빨강
+        case 1: return 'bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]'; // 주황
+        case 2: return 'bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]'; // 노랑
+        case 3: return 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]'; // 초록
+        case 4: return 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]'; // 파랑
+        default: return 'bg-muted-foreground/30'; // 그레이 닷
+    }
+}
 interface YoutubeInsight {
     id: number;
     video_id: string;
@@ -63,42 +75,134 @@ export default function NarrativeInsightTab() {
     const [selectedBriefingSources, setSelectedBriefingSources] = useState<any[]>([]);
     const [newKeyword, setNewKeyword] = useState('');
 
+    // [MAIIS 통합] MAIIS domain insights를 기존 UI 형식으로 어댑팅하는 헬퍼
+    const adaptMaiisToLegacy = (insights: any[], type: 'YOUTUBE' | 'NEWS') => {
+        // 날짜별로 그룹핑 (하루에 여러 레코드가 있을 수 있으므로 최신 1건만 사용)
+        const byDate = new Map<string, any>();
+        for (const ins of insights) {
+            if (!byDate.has(ins.date)) byDate.set(ins.date, ins);
+        }
+        
+        const trends: any[] = [];
+        const reports: any[] = [];
+
+        for (const [date, ins] of byDate.entries()) {
+            try {
+                const json = JSON.parse(ins.generated_json);
+                const themes = json.top_themes || [];
+                const sentimentIndex = json.sentiment_index || 0;
+
+                // 트렌드 데이터 (차트용)
+                if (type === 'YOUTUBE') {
+                    trends.push({
+                        date,
+                        sentiment_score: sentimentIndex,
+                        sector_rankings_json: JSON.stringify(themes.map((t: any) => ({
+                            sector: t.theme_name,
+                            score: t.intensity || 0,
+                            summary: t.evidence
+                        })))
+                    });
+                } else {
+                    const keywords = themes.flatMap((t: any) => 
+                        (t.related_keywords || []).map((k: any) => ({
+                            keyword: k.keyword,
+                            score: k.impact_score || 0,
+                            summary: t.evidence
+                        }))
+                    ).sort((a: any, b: any) => b.score - a.score).slice(0, 5);
+
+                    trends.push({
+                        date,
+                        sentiment_score: sentimentIndex,
+                        hot_keywords_json: JSON.stringify(keywords)
+                    });
+                }
+
+                // 리포트 데이터 (목록용)
+                reports.push({
+                    id: ins.id,
+                    date,
+                    created_at: ins.created_at,
+                    ...(type === 'YOUTUBE' ? {
+                        consensus_report: json.domain_summary,
+                        pivot_analysis: json.trend_pivot,
+                        sources_json: JSON.stringify(themes.flatMap((t: any) => 
+                            (t.related_stocks || []).map((s: any) => ({ channel: [s.stock], title: s.context }))
+                        )),
+                    } : {
+                        summary_json: JSON.stringify({
+                            sentiment: sentimentIndex,
+                            pivot: json.trend_pivot,
+                            summary: themes.map((t: any) => `[${t.theme_name}] ${t.evidence?.slice(0, 120)}`),
+                            themes: themes.map((t: any) => ({
+                                theme_name: t.theme_name,
+                                reason: t.evidence,
+                                intensity: t.intensity
+                            }))
+                        }),
+                        hot_keywords_json: JSON.stringify(
+                            themes.flatMap((t: any) => 
+                                (t.related_keywords || []).map((k: any) => ({
+                                    keyword: k.keyword,
+                                    score: k.impact_score || 0,
+                                    summary: t.evidence
+                                }))
+                            ).sort((a: any, b: any) => b.score - a.score).slice(0, 6)
+                        ),
+                        source_news: ins.raw_input_text ? JSON.stringify(
+                            ins.raw_input_text.split('\n').filter((l: string) => l.startsWith('-')).map((l: string) => ({
+                                title: l.replace(/^- /, '').split(':')[0]?.trim(),
+                                link: '#'
+                            })).slice(0, 10)
+                        ) : '[]'
+                    })
+                });
+            } catch (e) {
+                console.warn('[NarrativeInsightTab] MAIIS 데이터 어댑팅 실패:', e);
+            }
+        }
+
+        return { trends, reports };
+    };
+
     const fetchData = async () => {
         setLoading(true);
         try {
+            const api = window.electronAPI as any;
+            
             if (narrativeType === 'youtube') {
-                if (window.electronAPI?.getLatestYoutubeInsights) {
-                    const data = await window.electronAPI.getLatestYoutubeInsights(15);
-                    setInsights(data || []);
+                // [MAIIS 통합] MAIIS 도메인 인사이트에서 유튜브 히스토리 가져오기
+                if (api.getDomainInsightsHistory) {
+                    const ytInsights = await api.getDomainInsightsHistory('YOUTUBE', 14);
+                    const { trends, reports } = adaptMaiisToLegacy(ytInsights || [], 'YOUTUBE');
+                    setYoutubeTrends(trends);
+                    setYoutubeConsensus(reports);
                 }
-                if (window.electronAPI?.getYoutubeChannels) {
-                    const chanData = await window.electronAPI.getYoutubeChannels();
+                // 채널 관리는 Legacy 유지 (수집 인프라 관리용)
+                if (api.getYoutubeChannels) {
+                    const chanData = await api.getYoutubeChannels();
                     setChannels(chanData || []);
                 }
-                if (window.electronAPI?.getYoutubeTrends) {
-                    const res = await window.electronAPI.getYoutubeTrends(14);
-                    if (res.success) setYoutubeTrends(res.data || []);
+                if (api.getLatestYoutubeInsights) {
+                    const data = await api.getLatestYoutubeInsights(15);
+                    setInsights(data || []);
                 }
-                if (window.electronAPI?.getYoutubeConsensus) {
-                    const res = await window.electronAPI.getYoutubeConsensus(10);
-                    if (res.success) setYoutubeConsensus(res.data || []);
-                }
-                if ((window.electronAPI as any).getYoutubeSettings) {
-                    const settings = await (window.electronAPI as any).getYoutubeSettings();
+                if (api.getYoutubeSettings) {
+                    const settings = await api.getYoutubeSettings();
                     if (settings) setYtSettings(settings);
                 }
             } else {
-                if ((window.electronAPI as any).getNewsSettings) {
-                    const settings = await (window.electronAPI as any).getNewsSettings();
+                // [MAIIS 통합] MAIIS 도메인 인사이트에서 뉴스 히스토리 가져오기
+                if (api.getDomainInsightsHistory) {
+                    const newsInsights = await api.getDomainInsightsHistory('NEWS', 14);
+                    const { trends, reports } = adaptMaiisToLegacy(newsInsights || [], 'NEWS');
+                    setNewsTrends(trends);
+                    setNewsBriefings(reports);
+                }
+                if (api.getNewsSettings) {
+                    const settings = await api.getNewsSettings();
                     setNewsSettings(settings);
-                }
-                if ((window.electronAPI as any).getLatestBriefings) {
-                    const briefings = await (window.electronAPI as any).getLatestBriefings(15);
-                    setNewsBriefings(briefings || []);
-                }
-                if ((window.electronAPI as any).getNewsTrends) {
-                    const res = await (window.electronAPI as any).getNewsTrends(14);
-                    if (res.success) setNewsTrends(res.data || []);
                 }
             }
         } catch (err) {
@@ -746,9 +850,11 @@ export default function NarrativeInsightTab() {
                                             <div key={idx} className="bg-card/20 border border-border/50 p-8 rounded-[40px] shadow-sm hover:border-primary/40 transition-all flex flex-col gap-6">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-4">
-                                                        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center font-black text-primary">
-                                                            #{idx + 1}
+                                                        <div className="flex items-center gap-2 text-xl">
+                                                            <span className="font-black text-foreground">{idx + 1}</span>
+                                                            <span className="text-muted-foreground/40">-</span>
                                                         </div>
+                                                        <div className={cn("w-3.5 h-3.5 rounded-full shrink-0", getRankDotClass(idx))} />
                                                         <div>
                                                             <h4 className="text-xl font-black">{s.sector}</h4>
                                                             <span className="text-xs font-bold text-muted-foreground">{s.score}(point)</span>
@@ -920,12 +1026,13 @@ export default function NarrativeInsightTab() {
                             onClick={async () => {
                                 setIsCollecting(true);
                                 try {
-                                    const res = await (window.electronAPI as any).generateNewsBriefingNow();
+                                    // [MAIIS 통합] MAIIS 도메인 분석 직접 호출
+                                    const res = await (window.electronAPI as any).analyzeDomain({ domain: 'NEWS' });
                                     if (res.success) {
-                                        alert('뉴스 브리핑이 생성되었습니다.');
+                                        alert('MAIIS 뉴스 도메인 분석이 완료되었습니다.');
                                         await fetchData();
                                     } else {
-                                        alert('뉴스 브리핑 생성 실패: ' + res.error);
+                                        alert('뉴스 분석 실패: ' + res.error);
                                     }
                                 } finally {
                                     setIsCollecting(false);
@@ -1082,9 +1189,16 @@ export default function NarrativeInsightTab() {
                                                                 {hotKeywords.map((kw: any, i: number) => (
                                                                     <div key={i} className="group p-5 bg-card/40 hover:bg-card/60 border border-border/40 hover:border-primary/30 rounded-[24px] transition-all duration-300 space-y-3 shadow-sm">
                                                                         <div className="flex items-center justify-between">
-                                                                            <span className="px-3 py-1 bg-primary/5 text-primary border border-primary/20 rounded-full text-[10px] font-black tracking-tight group-hover:bg-primary group-hover:text-white transition-colors duration-300">
-                                                                                #{kw.keyword}
-                                                                            </span>
+                                                                            <div className="flex items-center gap-3">
+                                                                                <div className="flex items-center gap-1.5 min-w-[32px]">
+                                                                                    <span className="text-[15px] font-black">{i + 1}</span>
+                                                                                    <span className="text-muted-foreground/40 text-[15px]">-</span>
+                                                                                </div>
+                                                                                <div className={cn("w-2.5 h-2.5 rounded-full shrink-0", getRankDotClass(i))} />
+                                                                                <span className="px-3 py-1 bg-primary/5 text-primary border border-primary/20 rounded-full text-[11px] font-bold tracking-tight group-hover:bg-primary group-hover:text-white transition-colors duration-300">
+                                                                                    {kw.keyword}
+                                                                                </span>
+                                                                            </div>
                                                                             <span className="text-[14px] font-black text-primary/40 group-hover:text-primary transition-colors">
                                                                                 {kw.score}
                                                                             </span>

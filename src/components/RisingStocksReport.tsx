@@ -12,6 +12,18 @@ import { useLayoutStore } from '../store/useLayoutStore'
 import { useTagStore } from '../store/useTagStore'
 import { useRef } from 'react'
 
+// 랭킹 컬러 유틸리티 (1위~5위: 빨주노초파, 그 외: 그레이 닷)
+export const getRankDotClass = (idx: number) => {
+    switch(idx) {
+        case 0: return 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]'; // 빨강
+        case 1: return 'bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]'; // 주황
+        case 2: return 'bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]'; // 노랑
+        case 3: return 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]'; // 초록
+        case 4: return 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]'; // 파랑
+        default: return 'bg-muted-foreground/30'; // 그레이 닷
+    }
+}
+
 // 데이터 구조 정의
 interface RisingStock {
     code: string
@@ -238,7 +250,11 @@ export default function RisingStocksReport() {
             const mapped: RisingStock[] = rawList
                 .filter((s: any) => {
                     const name = (s.name || '').replace(/\s+/g, '')
-                    return name && !etfKeywords.some(kw => name.toUpperCase().includes(kw.toUpperCase()))
+                    if (!name) return false
+                    if (etfKeywords.some(kw => name.toUpperCase().includes(kw.toUpperCase()))) return false
+                    if (name.endsWith('우') || name.endsWith('우B') || name.includes('우(')) return false
+                    if ((s.changeRate || 0) <= 0) return false // 상승 종목만 표시
+                    return true
                 })
                 .map((s: any) => ({
                     code: String(s.code).replace(/[^0-9]/g, ''),
@@ -898,7 +914,7 @@ export default function RisingStocksReport() {
                                     if (sortOrder === 'value') return (b.tradingValue || 0) - (a.tradingValue || 0)
                                     return 0
                                 })
-                                .map((stock) => (
+                                .map((stock, index) => (
                                 <div 
                                     key={stock.code} 
                                     onClick={() => {
@@ -927,21 +943,18 @@ export default function RisingStocksReport() {
                                         "bg-blue-500"
                                     )} title={stock.source} />
 
-                                    {/* AI Score Badge */}
-                                    <div className="relative shrink-0">
+                                    {/* Ranking Badge or Evaluation Trigger */}
+                                    <div className="relative shrink-0 flex items-center justify-center w-8 h-8">
                                         {stock.aiScore ? (
-                                            <div 
-                                                className="w-8 h-8 rounded-lg flex items-center justify-center shadow-sm transition-colors"
-                                                style={{ 
-                                                    backgroundColor: stock.aiScore >= 80 ? '#22C55E' : 
-                                                                     stock.aiScore >= 60 ? '#EAB308' : 
-                                                                     stock.aiScore >= 40 ? '#F97316' : '#EF4444',
-                                                }}
-                                            >
-                                                <span className="text-white font-bold text-[11px] font-mono">
-                                                    {stock.aiScore}
-                                                </span>
-                                            </div>
+                                            index < 5 ? (
+                                                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shadow-sm text-white font-bold text-[12px] font-mono", getRankDotClass(index))}>
+                                                    {index + 1}
+                                                </div>
+                                            ) : (
+                                                <div className="w-8 h-8 flex items-center justify-center">
+                                                    <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/30" title={`${stock.aiScore} pts (Rank ${index + 1})`} />
+                                                </div>
+                                            )
                                         ) : (
                                             <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
                                                 {evaluatingStock?.code === stock.code ? (
@@ -953,6 +966,7 @@ export default function RisingStocksReport() {
                                                             handleRunAnalysis(stock)
                                                         }}
                                                         className="w-full h-full flex items-center justify-center hover:bg-primary/20 rounded-lg transition-colors group/btn"
+                                                        title="초기 분석 실행"
                                                     >
                                                         <ShieldCheck size={12} className="text-muted-foreground group-hover/btn:text-primary" />
                                                     </button>

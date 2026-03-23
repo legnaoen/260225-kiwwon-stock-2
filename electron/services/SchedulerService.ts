@@ -70,34 +70,9 @@ export class SchedulerService {
 
         this.scheduledJobs.push(preMarketJob, pendingExecutionJob, morningJob, eveningJob)
 
-        // 4. 시장 뉴스 브리핑 (사용자 설정 시간)
-        const newsSettings = store.get('market_briefing_settings') as any || { reportTime: '08:20', telegramTime: '08:30', enabled: true };
-        if (newsSettings.enabled) {
-            const [rHour, rMinute] = newsSettings.reportTime.split(':');
-            const newsJob = cron.schedule(`${rMinute} ${rHour} * * 1-5`, () => {
-                console.log(`[SchedulerService] Starting automatic Market News Briefing (${newsSettings.reportTime})...`);
-                this.runMarketNewsAnalysis();
-            }, { timezone: 'Asia/Seoul' });
-            
-            const [tHour, tMinute] = newsSettings.telegramTime.split(':');
-            const newsTelegramJob = cron.schedule(`${tMinute} ${tHour} * * 1-5`, () => {
-                console.log(`[SchedulerService] Sending Market News Telegram Notification (${newsSettings.telegramTime})...`);
-                this.sendMarketNewsTelegram();
-            }, { timezone: 'Asia/Seoul' });
-
-            this.scheduledJobs.push(newsJob, newsTelegramJob);
-        }
-
-        // 5. 유튜브 내러티브 분석 (독자적 스케줄)
-        const ytSettings = store.get('youtube_settings') as any || { enabled: true, collectTime: '08:30' };
-        if (ytSettings.enabled) {
-            const [yHour, yMinute] = ytSettings.collectTime.split(':');
-            const ytJob = cron.schedule(`${yMinute} ${yHour} * * 1-5`, () => {
-                console.log(`[SchedulerService] Starting automatic Youtube Narrative Analysis (${ytSettings.collectTime})...`);
-                this.runYoutubeAnalysis();
-            }, { timezone: 'Asia/Seoul' });
-            this.scheduledJobs.push(ytJob);
-        }
+        // [MAIIS 통합] 독립 뉴스/유튜브 크론 제거 완료.
+        // 뉴스 수집+분석, 유튜브 수집+분석은 모두 PRE_MARKET 파이프라인 내
+        // MaiisDomainService에서 직접 수행합니다. (AI 중복 호출 방지, Source of Truth 단일화)
 
         // 6. PM INTRADAY 하드룰 체크 (Step 5: 14:50)
         const { StrategyProfileService } = await import('./StrategyProfileService')
@@ -189,30 +164,31 @@ export class SchedulerService {
     /**
      * 장 시작 전 전체 파이프라인 (08:30)
      * 
-     * Phase 1: 기초 데이터 수집 (매크로 + 유튜브)
-     * Phase 2: 서브에이전트 도메인 분석 (뉴스 팩트체커 + 유튜브 FOMO/FUD)
-     * Phase 3: 마스터 AI 장전 대전제 수립 (0845)
-     * Phase 4: PM AI 포트폴리오 리뷰 (전일 추천 기반)
+     * [MAIIS 통합] PRE_MARKET 파이프라인 (08:30)
+     * 
+     * Phase 0: 매크로 지표 수집 (MaiisMacroService)
+     * Phase 1: 도메인 수집+분석 (MaiisDomainService - 유튜브/뉴스 직접 수집 → AI 분석)
+     * Phase 2: 테마/키워드 랭킹 집계 (MaiisRankingAggregator)
+     * Phase 3: 마스터 AI 장전 대전제 (MasterAiService - 최신 테마 포함)
+     * Phase 4: PM AI 포트폴리오 리뷰 (PortfolioManagerService)
      */
     public async runPreMarketAnalysis() {
         const log = PipelineLogger.getInstance()
         const runId = log.startPipeline('PRE_MARKET')
-        console.log('[SchedulerService] ═══ PRE_MARKET 전체 파이프라인 시작 ═══');
+        console.log('[SchedulerService] ═══ PRE_MARKET 통합 파이프라인 시작 ═══');
         
-        const p0 = log.startPhase(runId, '기초 데이터 수집', 'MaiisMacroService', 'getDailyMacroSnapshot')
+        // Phase 0: 매크로 지표 수집 (유튜브/뉴스는 Phase 1에서 MaiisDomainService가 직접 수집)
+        const p0 = log.startPhase(runId, '매크로 지표 수집', 'MaiisMacroService', 'getDailyMacroSnapshot')
         try {
             const { MaiisMacroService } = await import('./MaiisMacroService')
-            const { YoutubeService } = await import('./YoutubeService')
             await MaiisMacroService.getInstance().getDailyMacroSnapshot()
-            const youtube = YoutubeService.getInstance()
-            const apiKey = store.get('youtube_api_key') as string;
-            if (apiKey) { await youtube.collectLatestVideos(apiKey) }
-            log.endPhase(runId, p0, 'SUCCESS', '매크로 + 유튜브 수집')
+            log.endPhase(runId, p0, 'SUCCESS', '글로벌 매크로 지표(환율/금리/유가 등) 수집 완료')
         } catch (e: any) {
             log.endPhase(runId, p0, 'FAILED', undefined, e.message)
         }
 
-        const p1 = log.startPhase(runId, '서브에이전트 도메인 분석', 'MaiisDomainService', 'analyzeNewsDomain+analyzeYoutubeDomain')
+        // Phase 1: 도메인 수집+분석 (수집과 분석이 하나의 함수 내에서 완결)
+        const p1 = log.startPhase(runId, '도메인 수집+분석', 'MaiisDomainService', 'analyzeNewsDomain+analyzeYoutubeDomain')
         try {
             const { MaiisDomainService } = await import('./MaiisDomainService')
             const domain = MaiisDomainService.getInstance()
@@ -223,14 +199,14 @@ export class SchedulerService {
             
             let resultParts = [];
             if (newsRes.success && newsRes.data) {
-                resultParts.push(`📰 [뉴스 분석 요약]\n${newsRes.data.domain_summary || '성공'}\n분위기 점수: ${newsRes.data.sentiment_index}`);
+                resultParts.push(`📰 [뉴스 수집+분석]\n${newsRes.data.domain_summary || '성공'}\n분위기 점수: ${newsRes.data.sentiment_index}`);
             } else {
-                resultParts.push(`📰 [뉴스 분석 실패] ${newsRes.error}`);
+                resultParts.push(`📰 [뉴스 실패] ${newsRes.error}`);
             }
             if (ytRes.success && ytRes.data) {
-                resultParts.push(`▶️ [유튜브 분석 요약]\n${ytRes.data.domain_summary || '성공'}\n광기(FOMO) 점수: ${ytRes.data.sentiment_index}`);
+                resultParts.push(`▶️ [유튜브 수집+분석]\n${ytRes.data.domain_summary || '성공'}\n광기(FOMO) 점수: ${ytRes.data.sentiment_index}`);
             } else {
-                resultParts.push(`▶️ [유튜브 분석 실패] ${ytRes.error}`);
+                resultParts.push(`▶️ [유튜브 실패] ${ytRes.error}`);
             }
 
             log.endPhase(runId, p1, (newsRes.success || ytRes.success) ? 'SUCCESS' : 'FAILED', resultParts.join('\n\n'))
@@ -238,44 +214,47 @@ export class SchedulerService {
             log.endPhase(runId, p1, 'FAILED', undefined, e.message)
         }
 
-        const p2 = log.startPhase(runId, '마스터 AI 0845', 'MasterAiService', 'generateWorldState')
+        // Phase 2: 테마/키워드 랭킹 집계 (마스터 AI 이전에 실행 → 마스터 AI가 최신 테마 활용)
+        const p2 = log.startPhase(runId, '테마/키워드 랭킹 집계', 'MaiisRankingAggregator', 'runDailyAggregation')
+        try {
+            const { MaiisRankingAggregator } = await import('./MaiisRankingAggregator')
+            const aggResult = await MaiisRankingAggregator.getInstance().runDailyAggregation()
+            log.endPhase(runId, p2, 'SUCCESS', `📈 섹터 ${aggResult.themes?.length || 0}건, 키워드 ${aggResult.keywords?.length || 0}건 집계 완료`)
+        } catch (e: any) {
+            log.endPhase(runId, p2, 'FAILED', undefined, e.message)
+        }
+
+        // Phase 3: 마스터 AI 장전 대전제 (최신 테마/키워드 집계 후 실행)
+        const p3 = log.startPhase(runId, '마스터 AI 0845', 'MasterAiService', 'generateWorldState')
         try {
             const { MasterAiService } = await import('./MasterAiService')
             const masterRes = await MasterAiService.getInstance().generateWorldState('0845')
             if (masterRes.success && masterRes.data) {
                 const summary = masterRes.data.market_thesis || '마스터 AI 컨센서스 생성 완료';
-                log.endPhase(runId, p2, 'SUCCESS', `🧠 [마스터 AI 대전제]\n${summary}\n(센티먼트: ${masterRes.data.sentiment_score})`)
+                log.endPhase(runId, p3, 'SUCCESS', `🧠 [마스터 AI 대전제]\n${summary}\n(센티먼트: ${masterRes.data.sentiment_score})`)
             } else {
-                log.endPhase(runId, p2, 'FAILED', undefined, masterRes.error)
-            }
-        } catch (e: any) {
-            log.endPhase(runId, p2, 'FAILED', undefined, e.message)
-        }
-
-        const p3 = log.startPhase(runId, 'PM AI 리뷰', 'PortfolioManagerService', 'runPortfolioReview')
-        try {
-            const { PortfolioManagerService } = await import('./PortfolioManagerService')
-            const pmRes = await PortfolioManagerService.getInstance().runPortfolioReview()
-            if (pmRes.success && pmRes.data) {
-                log.endPhase(runId, p3, 'SUCCESS', `📊 [포트폴리오 리뷰 반영 완료]\n갱신: ${pmRes.data.updated}건, 신규: ${pmRes.data.newEntries}건\nBUY 판단: ${pmRes.data.buySignals}건, SELL 판단: ${pmRes.data.sellSignals}건`)
-            } else {
-                log.endPhase(runId, p3, 'FAILED', undefined, pmRes.error)
+                log.endPhase(runId, p3, 'FAILED', undefined, masterRes.error)
             }
         } catch (e: any) {
             log.endPhase(runId, p3, 'FAILED', undefined, e.message)
         }
 
-        const p4 = log.startPhase(runId, '테마/키워드 랭킹 집계', 'MaiisRankingAggregator', 'runDailyAggregation')
+        // Phase 4: PM AI 포트폴리오 리뷰
+        const p4 = log.startPhase(runId, 'PM AI 리뷰', 'PortfolioManagerService', 'runPortfolioReview')
         try {
-            const { MaiisRankingAggregator } = await import('./MaiisRankingAggregator')
-            const aggResult = await MaiisRankingAggregator.getInstance().runDailyAggregation()
-            log.endPhase(runId, p4, 'SUCCESS', `📈 섹터 ${aggResult.themes?.length || 0}건, 키워드 ${aggResult.keywords?.length || 0}건 집계 완료`)
+            const { PortfolioManagerService } = await import('./PortfolioManagerService')
+            const pmRes = await PortfolioManagerService.getInstance().runPortfolioReview()
+            if (pmRes.success && pmRes.data) {
+                log.endPhase(runId, p4, 'SUCCESS', `📊 [포트폴리오 리뷰 반영 완료]\n갱신: ${pmRes.data.updated}건, 신규: ${pmRes.data.newEntries}건\nBUY 판단: ${pmRes.data.buySignals}건, SELL 판단: ${pmRes.data.sellSignals}건`)
+            } else {
+                log.endPhase(runId, p4, 'FAILED', undefined, pmRes.error)
+            }
         } catch (e: any) {
             log.endPhase(runId, p4, 'FAILED', undefined, e.message)
         }
 
         log.endPipeline(runId)
-        console.log(`[SchedulerService] ═══ PRE_MARKET 파이프라인 완료 (${log.getRunDetail(runId)?.durationMs}ms) ═══`);
+        console.log(`[SchedulerService] ═══ PRE_MARKET 통합 파이프라인 완료 (${log.getRunDetail(runId)?.durationMs}ms) ═══`);
     }
 
     /**
@@ -533,29 +512,30 @@ export class SchedulerService {
 
             const etfKeywords = ['ETF', 'ETN', 'KODEX', 'TIGER', 'ACE', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'KOSEF', 'KINDEX', 'KB스타', '스팩', 'SPAC']
             
-            // 2. 기본 필터링 (ETF, 우선주, 동전주 등 제거)
+            // 2. 기본 필터링 (ETF, 우선주 등 제거)
             const filteredBase = rawCombinedList.filter(s => {
                 const name = s.name.toUpperCase().replace(/\s+/g, '')
                 if (etfKeywords.some(kw => name.includes(kw.toUpperCase()))) return false
                 if (name.endsWith('우') || name.endsWith('우B') || name.includes('우(')) return false
-                if (s.changeRate < 0) return false // 상승 종목만 대상
+                if (s.changeRate <= 0) return false // 상승 종목만 대상
                 return true
             })
 
-            // 3. 우선순위 (Track A / Track B 이원화 구조)
+            // 3. 순수 TOP N 방식 (임계값 없이 상위 N개를 무조건 확보)
             
-            // Track A: 순수 급등/테마주 (등락률 10% 이상, 15개 할당)
+            // Track A: 등락률 상위 TOP 15 (시장이 약세든 강세든 "그날의 주도주")
             const trackA = filteredBase
-                .filter(s => s.changeRate >= 10)
                 .sort((a, b) => b.changeRate - a.changeRate)
                 .slice(0, 15)
                 .map(s => ({ ...s, source: 'RISING' as const }))
+            
+            const trackACodes = new Set(trackA.map(s => s.code))
 
-            // Track B: 우량 수급주 (거래대금 500억 이상 & 등락률 3% 이상, 10개 할당)
+            // Track B: 거래대금 상위 TOP 15 (Track A 중복 제거, 양수 등락률만)
             const trackB = filteredBase
-                .filter(s => !trackA.some(a => a.code === s.code) && s.changeRate >= 3 && (s.tradingValue || 0) >= 50000)
+                .filter(s => !trackACodes.has(s.code))
                 .sort((a, b) => (b.tradingValue || 0) - (a.tradingValue || 0))
-                .slice(0, 10)
+                .slice(0, 15)
                 .map(s => ({ ...s, source: 'TRADING_VALUE' as const }))
 
             // 4. 최종 리스트 구성 (두 트랙 명확히 분리)
@@ -569,7 +549,7 @@ export class SchedulerService {
                 source: s.source
             }))
 
-            console.log(`[SchedulerService] ${label} analysis targets: ${targetStocks.length} stocks (Filtered)`)
+            console.log(`[SchedulerService] ${label} analysis targets: ${targetStocks.length} stocks (Track A: ${trackA.length} rising, Track B: ${trackB.length} trading_value)`)
 
             // 2. 배치 분석 실행 (데이터 수집부터 AI 분석까지 일괄)
             const timing = label === 'MORNING' ? 'MORNING' : (label === 'EVENING' ? 'EVENING' : 'MANUAL')

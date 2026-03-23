@@ -198,6 +198,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // MAIIS Agent Tester & World State
     analyzeDomain: (options: { domain: 'YOUTUBE' | 'NEWS', date?: string }) => ipcRenderer.invoke('maiis:analyze-domain', options),
     getDomainInsights: (date?: string) => ipcRenderer.invoke('maiis:get-domain-insights', date),
+    getDomainInsightsHistory: (domainType: string, days?: number) => ipcRenderer.invoke('maiis:get-domain-insights-history', { domainType, days }),
     getMaiisWorldState: (date?: string) => ipcRenderer.invoke('maiis:get-world-state', date),
     getMacroSnapshot: () => ipcRenderer.invoke('maiis:get-macro-snapshot'),
     getRisingStocksSummary: (date?: string) => ipcRenderer.invoke('maiis:get-rising-stocks-summary', date),

@@ -91,7 +91,7 @@ const SentimentCandleChart = ({ candles }: { candles: { date: string, open: numb
 
 
 /** 네러티브 페이지의 Leading Keywords 스타일 멀티라인 트렌드 차트 */
-const TREND_COLORS = ['#ef4444', '#3b82f6', '#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#f97316'];
+const TREND_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#ec4899', '#6366f1'];
 
 const MultiLineTrendChart = ({ trendData }: { trendData: { dates: string[], series: { name: string, data: number[] }[] } }) => {
     const W = 280, H = 100, PAD_L = 10, PAD_R = 10, PAD_T = 6, PAD_B = 16;

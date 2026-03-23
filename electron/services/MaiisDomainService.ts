@@ -19,29 +19,53 @@ export class MaiisDomainService {
     }
 
     /**
-     * 유튜브 원본 자막(Transcript)을 긁어와 '개인투자자(FOMO/FUD) 심리' 페르소나로 분석합니다.
+     * [MAIIS 통합] 유튜브 자막을 직접 수집 → 즉시 FOMO/FUD 심리 분석
+     * Legacy YoutubeService의 수집 유틸을 활용하되, AI 분석은 MAIIS 전용 페르소나로만 1회 수행.
      */
     public async analyzeYoutubeDomain(date?: string): Promise<{ success: boolean; data?: any; error?: string }> {
         const targetDate = date || this.db.getKstDate();
         try {
-            // 1. DB에서 오늘 자로 수집된 유튜브 원본 자막 로그들을 가져옵니다. (기존 크롤러 사용)
-            // Note: youtube_narrative_logs 테이블에서 최근 5개 정도의 영상을 가져와 분석 (시간별 수집에 따라 다름)
-            const rawLogs = this.db.getDb().prepare(`
-                SELECT title, channel_id, transcript, summary_json 
-                FROM youtube_narrative_logs 
-                ORDER BY published_at DESC 
-                LIMIT 15
-            `).all() as any[];
-
-            if (!rawLogs || rawLogs.length === 0) {
-                return { success: false, error: '분석할 유튜브 원본 데이터가 없습니다.' };
+            // 1. YoutubeService로 최신 영상 수집 (AI 분석 생략 옵션)
+            const { YoutubeService } = await import('./YoutubeService');
+            const Store = (await import('electron-store')).default;
+            const store = new Store();
+            const apiKey = store.get('youtube_api_key') as string;
+            
+            let rawInputText = '';
+            
+            if (apiKey) {
+                console.log('[MaiisDomainService] YouTube 직접 수집 시작 (skipAnalysis 모드)...');
+                const collectResult = await YoutubeService.getInstance().collectLatestVideos(apiKey, undefined, { skipAnalysis: true });
+                
+                if (collectResult.success && collectResult.sources && collectResult.sources.length > 0) {
+                    // 수집된 자막을 직접 인메모리로 사용 (Legacy DB 경유 X)
+                    rawInputText = collectResult.sources.map((video: any, idx: number) => {
+                        const content = video.transcript?.trim() ? video.transcript : '자막 없음';
+                        return `[영상${idx + 1}] 채널: ${video.channel_name}\n제목: ${video.title}\n발언 요약: ${String(content).slice(0, 1500)}...`;
+                    }).join('\n\n');
+                    console.log(`[MaiisDomainService] YouTube ${collectResult.sources.length}건 자막 수집 완료`);
+                }
             }
+            
+            // 2. 수집 실패 시 DB 폴백 (이전에 수집해둔 자막이 있으면 사용)
+            if (!rawInputText) {
+                console.log('[MaiisDomainService] YouTube 직접 수집 데이터 없음, DB 폴백 시도...');
+                const rawLogs = this.db.getDb().prepare(`
+                    SELECT title, channel_id, transcript, summary_json 
+                    FROM youtube_narrative_logs 
+                    ORDER BY published_at DESC 
+                    LIMIT 15
+                `).all() as any[];
 
-            // 2. 인풋 데이터 조합 (자막이나 개별 요약본 텍스트 압축 등)
-            const rawInputText = rawLogs.map((log, idx) => {
-                const content = log.transcript?.trim() ? log.transcript : (log.summary_json || '내용 없음');
-                return `[영상${idx + 1}] 제목: ${log.title}\n발언 요약: ${String(content).slice(0, 1500)}...`;
-            }).join('\n\n');
+                if (!rawLogs || rawLogs.length === 0) {
+                    return { success: false, error: '분석할 유튜브 원본 데이터가 없습니다. (API 키 또는 채널 등록 확인 필요)' };
+                }
+
+                rawInputText = rawLogs.map((log, idx) => {
+                    const content = log.transcript?.trim() ? log.transcript : (log.summary_json || '내용 없음');
+                    return `[영상${idx + 1}] 제목: ${log.title}\n발언 요약: ${String(content).slice(0, 1500)}...`;
+                }).join('\n\n');
+            }
 
             // 3. MAIIS 전용 페르소나 프롬프트 (유튜브 = 개인 투자자의 광기/공포 탐지기)
             const systemPrompt = `
@@ -86,7 +110,7 @@ theme_name에는 아래 표준 테마 목록에서 가장 가까운 이름을 �
             const aiResponse = await this.ai.askGemini(userPrompt, systemPrompt);
             const parsedJson = JsonUtils.extractAndParse(aiResponse);
 
-            // 5. DB 저장 (maiis_domain_insights)
+            // 5. DB 저장 (maiis_domain_insights) - 단일 Source of Truth
             this.db.saveMaiisDomainInsight({
                 date: targetDate,
                 domain_type: 'YOUTUBE',
@@ -105,27 +129,64 @@ theme_name에는 아래 표준 테마 목록에서 가장 가까운 이름을 �
     }
 
     /**
-     * 메가 트렌드 뉴스 원본을 긁어와 '거시경제/팩트 관점' 페르소나로 분석합니다.
+     * [MAIIS 통합] 뉴스 헤드라인을 직접 수집 → 즉시 거시경제 팩트체크 분석
+     * NaverNewsService를 직접 활용. Legacy MarketNewsService 의존 완전 제거.
      */
     public async analyzeNewsDomain(date?: string): Promise<{ success: boolean; data?: any; error?: string }> {
         const targetDate = date || this.db.getKstDate();
         try {
-            // 1. 기존 뉴스 에이전트가 긁어둔 'source_news' (원본 기사 리스트)를 불러옵니다.
-            const lastConsensus = this.db.getLatestMarketNewsConsensus(1)[0];
+            // 1. NaverNewsService로 직접 뉴스 수집 (Legacy MarketNewsService 경유 X)
+            const { NaverNewsService } = await import('./NaverNewsService');
+            const naverNews = NaverNewsService.getInstance();
             
-            if (!lastConsensus || !lastConsensus.source_news) {
-                return { success: false, error: '분석할 뉴스 원본 소스가 없습니다. (MarketNewsService 수집 선행 필요)' };
+            // MAIIS 자체 키워드 기반 수집 (Legacy의 evolveAiKeywordsPool 대체)
+            const baseKeywords = ['코스피 코스닥 시황', '뉴욕증시 마감', '미국 금리 환율', '한국 경제 정책'];
+            
+            // maiis_keyword_rankings에서 최근 고점수 키워드를 추가 활용
+            const topKeywords = this.db.getDb().prepare(`
+                SELECT keyword FROM maiis_keyword_rankings 
+                WHERE score >= 50 
+                ORDER BY date DESC, score DESC LIMIT 3
+            `).all() as any[];
+            
+            const finalKeywords = [...baseKeywords];
+            for (const kw of topKeywords) {
+                if (!finalKeywords.includes(kw.keyword)) finalKeywords.push(kw.keyword);
             }
 
-            let rawNewsItems = [];
-            try {
-                rawNewsItems = JSON.parse(lastConsensus.source_news);
-            } catch (e) {
-                return { success: false, error: '뉴스 원본 데이터 파싱에 실패했습니다.' };
+            const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+            let allNewsText = '';
+            const sourceNews: { title: string, url: string, pubDate: string }[] = [];
+
+            console.log(`[MaiisDomainService] 뉴스 직접 수집 시작 (키워드 ${finalKeywords.length}개)...`);
+            
+            for (const keyword of finalKeywords) {
+                try {
+                    const items = await naverNews.searchNews(keyword, 15);
+                    const recentItems = items.filter(item => new Date(item.pubDate).getTime() > oneDayAgo);
+                    
+                    if (recentItems.length > 0) {
+                        allNewsText += `\n### 키워드: ${keyword}\n`;
+                        allNewsText += recentItems.map(item => `- ${item.title}: ${item.description}`).join('\n');
+                        recentItems.forEach(item => sourceNews.push({ 
+                            title: item.title, 
+                            url: item.link, 
+                            pubDate: item.pubDate 
+                        }));
+                    }
+                } catch (e: any) {
+                    console.warn(`[MaiisDomainService] 키워드 '${keyword}' 뉴스 수집 실패:`, e.message);
+                }
             }
+
+            if (!allNewsText) {
+                return { success: false, error: '최근 24시간 내 수집된 뉴스가 없습니다. (Naver API 키 확인 필요)' };
+            }
+            
+            console.log(`[MaiisDomainService] 뉴스 ${sourceNews.length}건 수집 완료`);
 
             // 2. 인풋 데이터 조합
-            const rawInputText = rawNewsItems.map((n: any, idx: number) => `[기사${idx + 1}] ${n.title}`).join('\n');
+            const rawInputText = allNewsText;
 
             // 3. MAIIS 전용 페르소나 프롬프트 (뉴스 = 기관/외인 관점의 매크로 팩트체커)
             const systemPrompt = `
@@ -176,7 +237,7 @@ theme_name에는 아래 표준 테마 목록에서 가장 가까운 이름을 �
             const aiResponse = await this.ai.askGemini(userPrompt, systemPrompt);
             const parsedJson = JsonUtils.extractAndParse(aiResponse);
 
-            // 5. DB 저장 (maiis_domain_insights)
+            // 5. DB 저장 (maiis_domain_insights) - 단일 Source of Truth
             this.db.saveMaiisDomainInsight({
                 date: targetDate,
                 domain_type: 'NEWS',

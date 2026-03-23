@@ -1318,6 +1318,16 @@ export class DatabaseService {
         return this.db.prepare('SELECT * FROM maiis_domain_insights WHERE date = ? ORDER BY created_at DESC').all(date);
     }
 
+    /** [MAIIS 통합] 최근 N일간 도메인 인사이트 히스토리 (차트/트렌드용) */
+    public getMaiisDomainInsightsHistory(domainType: string, days: number = 14) {
+        return this.db.prepare(`
+            SELECT * FROM maiis_domain_insights 
+            WHERE domain_type = ? 
+            ORDER BY date DESC, created_at DESC 
+            LIMIT ?
+        `).all(domainType, days);
+    }
+
     public saveMaiisWorldState(data: { date: string, sentiment_score: number, market_frame: string, top_keywords_json: string, expected_sectors_json: string, macro_indicators_json?: string }) {
         const sql = `
             INSERT OR REPLACE INTO maiis_world_state (date, sentiment_score, market_frame, top_keywords_json, expected_sectors_json, macro_indicators_json, created_at)

@@ -95,27 +95,51 @@ export class MaiisDashboardService {
             try { scoreAdjustments = JSON.parse(todayMasterState.score_adjustments_json); } catch(e) {}
         }
         
-        const sectorRankings = currentThemes.map((theme, index) => {
-            const currentRank = index + 1;
-            const prevTheme = prevThemes.find(pt => pt.theme_name === theme.theme_name);
-            const prevRank = prevTheme ? prevThemes.indexOf(prevTheme) + 1 : currentRank;
-            const change = prevRank - currentRank;
+        let tempSectorRankings = currentThemes.map((theme, index) => {
+            const rawWeight = theme.final_score ? Math.round(theme.final_score) : 0;
             
-            // Master AI의 점수 조정 반영
+            // Master AI의 점수 조정 수집
             const adjustment = scoreAdjustments.find((a: any) => 
                 theme.theme_name.includes(a.target_theme) || a.target_theme.includes(theme.theme_name)
             );
-            const aiAdjustText = adjustment 
+            
+            // [개선 2] 마스터 AI의 실제 산술 연산 적용 및 스코어 캡핑 (0 ~ 100)
+            let adjustedWeight = rawWeight;
+            if (adjustment && adjustment.adjustment_point) {
+                adjustedWeight += adjustment.adjustment_point;
+            }
+            adjustedWeight = Math.max(0, Math.min(adjustedWeight, 100));
+
+            const aiAdjustText = adjustment && adjustment.adjustment_point !== 0
                 ? `[AI 조정: ${adjustment.adjustment_point > 0 ? '+' : ''}${adjustment.adjustment_point}] ${adjustment.reason}`
                 : '';
+            
+            return {
+                originalRank: index + 1, // 필요시 참고용
+                themeName: theme.theme_name,
+                badge: theme.theme_name,
+                weight: adjustedWeight,
+                text: aiAdjustText ? `${aiAdjustText} ${theme.ai_reason}` : (theme.ai_reason || '알고리즘에 의한 기계적 스코어링') // 조정 사유를 최우선으로, 그 뒤에 원래 사유 병합
+            };
+        });
+
+        // 조정된 점수를 기반으로 다시 내림차순 정렬
+        tempSectorRankings.sort((a, b) => b.weight - a.weight);
+
+        const sectorRankings = tempSectorRankings.map((theme, index) => {
+            const currentRank = index + 1;
+            // 어제 랭킹 구하기 (이름 기준으로 비교)
+            const prevTheme = prevThemes.find(pt => pt.theme_name === theme.themeName);
+            const prevRank = prevTheme ? prevThemes.indexOf(prevTheme) + 1 : currentRank;
+            const change = prevRank - currentRank;
             
             return {
                 rank: currentRank,
                 change: change,
                 isUp: change > 0,
-                badge: theme.theme_name,
-                weight: theme.final_score ? Math.round(theme.final_score) : 0,
-                text: aiAdjustText || theme.ai_reason || '알고리즘에 의한 기계적 스코어링'
+                badge: theme.badge,
+                weight: theme.weight,
+                text: theme.text
             };
         });
 
@@ -336,7 +360,7 @@ export class MaiisDashboardService {
                 name,
                 data: kwTrendDates.map(d => {
                     const rows = kwHistStmt.all(d) as any[];
-                    const found = rows.find(r => r.keyword === name);
+                    const found = rows.find(r => r.keyword === name.replace('#', ''));
                     return found ? Math.round(found.score) : 0;
                 })
             }))

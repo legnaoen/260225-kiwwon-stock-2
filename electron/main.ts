@@ -289,6 +289,13 @@ ipcMain.handle('maiis:get-domain-insights', async (_event, date) => {
     return db.getMaiisDomainInsights(targetDate)
 })
 
+// [MAIIS 통합] 최근 N일간 도메인 인사이트 히스토리 (차트용)
+ipcMain.handle('maiis:get-domain-insights-history', async (_event, { domainType, days }) => {
+    const { DatabaseService } = await import('./services/DatabaseService');
+    const db = DatabaseService.getInstance();
+    return db.getMaiisDomainInsightsHistory(domainType, days || 14)
+})
+
 ipcMain.handle('maiis:get-world-state', async (_event, date) => {
     const { DatabaseService } = await import('./services/DatabaseService');
     const db = DatabaseService.getInstance();

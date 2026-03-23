@@ -117,8 +117,21 @@ export class MaiisRankingAggregator {
 
         const recordsToSave: any[] = [];
         themeScores.forEach((scores, theme) => {
-            // (유튜브 30% + 뉴스 40% + 수급 30%) 비중 임시 적용
-            const baseScore = (scores.youtube * 0.3) + (scores.news * 0.4) + (scores.rising * 0.3);
+            // [개선 1] 최댓값(Max) + 다중 매체 포착 보너스 점수 시스템
+            const maxScore = Math.max(scores.youtube, scores.news, scores.rising);
+            
+            let overlapBonus = 0;
+            let sourcesCount = 0;
+            // 유의미한 신호(강도 20 이상)일 때만 카운트
+            if (scores.youtube >= 20) sourcesCount++;
+            if (scores.news >= 20) sourcesCount++;
+            if (scores.rising >= 20) sourcesCount++;
+            
+            if (sourcesCount >= 3) overlapBonus = 20;
+            else if (sourcesCount === 2) overlapBonus = 10;
+
+            const baseScore = Math.min(maxScore + overlapBonus, 100);
+
             if (baseScore > 0) {
                 recordsToSave.push({ 
                     date, 

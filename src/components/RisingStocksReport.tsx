@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { TrendingUp, RefreshCw, Calendar, FileText, BarChart2, PieChart, Info, ShieldCheck, AlertCircle, Beaker, CheckCircle2, Newspaper, Rss, Settings, Clock, Bell, Save, Trash2, X } from 'lucide-react'
 import { cn } from '../utils'
+import { Switch } from './ui/Switch'
 import { StockChart } from './StockChart'
 import { StockNotes } from './StockNotes'
 import { StockFinancials } from './StockFinancials'
@@ -735,7 +736,7 @@ export default function RisingStocksReport() {
     return (
         <div className="flex h-full overflow-hidden">
             {/* 왼쪽 패널: 리포트 리스트 */}
-            <div className="w-[320px] shrink-0 border-r border-border bg-card flex flex-col min-h-0">
+            <div className="w-[320px] shrink-0 border-r border-border bg-background flex flex-col min-h-0">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background">
                 <div className="flex items-center gap-2">
                     {/* 타이틀 제거됨 */}
@@ -774,18 +775,10 @@ export default function RisingStocksReport() {
                                             <p className="text-[11px] font-bold">자동 분석 활성</p>
                                             <p className="text-[9px] text-muted-foreground">정해진 시간에 자동 실행</p>
                                         </div>
-                                        <button 
-                                            onClick={() => setScheduleConfig(prev => ({ ...prev, enabled: !prev.enabled }))}
-                                            className={cn(
-                                                "w-10 h-5 rounded-full transition-colors relative",
-                                                scheduleConfig.enabled ? "bg-primary" : "bg-muted-foreground/30"
-                                            )}
-                                        >
-                                            <div className={cn(
-                                                "absolute top-1 w-3 h-3 bg-white rounded-full transition-all",
-                                                scheduleConfig.enabled ? "left-6" : "left-1"
-                                            )} />
-                                        </button>
+                                        <Switch
+                                            checked={scheduleConfig.enabled}
+                                            onChange={(checked) => setScheduleConfig(prev => ({ ...prev, enabled: checked }))}
+                                        />
                                     </div>
 
                                     <div className={cn("space-y-4 transition-opacity", !scheduleConfig.enabled && "opacity-40 pointer-events-none")}>
@@ -823,11 +816,9 @@ export default function RisingStocksReport() {
                                                 <Bell size={12} className="text-primary/70" />
                                                 <span className="text-[10px] font-bold">텔레그램 결과 발송</span>
                                             </div>
-                                            <input 
-                                                type="checkbox" 
+                                            <Switch
                                                 checked={scheduleConfig.telegramNotify}
-                                                onChange={(e) => setScheduleConfig(prev => ({ ...prev, telegramNotify: e.target.checked }))}
-                                                className="w-3 h-3 rounded border-border"
+                                                onChange={(checked) => setScheduleConfig(prev => ({ ...prev, telegramNotify: checked }))}
                                             />
                                         </div>
                                     </div>
@@ -1125,7 +1116,7 @@ export default function RisingStocksReport() {
                                                 <p className="text-[10px] mt-2 opacity-60">네이버 API 키가 정상적으로 등록되어 있는지 확인하세요.</p>
                                             </div>
                                         ) : rawData.news.map((item: any, idx: number) => (
-                                            <div key={idx} className="p-4 bg-card border border-border/60 rounded-2xl space-y-1.5 hover:border-primary/30 transition-colors">
+                                            <div key={idx} className="py-4 border-b border-border/40 space-y-1.5 hover:bg-muted/10 transition-colors px-2">
                                                 <div className="flex items-start justify-between gap-2">
                                                     <a href={item.link || item.originallink} target="_blank" rel="noopener noreferrer"
                                                         className="text-sm font-bold leading-tight hover:text-primary transition-colors line-clamp-2">
@@ -1182,7 +1173,7 @@ export default function RisingStocksReport() {
                                                 <p className="text-[10px] mt-2 opacity-60">DART API 키와 법인코드 동기화 여부를 확인하세요.</p>
                                             </div>
                                         ) : rawData.disclosures.map((item: any, idx: number) => (
-                                            <div key={idx} className="p-4 bg-card border border-border/60 rounded-2xl space-y-1 hover:border-amber-500/30 transition-colors">
+                                            <div key={idx} className="py-4 border-b border-border/40 space-y-1 hover:bg-muted/10 transition-colors px-2">
                                                 <div className="flex items-center justify-between gap-2">
                                                     <span className="text-xs font-black text-amber-500 font-mono">
                                                         {item.rcept_dt ? `${item.rcept_dt.slice(0,4)}-${item.rcept_dt.slice(4,6)}-${item.rcept_dt.slice(6,8)}` : ''}

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/Table'
 import { Play, Square, RefreshCw, Settings2, Clock, ShieldCheck, ListOrdered } from 'lucide-react'
+import { Switch } from './ui/Switch'
+import { Button } from './ui/Button'
 import { useAccountStore } from '../store/useAccountStore'
 import { useAutoTradeStore } from '../store/useAutoTradeStore'
 
@@ -239,19 +241,21 @@ export default function AutoTrade() {
 
                     <div className="flex gap-3">
                         {isActive ? (
-                            <button
+                            <Button
+                                variant="outline"
                                 onClick={() => toggleActive(false)}
-                                className="flex items-center gap-2 px-6 py-2 bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 transition-colors rounded-xl font-bold"
+                                className="text-red-500 border-red-500/20 bg-red-500/10 hover:bg-red-500/20 font-bold"
                             >
-                                <Square size={18} /> 정지
-                            </button>
+                                <Square size={18} className="mr-2" /> 정지
+                            </Button>
                         ) : (
-                            <button
+                            <Button
+                                variant="outline"
                                 onClick={() => toggleActive(true)}
-                                className="flex items-center gap-2 px-6 py-2 bg-green-500/10 text-green-500 border border-green-500/20 hover:bg-green-500/20 transition-colors rounded-xl font-bold"
+                                className="text-green-500 border-green-500/20 bg-green-500/10 hover:bg-green-500/20 font-bold"
                             >
-                                <Play size={18} /> 가동 시작
-                            </button>
+                                <Play size={18} className="mr-2" /> 가동 시작
+                            </Button>
                         )}
                     </div>
                 </div>
@@ -427,26 +431,24 @@ export default function AutoTrade() {
                                 </p>
                             </div>
 
-                            <label className="flex items-start gap-2 pt-2 border-t border-border/50 cursor-pointer group">
-                                <input
-                                    type="checkbox"
-                                    className="w-3.5 h-3.5 mt-0.5 rounded border-border text-primary focus:ring-primary bg-background"
+                            <div className="flex items-start gap-3 pt-4 border-t border-border/50">
+                                <Switch
                                     checked={autoModify}
-                                    onChange={e => setAutoModify(e.target.checked)}
+                                    onChange={(checked) => setAutoModify(checked)}
                                 />
                                 <div className="flex flex-col flex-1">
-                                    <span className="text-[13px] font-bold text-foreground group-hover:text-primary transition-colors">1분 경과 매도주문 정정</span>
+                                    <span className="text-[13px] font-bold text-foreground">1분 경과 매도주문 정정</span>
                                     <span className="text-[10px] text-muted-foreground mt-0.5 leading-tight">지정가 매도가 1분 경과시 현재가로 정정</span>
                                 </div>
-                            </label>
+                            </div>
 
                             <div className="pt-6 border-t border-border/50 mt-4">
-                                <button
+                                <Button
                                     onClick={handleManualExecuteBuy}
-                                    className="w-full py-2.5 px-4 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded shadow-sm flex items-center justify-center gap-2 transition-colors text-sm"
+                                    className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold h-11"
                                 >
-                                    <Play fill="currentColor" size={14} /> 수동 매수 파도타기 호출
-                                </button>
+                                    <Play fill="currentColor" size={14} className="mr-2" /> 수동 매수 파도타기 호출
+                                </Button>
                                 <p className="text-[9px] text-muted-foreground mt-2 text-center leading-tight">
                                     오류 발생, 앱 재시작 등 예약시간을 놓쳤을 때 강제로 조건검색을 실행하여 매수 프로세스를 태웁니다.
                                 </p>

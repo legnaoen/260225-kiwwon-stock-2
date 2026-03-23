@@ -1,11 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { Card, CardContent } from './ui/Card'
 import { ProfitBadge, ProfitText } from './ui/ProfitDisplay'
 import { useAccountStore } from '../store/useAccountStore'
-import { useAutoTradeStore, OrderInfo } from '../store/useAutoTradeStore'
-import { useScheduleStore, ScheduleEvent } from '../store/useScheduleStore'
 import { parseNumber, cn } from '../utils'
-import { Activity, Play, Square } from 'lucide-react'
+import { Activity, Terminal, BrainCircuit, Globe } from 'lucide-react'
 
 interface Summary {
     totalEvaluation: number
@@ -15,22 +12,15 @@ interface Summary {
     holdingsCount: number
 }
 
+// Swarm Agent mock states
+const AGENTS = [
+    { id: '1', name: 'Master AI', status: 'thinking', role: '시장 분석' },
+    { id: '2', name: 'PM Bot Alpha', status: 'idle', role: '포트폴리오 평가' },
+    { id: '3', name: 'Execution Bot', status: 'executing', role: '주문 워커' },
+]
+
 export default function Dashboard() {
     const { selectedAccount } = useAccountStore()
-    const isRunning = useAutoTradeStore(state => state.isRunning)
-    const setIsRunning = useAutoTradeStore(state => state.setIsRunning)
-    const orders = useAutoTradeStore(state => state.orders)
-
-    const getEventsByDate = useScheduleStore(state => state.getEventsByDate)
-
-    // For auto-trade today stats
-    const todayOrders = orders // Assuming orders are today's
-    const completedOrders = todayOrders.filter(o => o.status === '체결')
-    const pendingOrders = todayOrders.filter(o => o.status !== '체결' && o.status !== '거부' && o.remain_qty > 0)
-
-    // For schedule
-    const todayString = new Date().toLocaleDateString('sv-SE')
-    const todayEvents = getEventsByDate(todayString)
 
     const [summary, setSummary] = useState<Summary>({
         totalEvaluation: 0,
@@ -39,28 +29,6 @@ export default function Dashboard() {
         deposit: 0,
         holdingsCount: 0
     })
-
-    const [autoTradeSettings, setAutoTradeSettings] = useState({
-        timeHours: '09',
-        timeMinutes: '00',
-        buyLimit: '0'
-    })
-
-    const fetchAutoTradeSettings = async () => {
-        if (!window.electronAPI?.getAutoTradeSettings) return
-        try {
-            const saved = await window.electronAPI.getAutoTradeSettings()
-            if (saved) {
-                setAutoTradeSettings({
-                    timeHours: saved.timeHours || '09',
-                    timeMinutes: saved.timeMinutes || '00',
-                    buyLimit: saved.buyLimit || '0'
-                })
-            }
-        } catch (err) {
-            console.error('Failed to fetch auto trade settings:', err)
-        }
-    }
 
     const fetchData = async (accountNo: string) => {
         if (!accountNo || !window.electronAPI?.getHoldings) return
@@ -103,9 +71,7 @@ export default function Dashboard() {
 
     useEffect(() => {
         const handleRefresh = () => {
-            if (selectedAccount) {
-                fetchData(selectedAccount)
-            }
+            if (selectedAccount) fetchData(selectedAccount)
         }
         window.addEventListener('kiwoom:refresh-data', handleRefresh)
         return () => window.removeEventListener('kiwoom:refresh-data', handleRefresh)
@@ -114,7 +80,6 @@ export default function Dashboard() {
     useEffect(() => {
         if (selectedAccount) {
             fetchData(selectedAccount)
-            fetchAutoTradeSettings()
             const intervalId = setInterval(() => {
                 fetchData(selectedAccount)
             }, 10000)
@@ -125,128 +90,118 @@ export default function Dashboard() {
     const totalAssets = summary.totalEvaluation + summary.deposit
 
     return (
-        <div className="flex-1 flex flex-col p-6 bg-background h-full overflow-y-auto min-h-0">
-            <h1 className="text-2xl font-bold mb-6 tracking-tight shrink-0">DASHBOARD</h1>
-
-            {/* 계좌 요약 (Asset Summary) - Ticker Style */}
-            <Card className="mb-6 bg-muted/20 border-border/50 shadow-sm shrink-0">
-                <CardContent className="p-4 overflow-x-auto scrollbar-thin">
-                    <div className="flex flex-row items-center justify-between font-mono text-sm leading-none min-w-max gap-6">
-                        <div className="flex flex-col gap-1.5 items-start shrink-0">
-                            <span className="text-[11px] text-muted-foreground font-sans font-medium uppercase tracking-wider">Total Assets</span>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-xl font-bold tracking-tight">₩ {totalAssets.toLocaleString()}</span>
-                            </div>
-                        </div>
-
-                        <div className="w-px h-10 bg-border shrink-0" />
-
-                        <div className="flex flex-col gap-1.5 items-start shrink-0">
-                            <span className="text-[11px] text-muted-foreground font-sans font-medium uppercase">평가자산</span>
-                            <span className="text-base font-semibold">₩ {summary.totalEvaluation.toLocaleString()}</span>
-                        </div>
-
-                        <div className="w-px h-10 bg-border shrink-0" />
-
-                        <div className="flex flex-col gap-1.5 items-start shrink-0">
-                            <span className="text-[11px] text-muted-foreground font-sans font-medium uppercase">예수금</span>
-                            <span className="text-base font-semibold text-primary">₩ {summary.deposit.toLocaleString()}</span>
-                        </div>
-
-                        <div className="w-px h-10 bg-border shrink-0" />
-
-                        <div className="flex flex-col gap-1.5 items-start shrink-0">
-                            <span className="text-[11px] text-muted-foreground font-sans font-medium uppercase">손익</span>
-                            <div className="flex items-center gap-1.5">
-                                <ProfitText value={summary.totalProfit} prefix="₩ " className="text-base" />
-                                <ProfitBadge value={summary.profitRate} suffix="%" />
-                            </div>
-                        </div>
-
-                        <div className="w-px h-10 bg-border shrink-0" />
-
-                        <div className="flex flex-col gap-1.5 items-start shrink-0">
-                            <span className="text-[11px] text-muted-foreground font-sans font-medium uppercase">보유 종목</span>
-                            <span className="text-base font-semibold">{summary.holdingsCount} 종목</span>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Split Middle Section */}
-            <div className="flex gap-6 mb-6 shrink-0 h-[220px]">
-                {/* 왼쪽: 자동매매 */}
-                <Card className="flex-1 bg-muted/10 border-border/50 flex flex-col">
-                    <CardContent className="p-5 flex flex-col h-full relative overflow-hidden">
-                        <h2 className="text-sm font-bold flex items-center gap-2 mb-4 tracking-tight">
-                            <div className="w-1.5 h-4 bg-primary rounded-sm shadow-[0_0_8px_rgba(var(--primary),0.5)]"></div>
-                            자동매매 (Auto-Trade)
-                        </h2>
-
-                        <div className="flex-1 flex flex-col justify-center gap-3">
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-muted-foreground font-medium">상태</span>
-                                <div className="flex items-center gap-2">
-                                    <div className={cn(
-                                        "w-2 h-2 rounded-full",
-                                        isRunning ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" : "bg-muted-foreground"
-                                    )} />
-                                    <span className={cn("font-bold font-mono tracking-widest", isRunning ? "text-green-500" : "text-muted-foreground")}>
-                                        {isRunning ? 'RUNNING' : 'STOPPED'}
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-muted-foreground font-medium">자동매수실행 시간</span>
-                                <span className="font-mono font-semibold">{autoTradeSettings.timeHours}:{autoTradeSettings.timeMinutes}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-muted-foreground font-medium">종목별매수금 설정액</span>
-                                <span className="font-mono font-semibold">₩ {parseInt(autoTradeSettings.buyLimit).toLocaleString()}</span>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* 오른쪽: 오늘 일정 */}
-                <Card className="flex-1 bg-muted/10 border-border/50 flex flex-col">
-                    <CardContent className="p-5 flex flex-col h-full">
-                        <h2 className="text-sm font-bold flex items-center gap-2 mb-4 tracking-tight">
-                            <div className="w-1.5 h-4 bg-amber-500 rounded-sm shadow-[0_0_8px_rgba(245,158,11,0.5)]"></div>
-                            오늘 일정 (Today's Schedule)
-                        </h2>
-
-                        <div className="flex-1 overflow-y-auto pr-2 space-y-2.5 scrollbar-thin">
-                            {todayEvents.length === 0 ? (
-                                <div className="h-full flex items-center justify-center text-sm text-muted-foreground/50 font-medium">
-                                    오늘 등록된 일정이 없습니다
-                                </div>
-                            ) : (
-                                todayEvents.map((event: ScheduleEvent) => (
-                                    <div key={event.id} className="flex gap-3 items-start text-[13px] bg-background/50 p-2.5 rounded-lg border border-border/40">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0" />
-                                        <div className="flex flex-col gap-0.5 min-w-0">
-                                            <span className="font-semibold truncate">{event.title}</span>
-                                            {event.code && <span className="text-[10px] text-muted-foreground font-mono">{event.code}</span>}
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </CardContent>
-                </Card>
+        <div className="flex-1 flex flex-col bg-background h-full overflow-hidden">
+            
+            {/* Header / Title Area */}
+            <div className="px-8 py-6 border-b flex items-center justify-between shrink-0">
+                <div className="flex flex-col gap-1">
+                    <h1 className="text-2xl font-bold tracking-tight">Command Center</h1>
+                    <span className="text-sm text-muted-foreground">Kiwoom System V2 Dashboard</span>
+                </div>
+                {/* Global Status */}
+                <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-full border">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-sm font-medium">System Online</span>
+                </div>
             </div>
 
-            {/* 하단 넓은 영역: AI 분석 및 시장 맥락 */}
-            <Card className="flex-1 bg-muted/5 border-border/30 border-dashed flex flex-col min-h-[300px] shrink-0 relative group">
-                <CardContent className="p-0 flex-1 flex flex-col items-center justify-center opacity-40 group-hover:opacity-60 transition-opacity">
-                    <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
-                        <Activity size={24} className="text-muted-foreground" />
+            {/* Top Asset Bar (Divider Based) */}
+            <div className="border-b bg-muted/10 w-full overflow-x-auto scrollbar-hide shrink-0">
+                <div className="px-8 py-4 flex flex-row items-center justify-between gap-8 min-w-max">
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Assets</span>
+                        <span className="text-xl tabular-nums tracking-tight font-bold">₩ {totalAssets.toLocaleString()}</span>
                     </div>
-                    <h3 className="text-lg font-bold tracking-widest text-muted-foreground mb-1">AI INSIGHTS & MARKET BRIEFING</h3>
-                    <p className="text-xs text-muted-foreground/60 font-medium">준비 중입니다. (Phase 2 예정)</p>
-                </CardContent>
-            </Card>
+                    <div className="w-px h-10 bg-border shrink-0" />
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <span className="text-xs font-medium text-muted-foreground">예평금액</span>
+                        <span className="text-base tabular-nums font-semibold">₩ {summary.totalEvaluation.toLocaleString()}</span>
+                    </div>
+                    <div className="w-px h-10 bg-border shrink-0" />
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <span className="text-xs font-medium text-muted-foreground">D+2 예수금</span>
+                        <span className="text-base tabular-nums font-semibold text-primary">₩ {summary.deposit.toLocaleString()}</span>
+                    </div>
+                    <div className="w-px h-10 bg-border shrink-0" />
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <span className="text-xs font-medium text-muted-foreground">보유 종목수</span>
+                        <span className="text-base tabular-nums font-semibold">{summary.holdingsCount}</span>
+                    </div>
+                    <div className="w-px h-10 bg-border shrink-0" />
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <span className="text-xs font-medium text-muted-foreground">총 수익률</span>
+                        <div className="flex items-center gap-2">
+                            <ProfitText value={summary.totalProfit} prefix="₩ " className="text-base data-mono" />
+                            <ProfitBadge value={summary.profitRate} suffix="%" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Main Content Area (Divider Splitted Grid) */}
+            <div className="flex-1 flex flex-col md:flex-row min-h-0">
+                
+                {/* Left Area: Macro & Terminal (75%) */}
+                <div className="flex-1 flex flex-col border-r min-w-0">
+                    
+                    {/* Macro Ecosystem Section */}
+                    <div className="flex-1 flex flex-col relative overflow-hidden group">
+                        <div className="px-6 py-4 border-b flex items-center gap-2 font-medium text-sm text-foreground bg-muted/5">
+                            <Globe size={16} className="text-muted-foreground" />
+                            Macro Ecosystem <span className="text-xs text-muted-foreground font-normal ml-auto">V2 Phase 1</span>
+                        </div>
+                        <div className="p-6 flex-1 flex flex-col items-center justify-center bg-muted/10">
+                            <h3 className="text-lg font-bold text-muted-foreground/60 mb-2 font-mono tracking-wider">WAITING_FOR_DATA_STREAM</h3>
+                            <p className="text-sm text-muted-foreground/50">MaiisMacroService connection pending...</p>
+                        </div>
+                    </div>
+
+                    {/* Terminal Event Stream Section */}
+                    <div className="h-64 flex flex-col border-t">
+                        <div className="px-6 py-3 flex items-center border-b justify-between bg-muted/5">
+                            <div className="flex items-center gap-2">
+                                <Terminal size={14} className="text-muted-foreground" />
+                                <span className="text-sm font-semibold text-foreground">Event Bus Stream</span>
+                            </div>
+                        </div>
+                        <div className="p-6 font-mono text-sm flex-1 bg-black/5 dark:bg-black/30 text-foreground/80 overflow-y-auto space-y-2">
+                            <div className="flex gap-4"><span className="text-muted-foreground/60 w-28 shrink-0">[10:05:22.012]</span><span>[Master AI] Context built from pre-market themes...</span></div>
+                            <div className="flex gap-4"><span className="text-muted-foreground/60 w-28 shrink-0">[10:05:22.450]</span><span className="text-purple-600 dark:text-purple-400">Thinking: Running portfolio evaluation against new thesis...</span></div>
+                            <div className="flex gap-4"><span className="text-muted-foreground/60 w-28 shrink-0">[10:05:23.100]</span><span className="text-blue-600 dark:text-blue-400 font-medium">Execution: Target order generated. Awaiting user approval.</span></div>
+                            <div className="flex gap-4 opacity-50"><span className="text-muted-foreground/60 w-28 shrink-0">[{new Date().toISOString().substring(11,23)}]</span><span>Waiting for tick stream... </span></div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Right Area: Agent Swarm (25%) */}
+                <div className="flex flex-col w-80 bg-card shrink-0">
+                    <div className="px-6 py-4 border-b flex items-center justify-between text-sm font-medium w-full bg-muted/5">
+                        <span className="flex items-center gap-2">
+                            <BrainCircuit size={16} className="text-muted-foreground" />
+                            Agent Swarm Status
+                        </span>
+                    </div>
+                    <div className="p-6 flex-1 overflow-y-auto scrollbar-hide space-y-4 bg-muted/5">
+                        {AGENTS.map(agent => (
+                            <div key={agent.id} className="flex flex-col gap-2 p-4 rounded-lg border bg-background shadow-sm">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm font-semibold">{agent.name}</span>
+                                    <span className={cn(
+                                        "text-[10px] font-bold uppercase px-2 py-0.5 rounded-full tracking-wider",
+                                        agent.status === 'thinking' && "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+                                        agent.status === 'executing' && "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+                                        agent.status === 'idle' && "bg-muted text-muted-foreground"
+                                    )}>
+                                        {agent.status}
+                                    </span>
+                                </div>
+                                <span className="text-xs text-muted-foreground">{agent.role}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+            </div>
         </div>
     )
 }

@@ -212,7 +212,7 @@ export const StockFinancials: React.FC<StockFinancialsProps> = ({ stockCode, sto
                     <p className="text-[10px] text-muted-foreground/60 mt-1">설정에서 '10년 재무정보 일괄 업데이트'를<br />진행해 주세요.</p>
                 </div>
             ) : (
-                <div className="bg-card border border-border/60 rounded-2xl overflow-hidden shadow-sm">
+                <div className="border border-border/30 rounded-xl overflow-hidden bg-background">
                     <Table>
                         <TableHeader>
                             <TableRow>

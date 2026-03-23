@@ -79,7 +79,7 @@ export const StockSchedules: React.FC<StockSchedulesProps> = ({ stockCode, stock
                         <div
                             key={schedule.id}
                             className={cn(
-                                "group bg-card border border-border/60 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-green-500/30 transition-all",
+                                "group border border-border/30 rounded-xl p-4 bg-background transition-all hover:bg-muted/10",
                                 schedule.source === 'DART' ? "border-l-4 border-l-green-500" : "border-l-4 border-l-amber-500"
                             )}
                         >

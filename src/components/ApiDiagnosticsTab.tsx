@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Activity, Code, Database, AlertCircle } from 'lucide-react';
+import { Switch } from './ui/Switch';
+import { Button } from './ui/Button';
 
 export default function ApiDiagnosticsTab() {
     const [logs, setLogs] = useState<any[]>([]);
@@ -55,38 +57,40 @@ export default function ApiDiagnosticsTab() {
     };
 
     return (
-        <div className="flex flex-col h-full bg-slate-50 dark:bg-gray-900 absolute inset-0 pt-6">
+        <div className="flex flex-col h-full bg-background absolute inset-0 pt-6">
             <div className="flex items-center justify-between px-6 mb-4">
                 <div>
-                    <h2 className="text-xl font-bold font-neo text-slate-800 dark:text-gray-100 flex items-center">
-                        <Activity className="w-5 h-5 mr-2 text-indigo-500" />
+                    <h2 className="text-xl font-bold font-neo text-foreground flex items-center gap-2">
+                        <Activity className="w-5 h-5 text-indigo-500" />
                         API & Data Pipeline Inspector
                     </h2>
-                    <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">
+                    <p className="text-sm text-muted-foreground mt-1">
                         최근 백엔드 서버(키움증권 등)와의 API 통신 기록과 가공된 날것의 데이터를 교차 검증합니다.
                     </p>
                 </div>
                 <div className="flex items-center space-x-3">
-                    <label className="flex items-center space-x-2 text-sm text-slate-600 dark:text-gray-300 cursor-pointer">
-                        <input
-                            type="checkbox"
+                    <div className="flex items-center space-x-2 text-xs text-muted-foreground font-bold">
+                        <Switch
                             checked={hideKa00001}
-                            onChange={(e) => setHideKa00001(e.target.checked)}
-                            className="rounded border-slate-300 text-indigo-500 focus:ring-indigo-500"
+                            onChange={(checked) => setHideKa00001(checked)}
                         />
                         <span>ka00001 숨기기</span>
-                    </label>
+                    </div>
 
-                    <button
+                    <Button
+                        variant="outline"
+                        size="sm"
                         onClick={runManualTest}
                         disabled={isTestingSync}
-                        className="flex items-center px-4 py-2 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition font-neo text-sm font-bold text-indigo-700 dark:text-indigo-400 shadow-sm disabled:opacity-50"
+                        className="text-indigo-500 border-indigo-500/20 bg-indigo-500/10 hover:bg-indigo-500/20"
                     >
                         {isTestingSync ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
                         시장스캐너 강제 포착시험
-                    </button>
+                    </Button>
 
-                    <button
+                    <Button
+                        variant="outline"
+                        size="sm"
                         onClick={async () => {
                             if (window.electronAPI.resetCircuitBreaker) {
                                 await window.electronAPI.resetCircuitBreaker();
@@ -94,59 +98,61 @@ export default function ApiDiagnosticsTab() {
                                 fetchLogs();
                             }
                         }}
-                        className="flex items-center px-4 py-2 bg-rose-50 dark:bg-rose-900/40 border border-rose-200 dark:border-rose-800 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/60 transition font-neo text-sm font-bold text-rose-700 dark:text-rose-400 shadow-sm"
+                        className="text-rose-500 border-rose-500/20 bg-rose-500/10 hover:bg-rose-500/20"
                     >
                         <AlertCircle className="w-4 h-4 mr-2" />
                         회로 차단 해제(긴급)
-                    </button>
+                    </Button>
 
-                    <button
+                    <Button
+                        variant="outline"
+                        size="sm"
                         onClick={fetchLogs}
-                        className="flex items-center px-4 py-2 bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-700 transition font-neo text-sm font-bold text-slate-700 dark:text-gray-200 shadow-sm"
+                        className="text-foreground border-border bg-muted/50 hover:bg-muted"
                     >
                         <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                         Refresh Logs
-                    </button>
+                    </Button>
                 </div>
             </div>
 
-            <div className="flex flex-1 overflow-hidden border-t border-slate-200 dark:border-gray-800">
+            <div className="flex flex-1 overflow-hidden border-t border-border mt-4">
                 {/* Left Panel: Log List */}
-                <div className="w-1/3 border-r border-slate-200 dark:border-gray-800 bg-white dark:bg-gray-800 overflow-y-auto">
+                <div className="w-[300px] border-r border-border bg-muted/10 overflow-y-auto">
                     {logs.length === 0 ? (
-                        <div className="p-8 text-center text-slate-400 dark:text-gray-500">
+                        <div className="p-8 text-center text-muted-foreground text-xs font-bold">
                             No API logs available yet.
                         </div>
                     ) : (
-                        <div className="divide-y divide-slate-100 dark:divide-gray-700">
+                        <div className="divide-y divide-border/50">
                             {logs.map((log) => (
                                 <button
                                     key={log.id}
                                     onClick={() => setSelectedLog(log)}
-                                    className={`w-full text-left p-4 hover:bg-slate-50 dark:hover:bg-gray-700 transition ${selectedLog?.id === log.id ? 'bg-indigo-50 dark:bg-indigo-900/20 border-l-4 border-indigo-500' : 'border-l-4 border-transparent'
+                                    className={`w-full text-left p-4 hover:bg-muted/30 transition ${selectedLog?.id === log.id ? 'bg-indigo-500/5 border-l-2 border-indigo-500' : 'border-l-2 border-transparent'
                                         }`}
                                 >
                                     <div className="flex justify-between items-start mb-1">
                                         <div className="flex items-center space-x-2">
                                             {log.success ? (
-                                                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
                                             ) : (
-                                                <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
                                             )}
-                                            <span className="font-bold text-sm text-slate-800 dark:text-gray-200">
+                                            <span className="font-bold text-xs text-foreground">
                                                 {log.apiId}
                                             </span>
                                         </div>
-                                        <span className="text-xs text-slate-400 dark:text-gray-500 font-mono">
+                                        <span className="text-[10px] text-muted-foreground font-mono">
                                             {log.time}
                                         </span>
                                     </div>
-                                    <div className="text-xs text-slate-500 dark:text-gray-400 truncate max-w-[250px]">
+                                    <div className="text-[10px] text-muted-foreground truncate w-full pr-2 mt-1 font-mono">
                                         {log.url?.replace('https://api.kiwoom.com', '')}
                                     </div>
-                                    <div className="mt-2 text-xs text-slate-400 dark:text-gray-500 flex justify-between">
+                                    <div className="mt-2 text-[10px] text-muted-foreground flex items-center justify-between font-bold">
                                         <span>{log.duration}ms</span>
-                                        {!log.success && <span className="text-red-500 truncate w-32 ml-2">{typeof log.responseData === 'string' ? log.responseData : 'Error'}</span>}
+                                        {!log.success && <span className="text-rose-500 truncate max-w-[120px] text-right ml-2">{typeof log.responseData === 'string' ? log.responseData : 'Error'}</span>}
                                     </div>
                                 </button>
                             ))}

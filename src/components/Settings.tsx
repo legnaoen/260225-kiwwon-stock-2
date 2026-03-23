@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database, Globe, BrainCircuit, Info, Activity } from 'lucide-react'
+import { Input } from './ui/Input'
+import { Button } from './ui/Button'
+import { Switch } from './ui/Switch'
 import { useScheduleStore } from '../store/useScheduleStore'
 import ApiDiagnosticsTab from './ApiDiagnosticsTab'
 import MaiisMonitorTab from './MaiisMonitorTab'
@@ -584,11 +587,11 @@ export default function Settings() {
     }
 
     const menuItems = [
-        { id: 'monitor', label: '📊 MAIIS 관제 센터', icon: Activity, color: 'text-primary' },
-        { id: 'accounts', label: '🔑 계정 및 인프라', icon: ShieldCheck, color: 'text-blue-500' },
-        { id: 'telegram', label: '💬 텔레그램 통합 설정', icon: MessageCircle, color: 'text-sky-500' },
-        { id: 'strategy', label: '⚖️ 자동매매 및 전략', icon: BrainCircuit, color: 'text-indigo-500' },
-        { id: 'diagnostics', label: '🔍 원천 데이터 진단', icon: Info, color: 'text-rose-500' },
+        { id: 'monitor', label: 'MAIIS 관제 센터', icon: Activity, color: 'text-primary' },
+        { id: 'accounts', label: '계정 및 인프라', icon: ShieldCheck, color: 'text-blue-500' },
+        { id: 'telegram', label: '텔레그램 통합 설정', icon: MessageCircle, color: 'text-sky-500' },
+        { id: 'strategy', label: '자동매매 및 전략', icon: BrainCircuit, color: 'text-indigo-500' },
+        { id: 'diagnostics', label: '원천 데이터 진단', icon: Info, color: 'text-rose-500' },
     ] as const
 
     return (
@@ -602,17 +605,15 @@ export default function Settings() {
 
                 <nav className="flex-1 space-y-1">
                     {menuItems.map((item) => (
-                        <button
+                        <Button
                             key={item.id}
+                            variant={activeTab === item.id ? 'secondary' : 'ghost'}
                             onClick={() => setActiveTab(item.id)}
-                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group ${activeTab === item.id
-                                ? 'bg-background shadow-sm border border-border text-foreground font-semibold'
-                                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-                                }`}
+                            className={`w-full justify-start gap-3 h-11 ${activeTab === item.id ? 'font-bold' : 'text-muted-foreground'}`}
                         >
-                            <item.icon size={18} className={`${activeTab === item.id ? item.color : 'text-muted-foreground/50 group-hover:text-muted-foreground'} transition-colors`} />
-                            <span className="text-sm">{item.label}</span>
-                        </button>
+                            <item.icon size={18} className={`${activeTab === item.id ? item.color : 'text-muted-foreground/60'} transition-colors`} />
+                            {item.label}
+                        </Button>
                     ))}
                 </nav>
             </aside>
@@ -635,27 +636,25 @@ export default function Settings() {
                                     <p className="text-muted-foreground">키움증권 REST API 연동 정보를 설정합니다.</p>
                                 </div>
 
-                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                <div className="border border-border/30 rounded-xl p-8 bg-background space-y-8">
                                     <form onSubmit={handleSave} className="space-y-6">
                                         <div className="space-y-2">
                                             <label className="text-sm font-semibold ml-1">App Key</label>
-                                            <input
+                                            <Input
                                                 type="password"
                                                 value={keys.appkey}
                                                 onChange={(e) => setKeys({ ...keys, appkey: e.target.value })}
                                                 placeholder="발급받은 App Key를 입력하세요"
-                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
                                             />
                                         </div>
 
                                         <div className="space-y-2">
                                             <label className="text-sm font-semibold ml-1">Secret Key</label>
-                                            <input
+                                            <Input
                                                 type="password"
                                                 value={keys.secretkey}
                                                 onChange={(e) => setKeys({ ...keys, secretkey: e.target.value })}
                                                 placeholder="발급받은 Secret Key를 입력하세요"
-                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
                                             />
                                         </div>
 
@@ -678,14 +677,13 @@ export default function Settings() {
                                                 )}
                                             </div>
 
-                                            <button
+                                            <Button
                                                 type="submit"
                                                 disabled={isSaving}
-                                                className="flex items-center gap-2 bg-primary text-primary-foreground px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-primary/20"
                                             >
-                                                {isSaving ? <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" /> : <Save size={18} />}
+                                                {isSaving ? <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin mr-2" /> : <Save size={18} className="mr-2" />}
                                                 저장하기
-                                            </button>
+                                            </Button>
                                         </div>
                                     </form>
 
@@ -710,16 +708,15 @@ export default function Settings() {
                                     <p className="text-muted-foreground">알림 및 차트 전송을 위한 텔레그램 설정을 구성합니다.</p>
                                 </div>
 
-                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                <div className="border border-border/30 rounded-xl p-8 bg-background space-y-8">
                                     <form onSubmit={handleSaveTelegram} className="space-y-6">
                                         <div className="space-y-2">
                                             <label className="text-sm font-semibold ml-1">Bot Token</label>
-                                            <input
+                                            <Input
                                                 type="password"
                                                 value={telegramKeys.botToken}
                                                 onChange={(e) => setTelegramKeys({ ...telegramKeys, botToken: e.target.value })}
                                                 placeholder="BotFather에서 발급받은 봇 토큰"
-                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:text-muted-foreground/50"
                                             />
                                         </div>
 
@@ -733,12 +730,12 @@ export default function Settings() {
                                                 )}
                                             </label>
                                             <div className="relative group">
-                                                <input
+                                                <Input
                                                     type="text"
                                                     value={telegramKeys.chatId}
                                                     onChange={(e) => setTelegramKeys({ ...telegramKeys, chatId: e.target.value })}
                                                     placeholder="사용자 ID 혹은 그룹 ID"
-                                                    className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all pr-14 placeholder:text-muted-foreground/50"
+                                                    className="pr-14"
                                                 />
                                                 {telegramKeys.chatId && (
                                                     <button
@@ -784,15 +781,10 @@ export default function Settings() {
                                                     </h3>
                                                     <p className="text-[11px] text-muted-foreground">지정된 시간에 당일 상승률 상위 종목을 요약하여 전송합니다.</p>
                                                 </div>
-                                                <label className="relative inline-flex items-center cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={telegramKeys.dailyTopRisingNotify}
-                                                        onChange={(e) => setTelegramKeys({ ...telegramKeys, dailyTopRisingNotify: e.target.checked })}
-                                                        className="sr-only peer"
-                                                    />
-                                                    <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                                </label>
+                                                <Switch
+                                                    checked={telegramKeys.dailyTopRisingNotify}
+                                                    onChange={(checked) => setTelegramKeys({ ...telegramKeys, dailyTopRisingNotify: checked })}
+                                                />
                                             </div>
 
                                             {telegramKeys.dailyTopRisingNotify && (
@@ -801,22 +793,20 @@ export default function Settings() {
                                                         <label className="text-xs font-semibold ml-1 text-muted-foreground uppercase flex items-center gap-1">
                                                             <Clock size={12} /> 알림 시간 1
                                                         </label>
-                                                        <input
+                                                        <Input
                                                             type="time"
                                                             value={telegramKeys.dailyTopRisingTime1}
                                                             onChange={(e) => setTelegramKeys({ ...telegramKeys, dailyTopRisingTime1: e.target.value })}
-                                                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                                                         />
                                                     </div>
                                                     <div className="space-y-2">
                                                         <label className="text-xs font-semibold ml-1 text-muted-foreground uppercase flex items-center gap-1">
                                                             <Clock size={12} /> 알림 시간 2
                                                         </label>
-                                                        <input
+                                                        <Input
                                                             type="time"
                                                             value={telegramKeys.dailyTopRisingTime2}
                                                             onChange={(e) => setTelegramKeys({ ...telegramKeys, dailyTopRisingTime2: e.target.value })}
-                                                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                                                         />
                                                     </div>
                                                 </div>
@@ -824,18 +814,21 @@ export default function Settings() {
 
                                             {telegramKeys.dailyTopRisingNotify && (
                                                 <div className="flex justify-start">
-                                                    <button
+                                                    <Button
                                                         type="button"
+                                                        variant="outline"
+                                                        size="sm"
                                                         onClick={handleTestTopRising}
                                                         disabled={isTestingTopRising}
-                                                        className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-700 font-bold px-4 py-2.5 rounded-xl border border-blue-200 hover:bg-blue-50 transition-colors"
+                                                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200"
                                                     >
-                                                        {isTestingTopRising ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                        {isTestingTopRising ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Send size={14} className="mr-2" />}
                                                         당일 급등주 TOP 10 즉시 테스트
-                                                    </button>
+                                                    </Button>
                                                 </div>
                                             )}
 
+                                            {/* 주간 및 월간 알림 삭제 블록 */}
                                             <div className="pt-4 border-t border-border/40 space-y-4">
                                                 <div className="flex items-center justify-between">
                                                     <div className="space-y-1">
@@ -844,15 +837,10 @@ export default function Settings() {
                                                         </h3>
                                                         <p className="text-[11px] text-muted-foreground">매일 지정된 시간에 최근 1주일간 수익률 상위 종목을 전송합니다.</p>
                                                     </div>
-                                                    <label className="relative inline-flex items-center cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={telegramKeys.weeklyTopRisingNotify}
-                                                            onChange={(e) => setTelegramKeys({ ...telegramKeys, weeklyTopRisingNotify: e.target.checked })}
-                                                            className="sr-only peer"
-                                                        />
-                                                        <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                                    </label>
+                                                    <Switch
+                                                        checked={telegramKeys.weeklyTopRisingNotify}
+                                                        onChange={(checked) => setTelegramKeys({ ...telegramKeys, weeklyTopRisingNotify: checked })}
+                                                    />
                                                 </div>
                                                 {telegramKeys.weeklyTopRisingNotify && (
                                                     <div className="space-y-4">
@@ -861,23 +849,24 @@ export default function Settings() {
                                                                 <label className="text-xs font-semibold ml-1 text-muted-foreground uppercase flex items-center gap-1">
                                                                     <Clock size={12} /> 알림 시간
                                                                 </label>
-                                                                <input
+                                                                <Input
                                                                     type="time"
                                                                     value={telegramKeys.weeklyTopRisingTime}
                                                                     onChange={(e) => setTelegramKeys({ ...telegramKeys, weeklyTopRisingTime: e.target.value })}
-                                                                    className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                                                                 />
                                                             </div>
                                                             <div className="flex items-end">
-                                                                <button
+                                                                <Button
                                                                     type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
                                                                     onClick={() => handleTestPeriodRising('주간(1주일)', 5)}
                                                                     disabled={isTestingPeriodRising}
-                                                                    className="flex items-center gap-2 text-xs text-indigo-600 hover:text-indigo-700 font-bold px-4 py-2.5 rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-colors w-full justify-center"
+                                                                    className="w-full text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 border-indigo-200"
                                                                 >
-                                                                    {isTestingPeriodRising ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                                    {isTestingPeriodRising ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Send size={14} className="mr-2" />}
                                                                     주간 TOP 10 테스트
-                                                                </button>
+                                                                </Button>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -892,15 +881,10 @@ export default function Settings() {
                                                         </h3>
                                                         <p className="text-[11px] text-muted-foreground">매일 지정된 시간에 최근 1개월간 수익률 상위 종목을 전송합니다.</p>
                                                     </div>
-                                                    <label className="relative inline-flex items-center cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={telegramKeys.monthlyTopRisingNotify}
-                                                            onChange={(e) => setTelegramKeys({ ...telegramKeys, monthlyTopRisingNotify: e.target.checked })}
-                                                            className="sr-only peer"
-                                                        />
-                                                        <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                                    </label>
+                                                    <Switch
+                                                        checked={telegramKeys.monthlyTopRisingNotify}
+                                                        onChange={(checked) => setTelegramKeys({ ...telegramKeys, monthlyTopRisingNotify: checked })}
+                                                    />
                                                 </div>
                                                 {telegramKeys.monthlyTopRisingNotify && (
                                                     <div className="space-y-4">
@@ -909,23 +893,24 @@ export default function Settings() {
                                                                 <label className="text-xs font-semibold ml-1 text-muted-foreground uppercase flex items-center gap-1">
                                                                     <Clock size={12} /> 알림 시간
                                                                 </label>
-                                                                <input
+                                                                <Input
                                                                     type="time"
                                                                     value={telegramKeys.monthlyTopRisingTime}
                                                                     onChange={(e) => setTelegramKeys({ ...telegramKeys, monthlyTopRisingTime: e.target.value })}
-                                                                    className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                                                                 />
                                                             </div>
                                                             <div className="flex items-end">
-                                                                <button
+                                                                <Button
                                                                     type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
                                                                     onClick={() => handleTestPeriodRising('월간(1개월)', 20)}
                                                                     disabled={isTestingPeriodRising}
-                                                                    className="flex items-center gap-2 text-xs text-purple-600 hover:text-purple-700 font-bold px-4 py-2.5 rounded-xl border border-purple-200 hover:bg-purple-50 transition-colors w-full justify-center"
+                                                                    className="w-full text-purple-600 hover:text-purple-700 hover:bg-purple-50 border-purple-200"
                                                                 >
-                                                                    {isTestingPeriodRising ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                                    {isTestingPeriodRising ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Send size={14} className="mr-2" />}
                                                                     월간 TOP 10 테스트
-                                                                </button>
+                                                                </Button>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -953,23 +938,24 @@ export default function Settings() {
                                             </div>
 
                                             <div className="flex gap-3">
-                                                <button
+                                                <Button
                                                     type="button"
+                                                    variant="outline"
                                                     onClick={handleTestMessage}
                                                     disabled={isTestingTg}
-                                                    className="flex items-center gap-2 bg-muted/50 text-foreground px-6 py-3.5 rounded-2xl font-bold hover:bg-muted active:scale-[0.98] disabled:opacity-50 transition-all border border-border"
+                                                    className="px-6 h-12 shadow-sm"
                                                 >
-                                                    {isTestingTg ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} className="text-blue-500" />}
+                                                    {isTestingTg ? <RefreshCw size={18} className="animate-spin mr-2" /> : <Send size={18} className="text-blue-500 mr-2" />}
                                                     테스트 발송
-                                                </button>
-                                                <button
+                                                </Button>
+                                                <Button
                                                     type="submit"
                                                     disabled={isSavingTg}
-                                                    className="flex items-center gap-2 bg-blue-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-blue-600/20"
+                                                    className="px-8 h-12 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
                                                 >
-                                                    {isSavingTg ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
+                                                    {isSavingTg ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" /> : <Save size={18} className="mr-2" />}
                                                     저장하기
-                                                </button>
+                                                </Button>
                                             </div>
                                         </div>
                                     </form>
@@ -995,18 +981,17 @@ export default function Settings() {
                                     <p className="text-muted-foreground">매일 지정된 시간에 텔레그램으로 주요 정보를 받아봅니다.</p>
                                 </div>
 
-                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                <div className="border border-border/30 rounded-xl p-8 bg-background space-y-8">
                                     <form onSubmit={handleSaveSchedule} className="space-y-8">
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                             <div className="space-y-3">
                                                 <label className="text-sm font-semibold ml-1 flex items-center gap-2">
                                                     <Clock size={16} /> 알림 발송 시간
                                                 </label>
-                                                <input
+                                                <Input
                                                     type="time"
                                                     value={scheduleSettings.notificationTime}
                                                     onChange={(e) => setScheduleSettings({ ...scheduleSettings, notificationTime: e.target.value })}
-                                                    className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all"
                                                 />
                                             </div>
 
@@ -1072,14 +1057,14 @@ export default function Settings() {
                                                 )}
                                             </div>
 
-                                            <button
+                                            <Button
                                                 type="submit"
                                                 disabled={isSavingSchedule}
-                                                className="flex items-center gap-2 bg-amber-500 text-white px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-amber-500/20"
+                                                className="px-8 bg-amber-500 hover:bg-amber-600 text-white shadow-sm"
                                             >
-                                                {isSavingSchedule ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
+                                                {isSavingSchedule ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" /> : <Save size={18} className="mr-2" />}
                                                 설정 저장하기
-                                            </button>
+                                            </Button>
                                         </div>
                                     </form>
                                 </div>
@@ -1095,16 +1080,15 @@ export default function Settings() {
                                     <p className="text-muted-foreground">Open DART 연동 및 기업 고유번호 매핑을 관리합니다.</p>
                                 </div>
 
-                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                <div className="border border-border/30 rounded-xl p-8 bg-background space-y-8">
                                     <form onSubmit={handleSaveDart} className="space-y-6">
                                         <div className="space-y-2">
                                             <label className="text-sm font-semibold ml-1">Certified Key (DART API Key)</label>
-                                            <input
+                                            <Input
                                                 type="password"
                                                 value={dartKey}
                                                 onChange={(e) => setDartKey(e.target.value)}
                                                 placeholder="Open DART API 키를 입력하세요"
-                                                className="w-full bg-muted/30 border border-border rounded-2xl px-5 py-3.5 focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all placeholder:text-muted-foreground/50"
                                             />
                                         </div>
 
@@ -1160,23 +1144,24 @@ export default function Settings() {
                                             </div>
 
                                             <div className="flex gap-3">
-                                                <button
+                                                <Button
                                                     type="button"
+                                                    variant="outline"
                                                     onClick={handleSyncCorpCodes}
                                                     disabled={isSyncingDart || !dartKey}
-                                                    className="flex items-center gap-2 bg-muted/50 text-foreground px-6 py-3.5 rounded-2xl font-bold hover:bg-muted active:scale-[0.98] disabled:opacity-50 transition-all border border-border"
+                                                    className="px-6 shadow-sm"
                                                 >
-                                                    {isSyncingDart ? <RefreshCw size={18} className="animate-spin" /> : <RefreshCw size={18} className="text-green-500" />}
+                                                    {isSyncingDart ? <RefreshCw size={18} className="animate-spin mr-2" /> : <RefreshCw size={18} className="text-green-500 mr-2" />}
                                                     코드 동기화
-                                                </button>
-                                                <button
+                                                </Button>
+                                                <Button
                                                     type="submit"
                                                     disabled={isSavingDart}
-                                                    className="flex items-center gap-2 bg-green-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all shadow-xl shadow-green-600/20"
+                                                    className="px-8 bg-green-600 text-white hover:bg-green-700 shadow-sm"
                                                 >
-                                                    {isSavingDart ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
+                                                    {isSavingDart ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" /> : <Save size={18} className="mr-2" />}
                                                     저장하기
-                                                </button>
+                                                </Button>
                                             </div>
                                         </div>
                                     </form>
@@ -1210,15 +1195,17 @@ export default function Settings() {
                                                     </span>
                                                 )}
                                             </div>
-                                            <button
+                                            <Button
                                                 type="button"
+                                                variant="secondary"
+                                                size="sm"
                                                 onClick={handleSyncDisclosures}
                                                 disabled={isSyncingDisclosures || !dartKey}
-                                                className="flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary/20 disabled:opacity-50 transition-all border border-primary/20"
+                                                className="text-primary bg-primary/10 hover:bg-primary/20 border-primary/20"
                                             >
-                                                <RefreshCw size={14} className={isSyncingDisclosures ? 'animate-spin' : ''} />
+                                                <RefreshCw size={14} className={isSyncingDisclosures ? 'animate-spin mr-2' : 'mr-2'} />
                                                 공시 일정 동기화
-                                            </button>
+                                            </Button>
                                         </div>
 
                                         <div className="pt-2 border-t border-border/20 flex flex-col gap-3">
@@ -1240,15 +1227,17 @@ export default function Settings() {
                                                         </span>
                                                     )}
                                                 </div>
-                                                <button
+                                                <Button
                                                     type="button"
+                                                    variant="secondary"
+                                                    size="sm"
                                                     onClick={handleSyncBatchFinancials}
                                                     disabled={isSyncingFinancials || !dartKey}
-                                                    className="flex items-center gap-2 bg-blue-500/10 text-blue-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-500/20 disabled:opacity-50 transition-all border border-blue-500/20"
+                                                    className="text-blue-600 bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/20"
                                                 >
-                                                    <Database size={14} className={isSyncingFinancials ? 'animate-spin' : ''} />
+                                                    <Database size={14} className={isSyncingFinancials ? 'animate-spin mr-2' : 'mr-2'} />
                                                     10년 재무정보 일괄 업데이트
-                                                </button>
+                                                </Button>
                                             </div>
                                             <p className="text-[10px] text-muted-foreground italic leading-relaxed">
                                                 * 관심종목에 등록된 모든 종목의 최근 10개년 사업보고서 데이터를 수집합니다.<br />
@@ -1267,7 +1256,7 @@ export default function Settings() {
                                     <p className="text-muted-foreground">자동매매 전략 복기 및 종목 분석을 위한 AI 모델을 설정합니다.</p>
                                 </div>
 
-                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm">
+                                <div className="border border-border/30 rounded-xl p-8 bg-background">
                                     <form onSubmit={handleSaveAi} className="space-y-8">
                                         <div className="space-y-6">
                                             <div className="space-y-3">
@@ -1284,12 +1273,11 @@ export default function Settings() {
                                                         </a>
                                                     </label>
                                                 </div>
-                                                <input
+                                                <Input
                                                     type="password"
                                                     value={aiSettings.geminiKey}
                                                     onChange={(e) => setAiSettings({ ...aiSettings, geminiKey: e.target.value })}
                                                     placeholder="AI Studio에서 발급받은 API 키를 입력하세요"
-                                                    className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
                                                 />
                                             </div>
 
@@ -1298,7 +1286,7 @@ export default function Settings() {
                                                 <select
                                                     value={aiSettings.modelName}
                                                     onChange={(e) => setAiSettings({ ...aiSettings, modelName: e.target.value })}
-                                                    className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
+                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors font-medium"
                                                 >
                                                     <optgroup label="Gemini 3.1 / 3 (2026 Latest Preview)">
                                                         <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (세계 최상위 지능)</option>
@@ -1324,13 +1312,12 @@ export default function Settings() {
                                                         ₩ {aiSettings.virtualInitialBalance?.toLocaleString() || '1,000,000'}
                                                     </span>
                                                 </div>
-                                                <input
+                                                <Input
                                                     type="number"
                                                     step="100000"
                                                     value={aiSettings.virtualInitialBalance}
                                                     onChange={(e) => setAiSettings({ ...aiSettings, virtualInitialBalance: Number(e.target.value) })}
                                                     placeholder="예: 1000000"
-                                                    className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
                                                 />
                                                 <p className="text-[10px] text-muted-foreground ml-1">
                                                     * 자본금을 변경하고 저장하면 이후 RESET 시 위 금액으로 시작합니다.
@@ -1343,11 +1330,10 @@ export default function Settings() {
                                                         <Clock size={14} className="text-indigo-500" />
                                                         매수 시작 시간
                                                     </label>
-                                                    <input
+                                                    <Input
                                                         type="time"
                                                         value={aiSettings.buyStartTime}
                                                         onChange={(e) => setAiSettings({ ...aiSettings, buyStartTime: e.target.value })}
-                                                        className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
                                                     />
                                                 </div>
                                                 <div className="space-y-3">
@@ -1355,11 +1341,10 @@ export default function Settings() {
                                                         <Clock size={14} className="text-destructive/70" />
                                                         매수 종료 시간
                                                     </label>
-                                                    <input
+                                                    <Input
                                                         type="time"
                                                         value={aiSettings.buyEndTime}
                                                         onChange={(e) => setAiSettings({ ...aiSettings, buyEndTime: e.target.value })}
-                                                        className="w-full bg-muted/30 border border-border/60 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
                                                     />
                                                 </div>
                                             </div>
@@ -1369,23 +1354,24 @@ export default function Settings() {
                                         </div>
 
                                         <div className="flex gap-4">
-                                            <button
+                                            <Button
                                                 type="button"
+                                                variant="outline"
                                                 onClick={handleTestAi}
                                                 disabled={isTestingAi || isSavingAi}
-                                                className="flex-1 flex items-center justify-center gap-2 bg-muted border border-border rounded-2xl py-4 font-bold text-base hover:bg-muted/80 active:scale-[0.98] transition-all disabled:opacity-50"
+                                                className="flex-1 h-12 text-base text-indigo-500 shadow-sm"
                                             >
-                                                {isTestingAi ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} className="text-indigo-500" />}
+                                                {isTestingAi ? <RefreshCw size={18} className="animate-spin mr-2" /> : <Send size={18} className="mr-2" />}
                                                 연결 테스트
-                                            </button>
-                                            <button
+                                            </Button>
+                                            <Button
                                                 type="submit"
                                                 disabled={isSavingAi || isTestingAi}
-                                                className="flex-[2] flex items-center justify-center gap-2 bg-indigo-600 text-white rounded-2xl py-4 font-bold text-base hover:bg-indigo-700 active:scale-[0.98] transition-all disabled:opacity-50 shadow-lg shadow-indigo-600/20"
+                                                className="flex-[2] h-12 text-base bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
                                             >
-                                                {isSavingAi ? <RefreshCw size={20} className="animate-spin" /> : <Save size={20} />}
+                                                {isSavingAi ? <RefreshCw size={20} className="animate-spin mr-2" /> : <Save size={20} className="mr-2" />}
                                                 AI 설정 저장하기
-                                            </button>
+                                            </Button>
                                         </div>
 
                                         {messageAi && (
@@ -1418,7 +1404,7 @@ export default function Settings() {
                                     <p className="text-muted-foreground">매크로 및 차트 분석을 위한 글로벌 데이터 소스를 관리합니다.</p>
                                 </div>
 
-                                <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-8">
+                                <div className="border border-border/30 rounded-xl p-8 bg-background space-y-8">
                                     <div className="space-y-6">
                                         <div className="flex items-center justify-between p-6 bg-muted/20 border border-border/40 rounded-2xl group hover:border-purple-500/30 transition-all">
                                             <div className="flex items-center gap-4">
@@ -1441,7 +1427,7 @@ export default function Settings() {
                                                         연결 오류
                                                     </span>
                                                 )}
-                                                <button
+                                                <Button
                                                     onClick={async () => {
                                                         setIsTestingYahoo(true)
                                                         setStatusYahoo('idle')
@@ -1462,11 +1448,12 @@ export default function Settings() {
                                                         }
                                                     }}
                                                     disabled={isTestingYahoo}
-                                                    className="flex items-center gap-2 bg-purple-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 transition-all"
+                                                    className="bg-purple-600 hover:bg-purple-700 text-white shadow-sm px-5"
+                                                    size="sm"
                                                 >
-                                                    {isTestingYahoo ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                                    {isTestingYahoo ? <RefreshCw size={16} className="animate-spin mr-2" /> : <RefreshCw size={16} className="mr-2" />}
                                                     연결 테스트
-                                                </button>
+                                                </Button>
                                             </div>
                                         </div>
 
@@ -1511,22 +1498,20 @@ export default function Settings() {
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                     <div className="space-y-2">
                                                         <label className="text-xs font-bold ml-1">Client ID</label>
-                                                        <input
+                                                        <Input
                                                             type="text"
                                                             value={naverKeys.clientId}
                                                             onChange={(e) => setNaverKeys({ ...naverKeys, clientId: e.target.value })}
                                                             placeholder="네이버 개발자 센터에서 발급받은 ID"
-                                                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all"
                                                         />
                                                     </div>
                                                     <div className="space-y-2">
                                                         <label className="text-xs font-bold ml-1">Client Secret</label>
-                                                        <input
+                                                        <Input
                                                             type="password"
                                                             value={naverKeys.clientSecret}
                                                             onChange={(e) => setNaverKeys({ ...naverKeys, clientSecret: e.target.value })}
                                                             placeholder="네이버 개발자 센터에서 발급받은 Secret"
-                                                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all"
                                                         />
                                                     </div>
                                                 </div>
@@ -1550,23 +1535,26 @@ export default function Settings() {
                                                         )}
                                                     </div>
                                                     <div className="flex gap-3">
-                                                        <button
+                                                        <Button
                                                             type="button"
+                                                            variant="outline"
+                                                            size="sm"
                                                             onClick={handleTestNaver}
                                                             disabled={isTestingNaver}
-                                                            className="flex items-center gap-2 text-xs text-green-600 hover:text-green-700 font-bold px-4 py-2 rounded-xl border border-green-200 hover:bg-green-50 transition-colors"
+                                                            className="text-green-600 hover:text-green-700 hover:bg-green-50 border-green-200"
                                                         >
-                                                            {isTestingNaver ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                            {isTestingNaver ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Send size={14} className="mr-2" />}
                                                             연결 테스트
-                                                        </button>
-                                                        <button
+                                                        </Button>
+                                                        <Button
                                                             type="submit"
+                                                            size="sm"
                                                             disabled={isSavingNaver}
-                                                            className="flex items-center gap-2 bg-green-600 text-white px-6 py-2 rounded-xl text-xs font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-600/10"
+                                                            className="bg-green-600 hover:bg-green-700 text-white shadow-sm px-6 text-xs font-bold"
                                                         >
-                                                            {isSavingNaver ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                                                            {isSavingNaver ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Save size={14} className="mr-2" />}
                                                             네이버 키 저장
-                                                        </button>
+                                                        </Button>
                                                     </div>
                                                 </div>
                                             </form>
@@ -1596,12 +1584,11 @@ export default function Settings() {
                                             <form onSubmit={handleSaveYoutube} className="space-y-4">
                                                 <div className="space-y-2">
                                                     <label className="text-xs font-bold ml-1">YouTube API Key</label>
-                                                    <input
+                                                    <Input
                                                         type="password"
                                                         value={youtubeKey}
                                                         onChange={(e) => setYoutubeKey(e.target.value)}
                                                         placeholder="Google Cloud Console에서 발급받은 API 키를 입력하세요"
-                                                        className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none transition-all font-mono"
                                                     />
                                                 </div>
 
@@ -1624,23 +1611,26 @@ export default function Settings() {
                                                         )}
                                                     </div>
                                                     <div className="flex gap-3">
-                                                        <button
+                                                        <Button
                                                             type="button"
+                                                            variant="outline"
+                                                            size="sm"
                                                             onClick={handleTestYoutube}
                                                             disabled={isTestingYoutube}
-                                                            className="flex items-center gap-2 text-xs text-red-600 hover:text-red-700 font-bold px-4 py-2 rounded-xl border border-red-200 hover:bg-red-50 transition-colors"
+                                                            className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
                                                         >
-                                                            {isTestingYoutube ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                                                            {isTestingYoutube ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Send size={14} className="mr-2" />}
                                                             연결 테스트
-                                                        </button>
-                                                        <button
+                                                        </Button>
+                                                        <Button
                                                             type="submit"
+                                                            size="sm"
                                                             disabled={isSavingYoutube}
-                                                            className="flex items-center gap-2 bg-red-600 text-white px-6 py-2 rounded-xl text-xs font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-600/10"
+                                                            className="bg-red-600 hover:bg-red-700 text-white shadow-sm px-6 text-xs font-bold"
                                                         >
-                                                            {isSavingYoutube ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                                                            {isSavingYoutube ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Save size={14} className="mr-2" />}
                                                             유튜브 키 저장
-                                                        </button>
+                                                        </Button>
                                                     </div>
                                                 </div>
                                             </form>

@@ -37,6 +37,7 @@ export class SchedulerService {
         this.scheduledJobs.forEach(job => job.stop())
         this.scheduledJobs = []
 
+        /* [V1 Legacy 방치 모듈 - V2 이벤트 드리븐 설계 시 부활 예정]
         const settings = store.get('ai_schedule_settings') as any || {
             enabled: true,
             preMarketTime: '08:30',
@@ -69,11 +70,13 @@ export class SchedulerService {
         const eveningJob = cron.schedule(`${eMinute} ${eHour} * * 1-5`, () => this.runEveningPipeline(), { timezone: 'Asia/Seoul' })
 
         this.scheduledJobs.push(preMarketJob, pendingExecutionJob, morningJob, eveningJob)
+        */
 
         // [MAIIS 통합] 독립 뉴스/유튜브 크론 제거 완료.
         // 뉴스 수집+분석, 유튜브 수집+분석은 모두 PRE_MARKET 파이프라인 내
         // MaiisDomainService에서 직접 수행합니다. (AI 중복 호출 방지, Source of Truth 단일화)
 
+        /* [V1 Legacy 방치 모듈 - V2 개편 위해 비활성화]
         // 6. PM INTRADAY 하드룰 체크 (Step 5: 14:50)
         const { StrategyProfileService } = await import('./StrategyProfileService')
         const reviewSchedule = StrategyProfileService.getInstance().getReviewSchedule()
@@ -94,6 +97,9 @@ export class SchedulerService {
         this.catchUpMissedOrders()
 
         console.log(`[SchedulerService] Automated MAIIS Main Pipeline schedules (PRE: ${settings.preMarketTime}, AM: ${settings.morningTime}, PM: ${settings.eveningTime}) initialized.`)
+        */
+        
+        console.log(`[SchedulerService] V1 Legacy schedules disabled for V2 Agentic Swarm refactoring.`)
     }
 
     /**
@@ -128,6 +134,7 @@ export class SchedulerService {
     }
 
     private async sendMarketNewsTelegram() {
+        /* [V1 Legacy 알림 비활성화]
         const { MarketNewsService } = await import('./MarketNewsService');
         const latest = MarketNewsService.getInstance().getLatestBriefings(1)[0];
         if (latest) {
@@ -149,6 +156,7 @@ export class SchedulerService {
                 this.telegram.sendMessage(`📣 *[MAIIS 시장 뉴스 브리핑]*\n분석이 완료되었습니다. 앱에서 확인하세요.`);
             }
         }
+        */
     }
 
     private async runYoutubeAnalysis() {
@@ -557,6 +565,7 @@ export class SchedulerService {
 
             // 3. 텔레그램 알림 발송 (자동 스케줄인 경우만)
             if (label !== 'MANUAL') {
+                /* [V1 Legacy 알림 비활성화]
                 const settings = store.get('ai_schedule_settings') as any || { telegramNotify: true }
                 if (!settings.telegramNotify) return { success: true, count: result.count }
 
@@ -586,6 +595,7 @@ export class SchedulerService {
                         this.telegram.sendMessage(`📢 *[AI 시장 분석 - ${typeLabel}]*\n\n리포트 생성이 완료되었습니다. 앱에서 상세 내용을 확인하세요.`)
                     }
                 }
+                */
             }
 
             // Record success
@@ -612,8 +622,8 @@ export class SchedulerService {
                 error.message || 'Unknown Error'
             );
 
-            const msg = `🚨 [AI 자동분석 오류] ${label} 분석 중 오류 발생: ${error.message}`
-            if (label !== 'MANUAL') this.telegram.sendMessage(msg)
+            // const msg = `🚨 [AI 자동분석 오류] ${label} 분석 중 오류 발생: ${error.message}`
+            // if (label !== 'MANUAL') this.telegram.sendMessage(msg)
             return { success: false, error: error.message }
         }
     }

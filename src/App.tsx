@@ -336,23 +336,29 @@ function AppContent() {
                     <div className="w-full h-full flex flex-col min-h-0">
                         {activeTab === 'dashboard' && <Dashboard />}
                         {activeTab === 'holdings' && <Holdings />}
+                        {/* [V1 Legacy] 추후 재활용 (UI 라우팅 중단)
                         {activeTab === 'watchlist' && <Watchlist />}
+                        */}
                         {activeTab === 'rising-stocks' && <RisingStocksReport />}
+                        {/* [V1 Legacy]
                         {activeTab === 'auto-trade' && <AutoTrade />}
                         {activeTab === 'schedule' && <Schedule />}
+                        */}
                         { activeTab === 'settings' && <Settings />}
+                        {/* [V1 Legacy]
                         { activeTab === 'ai-trade' && <AiTradeDashboard />}
+                        */}
                         { activeTab === 'narrative-insight' && <NarrativeInsightTab />}
                         { activeTab === 'maiis-command' && <MaiisCommandCenter />}
                         { activeTab === 'macro-dashboard' && <MacroDashboard />}
                         { activeTab === 'pm-tracker' && <PmTracker />}
 
-                        {(activeTab !== 'dashboard' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'pm-tracker' && activeTab !== 'holdings' && activeTab !== 'watchlist' && activeTab !== 'rising-stocks' && activeTab !== 'settings' && activeTab !== 'auto-trade' && activeTab !== 'schedule' && activeTab !== 'ai-trade' && activeTab !== 'narrative-insight') && (
+                        {(activeTab !== 'dashboard' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'pm-tracker' && activeTab !== 'holdings' && activeTab !== 'rising-stocks' && activeTab !== 'settings' && activeTab !== 'narrative-insight') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />
                                 </div>
-                                <h2 className="text-xl font-semibold">{menuItems.find(i => i.id === activeTab)?.name} 화면 준비 중</h2>
+                                <h2 className="text-xl font-semibold">{menuItems.find(i => i.id === activeTab)?.name || 'V1 레거시'} 화면 접근 대기</h2>
                                 <p className="text-sm">현재 Phase 1 개발 진행 중입니다.</p>
                             </div>
                         )}

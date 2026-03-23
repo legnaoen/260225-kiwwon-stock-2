@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Activity, ShieldCheck, Globe, Zap, Clock, Database, AlertCircle, Terminal, CheckCircle2, Play, RotateCw, Settings, Search, LayoutGrid, ListFilter } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Activity, ShieldCheck, Globe, Zap, Clock, Database, AlertCircle, Terminal, CheckCircle2, Play, ChevronDown, Loader2, RotateCw, Settings, Search, LayoutGrid, ListFilter } from 'lucide-react';
+import { cn } from '../utils';
 
 interface ApiStatus {
     id: string;
@@ -108,27 +109,27 @@ export default function MaiisMonitorTab() {
                 </div>
 
                 {/* API Status Bar - Premium Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mt-8">
-                    {apiStatuses.map((api) => (
-                        <div key={api.id} className="bg-card/50 backdrop-blur-xl border border-border/60 p-4 rounded-3xl hover:border-primary/30 transition-all group overflow-hidden relative">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-0 mt-8 border border-border/50 bg-background overflow-hidden rounded-xl">
+                    {apiStatuses.map((api, index) => (
+                        <div key={api.id} className={cn("p-4 transition-all group overflow-hidden relative", index !== 0 && "border-t md:border-t-0 md:border-l border-border/50")}>
                             <div className="absolute -right-2 -top-2 opacity-5 group-hover:opacity-10 transition-opacity">
                                 <api.icon size={56} />
                             </div>
                             <div className="flex flex-col gap-3 relative z-10">
                                 <div className="flex items-center justify-between">
-                                    <div className={`p-2 rounded-xl bg-muted/50 ${api.color}`}>
-                                        <api.icon size={18} />
+                                    <div className={`p-2 rounded-md bg-muted/50 ${api.color}`}>
+                                        <api.icon size={16} />
                                     </div>
-                                    <div className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tighter ${api.status === 'online' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                                    <div className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-tighter ${api.status === 'online' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
                                         {api.status}
                                     </div>
                                 </div>
                                 <div className="space-y-0.5">
-                                    <div className="text-[11px] font-black uppercase text-foreground/60">{api.name}</div>
+                                    <div className="text-[11px] font-bold uppercase text-foreground/60">{api.name}</div>
                                     <div className="flex items-center gap-3">
-                                        <span className="text-sm font-black flex items-center gap-1"><Zap size={12} className="text-amber-500" /> {api.latency}ms</span>
+                                        <span className="text-sm font-mono font-bold flex items-center gap-1 tabular-nums"><Zap size={12} className="text-amber-500" /> {api.latency}ms</span>
                                     </div>
-                                    <div className="text-[10px] text-muted-foreground font-medium flex items-center gap-1 mt-1">
+                                    <div className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 mt-1">
                                         <Clock size={10} /> {api.lastChecked}
                                     </div>
                                 </div>
@@ -158,12 +159,12 @@ export default function MaiisMonitorTab() {
                                 <button
                                     key={btn.label}
                                     onClick={() => handleManualSync(btn.type)}
-                                    className="flex flex-col items-center gap-3 p-5 rounded-[2.5rem] bg-background border border-border/60 hover:border-primary/50 hover:shadow-xl hover:shadow-primary/5 transition-all group active:scale-95"
+                                    className="flex flex-col items-center gap-2 p-4 min-h-[90px] justify-center bg-background border border-border/50 hover:bg-muted/10 transition-colors group active:scale-95"
                                 >
-                                    <div className={`p-3 rounded-2xl ${btn.color} text-white shadow-lg shadow-${btn.color.split('-')[1]}-500/20 group-hover:scale-110 transition-transform`}>
-                                        <btn.icon size={20} />
+                                    <div className={`text-${btn.color.split('-')[1]}-500 transition-transform group-hover:scale-110 mb-1`}>
+                                        <btn.icon size={18} />
                                     </div>
-                                    <span className="text-[10px] font-black tracking-tighter truncate w-full px-1 uppercase">{btn.label}</span>
+                                    <span className="text-[10px] font-bold tracking-tight w-full px-1 uppercase text-center">{btn.label}</span>
                                 </button>
                             ))}
                         </div>
@@ -189,37 +190,37 @@ export default function MaiisMonitorTab() {
                         </div>
                         <div className="flex-1 overflow-y-auto px-6">
                             <table className="w-full text-left border-separate border-spacing-y-3">
-                                <thead className="text-[10px] font-black text-muted-foreground/50 uppercase tracking-[0.2em] sticky top-0 bg-background/95 backdrop-blur-md z-10 py-4">
-                                    <tr>
-                                        <th className="px-4 py-2">Source / Key</th>
-                                        <th className="px-4 py-2">Category</th>
-                                        <th className="px-4 py-2">Last Freshness</th>
-                                        <th className="px-4 py-2 text-right">Status</th>
+                                <thead className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-[0.1em] sticky top-0 bg-background/95 backdrop-blur-md z-10">
+                                    <tr className="border-b border-border/50">
+                                        <th className="px-4 py-3 font-normal">Source / Key</th>
+                                        <th className="px-4 py-3 font-normal">Category</th>
+                                        <th className="px-4 py-3 font-normal">Last Freshness</th>
+                                        <th className="px-4 py-3 text-right font-normal">Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {inventory.length > 0 ? (
                                         inventory.map((item) => (
-                                            <tr key={item.data_key} className="group cursor-default">
-                                                <td className="px-4 py-4 bg-card/40 border-y border-l border-border/40 rounded-l-[1.5rem] transition-all group-hover:bg-muted/30">
+                                            <tr key={item.data_key} className="group cursor-default border-b border-border/30 hover:bg-muted/30 transition-colors">
+                                                <td className="px-4 py-3">
                                                     <div className="flex flex-col gap-0.5">
-                                                        <span className="text-[11px] font-black tracking-tight text-foreground/80">{item.data_key}</span>
-                                                        <span className="text-[9px] text-muted-foreground/60 font-bold uppercase">{item.source_api}</span>
+                                                        <span className="text-[11px] font-bold text-foreground/80">{item.data_key}</span>
+                                                        <span className="text-[9px] text-muted-foreground/60 font-mono">{item.source_api}</span>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-4 bg-card/40 border-y border-border/40 transition-all group-hover:bg-muted/30">
-                                                    <span className="text-[9px] font-black px-2 py-1 rounded-lg bg-muted text-muted-foreground/80 border border-border/50">
+                                                <td className="px-4 py-3">
+                                                    <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-muted text-muted-foreground/80 border border-border/50">
                                                         {item.category || 'GENERAL'}
                                                     </span>
                                                 </td>
-                                                <td className="px-4 py-4 bg-card/40 border-y border-border/40 transition-all group-hover:bg-muted/30">
-                                                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground group-hover:text-foreground/80 transition-colors">
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground group-hover:text-foreground/80 transition-colors">
                                                         <Clock size={10} className="text-primary/50" />
                                                         {formatRelativeTime(item.last_freshness_at)}
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-4 bg-card/40 border-y border-r border-border/40 rounded-r-[1.5rem] text-right transition-all group-hover:bg-muted/30">
-                                                    <span className={`px-3 py-1 rounded-full text-[9px] font-black border tracking-tighter ${getStatusColor(item.status)}`}>
+                                                <td className="px-4 py-3 text-right">
+                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-tight ${getStatusColor(item.status)}`}>
                                                         {item.status}
                                                     </span>
                                                 </td>
@@ -289,27 +290,24 @@ export default function MaiisMonitorTab() {
                     </div>
 
                     {/* Bottom: System Health Card */}
-                    <div className="p-6 bg-card border-t border-border/50">
-                        <div className="bg-primary/5 border border-primary/20 rounded-3xl p-5 space-y-3 relative overflow-hidden group">
-                            <div className="absolute right-0 top-0 p-4 opacity-5 group-hover:scale-125 transition-transform duration-500">
-                                <ShieldCheck size={48} />
-                            </div>
-                            <h4 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-primary">
+                    <div className="p-6 bg-background pt-0">
+                        <div className="border border-border/50 rounded-xl p-5 space-y-3 relative overflow-hidden group">
+                            <h4 className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-primary">
                                 <ShieldCheck size={14} /> System Health Summary
                             </h4>
                             <div className="space-y-4">
                                 <div className="space-y-1.5">
-                                    <div className="flex items-center justify-between text-[10px] font-black text-muted-foreground">
+                                    <div className="flex items-center justify-between text-[10px] font-mono font-bold text-muted-foreground">
                                         <span>TOTAL SUCCESS RATE</span>
-                                        <span className="text-emerald-500">99.8%</span>
+                                        <span className="text-emerald-500 tabular-nums">99.8%</span>
                                     </div>
-                                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                                        <div className="h-full bg-emerald-500 w-[99.8%] rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                                    <div className="h-[2px] bg-muted overflow-hidden w-full">
+                                        <div className="h-full bg-emerald-500 w-[99.8%]" />
                                     </div>
                                 </div>
-                                <p className="text-[9px] text-muted-foreground/70 leading-relaxed font-bold italic">
-                                    * 모든 파이프라인이 정상 범위 내에서 가동 중입니다. <br/>
-                                    지연 시간(Avg Latency) 240ms 유지 중.
+                                <p className="text-[9px] text-muted-foreground/70 leading-relaxed">
+                                    * 모든 파이프라인 정상 가동 증.<br/>
+                                    지연 시간(Avg Latency) 240ms 유지.
                                 </p>
                             </div>
                         </div>

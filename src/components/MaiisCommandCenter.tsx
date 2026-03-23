@@ -3,6 +3,7 @@ import { Terminal, X, ChevronUp, ChevronDown, Activity, Hash, Layers, Target, Cl
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { MaiisAgentTester } from './MaiisAgentTester';
+import { ResponsiveContainer, LineChart as RechartsLineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -96,44 +97,71 @@ const SentimentCandleChart = ({ candles }: { candles: { date: string, open: numb
 const TREND_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#ec4899', '#6366f1'];
 
 const MultiLineTrendChart = ({ trendData }: { trendData: { dates: string[], series: { name: string, data: number[] }[] } }) => {
-    const W = 280, H = 100, PAD_L = 10, PAD_R = 10, PAD_T = 6, PAD_B = 16;
-    const chartW = W - PAD_L - PAD_R;
-    const chartH = H - PAD_T - PAD_B;
     const { dates, series } = trendData;
     const n = dates.length;
 
     if (n === 0 || series.length === 0) return <div className="flex items-center justify-center h-full text-xs text-muted-foreground">데이터 수집 중...</div>;
 
-    const allValues = series.flatMap(s => s.data).filter(v => v > 0);
-    const maxVal = Math.max(...allValues, 1);
+    const formattedData = dates.map((date, i) => {
+        const obj: any = { date };
+        series.forEach(s => {
+            obj[s.name] = s.data[i];
+        });
+        return obj;
+    });
 
-    const toX = (i: number) => PAD_L + (i / Math.max(n - 1, 1)) * chartW;
-    const toY = (v: number) => PAD_T + chartH - ((v / maxVal) * chartH);
+    const CustomTooltip = ({ active, payload, label }: any) => {
+        if (active && payload && payload.length) {
+            return (
+                <div className="bg-background border border-border rounded-lg shadow-lg p-3 text-xs">
+                    <p className="font-bold mb-2">{label}</p>
+                    {payload.map((entry: any, index: number) => (
+                        <div key={index} className="flex flex-col gap-1 mb-1">
+                            <span className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                                {entry.name}
+                            </span>
+                            <span className="font-bold text-sm text-foreground">
+                                {entry.value}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+        return null;
+    };
 
     return (
-        <svg className="w-full h-full" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-            {/* 수평 기준선 */}
-            <line x1={PAD_L} y1={PAD_T + chartH} x2={W - PAD_R} y2={PAD_T + chartH} stroke="currentColor" strokeOpacity="0.08" />
-            <line x1={PAD_L} y1={PAD_T + chartH / 2} x2={W - PAD_R} y2={PAD_T + chartH / 2} stroke="currentColor" strokeOpacity="0.06" strokeDasharray="3,3" />
-            {/* X축 날짜 라벨 */}
-            {dates.map((d, i) => (
-                <text key={i} x={toX(i)} y={H - 2} fontSize="7" fill="currentColor" fillOpacity="0.4" textAnchor="middle" fontWeight="600">{d}</text>
-            ))}
-            {/* 라인들 */}
-            {series.map((s, si) => {
-                const pts = s.data.map((v, i) => ({ x: toX(i), y: toY(v) }));
-                const lineStr = pts.map(p => `${p.x},${p.y}`).join(' ');
-                const color = TREND_COLORS[si % TREND_COLORS.length];
-                return (
-                    <g key={si}>
-                        <polyline points={lineStr} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" opacity="0.85" />
-                        {pts.map((p, pi) => (
-                            <circle key={pi} cx={p.x} cy={p.y} r="2.5" fill="white" stroke={color} strokeWidth="1.5" />
-                        ))}
-                    </g>
-                );
-            })}
-        </svg>
+        <ResponsiveContainer width="100%" height="100%">
+            <RechartsLineChart data={formattedData} margin={{ top: 6, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" strokeOpacity={0.06} />
+                <XAxis 
+                    dataKey="date" 
+                    axisLine={false} 
+                    tickLine={false}
+                    tick={{ fill: 'currentColor', opacity: 0.4, fontSize: 10, fontWeight: 600 }}
+                    dy={10}
+                />
+                <YAxis 
+                    axisLine={false} 
+                    tickLine={false}
+                    tick={false}
+                />
+                <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'currentColor', strokeOpacity: 0.2, strokeWidth: 1, strokeDasharray: '4 4' }} />
+                {series.map((s, si) => (
+                    <Line
+                        key={si}
+                        type="monotone"
+                        dataKey={s.name}
+                        stroke={TREND_COLORS[si % TREND_COLORS.length]}
+                        strokeWidth={1.5}
+                        dot={{ r: 2.5, fill: 'var(--background)', strokeWidth: 1.5 }}
+                        activeDot={{ r: 4, stroke: 'var(--background)', strokeWidth: 2 }}
+                    />
+                ))}
+            </RechartsLineChart>
+        </ResponsiveContainer>
     );
 };
 

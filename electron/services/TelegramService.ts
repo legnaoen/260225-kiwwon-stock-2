@@ -30,6 +30,8 @@ export class TelegramService {
     private constructor() {
         this.initializeBot();
         this.setupListeners();
+        
+        /* [V1 Legacy 알림 비활성화] - 더 이상 아래의 자동 Push 알림을 보내지 않음
         this.setupCronJobs();
         this.setupScheduleCron();
         this.setupDailyTopRisingCron();
@@ -39,6 +41,7 @@ export class TelegramService {
 
         // Startup check for missed schedule summary
         setTimeout(() => this.checkMissedScheduleSummary(), 10000);
+        */
     }
 
     public static getInstance(): TelegramService {
@@ -705,17 +708,20 @@ export class TelegramService {
     }
 
     private setupListeners() {
+        /* [V1 Legacy 알림 비활성화] V2 개편 시 이벤트 드리븐 구조로 다시 설계
         // [1] 매매 체결 시 자동 알림 발송
         eventBus.on(SystemEvent.TRADE_EXECUTED, (data) => {
             this.sendMessage(`✅ [체결 알림]\n${JSON.stringify(data)}`);
         });
+        */
 
-        // [2] 시스템 오류 발생 시 알림 발송
+        // [2] 시스템 오류 발생 시 알림 발송 (이것만 유지)
         eventBus.on(SystemEvent.SYSTEM_ERROR, (error) => {
             if (error.level === 'warning') return; // 경고 단계는 텔레그램 발송 생략
             this.sendMessage(`🚨 [시스템 오류]\n${error.message || error}`);
         });
 
+        /* [V1 Legacy 알림 비활성화]
         // [2.5] 비상 청산 종료 알림
         eventBus.on(SystemEvent.EMERGENCY_LIQUIDATION_COMPLETED, () => {
             this.sendMessage(`✅ [비상 청산 종료]\n모든 잔고 청산 및 시장가 매도가 완료되었습니다.\n자동매매 스위치가 완전히 [정지(OFF)] 상태로 전환되었습니다.`);
@@ -731,7 +737,6 @@ export class TelegramService {
                 this.disparityCache.set(cacheKey, today);
 
                 let displayName = data.name;
-                // 이름 데이터가 날아오지 않았거나 코드와 동일한 경우 캐시에서 종목명 찾기
                 if (!displayName || displayName === numericCode || displayName === data.code || displayName === '알 수 없음') {
                     const match = StockMasterService.getInstance().getStock(numericCode);
                     if (match) {
@@ -764,6 +769,7 @@ export class TelegramService {
             message += `💡 장 마감 시까지 미체결 시 시장가로 자동 전환되어 전량 매도됩니다.`;
             this.sendMessage(message);
         });
+        */
     }
 
     public async sendAutoTradeStatusMessage(isTest: boolean = false) {

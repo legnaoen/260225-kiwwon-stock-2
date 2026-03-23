@@ -240,7 +240,7 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
     return (
         <div className={cn("flex flex-col h-full relative group w-full", className)}>
             {!stockCode && (
-                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-12 text-muted-foreground border border-dashed rounded-2xl bg-muted/5">
+                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-12 text-muted-foreground">
                     <p className="text-sm">종목을 선택하면 차트가 표시됩니다.</p>
                 </div>
             )}

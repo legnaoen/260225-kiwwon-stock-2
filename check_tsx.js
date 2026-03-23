@@ -1,17 +1,27 @@
-const ts = require('typescript');
 const fs = require('fs');
-const src = fs.readFileSync('src/components/PmTracker.tsx', 'utf8');
+const code = fs.readFileSync('src/components/Settings.tsx', 'utf-8');
+const lines = code.split('\n');
 
-// Try parsing as TSX
-const sourceFile = ts.createSourceFile('PmTracker.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let count = 0;
+let formOpen = false;
+let startCount = 0;
 
-// Check for parse diagnostics  
-const diags = sourceFile.parseDiagnostics || [];
-if (diags.length > 0) {
-    diags.forEach(d => {
-        const pos = sourceFile.getLineAndCharacterOfPosition(d.start);
-        console.log(`ERROR at line ${pos.line + 1}, col ${pos.character}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`);
-    });
-} else {
-    console.log('TSX Parse OK - no syntax errors');
+for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    const opens = (line.match(/<div(\s|>)/g) || []).length;
+    const closes = (line.match(/<\/div>/g) || []).length;
+    
+    if (line.includes('<form')) {
+        formOpen = true;
+        startCount = count;
+        console.log(`[Form OPEN] Line ${i + 1}, divCount: ${count}`);
+    }
+    
+    count += (opens - closes);
+    
+    if (line.includes('</form>')) {
+        formOpen = false;
+        console.log(`[Form CLOSE] Line ${i + 1}, divCount (should be ${startCount}): ${count}`);
+    }
 }

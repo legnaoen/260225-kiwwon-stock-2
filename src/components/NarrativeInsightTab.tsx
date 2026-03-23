@@ -478,7 +478,7 @@ export default function NarrativeInsightTab() {
     return (
         <div className="flex flex-col h-full bg-background overflow-hidden">
             {/* Tab Switcher */}
-            <div className="px-8 pt-6 pb-2 border-b border-border/40 flex items-center justify-between bg-card/30">
+            <div className="px-8 pt-6 pb-2 border-b border-border/40 flex items-center justify-between bg-background">
                 <div className="flex bg-muted/30 p-1.5 rounded-2xl border border-border/20">
                     <button
                         onClick={() => setNarrativeType('youtube')}
@@ -534,7 +534,7 @@ export default function NarrativeInsightTab() {
                             </div>
 
                             {/* Channel List Card */}
-                            <div className="bg-card border border-border/60 rounded-3xl p-8 shadow-sm space-y-6">
+                            <div className="border border-border/30 rounded-xl p-8 bg-background space-y-6">
                                 <div className="flex items-center justify-between border-b border-border/40 pb-4">
                                     <h4 className="font-bold">모니터링 중인 전문가 채널 ({channels.length})</h4>
                                     <button 
@@ -670,27 +670,26 @@ export default function NarrativeInsightTab() {
                                 </div>
                             </div>
 
-                            {/* Dashboard Grid (Charts) */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            {/* Dashboard Grid (Charts) - Divider Style */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 py-8 border-y border-border/40">
                                 {/* Leading Sector Trend Chart */}
-                                <div className="bg-card/40 border border-border/60 rounded-[32px] p-8 shadow-sm space-y-6 flex flex-col min-h-[400px]">
+                                <div className="space-y-6">
                                     <div className="flex items-center justify-between">
                                         <div className="space-y-1">
-                                            <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                                                <TrendingUp size={14} className="text-green-500" /> Leading Sector Trend
-                                            </h3>
-                                            <p className="text-[11px] text-muted-foreground">주요 섹터의 주도권 점수 전이 모니터링</p>
+                                            <h3 className="text-xl font-black italic tracking-tighter text-foreground/80 uppercase">Leading Sector Trend</h3>
+                                            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">주요 섹터의 주도권 점수 전이 모니터링</p>
                                         </div>
                                         <TrendingUp size={18} className="text-green-500" />
                                     </div>
-                                    <div className="flex-1 w-full min-h-[250px] pt-4">
+                                    <div className="h-[250px] w-full pt-4">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <LineChart data={sectorTrendData}>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" opacity={0.5} />
-                                                <XAxis dataKey="date" fontSize={10} axisLine={false} tickLine={false} tick={{fill: '#64748b'}} />
-                                                <YAxis domain={[0, 100]} fontSize={10} axisLine={false} tickLine={false} tick={{fill: '#64748b'}} hide />
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" strokeOpacity={0.5} />
+                                                <XAxis dataKey="date" fontSize={10} axisLine={false} tickLine={false} tick={{fill: 'hsl(var(--muted-foreground))'}} dy={10} />
+                                                <YAxis domain={[0, 100]} fontSize={10} axisLine={false} tickLine={false} tick={{fill: 'hsl(var(--muted-foreground))'}} dx={-10} width={30} />
                                                 <Tooltip 
-                                                    contentStyle={{ backgroundColor: '#fff', borderRadius: '16px', border: '1px solid #E2E8F0', fontSize: '12px', fontWeight: 'bold' }}
+                                                    contentStyle={{ backgroundColor: 'hsl(var(--background))', color: 'hsl(var(--foreground))', borderRadius: '8px', border: '1px solid hsl(var(--border))', fontSize: '11px', fontWeight: 'bold' }}
+                                                    itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
                                                 />
                                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', paddingTop: '20px' }} />
                                                 {distinctSectors.map((sector, idx) => (
@@ -711,17 +710,15 @@ export default function NarrativeInsightTab() {
                                 </div>
 
                                 {/* Market Sentiment Trend Chart */}
-                                <div className="bg-card/40 border border-border/60 rounded-[32px] p-8 shadow-sm space-y-6 flex flex-col min-h-[400px]">
+                                <div className="space-y-6 md:border-l md:border-border/40 md:pl-12">
                                     <div className="flex items-center justify-between">
                                         <div className="space-y-1">
-                                            <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                                                <Activity size={14} className="text-blue-500" /> Market Sentiment Trend
-                                            </h3>
-                                            <p className="text-[11px] text-muted-foreground">영상 분석 기반 가중 시장 심리 점수</p>
+                                            <h3 className="text-xl font-black italic tracking-tighter text-foreground/80 uppercase">Market Sentiment</h3>
+                                            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">영상 분석 기반 가중 시장 심리 점수</p>
                                         </div>
                                         <Activity size={18} className="text-blue-500" />
                                     </div>
-                                    <div className="flex-1 w-full min-h-[250px] pt-4">
+                                    <div className="h-[250px] w-full pt-4">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <AreaChart data={sentimentChartData}>
                                                 <defs>
@@ -730,11 +727,12 @@ export default function NarrativeInsightTab() {
                                                         <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                                                     </linearGradient>
                                                 </defs>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" opacity={0.5} />
-                                                <XAxis dataKey="date" fontSize={10} axisLine={false} tickLine={false} tick={{fill: '#64748b'}} />
-                                                <YAxis domain={[0, 100]} fontSize={10} axisLine={false} tickLine={false} tick={{fill: '#64748b'}} hide />
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" strokeOpacity={0.5} />
+                                                <XAxis dataKey="date" fontSize={10} axisLine={false} tickLine={false} tick={{fill: 'hsl(var(--muted-foreground))'}} dy={10} />
+                                                <YAxis domain={[0, 100]} fontSize={10} axisLine={false} tickLine={false} tick={{fill: 'hsl(var(--muted-foreground))'}} dx={-10} width={30} />
                                                 <Tooltip 
-                                                    contentStyle={{ backgroundColor: '#fff', borderRadius: '16px', border: '1px solid #E2E8F0', fontSize: '12px', fontWeight: 'bold' }}
+                                                    contentStyle={{ backgroundColor: 'hsl(var(--background))', color: 'hsl(var(--foreground))', borderRadius: '8px', border: '1px solid hsl(var(--border))', fontSize: '11px', fontWeight: 'bold' }}
+                                                    itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
                                                 />
                                                 <Area 
                                                     type="monotone" 
@@ -787,14 +785,14 @@ export default function NarrativeInsightTab() {
                                 {youtubeSubTab === 'report' && (
                                     <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-500">
                                         {youtubeConsensus.length === 0 ? (
-                                            <div className="py-20 text-center bg-muted/5 border border-dashed border-border/40 rounded-3xl">
-                                                <p className="text-muted-foreground font-medium">생성된 데일리 통합 리포트가 없습니다.</p>
+                                            <div className="py-20 text-center border-b border-border/40">
+                                                <p className="text-muted-foreground font-medium text-sm">생성된 데일리 통합 리포트가 없습니다.</p>
                                             </div>
                                         ) : (
                                             youtubeConsensus.map((report, idx) => (
-                                                <div key={idx} className="group bg-card/10 border border-border/50 hover:border-primary/30 p-8 rounded-[32px] transition-all space-y-4">
+                                                <div key={idx} className="group border-b border-border/40 py-8 transition-all space-y-4">
                                                     <div className="flex items-center justify-between">
-                                                        <div className="p-3 bg-muted/40 rounded-2xl font-black text-foreground text-sm flex items-center gap-2">
+                                                        <div className="font-black text-foreground text-sm flex items-center gap-2">
                                                             <Calendar size={14} className="text-primary" /> {report.date}
                                                         </div>
                                                         <div className="flex items-center gap-4">
@@ -809,24 +807,24 @@ export default function NarrativeInsightTab() {
                                                     </div>
                                                     <div className="space-y-4">
                                                         <h4 className="text-lg font-bold leading-snug text-foreground/90">마켓 내러티브 데일리 컨센서스</h4>
-                                                        <div className="p-6 bg-muted/5 border border-border/30 rounded-2xl leading-[1.8] text-sm font-medium text-muted-foreground whitespace-pre-wrap">
+                                                        <div className="p-6 border border-border/30 bg-background leading-[1.8] text-sm font-medium text-muted-foreground whitespace-pre-wrap">
                                                             {report.consensus_report}
                                                         </div>
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                            <div className="p-5 bg-amber-500/5 border border-amber-500/10 rounded-2xl space-y-2">
-                                                                <h5 className="text-[10px] font-black text-amber-600 uppercase tracking-widest flex items-center gap-2">
-                                                                    <Zap size={14} /> Narrative Pivot Analysis
+                                                            <div className="p-5 border border-border/30 bg-background space-y-2">
+                                                                <h5 className="text-[10px] font-bold text-foreground uppercase tracking-widest flex items-center gap-2">
+                                                                    <Zap size={14} className="text-amber-500" /> Narrative Pivot Analysis
                                                                 </h5>
-                                                                <p className="text-xs font-medium text-amber-700/80 leading-relaxed italic line-clamp-2">
+                                                                <p className="text-xs text-muted-foreground leading-relaxed italic line-clamp-3">
                                                                     {report.pivot_analysis}
                                                                 </p>
                                                             </div>
-                                                            <div className="p-5 bg-primary/5 border border-primary/10 rounded-2xl flex flex-col justify-center">
-                                                                <span className="text-[10px] font-black text-primary uppercase tracking-widest mb-2">Sources Analyzed</span>
+                                                            <div className="p-5 border border-border/30 bg-background flex flex-col justify-center">
+                                                                <span className="text-[10px] font-bold text-foreground uppercase tracking-widest mb-2">Sources Analyzed</span>
                                                                 <div className="flex items-center gap-2">
                                                                     <div className="flex -space-x-2">
                                                                         {parseSummary(report.sources_json)?.slice(0, 3).map((s: any, i: number) => (
-                                                                            <div key={i} className="w-8 h-8 rounded-full bg-muted border-2 border-background flex items-center justify-center text-[10px] font-black text-muted-foreground">
+                                                                            <div key={i} className="w-8 h-8 rounded-full bg-muted border-2 border-background flex items-center justify-center text-[10px] font-bold text-muted-foreground">
                                                                                 {s.channel?.[0] || 'Y'}
                                                                             </div>
                                                                         ))}
@@ -845,9 +843,9 @@ export default function NarrativeInsightTab() {
                                 )}
 
                                 {youtubeSubTab === 'sector' && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-right-4 duration-500">
+                                    <div className="flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
                                         {youtubeTrends.length > 0 && parseSummary(youtubeTrends[0].sector_rankings_json)?.map((s: any, idx: number) => (
-                                            <div key={idx} className="bg-card/20 border border-border/50 p-8 rounded-[40px] shadow-sm hover:border-primary/40 transition-all flex flex-col gap-6">
+                                            <div key={idx} className="py-8 border-b border-border/40 transition-all flex flex-col gap-6">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-4">
                                                         <div className="flex items-center gap-2 text-xl">
@@ -915,7 +913,7 @@ export default function NarrativeInsightTab() {
                                             {insights.map((insight) => {
                                                 const summary = parseSummary(insight.summary_json);
                                                 return (
-                                                    <div key={insight.id} className="group flex flex-col md:flex-row gap-6 p-6 bg-muted/10 border border-border/50 hover:border-primary/30 rounded-2xl transition-all duration-300">
+                                                    <div key={insight.id} className="group flex flex-col md:flex-row gap-6 py-6 border-b border-border/40 transition-all duration-300">
                                                         <div 
                                                             onClick={() => window.open(`https://youtube.com/watch?v=${insight.video_id}`)}
                                                             className="hidden md:flex shrink-0 w-48 aspect-video bg-muted rounded-xl items-center justify-center overflow-hidden relative group-hover:shadow-2xl transition-all duration-300 bg-cover bg-center cursor-pointer"
@@ -1187,7 +1185,7 @@ export default function NarrativeInsightTab() {
                                                         return (
                                                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                                                 {hotKeywords.map((kw: any, i: number) => (
-                                                                    <div key={i} className="group p-5 bg-card/40 hover:bg-card/60 border border-border/40 hover:border-primary/30 rounded-[24px] transition-all duration-300 space-y-3 shadow-sm">
+                                                                    <div key={i} className="group py-4 border-b border-border/30 last:border-b-0 space-y-3 transition-all duration-300 hover:bg-muted/10 px-4 -mx-4 rounded-xl">
                                                                         <div className="flex items-center justify-between">
                                                                             <div className="flex items-center gap-3">
                                                                                 <div className="flex items-center gap-1.5 min-w-[32px]">
@@ -1224,7 +1222,7 @@ export default function NarrativeInsightTab() {
                                                                 </div>
                                                                 <div className="flex flex-wrap gap-2 pt-2">
                                                                     {hotKeywords.map((kw: any, i: number) => (
-                                                                        <span key={i} className="px-3 py-1 bg-card border border-border/60 rounded-full text-[10px] font-black text-foreground/70 flex items-center gap-2">
+                                                                        <span key={i} className="px-3 py-1 border border-border/40 rounded-full text-[10px] font-black text-foreground/70 flex items-center gap-2 bg-background hover:bg-muted/30 transition-colors">
                                                                             <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
                                                                             {kw.keyword} {kw.score}
                                                                         </span>

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { LineChart, TrendingUp, TrendingDown, Activity, Target, Award, Brain, Loader2, Settings, Save, RotateCcw, Cpu, Clock, X, CalendarDays, ArrowRight } from 'lucide-react'
+import { Switch } from './ui/Switch'
 import { cn } from '../utils'
+import { ResponsiveContainer, LineChart as RechartsLineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 
 // ──────────────────────────────────────────────
 // Strategy Profile Types
@@ -63,75 +65,78 @@ function DualLineChart({ data, width = 700, height = 220 }: {
         )
     }
 
-    const padding = { top: 20, right: 20, bottom: 30, left: 50 }
-    const chartW = width - padding.left - padding.right
-    const chartH = height - padding.top - padding.bottom
-
-    const allValues = data.flatMap(d => [d.pmReturn, d.kospiReturn])
-    const minVal = Math.min(...allValues, 0)
-    const maxVal = Math.max(...allValues, 0)
-    const range = maxVal - minVal || 1
-    const yBuffer = range * 0.15
-
-    const yMin = minVal - yBuffer
-    const yMax = maxVal + yBuffer
-    const yRange = yMax - yMin
-
-    const toX = (i: number) => padding.left + (i / (data.length - 1)) * chartW
-    const toY = (v: number) => padding.top + (1 - (v - yMin) / yRange) * chartH
-    const zeroY = toY(0)
-
-    const pmPath = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(d.pmReturn).toFixed(1)}`).join(' ')
-    const kospiPath = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(d.kospiReturn).toFixed(1)}`).join(' ')
-
-    const gridCount = 5
-    const gridLines = Array.from({ length: gridCount + 1 }, (_, i) => {
-        const val = yMin + (yRange * i / gridCount)
-        return { y: toY(val), label: `${val >= 0 ? '+' : ''}${val.toFixed(1)}%` }
-    })
-
-    const labelStep = Math.max(1, Math.floor(data.length / 8))
-    const xLabels = data.filter((_, i) => i % labelStep === 0 || i === data.length - 1)
-        .map((d) => ({ x: toX(data.indexOf(d)), label: d.date }))
+    const CustomTooltip = ({ active, payload, label }: any) => {
+        if (active && payload && payload.length) {
+            return (
+                <div className="bg-background border border-border rounded-lg shadow-lg p-3 text-xs">
+                    <p className="font-bold mb-2">{label}</p>
+                    {payload.map((entry: any, index: number) => (
+                        <div key={index} className="flex flex-col gap-1 mb-1">
+                            <span className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                                {entry.name}
+                            </span>
+                            <span className={cn("font-bold text-sm", entry.value > 0 ? "text-red-500" : entry.value < 0 ? "text-blue-500" : "text-foreground")}>
+                                {entry.value > 0 ? '+' : ''}{entry.value.toFixed(2)}%
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+        return null;
+    };
 
     return (
-        <svg width="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
-            {gridLines.map((g, i) => (
-                <g key={i}>
-                    <line x1={padding.left} y1={g.y} x2={width - padding.right} y2={g.y}
-                        stroke="currentColor" strokeOpacity="0.08" strokeDasharray="4 4" />
-                    <text x={padding.left - 6} y={g.y + 3} textAnchor="end"
-                        className="fill-muted-foreground text-[9px]">{g.label}</text>
-                </g>
-            ))}
-            <line x1={padding.left} y1={zeroY} x2={width - padding.right} y2={zeroY}
-                stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" />
-            {xLabels.map((xl, i) => (
-                <text key={i} x={xl.x} y={height - 6} textAnchor="middle"
-                    className="fill-muted-foreground text-[9px]">{xl.label}</text>
-            ))}
-            <path d={kospiPath} fill="none" stroke="#9ca3af" strokeWidth="1.5"
-                strokeDasharray="6 3" strokeOpacity="0.6" />
-            <path d={pmPath} fill="none" stroke="#8b5cf6" strokeWidth="2.5"
-                strokeLinecap="round" strokeLinejoin="round" />
-            <defs>
-                <linearGradient id="pmGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.15" />
-                    <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0" />
-                </linearGradient>
-            </defs>
-            <path
-                d={`${pmPath} L${toX(data.length - 1).toFixed(1)},${zeroY.toFixed(1)} L${toX(0).toFixed(1)},${zeroY.toFixed(1)} Z`}
-                fill="url(#pmGrad)" />
-            <circle cx={toX(data.length - 1)} cy={toY(data[data.length - 1].pmReturn)}
-                r="4" fill="#8b5cf6" stroke="white" strokeWidth="1.5" />
-            <g transform={`translate(${padding.left + 5}, ${padding.top - 5})`}>
-                <line x1="0" y1="0" x2="16" y2="0" stroke="#8b5cf6" strokeWidth="2.5" />
-                <text x="20" y="3" className="fill-foreground text-[10px] font-bold">PM 포트폴리오</text>
-                <line x1="110" y1="0" x2="126" y2="0" stroke="#9ca3af" strokeWidth="1.5" strokeDasharray="4 2" />
-                <text x="130" y="3" className="fill-muted-foreground text-[10px]">KOSPI</text>
-            </g>
-        </svg>
+        <div style={{ width: '100%', height }}>
+            <ResponsiveContainer width="100%" height="100%">
+                <RechartsLineChart data={data} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" strokeOpacity={0.08} />
+                    <XAxis 
+                        dataKey="date" 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fill: 'currentColor', opacity: 0.5, fontSize: 10, fontWeight: 500 }}
+                        dy={10}
+                        minTickGap={30}
+                    />
+                    <YAxis 
+                        axisLine={false} 
+                        tickLine={false}
+                        tick={{ fill: 'currentColor', opacity: 0.4, fontSize: 10, fontWeight: 500 }}
+                        tickFormatter={(value) => `${value > 0 ? '+' : ''}${value.toFixed(1)}%`}
+                        dx={-10}
+                        width={60}
+                    />
+                    <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'currentColor', strokeOpacity: 0.2, strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <defs>
+                        <linearGradient id="pmColor" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                        </linearGradient>
+                    </defs>
+                    <Line 
+                        name="KOSPI"
+                        type="monotone" 
+                        dataKey="kospiReturn" 
+                        stroke="#9ca3af" 
+                        strokeWidth={1.5}
+                        strokeDasharray="5 5"
+                        dot={false}
+                        activeDot={{ r: 4, fill: '#9ca3af', stroke: 'var(--background)', strokeWidth: 2 }}
+                    />
+                    <Line 
+                        name="PM 포트폴리오"
+                        type="monotone" 
+                        dataKey="pmReturn" 
+                        stroke="#8b5cf6" 
+                        strokeWidth={2.5}
+                        dot={false}
+                        activeDot={{ r: 5, fill: '#8b5cf6', stroke: 'var(--background)', strokeWidth: 2 }}
+                    />
+                </RechartsLineChart>
+            </ResponsiveContainer>
+        </div>
     )
 }
 
@@ -338,12 +343,13 @@ function StrategySettingsModal({ profiles, reviewSchedule, onProfileChange, onSc
                                     onChange={e => onScheduleChange({ ...reviewSchedule, closingTime: e.target.value })}
                                     className="px-2.5 py-1.5 text-sm font-mono bg-background border border-border rounded-lg" />
                             </div>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" checked={reviewSchedule.autoEnabled}
-                                    onChange={e => onScheduleChange({ ...reviewSchedule, autoEnabled: e.target.checked })}
-                                    className="rounded" />
+                            <div className="flex items-center gap-2">
+                                <Switch
+                                    checked={reviewSchedule.autoEnabled}
+                                    onChange={(checked) => onScheduleChange({ ...reviewSchedule, autoEnabled: checked })}
+                                />
                                 <span className="text-xs font-bold">자동 실행</span>
-                            </label>
+                            </div>
                         </div>
                     </div>
                 </div>

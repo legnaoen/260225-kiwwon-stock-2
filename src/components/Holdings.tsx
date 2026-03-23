@@ -235,50 +235,48 @@ export default function Holdings() {
     }, [selectedAccount])
 
     return (
-        <div className="flex-1 flex flex-col animate-in bg-muted/20 fade-in slide-in-from-bottom-4 duration-500 overflow-hidden h-full min-h-0">
-            {/* Header & Summary Section */}
-            <div className="flex flex-col shrink-0 p-4 pb-4">
-                <div className="flex items-center gap-4 text-sm relative">
+        <div className="flex-1 flex flex-col animate-in bg-background fade-in slide-in-from-bottom-4 duration-500 overflow-hidden h-full min-h-0">
+            {/* Header Area */}
+            <div className="px-8 py-6 border-b flex items-center justify-between shrink-0 bg-background">
+                <div className="flex flex-col gap-1 relative">
                     {isLoading && (
-                        <div className="absolute -left-4 flex items-center">
-                            <RefreshCw size={14} className="animate-spin text-primary" />
+                        <div className="absolute -left-6 top-1/2 -translate-y-1/2 flex items-center">
+                            <RefreshCw size={14} className="animate-spin text-muted-foreground/50" />
                         </div>
                     )}
+                    <h1 className="text-2xl font-bold tracking-tight">Portfolio Holdings</h1>
+                    <span className="text-sm text-muted-foreground">실시간 보유 종목 및 평가 수익 현황</span>
+                </div>
+            </div>
 
-                    {/* 계좌 정보 등의 요약 카드화 */}
-                    <Card className="min-w-[200px]">
-                        <CardContent>
-                            <span className="text-muted-foreground text-xs font-medium">평가금액</span>
-                            <span className="text-lg font-bold text-right">₩ {data.summary.totalEvaluation.toLocaleString()}</span>
-                        </CardContent>
-                    </Card>
-
-                    <Card className="min-w-[200px]">
-                        <CardContent>
-                            <div className="flex items-center justify-between">
-                                <span className="text-muted-foreground text-xs font-medium">평가손익</span>
-                                <ProfitBadge value={data.summary.profitRate} suffix="%" />
-                            </div>
-                            <div className="flex justify-end">
-                                <ProfitText value={data.summary.totalProfit} prefix="₩ " className="text-lg" />
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    <Card className="min-w-[200px]">
-                        <CardContent>
-                            <span className="text-muted-foreground text-xs font-medium">예수금</span>
-                            <span className="text-lg font-bold text-primary text-right">₩ {data.summary.deposit.toLocaleString()}</span>
-                        </CardContent>
-                    </Card>
+            {/* Top Asset Bar (Divider Based) */}
+            <div className="border-b bg-muted/10 w-full overflow-x-auto scrollbar-hide shrink-0">
+                <div className="px-8 py-4 flex flex-row items-center justify-start gap-8 min-w-max">
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">평가금액</span>
+                        <span className="text-xl tabular-nums tracking-tight font-bold">₩ {data.summary.totalEvaluation.toLocaleString()}</span>
+                    </div>
+                    <div className="w-px h-10 bg-border shrink-0" />
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">예수금</span>
+                        <span className="text-xl tabular-nums tracking-tight font-bold text-primary">₩ {data.summary.deposit.toLocaleString()}</span>
+                    </div>
+                    <div className="w-px h-10 bg-border shrink-0" />
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">평가손익</span>
+                        <div className="flex items-center gap-2">
+                            <ProfitText value={data.summary.totalProfit} prefix="₩ " className="text-xl data-mono tracking-tight font-bold" />
+                            <ProfitBadge value={data.summary.profitRate} suffix="%" />
+                        </div>
+                    </div>
                 </div>
             </div>
 
             {error && (
-                <div className="bg-destructive/10 text-destructive p-4 rounded-xl flex items-center gap-3 border border-destructive/20 shrink-0">
-                    <AlertCircle size={18} />
-                    <p className="text-sm font-medium">{error}</p>
-                    <button onClick={() => fetchData(selectedAccount)} className="ml-auto text-xs underline font-bold">다시 시도</button>
+                <div className="bg-destructive/5 text-destructive font-medium px-8 py-3 border-b border-destructive/20 flex items-center gap-3 shrink-0 text-sm">
+                    <AlertCircle size={16} />
+                    <p>{error}</p>
+                    <button onClick={() => fetchData(selectedAccount)} className="ml-auto underline font-bold opacity-80 hover:opacity-100 transition-opacity">다시 시도</button>
                 </div>
             )}
 

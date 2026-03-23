@@ -121,10 +121,10 @@ export function StockAiReport({ symbol, name, refreshTrigger }: StockAiReportPro
                             </div>
 
                             {/* 리포트 본문 (분석 의견) */}
-                            <div className="bg-card border border-border/40 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
-                                <div className="space-y-5">
+                            <div className="border border-border/20 rounded-xl p-5 hover:border-border/40 transition-colors bg-background">
+                                <div className="space-y-4">
                                     {rpt.past_reference && (
-                                        <div className="p-4 bg-primary/[0.03] rounded-xl border border-primary/10 text-primary/80 text-[12px] font-bold leading-relaxed">
+                                        <div className="p-4 bg-muted/10 rounded-xl border border-border/30 text-muted-foreground text-[12px] font-bold leading-relaxed">
                                             🔍 {rpt.past_reference}
                                         </div>
                                     )}

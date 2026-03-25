@@ -429,6 +429,33 @@ export class DatabaseService {
             );
         `
 
+        // PL-NaverFlow: 업종 및 테마별 상승률 트렌드 테이블
+        const createNaverMarketFlowTable = `
+            CREATE TABLE IF NOT EXISTS naver_market_flow (
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                rank_num INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                change_rate REAL NOT NULL,
+                PRIMARY KEY(date, type, name)
+            );
+        `
+
+        // PL-NaverFlow: 마켓 주도주 자동 태깅 테이블
+        const createStockThemeTagsTable = `
+            CREATE TABLE IF NOT EXISTS stock_theme_tags (
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                tag_name TEXT NOT NULL,
+                is_auto_tagged INTEGER DEFAULT 0,
+                added_date TEXT NOT NULL,
+                PRIMARY KEY(stock_code, tag_name)
+            );
+        `
+
+        this.db.exec(createNaverMarketFlowTable)
+        this.db.exec(createStockThemeTagsTable)
+
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
         this.db.exec(createFinancialDataTable)
@@ -1547,5 +1574,47 @@ export class DatabaseService {
             bestTrade: bestTrade ? { name: bestTrade.stock_name, profit: bestTrade.closed_profit_rate } : null,
             worstTrade: worstTrade ? { name: worstTrade.stock_name, profit: worstTrade.closed_profit_rate } : null,
         };
+    }
+
+    public upsertNaverMarketFlow(flows: { date: string, type: string, rank_num: number, name: string, change_rate: number }[]) {
+        const stmt = this.db.prepare(`
+            INSERT INTO naver_market_flow (date, type, rank_num, name, change_rate)
+            VALUES (@date, @type, @rank_num, @name, @change_rate)
+            ON CONFLICT(date, type, name) DO UPDATE SET
+                rank_num = excluded.rank_num,
+                change_rate = excluded.change_rate
+        `)
+        const insertMany = this.db.transaction((items) => {
+            for (const item of items) {
+                stmt.run(item)
+            }
+        })
+        insertMany(flows)
+    }
+
+    public getRecentNaverMarketFlows(type: string, limitDays: number = 5) {
+        // limitDays 만큼의 고유 날짜 조회 후 필터링
+        return this.db.prepare(`
+            SELECT * FROM naver_market_flow 
+            WHERE type = ? 
+            ORDER BY date DESC, rank_num ASC
+        `).all(type) as any[]
+    }
+
+    public upsertStockThemeTags(tags: { stock_code: string, stock_name: string, tag_name: string, is_auto_tagged: number, added_date: string }[]) {
+        const stmt = this.db.prepare(`
+            INSERT OR IGNORE INTO stock_theme_tags (stock_code, stock_name, tag_name, is_auto_tagged, added_date)
+            VALUES (@stock_code, @stock_name, @tag_name, @is_auto_tagged, @added_date)
+        `)
+        const insertMany = this.db.transaction((items) => {
+            for (const item of items) {
+                stmt.run(item)
+            }
+        })
+        insertMany(tags)
+    }
+
+    public getStockThemeTags(stockCode: string) {
+        return this.db.prepare('SELECT * FROM stock_theme_tags WHERE stock_code = ?').all(stockCode) as any[]
     }
 }

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database, Globe, BrainCircuit, Info, Activity } from 'lucide-react'
+import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database, Globe, BrainCircuit, Info, Activity, MonitorSmartphone } from 'lucide-react'
 import { Input } from './ui/Input'
 import { Button } from './ui/Button'
 import { Switch } from './ui/Switch'
 import { useScheduleStore } from '../store/useScheduleStore'
+import { useUiStore, FontSizeTier } from '../store/useUiStore'
 import ApiDiagnosticsTab from './ApiDiagnosticsTab'
 import MaiisMonitorTab from './MaiisMonitorTab'
 
@@ -88,6 +89,9 @@ export default function Settings() {
     const [isTestingAi, setIsTestingAi] = useState(false)
 
     const [activeTab, setActiveTab] = useState<'monitor' | 'accounts' | 'strategy' | 'system' | 'diagnostics'>('monitor')
+    
+    // UI Global State
+    const { fontSizeTier, setFontSizeTier } = useUiStore()
 
     const [isTestingYahoo, setIsTestingYahoo] = useState(false)
     const [statusYahoo, setStatusYahoo] = useState<'idle' | 'success' | 'error'>('idle')
@@ -588,6 +592,7 @@ export default function Settings() {
 
     const menuItems = [
         { id: 'monitor', label: 'MAIIS 관제 센터', icon: Activity, color: 'text-primary' },
+        { id: 'system', label: '시스템 및 UI 설정', icon: MonitorSmartphone, color: 'text-zinc-500' },
         { id: 'accounts', label: '계정 및 인프라', icon: ShieldCheck, color: 'text-blue-500' },
         { id: 'telegram', label: '텔레그램 통합 설정', icon: MessageCircle, color: 'text-sky-500' },
         { id: 'strategy', label: '자동매매 및 전략', icon: BrainCircuit, color: 'text-indigo-500' },
@@ -1392,6 +1397,59 @@ export default function Settings() {
                                             </ul>
                                         </div>
                                     </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'system' && (
+                        <div className="pt-12 border-t border-border/40 animate-in fade-in slide-in-from-bottom-2">
+                            <div className="space-y-8">
+                            <div className="space-y-1">
+                                <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
+                                    <MonitorSmartphone className="text-zinc-500" size={32} />
+                                    시스템 및 UI 테마
+                                </h1>
+                                <p className="text-muted-foreground">화면 표시 배율(글꼴 크기) 등 앱 전역 환경설정을 관리합니다.</p>
+                            </div>
+
+                            <div className="border border-border/30 rounded-xl p-8 bg-background space-y-8">
+                                <div className="space-y-6">
+                                    <h2 className="text-xl font-bold">화면 표시 배율 (UI Zoom)</h2>
+                                    <p className="text-sm text-muted-foreground -mt-3">
+                                        VSCode나 트레이딩 뷰어처럼 좁고 밀도 높은 화면 구성을 원하신다면 다소 작은 폰트를 선택하세요.<br/>
+                                        이 설정은 즉시 시각적으로 적용되며 브라우저 로컬 저장소에 영구 보존됩니다.
+                                    </p>
+                                    
+                                    <div className="grid grid-cols-4 gap-4 mt-6">
+                                        {(['small', 'medium', 'large', 'xlarge'] as FontSizeTier[]).map((tier) => (
+                                            <button
+                                                key={tier}
+                                                onClick={() => setFontSizeTier(tier)}
+                                                className={`flex flex-col items-center gap-4 py-8 px-4 rounded-xl border-2 transition-all duration-200 ${
+                                                    fontSizeTier === tier 
+                                                        ? 'border-primary bg-primary/5 shadow-sm' 
+                                                        : 'border-border/50 bg-background hover:border-primary/30 hover:bg-muted/10'
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-center h-16 w-16 bg-muted/30 rounded-full">
+                                                    <span className={`font-bold ${tier === 'small' ? 'text-xs' : tier === 'medium' ? 'text-base' : tier === 'large' ? 'text-xl' : 'text-3xl'}`}>
+                                                        Aa
+                                                    </span>
+                                                </div>
+                                                <div className="text-center">
+                                                    <div className="font-bold capitalize">{tier}</div>
+                                                    <div className="text-xs text-muted-foreground mt-1">
+                                                        {tier === 'small' && '고밀도 14px'}
+                                                        {tier === 'medium' && '기본 16px'}
+                                                        {tier === 'large' && '크게 18px'}
+                                                        {tier === 'xlarge' && '매우 크게 20px'}
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
                             </div>
                         </div>
                     )}

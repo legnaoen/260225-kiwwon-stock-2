@@ -3,3 +3,8 @@ dist/
 dist-electron/
 release/
 *.exe
+
+# Python crawler proxy
+electron/python/venv/
+__pycache__/
+*.pyc

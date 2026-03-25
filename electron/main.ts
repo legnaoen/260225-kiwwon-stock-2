@@ -1,15 +1,20 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'node:path'
+import { spawn, ChildProcess } from 'node:child_process'
+import fs from 'node:fs'
 import Store from 'electron-store'
 import { KiwoomService } from './services/KiwoomService'
 import { AutoTradeService } from './services/AutoTradeService'
 import { TelegramService } from './services/TelegramService'
 import { DatabaseService } from './services/DatabaseService'
-import { DartApiService } from './services/DartApiService'
+// [DEPRECATED] DART 관심종목 연동 기능 비활성화됨 - 재활용 시 아래 import 복원
+// import { DartApiService } from './services/DartApiService'
 import { CompanyAnalysisService } from './services/CompanyAnalysisService'
-import { MarketScannerService } from './services/MarketScannerService'
+// [DEPRECATED] V1 MarketScanner - V2 파이프라인으로 대체됨. 재활용 시 import 복원
+// import { MarketScannerService } from './services/MarketScannerService'
 import { AiDecisionService } from './services/AiDecisionService'
-import { DataLoggingService } from './services/DataLoggingService'
+// [DEPRECATED] V1 DataLoggingService - V2에서 미사용. 재활용 시 import 복원
+// import { DataLoggingService } from './services/DataLoggingService'
 import { DailyRetrospectiveService } from './services/DailyRetrospectiveService'
 import { AiService } from './services/AiService'
 import { VirtualAccountService } from './services/VirtualAccountService'
@@ -22,7 +27,8 @@ const store = new Store()
 const kiwoomService = KiwoomService.getInstance()
 const autoTradeService = AutoTradeService.getInstance()
 const telegramService = TelegramService.getInstance()
-const marketScannerService = MarketScannerService.getInstance()
+// [DEPRECATED] V1 MarketScanner - V2 파이프라인 전환으로 비활성화
+// const marketScannerService = MarketScannerService.getInstance()
 const aiDecisionService = AiDecisionService.getInstance()
 const schedulerService = SchedulerService.getInstance()
 const ingestionManager = IngestionManager.getInstance()
@@ -42,6 +48,7 @@ process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = (app && app.isPackaged) ? process.env.DIST : path.join(process.env.DIST, '../public')
 
 let win: BrowserWindow | null
+let crawlerProxyProcess: ChildProcess | null = null
 
 // 앱 시작 시 스킬스 파일 초기 스냅샷 DB 기록
 import('./services/SkillsService').then(({ SkillsService }) => {
@@ -148,6 +155,10 @@ function createWindow() {
 
 app.on('window-all-closed', () => {
     kiwoomService.disconnectWebSocket()
+    if (crawlerProxyProcess) {
+        crawlerProxyProcess.kill()
+        console.log('[Main] Crawler proxy server terminated.')
+    }
     if (process.platform !== 'darwin') {
         app.quit()
         win = null
@@ -163,21 +174,51 @@ app.on('activate', () => {
 app.whenReady().then(() => {
     createWindow()
 
-    // Startup DART Sync after 5 seconds
+    // Crawler Proxy Server 자동 실행 (NaverFlow 파이프라인용)
+    // 개발: electron/python/, 빌드: resources/python/
+    const crawlerDir = app.isPackaged
+        ? path.join(process.resourcesPath, 'python')
+        : path.join(__dirname, 'python')
+    
+    // venv가 있으면 사용, 없으면 시스템 python 사용
+    const venvPython = path.join(crawlerDir, 'venv', 'Scripts', 'python.exe')
+    const pythonExe = fs.existsSync(venvPython) ? venvPython : 'python'
+
+    console.log(`[Main] Crawler dir: ${crawlerDir}`)
+    console.log(`[Main] Python exe: ${pythonExe}`)
+
+    try {
+        crawlerProxyProcess = spawn(pythonExe, ['crawler_server.py'], {
+            cwd: crawlerDir,
+            env: process.env,
+            stdio: 'pipe'
+        })
+
+
+        crawlerProxyProcess.stdout?.on('data', (data) => console.log(`[CrawlerProxy] ${data.toString().trim()}`))
+        crawlerProxyProcess.stderr?.on('data', (data) => console.error(`[CrawlerProxy Error] ${data.toString().trim()}`))
+        console.log(`[Main] Started Crawler Proxy Python server (PID: ${crawlerProxyProcess.pid})`)
+    } catch (e: any) {
+        console.error('[Main] Failed to start Crawler Proxy:', e.message)
+    }
+
+    // Startup Stock Master sync after 5 seconds
     setTimeout(async () => {
         try {
-            console.log('[Main] Starting startup Stock Master & DART sync...')
+            console.log('[Main] Starting startup Stock Master sync...')
             // 종목 마스터 동기화 (내부에서 오늘 날짜 체크함)
             await StockMasterService.getInstance().checkAndUpdate()
             
-            await DartApiService.getInstance().syncWatchlistSchedules()
+            // [DEPRECATED] DART 관심종목 일정 동기화 - UI에서 관심종목/DART 탭 삭제됨
+            // 재활용 시: await DartApiService.getInstance().syncWatchlistSchedules()
             console.log('[Main] Startup sync completed.')
         } catch (err) {
             console.error('[Main] Startup sync failed:', err)
         }
 
-        // Start Market Scanner
-        marketScannerService.start()
+        // [DEPRECATED] V1 MarketScanner - V2 파이프라인 전환으로 비활성화
+        // 재활용 시: marketScannerService.start()
+        // marketScannerService.start()
     }, 5000)
 })
 
@@ -385,6 +426,17 @@ ipcMain.handle('maiis:run-pipeline-manual', async (_event, pipelineId: string) =
     }
 })
 
+ipcMain.handle('v2-pipeline:run', async (_event, { pipelineId, options }) => {
+    try {
+        const { V2PipelineManager } = await import('./services/v2_pipeline/V2PipelineManager')
+        const result = await V2PipelineManager.getInstance().runPipeline(pipelineId, options)
+        return { success: true, data: result }
+    } catch (error: any) {
+        console.error(`[V2Pipeline] run error:`, error)
+        return { success: false, error: error.message }
+    }
+})
+
 ipcMain.handle('maiis:get-portfolio-tracker', async () => {
     try {
         const db = DatabaseService.getInstance()
@@ -580,59 +632,32 @@ ipcMain.handle('kiwoom:get-all-stocks', async (_event, { marketType }) => {
     }
 })
 
-ipcMain.handle('kiwoom:save-watchlist-symbols', async (_event, symbols: string[]) => {
-    store.set('watchlist_symbols', symbols)
-    return { success: true }
-})
+// [DEPRECATED] 관심종목 기능 비활성화 - UI에서 관심종목 탭 삭제됨
+// 재활용 시: store key 'watchlist_symbols' 사용
+// ipcMain.handle('kiwoom:save-watchlist-symbols', async (_event, symbols: string[]) => {
+//     store.set('watchlist_symbols', symbols)
+//     return { success: true }
+// })
+// ipcMain.handle('kiwoom:get-watchlist-symbols', () => {
+//     return store.get('watchlist_symbols') || []
+// })
 
-ipcMain.handle('kiwoom:get-watchlist-symbols', () => {
-    return store.get('watchlist_symbols') || []
-})
+// [DEPRECATED] V1 MarketScanner IPC Handlers - V2 파이프라인 전환으로 비활성화
+// 재활용 시: kiwoomService.getVolumeSpikeStocks(), getTopTradingValueStocks(), getTopRisingStocks(), getCombinedTopStocks()
+// ipcMain.handle('kiwoom:test-market-scanner', async () => { ... })
+// ipcMain.handle('kiwoom:get-top-trading-value-stocks', async () => { ... })
+// ipcMain.handle('kiwoom:get-top-rising-stocks', async () => { ... })
+// ipcMain.handle('kiwoom:get-combined-top-stocks', async (_event, { risingLimit, tradingValueLimit }) => { ... })
 
-ipcMain.handle('kiwoom:test-market-scanner', async () => {
-    try {
-        const data = await kiwoomService.getVolumeSpikeStocks()
-        return { success: true, data }
-    } catch (error: any) {
-        return { success: false, error: error?.response?.data || { message: error.message } }
-    }
-})
-
-ipcMain.handle('kiwoom:get-top-trading-value-stocks', async () => {
-    try {
-        const data = await kiwoomService.getTopTradingValueStocks()
-        return { success: true, data }
-    } catch (error: any) {
-        return { success: false, error: error?.response?.data || { message: error.message } }
-    }
-})
-
-ipcMain.handle('kiwoom:get-top-rising-stocks', async () => {
-    try {
-        const data = await kiwoomService.getTopRisingStocks()
-        return { success: true, data }
-    } catch (error: any) {
-        return { success: false, error: error?.response?.data || { message: error.message } }
-    }
-})
-
-ipcMain.handle('kiwoom:get-combined-top-stocks', async (_event, { risingLimit, tradingValueLimit }) => {
-    try {
-        const data = await kiwoomService.getCombinedTopStocks(risingLimit, tradingValueLimit)
-        return { success: true, data }
-    } catch (error: any) {
-        return { success: false, error: error?.response?.data || { message: error.message } }
-    }
-})
-
-ipcMain.handle('kiwoom:get-watchlist', async (_event, { symbols }) => {
-    try {
-        const data = await kiwoomService.getWatchlist(symbols)
-        return { success: true, data }
-    } catch (error: any) {
-        return { success: false, error: error?.response?.data || { message: error.message } }
-    }
-})
+// [DEPRECATED] 관심종목 데이터 조회 - 재활용 시: kiwoomService.getWatchlist(symbols) 참조
+// ipcMain.handle('kiwoom:get-watchlist', async (_event, { symbols }) => {
+//     try {
+//         const data = await kiwoomService.getWatchlist(symbols)
+//         return { success: true, data }
+//     } catch (error: any) {
+//         return { success: false, error: error?.response?.data || { message: error.message } }
+//     }
+// })
 
 ipcMain.handle('kiwoom:get-chart-data', async (_event, { stk_cd, base_dt }) => {
     try {
@@ -762,69 +787,34 @@ ipcMain.handle('telegram:send-message', async (_event, message: string) => {
     }
 })
 
-// === DART API Handlers ===
-ipcMain.handle('dart:save-key', (_event, key: string) => {
-    store.set('dart_api_key', key)
-    return { success: true }
-})
-
-ipcMain.handle('dart:get-key', () => {
-    return store.get('dart_api_key') || ''
-})
-
-ipcMain.handle('dart:save-settings', (_event, settings: any) => {
-    store.set('dart_settings', settings)
-    return { success: true }
-})
-
-ipcMain.handle('dart:get-settings', () => {
-    return store.get('dart_settings') || {}
-})
-
-ipcMain.handle('dart:sync-corp-codes', async () => {
-    try {
-        await DartApiService.getInstance().syncCorpCodes()
-        return { success: true }
-    } catch (err: any) {
-        return { success: false, error: err.message }
-    }
-})
-
-ipcMain.handle('dart:sync-watchlist-schedules', async () => {
-    try {
-        await DartApiService.getInstance().syncWatchlistSchedules()
-        return { success: true }
-    } catch (err: any) {
-        return { success: false, error: err.message }
-    }
-})
-
-ipcMain.handle('dart:fetch-disclosures', async (_event, { corpCodes, bgnDe, endDe }) => {
-    try {
-        const disclosures = await DartApiService.getInstance().fetchDisclosures(corpCodes, bgnDe, endDe)
-        return { success: true, data: disclosures }
-    } catch (err: any) {
-        return { success: false, error: err.message }
-    }
-})
-
-ipcMain.handle('dart:get-financial-data', async (_event, stockCode: string) => {
-    try {
-        const data = DatabaseService.getInstance().getFinancialData(stockCode)
-        return { success: true, data }
-    } catch (err: any) {
-        return { success: false, error: err.message }
-    }
-})
-
-ipcMain.handle('dart:sync-batch-financials', async (_event, stockCodes: string[]) => {
-    try {
-        await DartApiService.getInstance().syncBatchFinancials(stockCodes)
-        return { success: true }
-    } catch (err: any) {
-        return { success: false, error: err.message }
-    }
-})
+// ═══════════════════════════════════════════════════════════════════════════════
+// [DEPRECATED] DART API Handlers - UI에서 DART/관심종목 탭 삭제됨
+// 재활용 가이드:
+//   1. DartApiService import 복원 (파일 상단)
+//   2. 아래 핸들러 주석 해제
+//   3. store key: 'dart_api_key', 'dart_settings'
+//   4. 주요 메서드: syncCorpCodes(), syncWatchlistSchedules(), fetchDisclosures(), syncBatchFinancials()
+//   5. DB 메서드: DatabaseService.getFinancialData(stockCode)
+// ═══════════════════════════════════════════════════════════════════════════════
+// ipcMain.handle('dart:save-key', (_event, key: string) => {
+//     store.set('dart_api_key', key)
+//     return { success: true }
+// })
+// ipcMain.handle('dart:get-key', () => {
+//     return store.get('dart_api_key') || ''
+// })
+// ipcMain.handle('dart:save-settings', (_event, settings: any) => {
+//     store.set('dart_settings', settings)
+//     return { success: true }
+// })
+// ipcMain.handle('dart:get-settings', () => {
+//     return store.get('dart_settings') || {}
+// })
+// ipcMain.handle('dart:sync-corp-codes', async () => { ... })
+// ipcMain.handle('dart:sync-watchlist-schedules', async () => { ... })
+// ipcMain.handle('dart:fetch-disclosures', async (_event, { corpCodes, bgnDe, endDe }) => { ... })
+// ipcMain.handle('dart:get-financial-data', async (_event, stockCode: string) => { ... })
+// ipcMain.handle('dart:sync-batch-financials', async (_event, stockCodes: string[]) => { ... })
 
 ipcMain.handle('kiwoom:analyze-stock', async (_event, stockCode: string) => {
     try {
@@ -1315,19 +1305,13 @@ ipcMain.handle('naver:collect-news', async (_event, { date, stockCode, stockName
     }
 })
 
-ipcMain.handle('dart:collect-disclosures', async (_event, { date, stockCode, stockName }) => {
-    try {
-        const { DartApiService } = await import('./services/DartApiService')
-        const result = await DartApiService.getInstance().getDisclosuresSummaryForAiWithRaw(stockCode)
-        
-        // DB 저장
-        DatabaseService.getInstance().saveDisclosuresRawData(date, stockCode, stockName, result.items)
-        
-        return { success: true, data: result.items }
-    } catch (err: any) {
-        return { success: false, error: err.message }
-    }
-})
+// [DEPRECATED] DART 공시 수집 핸들러 - 재활용 시: DartApiService.getDisclosuresSummaryForAiWithRaw(stockCode) 참조
+// ipcMain.handle('dart:collect-disclosures', async (_event, { date, stockCode, stockName }) => {
+//     const { DartApiService } = await import('./services/DartApiService')
+//     const result = await DartApiService.getInstance().getDisclosuresSummaryForAiWithRaw(stockCode)
+//     DatabaseService.getInstance().saveDisclosuresRawData(date, stockCode, stockName, result.items)
+//     return { success: true, data: result.items }
+// })
 
 // ─── Skills File IPC ─────────────────────────────────────────────────────────
 

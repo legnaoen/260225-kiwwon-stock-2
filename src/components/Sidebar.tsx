@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, ListOrdered, History, Settings, Bot, Calendar, Wallet, Brain, TrendingUp, BookOpen, Network, Globe, LineChart } from 'lucide-react'
+import { LayoutDashboard, ListOrdered, History, Settings, Bot, Calendar, Wallet, Brain, TrendingUp, BookOpen, Network, Globe, LineChart, Server } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -9,6 +9,7 @@ function cn(...inputs: ClassValue[]) {
 
 export const menuItems = [
     { id: 'dashboard', name: '대시보드', icon: LayoutDashboard },
+    { id: 'pipeline-monitor', name: '데이터 관제', icon: Server },
     { id: 'maiis-command', name: '종합 관제', icon: Network },
     { id: 'pm-tracker', name: 'PM 트래커', icon: LineChart },
     { id: 'macro-dashboard', name: '글로벌 매크로', icon: Globe },

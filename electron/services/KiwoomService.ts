@@ -782,44 +782,61 @@ export class KiwoomService {
     }
 
     /**
-     * 업종별 등락 조회 (ka10040)
+     * 업종 리스트 반환 (KRX 표준 업종코드)
+     * ka10040은 REST API에서 미지원 → 하드코딩 업종코드로 대체
      */
-    public async getSectorPerformance() {
-        return this.makeApiRequestWithRetry(async (token) => {
-            const url = `/api/dostk/stkinfo`
-            const headers = {
-                'Content-Type': 'application/json;charset=UTF-8',
-                'authorization': `Bearer ${token}`,
-                'api-id': 'ka10040'
-            }
-            const body = {
-                mrkt_tp: '0', // 0:전체, 1:코스피, 2:코스닥
-                sort_tp: '1'  // 1:등락률순
-            }
-            const response = await this.kiwoomAxios.post(url, body, { headers })
-            return response.data
-        }, { cacheKey: 'SECTOR_PERFORMANCE', ttl: 10 * 60 * 1000 }) // 10분 캐시
+    public getSectorCodes() {
+        return [
+            { code: '001', name: '종합(KOSPI)' },
+            { code: '002', name: '대형주' },
+            { code: '003', name: '중형주' },
+            { code: '004', name: '소형주' },
+            { code: '005', name: '음식료품' },
+            { code: '006', name: '섬유의복' },
+            { code: '007', name: '종이목재' },
+            { code: '008', name: '화학' },
+            { code: '009', name: '의약품' },
+            { code: '011', name: '비금속광물' },
+            { code: '012', name: '철강금속' },
+            { code: '013', name: '기계' },
+            { code: '014', name: '전기전자' },
+            { code: '015', name: '의료정밀' },
+            { code: '016', name: '운수장비' },
+            { code: '017', name: '유통업' },
+            { code: '019', name: '전기가스업' },
+            { code: '020', name: '건설업' },
+            { code: '024', name: '운수창고' },
+            { code: '025', name: '통신업' },
+            { code: '026', name: '금융업' },
+            { code: '028', name: '증권' },
+            { code: '029', name: '보험' },
+            { code: '030', name: '서비스업' },
+        ];
     }
 
     /**
-     * 업종별 투자자 매매동향 조회 (ka10021)
+     * 업종별 주가 요청 (ka20002) - 단일 업종코드 조회
+     * URI: /api/dostk/sect (키움 AI 확인됨)
+     * ka10040, ka10021은 REST API 미지원 → 이 메서드로 대체
      */
-    public async getSectorInvestorFlow(sectorCode: string) {
+    public async getSectorDetail(inds_cd: string, mrkt_tp: string = '0') {
         return this.makeApiRequestWithRetry(async (token) => {
-            const url = `/api/dostk/stkinfo`
+            const url = `/api/dostk/sect`
             const headers = {
                 'Content-Type': 'application/json;charset=UTF-8',
                 'authorization': `Bearer ${token}`,
-                'api-id': 'ka10021'
+                'api-id': 'ka20002'
             }
             const body = {
-                stk_cd: sectorCode, // 업종코드
-                tm_tp: '0'          // 0:당일
+                mrkt_tp: mrkt_tp,   // 0:코스피, 1:코스닥
+                inds_cd: inds_cd,   // 업종코드
+                stex_tp: '1'        // 1:KRX
             }
             const response = await this.kiwoomAxios.post(url, body, { headers })
             return response.data
-        }, { cacheKey: `SECTOR_FLOW_${sectorCode}`, ttl: 10 * 60 * 1000 })
+        }, { cacheKey: `SECTOR_DETAIL_${inds_cd}_${mrkt_tp}`, ttl: 5 * 60 * 1000 })
     }
+
 
     /**
      * ka10027 응답을 정규화 형태로 반환
@@ -827,7 +844,7 @@ export class KiwoomService {
     public async getParsedTopRisingStocks(limit = 25): Promise<{ code: string; name: string; changeRate: number; source: 'RISING' }[]> {
         try {
             const raw = await this.getTopRisingStocks()
-            const list: any[] = raw?.bid_req_upper ?? raw?.Body ?? raw?.list ?? []
+            const list: any[] = raw?.pred_pre_flu_rt_upper ?? raw?.bid_req_upper ?? raw?.Body ?? raw?.list ?? []
             return list.slice(0, limit).map((item: any) => ({
                 code: item.stk_cd || item.stck_shrn_iscd,
                 name: item.stk_nm || item.stck_nm || item.name,

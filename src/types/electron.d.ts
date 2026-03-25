@@ -148,6 +148,9 @@ export interface IElectronAPI {
     getPipelineRunDetail: (runId: string) => Promise<any>
     getAllPipelineRuns: (date?: string) => Promise<any[]>
     runPipelineManual: (pipelineId: string) => Promise<{ success: boolean, error?: string }>
+
+    // V2 Data Pipeline
+    runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => Promise<{ success: boolean, data?: any, error?: string }>
 }
 
 declare global {

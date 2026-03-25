@@ -238,6 +238,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAllPipelineRuns: (date?: string) => ipcRenderer.invoke('pipeline:get-all-runs', date),
     runPipelineManual: (pipelineId: string) => ipcRenderer.invoke('maiis:run-pipeline-manual', pipelineId),
     
+    // V2 Data Pipeline
+    runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => ipcRenderer.invoke('v2-pipeline:run', { pipelineId, options }),
+
     onSystemError: (callback: (error: { message: string, code: string, time: string }) => void) => {
         const listener = (_event: any, error: any) => callback(error)
         ipcRenderer.on('system:error', listener)

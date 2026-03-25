@@ -13,8 +13,8 @@ export function useGlobalSignalMonitor() {
             if (!window.electronAPI) return
 
             try {
-                // Get Watchlist symbols
-                const watchlistSymbols = await window.electronAPI.getWatchlistSymbols()
+                // [DEPRECATED] 관심종목 기능 제거됨 - 보유종목만으로 심볼 등록
+                // 재활용 시: const watchlistSymbols = await window.electronAPI.getWatchlistSymbols()
 
                 // Get Holdings symbols (from any available account)
                 const accountsResult = await window.electronAPI.getAccountList()
@@ -31,7 +31,7 @@ export function useGlobalSignalMonitor() {
                     }
                 }
 
-                const allSymbols = Array.from(new Set([...watchlistSymbols, ...holdingSymbols]))
+                const allSymbols = Array.from(new Set([...holdingSymbols]))
                 if (allSymbols.length > 0) {
                     // Register for Real-time WS if not already
                     window.electronAPI.wsRegister(allSymbols)

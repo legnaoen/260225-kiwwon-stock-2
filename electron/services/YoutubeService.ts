@@ -114,37 +114,94 @@ export class YoutubeService {
 
     /**
      * 영상의 자막(Transcript)을 수집합니다.
+     * youtube-transcript 라이브러리 사용 + 커스텀 fetch 주입 (봇 감지 우회)
      */
     private async fetchTranscript(videoId: string): Promise<string> {
         try {
+            const { YoutubeTranscript } = await import('youtube-transcript');
             const axios = (await import('axios')).default;
-            const response = await axios.get(`https://www.youtube.com/watch?v=${videoId}`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }
-            });
-            
-            const html = response.data;
-            const captionsConfigMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
-            if (!captionsConfigMatch) return "";
 
-            const captionTracks = JSON.parse(captionsConfigMatch[1]);
-            const targetTrack = captionTracks.find((t: any) => t.languageCode === 'ko') || captionTracks[0];
-            if (!targetTrack || !targetTrack.baseUrl) return "";
+            // YouTube 봇 감지 우회를 위한 커스텀 fetch (axios 기반)
+            // 라이브러리가 설정하는 헤더(User-Agent, Content-Type 등)를 우선 적용
+            const customFetch = async (url: string | URL | Request, init?: any): Promise<Response> => {
+                const urlStr = typeof url === 'string' ? url : url.toString();
+                const isPost = (init?.method || 'GET').toUpperCase() === 'POST';
+                
+                // 라이브러리 헤더를 우선, 기본 브라우저 헤더를 폴백으로
+                const mergedHeaders: Record<string, string> = {
+                    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Accept': isPost ? 'application/json' : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                };
+                
+                // 라이브러리가 설정하는 헤더가 있으면 그것을 우선 적용
+                if (init?.headers) {
+                    const h = init.headers;
+                    if (h instanceof Headers) {
+                        h.forEach((v: string, k: string) => { mergedHeaders[k] = v; });
+                    } else if (typeof h === 'object') {
+                        Object.assign(mergedHeaders, h);
+                    }
+                }
+                
+                // User-Agent가 없으면 브라우저 UA 기본 적용
+                if (!mergedHeaders['User-Agent']) {
+                    mergedHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+                }
 
-            const transcriptRes = await axios.get(targetTrack.baseUrl);
-            const transcriptXml = transcriptRes.data;
-            
-            const textMatch = transcriptXml.match(/<text.*?>([\s\S]*?)<\/text>/g);
-            if (!textMatch) return "";
+                console.log(`[YoutubeService:fetch] ${init?.method || 'GET'} ${urlStr.slice(0, 80)}... UA=${mergedHeaders['User-Agent']?.slice(0, 30)}`);
 
-            return textMatch
-                .map((t: string) => t.replace(/<text.*?>|<\/text>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'"))
-                .join(' ')
-                .slice(0, 5000); // 5000자 제한
+                // 429 자동 재시도 (exponential backoff)
+                let axiosRes: any;
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    axiosRes = await axios({
+                        url: urlStr,
+                        method: init?.method || 'GET',
+                        headers: mergedHeaders,
+                        data: init?.body,
+                        timeout: 15000,
+                        validateStatus: () => true,
+                    });
+                    
+                    if (axiosRes.status === 429) {
+                        const waitSec = 5 * Math.pow(2, attempt); // 5s, 10s, 20s
+                        console.warn(`[YoutubeService:fetch] ⚠️ 429 Rate Limited! Retry ${attempt + 1}/3 after ${waitSec}s...`);
+                        await new Promise(r => setTimeout(r, waitSec * 1000));
+                    } else {
+                        break;
+                    }
+                }
+                
+                console.log(`[YoutubeService:fetch] → ${axiosRes.status} (${typeof axiosRes.data === 'string' ? axiosRes.data.length : JSON.stringify(axiosRes.data).length} bytes)`);
 
-        } catch (err) {
-            console.error(`[YoutubeService] Transcript fetch failed for ${videoId}`);
+                return new Response(typeof axiosRes.data === 'string' ? axiosRes.data : JSON.stringify(axiosRes.data), {
+                    status: axiosRes.status,
+                    statusText: axiosRes.statusText,
+                    headers: new Headers(axiosRes.headers as any),
+                });
+            };
+
+            // 기본 언어(자동 생성 자막 포함) 먼저 시도
+            try {
+                const items = await YoutubeTranscript.fetchTranscript(videoId, { fetch: customFetch as any });
+                if (items && items.length > 0) {
+                    const text = items.map((i: any) => i.text).join(' ').slice(0, 8000);
+                    console.log(`[YoutubeService] ✅ Transcript for ${videoId}: OK (${items.length} segments)`);
+                    return text;
+                }
+            } catch (e: any) {
+                console.warn(`[YoutubeService] Transcript attempt failed for ${videoId}: ${e.message}`);
+            }
+
+            return "";
+        } catch (err: any) {
+            console.error(`[YoutubeService] Transcript fetch failed for ${videoId}:`, err.message);
             return "";
         }
+    }
+
+    /** 429 방지용 딜레이 */
+    private delay(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     public async collectLatestVideos(apiKey: string, channelId?: string, options: { skipAnalysis?: boolean } = {}) {
@@ -227,6 +284,8 @@ export class YoutubeService {
                 if (!video.transcript) {
                     this.emitProgress('TRANSCRIPT_FETCH', `[${i+1}/${totalVideos}] '${video.title}' 자막 추출 중...`, i+1, totalVideos);
                     video.transcript = await this.fetchTranscript(video.video_id);
+                    // 429 방지: 다음 영상 전 5초 대기
+                    if (i < totalVideos - 1) await this.delay(5000);
                 }
             }
 

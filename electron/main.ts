@@ -178,7 +178,7 @@ app.whenReady().then(() => {
     // 개발: electron/python/, 빌드: resources/python/
     const crawlerDir = app.isPackaged
         ? path.join(process.resourcesPath, 'python')
-        : path.join(__dirname, 'python')
+        : path.join(process.cwd(), 'electron', 'python')
     
     // venv가 있으면 사용, 없으면 시스템 python 사용
     const venvPython = path.join(crawlerDir, 'venv', 'Scripts', 'python.exe')

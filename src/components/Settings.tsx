@@ -103,11 +103,7 @@ export default function Settings() {
     const [messageNaver, setMessageNaver] = useState('')
     const [isTestingNaver, setIsTestingNaver] = useState(false)
 
-    const [youtubeKey, setYoutubeKey] = useState('')
-    const [isSavingYoutube, setIsSavingYoutube] = useState(false)
-    const [statusYoutube, setStatusYoutube] = useState<'idle' | 'success' | 'error'>('idle')
-    const [messageYoutube, setMessageYoutube] = useState('')
-    const [isTestingYoutube, setIsTestingYoutube] = useState(false)
+
 
     useEffect(() => {
         const loadKeys = async () => {
@@ -168,10 +164,7 @@ export default function Settings() {
                 setNaverKeys(savedNaverKeys)
             }
 
-            const savedYoutubeKey = await (window.electronAPI as any).getYoutubeApiKey()
-            if (savedYoutubeKey) {
-                setYoutubeKey(savedYoutubeKey)
-            }
+
         }
         loadKeys()
     }, [])
@@ -454,51 +447,7 @@ export default function Settings() {
         }
     }
 
-    const handleSaveYoutube = async (e: React.FormEvent) => {
-        e.preventDefault()
-        setIsSavingYoutube(true)
-        setStatusYoutube('idle')
-        setMessageYoutube('유튜브 API 키 저장 중...')
-        try {
-            const result = await (window.electronAPI as any).saveYoutubeApiKey(youtubeKey.trim())
-            if (result.success) {
-                setStatusYoutube('success')
-                setMessageYoutube('유튜브 API 설정이 저장되었습니다.')
-                setTimeout(() => setStatusYoutube('idle'), 3000)
-            }
-        } catch (error: any) {
-            setStatusYoutube('error')
-            setMessageYoutube('저장 오류')
-        } finally {
-            setIsSavingYoutube(false)
-        }
-    }
 
-    const handleTestYoutube = async () => {
-        if (!youtubeKey) {
-            setStatusYoutube('error')
-            setMessageYoutube('API 키를 먼저 입력해주세요.')
-            return
-        }
-        setIsTestingYoutube(true)
-        setStatusYoutube('idle')
-        setMessageYoutube('유튜브 API 연결 테스트 중...')
-        try {
-            const result = await (window.electronAPI as any).testYoutubeApi(youtubeKey.trim())
-            if (result.success) {
-                setStatusYoutube('success')
-                setMessageYoutube(result.message || '연결 성공!')
-            } else {
-                setStatusYoutube('error')
-                setMessageYoutube(`연결 실패: ${result.error}`)
-            }
-        } catch (error: any) {
-            setStatusYoutube('error')
-            setMessageYoutube(`테스트 오류: ${error.message}`)
-        } finally {
-            setIsTestingYoutube(false)
-        }
-    }
 
     const handleSaveSchedule = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -1628,81 +1577,7 @@ export default function Settings() {
                                             </div>
                                         </div>
 
-                                        <div className="pt-8 border-t border-border/40">
-                                            <div className="flex items-center gap-4 mb-6">
-                                                <div className="p-3 bg-red-500/10 rounded-xl">
-                                                    <Globe className="text-red-500" size={24} />
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold">YouTube Data API (v3)</h3>
-                                                    <p className="text-xs text-muted-foreground">시장 내러티브 분석을 위한 전문가 채널 영상 정보 및 자막 수집</p>
-                                                </div>
-                                            </div>
 
-                                            <form onSubmit={handleSaveYoutube} className="space-y-4">
-                                                <div className="space-y-2">
-                                                    <label className="text-xs font-bold ml-1">YouTube API Key</label>
-                                                    <Input
-                                                        type="password"
-                                                        value={youtubeKey}
-                                                        onChange={(e) => setYoutubeKey(e.target.value)}
-                                                        placeholder="Google Cloud Console에서 발급받은 API 키를 입력하세요"
-                                                    />
-                                                </div>
-
-                                                <div className="flex items-center justify-between pt-2">
-                                                    <div className="flex items-center gap-2">
-                                                        {isTestingYoutube && (
-                                                            <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-2">
-                                                                <RefreshCw size={14} className="animate-spin" /> {messageYoutube}
-                                                            </span>
-                                                        )}
-                                                        {statusYoutube === 'success' && (
-                                                            <span className="text-xs text-green-500 font-medium flex items-center gap-1 bg-green-500/10 px-3 py-1.5 rounded-full border border-green-500/20">
-                                                                <ShieldCheck size={14} /> {messageYoutube}
-                                                            </span>
-                                                        )}
-                                                        {statusYoutube === 'error' && (
-                                                            <span className="text-xs text-destructive font-medium flex items-center gap-1 bg-destructive/10 px-3 py-1.5 rounded-full border border-destructive/20 max-w-[400px]">
-                                                                <AlertCircle size={14} className="shrink-0" /> {messageYoutube}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex gap-3">
-                                                        <Button
-                                                            type="button"
-                                                            variant="outline"
-                                                            size="sm"
-                                                            onClick={handleTestYoutube}
-                                                            disabled={isTestingYoutube}
-                                                            className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-                                                        >
-                                                            {isTestingYoutube ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Send size={14} className="mr-2" />}
-                                                            연결 테스트
-                                                        </Button>
-                                                        <Button
-                                                            type="submit"
-                                                            size="sm"
-                                                            disabled={isSavingYoutube}
-                                                            className="bg-red-600 hover:bg-red-700 text-white shadow-sm px-6 text-xs font-bold"
-                                                        >
-                                                            {isSavingYoutube ? <RefreshCw size={14} className="animate-spin mr-2" /> : <Save size={14} className="mr-2" />}
-                                                            유튜브 키 저장
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            </form>
-
-                                            <div className="mt-4 bg-muted/20 rounded-xl p-4 flex gap-3 items-start border border-border/40">
-                                                <Info className="text-muted-foreground/60 mt-0.5" size={16} />
-                                                <div className="space-y-1">
-                                                    <p className="text-[10px] font-bold">API 신청 안내</p>
-                                                    <p className="text-[9px] text-muted-foreground leading-relaxed">
-                                                        Google Cloud Console(<a href="https://console.cloud.google.com/" target="_blank" className="text-blue-500 hover:underline">console.cloud.google.com</a>)에서 'YouTube Data API v3'를 활성화하고 사용자 인증 정보에서 API 키를 생성할 수 있습니다.
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </div>
                                     </div>
                                 </div>
                             </div>

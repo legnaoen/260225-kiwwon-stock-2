@@ -9,10 +9,11 @@ import { NewsKeywordCollector } from './collectors/NewsKeywordCollector';
 import { NewsKeywordAggregator } from './aggregators/NewsKeywordAggregator';
 import { ResearchCollector } from './collectors/ResearchCollector';
 import { ResearchAggregator } from './aggregators/ResearchAggregator';
-import { YoutubeContextCollector } from './collectors/YoutubeContextCollector';
-import { YoutubeContextAggregator } from './aggregators/YoutubeContextAggregator';
+
 import { NaverFlowCollector } from './collectors/NaverFlowCollector';
 import { NaverFlowAggregator } from './aggregators/NaverFlowAggregator';
+import { NewsFlowCollector } from './collectors/NewsFlowCollector';
+import { NewsFlowAggregator } from './aggregators/NewsFlowAggregator';
 
 export class V2PipelineManager {
     private static instance: V2PipelineManager;
@@ -31,11 +32,13 @@ export class V2PipelineManager {
     private researchCollector: ResearchCollector;
     private researchAggregator: ResearchAggregator;
 
-    private youtubeContextCollector: YoutubeContextCollector;
-    private youtubeContextAggregator: YoutubeContextAggregator;
+
 
     private naverFlowCollector: NaverFlowCollector;
     private naverFlowAggregator: NaverFlowAggregator;
+
+    private newsFlowCollector: NewsFlowCollector;
+    private newsFlowAggregator: NewsFlowAggregator;
 
     private constructor() {
         this.macroCollector = new MacroCollector();
@@ -52,11 +55,13 @@ export class V2PipelineManager {
         this.researchCollector = new ResearchCollector();
         this.researchAggregator = new ResearchAggregator();
 
-        this.youtubeContextCollector = new YoutubeContextCollector();
-        this.youtubeContextAggregator = new YoutubeContextAggregator();
+
 
         this.naverFlowCollector = new NaverFlowCollector();
         this.naverFlowAggregator = new NaverFlowAggregator();
+
+        this.newsFlowCollector = new NewsFlowCollector();
+        this.newsFlowAggregator = new NewsFlowAggregator();
     }
 
     public static getInstance(): V2PipelineManager {
@@ -98,13 +103,14 @@ export class V2PipelineManager {
                     rawData = await this.researchCollector.collect(options);
                     aggregatedMarkdown = await this.researchAggregator.process(rawData);
                     break;
-                case 'PL-YoutubeContext':
-                    rawData = await this.youtubeContextCollector.collect(options);
-                    aggregatedMarkdown = await this.youtubeContextAggregator.process(rawData);
-                    break;
+
                 case 'PL-NaverFlow':
                     rawData = await this.naverFlowCollector.collect(options);
                     aggregatedMarkdown = await this.naverFlowAggregator.process(rawData);
+                    break;
+                case 'PL-NewsFlow':
+                    rawData = await this.newsFlowCollector.collect(options);
+                    aggregatedMarkdown = await this.newsFlowAggregator.process(rawData);
                     break;
                 default:
                     throw new Error(`Unknown pipeline ID: ${pipelineId}`);

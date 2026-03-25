@@ -271,7 +271,10 @@ export class KiwoomService {
         this.pendingRequestsCount = 0;
     }
 
+    // [LEGACY] 키움 계좌 목록 조회 (V2 전환으로 비활성화)
     public async getAccounts() {
+        return [];
+        /*
         const url = `/api/dostk/acnt`
         const response = await this.makeApiRequestWithRetry((t) => this.kiwoomAxios.post(url, {}, {
             headers: {
@@ -281,6 +284,7 @@ export class KiwoomService {
             }
         }))
         return response.data;
+        */
     }
 
     public async getHoldings(accountNo: string, nextKey: string = "") {
@@ -302,7 +306,10 @@ export class KiwoomService {
         return { data: response.data, headers: response.headers };
     }
 
+    // [LEGACY] 예수금 내역 조회 (V2 전환으로 비활성화)
     public async getDeposit(accountNo: string) {
+        return { output: { dnca_tot_amt: "0", prvs_rcvbl_amt: "0" } };
+        /*
         const url = `/api/dostk/acnt`
         const today = DatabaseService.getInstance().getKstDate().replace(/-/g, '')
         const sevenDaysAgoDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
@@ -327,6 +334,7 @@ export class KiwoomService {
             }
         }))
         return response.data;
+        */
     }
 
     public async getAllStocks(marketType: string) {
@@ -389,7 +397,10 @@ export class KiwoomService {
         return result;
     }
 
+    // [LEGACY] 관심종목 조회 (V2 전환으로 비활성화)
     public async getWatchlist(symbols: string[]) {
+        return [];
+        /*
         const url = `/api/dostk/stkinfo`
         const response = await this.makeApiRequestWithRetry((t) => this.kiwoomAxios.post(url, {
             stk_cd: symbols.join('|')
@@ -401,6 +412,7 @@ export class KiwoomService {
             }
         }))
         return response.data;
+        */
     }
 
     public async getChartData(stk_cd: string, base_dt?: string) {
@@ -642,6 +654,7 @@ export class KiwoomService {
     /**
      * 미체결 주문 내역 조회 (TODO: 정확한 TR명 반영 필요)
      */
+    // [LEGACY] 미체결 주문 내역 조회 (V2 전환으로 비활성화)
     public async getUnexecutedOrders(
         accountNo: string,
         options: {
@@ -653,6 +666,9 @@ export class KiwoomService {
             next_key?: string;
         } = {}
     ): Promise<any> {
+        return { oso: [] };
+        
+        /* [원본 코드 백업]
         const {
             all_stk_tp = '1', // 전체 종목 조회
             trde_tp = '0', // 전체 매매구분
@@ -687,6 +703,7 @@ export class KiwoomService {
                 throw err;
             }
         });
+        */
     }
 
     /**

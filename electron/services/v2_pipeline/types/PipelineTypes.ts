@@ -4,8 +4,8 @@ export type PipelineId =
     | 'PL-NewsKeyword' // 핵심 뉴스 헤드라인 키워드
     | 'PL-Research'    // 네이버 리서치(증권사 시황 코멘트)
     | 'PL-RisingStock' // 당일 특징주/급등주 (분석 배제)
-    | 'PL-YoutubeContext' // 텍스트 스크립트 압축본
-    | 'PL-NaverFlow';  // 네이버 섹터/테마 흐름 분석
+    | 'PL-NaverFlow'   // 네이버 섹터/테마 흐름 분석
+    | 'PL-NewsFlow';   // 네이버 증권 뉴스 (주요/해외)
 
 // 모든 데이터 수집 및 1차 가공 파이프라인의 종착역 (표준 리턴 포맷)
 export interface V2PipelineResult {

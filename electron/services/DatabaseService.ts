@@ -453,8 +453,48 @@ export class DatabaseService {
             );
         `
 
+        // PL-NewsFlow: 네이버 증권 뉴스 수집 테이블
+        const createNaverNewsFlowTable = `
+            CREATE TABLE IF NOT EXISTS naver_news_flow (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body_snippet TEXT,
+                source TEXT,
+                article_id TEXT,
+                url TEXT,
+                collected_at TEXT NOT NULL,
+                UNIQUE(date, category, title)
+            );
+        `
+
+        // PL-Research: 네이버 리서치 집중 산업 수집 테이블
+        const createNaverResearchFlowTable = `
+            CREATE TABLE IF NOT EXISTS naver_research_flow (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                industry_name TEXT NOT NULL,
+                report_title TEXT,
+                analyst TEXT,
+                broker TEXT,
+                content_snippet TEXT,
+                url TEXT,
+                collected_at TEXT NOT NULL,
+                UNIQUE(date, industry_name, report_title)
+            );
+        `
+
         this.db.exec(createNaverMarketFlowTable)
         this.db.exec(createStockThemeTagsTable)
+        this.db.exec(createNaverNewsFlowTable)
+        try {
+            this.db.exec('ALTER TABLE naver_news_flow ADD COLUMN body_snippet TEXT;');
+        } catch (e: any) {
+            // Ignore error if column already exists
+        }
+        this.db.exec(createNaverResearchFlowTable)
 
         this.db.exec(createDartCorpTable)
         this.db.exec(createSchedulesTable)
@@ -1616,5 +1656,32 @@ export class DatabaseService {
 
     public getStockThemeTags(stockCode: string) {
         return this.db.prepare('SELECT * FROM stock_theme_tags WHERE stock_code = ?').all(stockCode) as any[]
+    }
+
+    // PL-NewsFlow: 뉴스 저장
+    public upsertNaverNewsFlow(news: { date: string, category: string, title: string, body_snippet: string, source: string, article_id: string, url: string, collected_at: string }[]) {
+        const stmt = this.db.prepare(`
+            INSERT OR IGNORE INTO naver_news_flow (date, category, title, body_snippet, source, article_id, url, collected_at)
+            VALUES (@date, @category, @title, @body_snippet, @source, @article_id, @url, @collected_at)
+        `)
+        const insertMany = this.db.transaction((items) => {
+            for (const item of items) {
+                stmt.run(item)
+            }
+        })
+        insertMany(news)
+    }
+
+    // PL-NewsFlow: 뉴스 조회 (AI 연동용)
+    public getRecentNaverNews(category?: string, date?: string) {
+        const targetDate = date || this.getKstDate()
+        if (category) {
+            return this.db.prepare(
+                'SELECT * FROM naver_news_flow WHERE category = ? AND date = ? ORDER BY collected_at DESC'
+            ).all(category, targetDate) as any[]
+        }
+        return this.db.prepare(
+            'SELECT * FROM naver_news_flow WHERE date = ? ORDER BY category, collected_at DESC'
+        ).all(targetDate) as any[]
     }
 }

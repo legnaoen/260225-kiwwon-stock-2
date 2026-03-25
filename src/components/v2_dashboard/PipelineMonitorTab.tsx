@@ -9,11 +9,11 @@ type PipelineStatus = 'idle' | 'running' | 'success' | 'failed';
 const PIPELINES = [
     { id: 'PL-Macro', name: 'Macro & Global', description: '글로벌 지수, 환율, VIX 및 이평선 가공', status: 'success', lastRun: '14:20:00', timeMs: 340 },
     { id: 'PL-LocalFlow', name: 'Domestic Flow', description: '코스피/코스닥 외인·기관 누적 수급', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
-    { id: 'PL-NewsKeyword', name: 'News Hot Keywords', description: '네이버 시황 메가 키워드 TOP 5 압축', status: 'failed', lastRun: '09:12:35', timeMs: 1250 },
-    { id: 'PL-Research', name: 'Brokerage Research', description: '여의도 증권사 데일리 시황 HTML 파싱', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
     { id: 'PL-RisingStock', name: 'Rising Stocks', description: '당일 특징주 및 급등주 리스트 픽업', status: 'success', lastRun: '15:30:10', timeMs: 80 },
-    { id: 'PL-YoutubeContext', name: 'Youtube Context', description: '주식 유튜버 스크립트 기반 심리 분석', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
+    { id: 'PL-NewsKeyword', name: 'News Hot Keywords', description: '네이버 시황 메가 키워드 TOP 5 압축', status: 'failed', lastRun: '09:12:35', timeMs: 1250 },
+    { id: 'PL-NewsFlow', name: 'Naver Market News', description: '네이버 증권 핵심 뉴스 (주요/해외) 수집', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
     { id: 'PL-NaverFlow', name: 'Sector/Theme Context', description: '네이버 증권 업종/테마 분석 및 주도주 태깅', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
+    { id: 'PL-Research', name: 'Naver Research (Top 3)', description: '최근 1주간 애널리스트 집중 산업 및 리포트 본문', status: 'idle', lastRun: '--:--:--', timeMs: 0 }
 ];
 
 export default function PipelineMonitorTab() {

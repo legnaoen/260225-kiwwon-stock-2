@@ -1,58 +1,106 @@
+import axios from 'axios';
 import { IBaseCollector } from '../types/PipelineTypes';
+import { DatabaseService } from '../../DatabaseService';
 
 export class ResearchCollector implements IBaseCollector {
+    private readonly PROXY_URL = 'http://127.0.0.1:5050/api/proxy_json';
+
     public async collect(options?: { forceFetch?: boolean }): Promise<any> {
-        return new Promise((resolve) => {
-            // TODO: 네이버 리서치 / 한경컨센서스 크롤링 및 카테고리별 분류 연동
-            const mockReports = [
-                {
-                    category: '데일리/시황',
-                    brokerage: '신한투자증권',
-                    analyst: '김마감',
-                    title: '국내 주식 마감 시황 - 개인 역대 최대 순매수와 KOSPI',
-                    summary: '외국인 매물을 개인이 전량 소화하며 하방 지지. 반도체, 금융 중심 강보합.',
-                    stance: 'Neutral'
-                },
-                {
-                    category: '산업분석',
-                    brokerage: '한화투자증권',
-                    analyst: '준영킴',
-                    title: '차세대 통신 연결 기술 CPO(Co-Packaged Optics)의 부상',
-                    summary: 'AI 데이터센터 전력 효율화를 위한 핵심 기술. 관련 밸류체인 수혜 기대.',
-                    stance: 'Positive'
-                },
-                {
-                    category: '경제/투자전략',
-                    brokerage: '키움증권',
-                    analyst: '이전략',
-                    title: '03/24 달러, 트럼프 발언에 하락',
-                    summary: '환율 변동성 확대 구간. 대형 수출주 및 헷지 관점의 포트폴리오 권고.',
-                    stance: 'Neutral'
-                },
-                {
-                    category: '국내종목',
-                    brokerage: '유진투자증권',
-                    analyst: '박종목',
-                    title: '현대중공업 - 기업 가치 재평가 필요',
-                    summary: '수주 잔고 질적 개선 및 친환경 선박 모멘텀. 이익 레버리지 본격화 구간.',
-                    stance: 'Buy'
-                }
-            ];
-
-            // 최근 1주간 애널리스트들이 집중한 산업 (네이버 증권 리서치 벤치마킹)
-            const mockHotSectors = [
-                { rank: 1, name: '반도체', reportCount: 42, reason: '차세대 통신 기술 및 HBM 수주 릴레이' },
-                { rank: 2, name: '건설', reportCount: 28, reason: '원전주 강세 및 중동 재건/수주 랠리' },
-                { rank: 3, name: 'IT/하드웨어', reportCount: 19, reason: '3월 기판, PCB 밸류체인 공장 투어 후기 및 턴어라운드 기대' }
-            ];
-
-            setTimeout(() => {
-                resolve({
-                    timestamp: new Date().toISOString(),
-                    reports: mockReports,
-                    hotSectors: mockHotSectors
+        try {
+            console.log('[PL-Research] Fetching Naver Research Data...');
+            const dateStr = DatabaseService.getInstance().getKstDate();
+            const hotSectors: any[] = [];
+            
+            // 1. 애널리스트 집중 산업 TOP 3
+            try {
+                const targetUrl = 'https://stock.naver.com/api/domestic/research/industry-research';
+                const response = await axios.get(this.PROXY_URL, {
+                    params: { url: targetUrl },
+                    timeout: 10000
                 });
-            }, 600);
-        });
+
+                if (response.data && !response.data.error) {
+                    const industryMap = response.data;
+                    let rank = 1;
+                    if (industryMap && typeof industryMap === 'object') {
+                        for (const [industryName, reportsList] of Object.entries(industryMap)) {
+                            if (!Array.isArray(reportsList)) continue;
+                            if (rank > 3) break;
+
+                            const articles = (reportsList as any[]).map((r: any) => ({
+                                title: r.title || '(No Title)',
+                                analyst: r.analyst || '',
+                                broker: r.brokerName || '',
+                                snippet: r.content || '',
+                                url: r.endUrl || ''
+                            }));
+
+                            hotSectors.push({
+                                rank,
+                                categoryName: industryName,
+                                articles
+                            });
+                            rank++;
+                        }
+                    }
+                }
+            } catch (err: any) {
+                console.warn('[PL-Research] Failed to fetch Top 3 Industries:', err.message);
+            }
+
+            // 2. 카테고리별 전체 리포트 1페이지 수집 (데일리, 종목, 산업, 전략, 경제)
+            const categories = [
+                { id: 'MARKET', name: '데일리' },
+                { id: 'COMPANY', name: '국내종목' },
+                { id: 'INDUSTRY', name: '산업분석' },
+                { id: 'INVEST', name: '투자전략' },
+                { id: 'ECONOMY', name: '경제분석' }
+            ];
+
+            const categoryReports: any[] = [];
+
+            for (const cat of categories) {
+                try {
+                    console.log(`[PL-Research] Fetching Category: ${cat.name}`);
+                    const catUrl = `https://stock.naver.com/api/domestic/research/category?category=${cat.id}&page=1&pageSize=15`;
+                    const res = await axios.get(this.PROXY_URL, {
+                        params: { url: catUrl },
+                        timeout: 10000
+                    });
+
+                    if (res.data && res.data.content && Array.isArray(res.data.content)) {
+                        const articles = res.data.content.map((r: any) => ({
+                            title: r.title || '(No Title)',
+                            analyst: r.analyst || '', // API에 따라 누락될 수도 있음
+                            broker: r.brokerName || '',
+                            snippet: r.content || '',
+                            url: r.endUrl || ''
+                        }));
+
+                        categoryReports.push({
+                            rank: 0,
+                            categoryName: cat.name,
+                            articles
+                        });
+                    }
+                    
+                    // Delay between category requests to prevent rate limit
+                    await new Promise(r => setTimeout(r, 500));
+                } catch (err: any) {
+                    console.warn(`[PL-Research] Failed to fetch category ${cat.name}:`, err.message);
+                }
+            }
+
+            return {
+                timestamp: new Date().toISOString(),
+                date: dateStr,
+                hotSectors,
+                categoryReports
+            };
+            
+        } catch (err: any) {
+            console.error(`[PL-Research] Critical Error collecting data:`, err.message);
+            throw new Error(`Naver research sync failed: ${err.message}`);
+        }
     }
 }

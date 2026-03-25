@@ -142,6 +142,20 @@ function createWindow() {
         }
     })
 
+    // Forward Market Agent Prediction Complete
+    eventBus.on('MARKET_AGENT_PREDICTION_COMPLETE' as any, (data) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('MARKET_AGENT_PREDICTION_COMPLETE', data)
+        }
+    })
+
+    // Forward Market Agent Performance Updated
+    eventBus.on('MARKET_AGENT_PERFORMANCE_UPDATED' as any, (data) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('MARKET_AGENT_PERFORMANCE_UPDATED', data)
+        }
+    })
+
     win.webContents.on('did-finish-load', () => {
         win?.webContents.send('main-process-message', (new Date).toLocaleString())
     })
@@ -433,6 +447,73 @@ ipcMain.handle('v2-pipeline:run', async (_event, { pipelineId, options }) => {
         return { success: true, data: result }
     } catch (error: any) {
         console.error(`[V2Pipeline] run error:`, error)
+        return { success: false, error: error.message }
+    }
+})
+
+// ═══ V2 Agent Swarm: Market Condition Agent IPC ═══
+
+ipcMain.handle('agent:market:settings:get', async () => {
+    return { success: true, data: store.get('market_agent_settings', { telegramEnabled: true }) }
+})
+
+ipcMain.handle('agent:market:settings:save', async (_event, settings) => {
+    store.set('market_agent_settings', settings)
+    return { success: true }
+})
+
+ipcMain.handle('agent:market:run', async (_event, cycle: 'A' | 'B') => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const result = await MarketConditionAgent.getInstance().runPrediction(cycle)
+        
+        // 동기적으로 즉시 당일 진입가격(Entry Price)과 가능한 수익률 평가(T+1 등)를 반영 시도
+        const { PerformanceTracker } = await import('./services/v2_agents/PerformanceTracker')
+        await PerformanceTracker.getInstance().runDailyTracking()
+        
+        return { success: true, data: result }
+    } catch (error: any) {
+        console.error(`[Agent] MarketCondition run error:`, error)
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:market:history', async (_event, limit: number = 30) => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const result = MarketConditionAgent.getInstance().getRecentPredictions(limit)
+        return { success: true, data: result }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:market:latest', async () => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const result = MarketConditionAgent.getInstance().getLatestPrediction()
+        return { success: true, data: result }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:market:stats', async () => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const result = MarketConditionAgent.getInstance().getStats()
+        return { success: true, data: result }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:market:rules', async () => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const result = await MarketConditionAgent.getInstance().getActiveRules()
+        return { success: true, data: result }
+    } catch (error: any) {
         return { success: false, error: error.message }
     }
 })

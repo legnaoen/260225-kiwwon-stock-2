@@ -527,6 +527,53 @@ export class DatabaseService {
         this.db.exec(createMaiisKeywordRankingsTable)
         this.db.exec(createMaiisActivePicksTable)
 
+        // ═══ V2 Agent Swarm: Market Condition Agent ═══
+        const createAgentPredictionsTable = `
+            CREATE TABLE IF NOT EXISTS agent_predictions (
+                id TEXT PRIMARY KEY,
+                date TEXT NOT NULL,
+                cycle TEXT NOT NULL,
+                predict TEXT NOT NULL,
+                position TEXT NOT NULL,
+                confidence REAL,
+                rationale TEXT,
+                sources_json TEXT,
+                indicators_json TEXT,
+                entry_price REAL,
+                t1_peak REAL,
+                t1_final REAL,
+                t5_peak REAL,
+                t5_final REAL,
+                t20_peak REAL,
+                t20_final REAL,
+                feedback TEXT,
+                pipelines_used TEXT,
+                execution_time_ms INTEGER,
+                created_at TEXT NOT NULL,
+                raw_context TEXT,
+                UNIQUE(date, cycle)
+            );
+        `
+
+        const createAgentRulesTable = `
+            CREATE TABLE IF NOT EXISTS agent_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_type TEXT NOT NULL DEFAULT 'market_condition',
+                rule_text TEXT NOT NULL,
+                source_prediction_id TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL,
+                deactivated_at TEXT
+            );
+        `
+
+        this.db.exec(createAgentPredictionsTable)
+        try {
+            this.db.exec("ALTER TABLE agent_predictions ADD COLUMN raw_context TEXT;");
+        } catch { } // Ignore if already exists
+
+        this.db.exec(createAgentRulesTable)
+
         // Phase 2: Portfolio State Machine
         const createMaiisPortfolioTable = `
             CREATE TABLE IF NOT EXISTS maiis_portfolio (

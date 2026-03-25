@@ -100,6 +100,31 @@ export class SchedulerService {
         */
         
         console.log(`[SchedulerService] V1 Legacy schedules disabled for V2 Agentic Swarm refactoring.`)
+
+        // ═══ V2 Agent Swarm Schedules ═══
+        const settings = store.get('ai_schedule_settings') as any || { enabled: true }
+        if (settings.enabled) {
+            // Cycle A: 08:50 (장전 시장 파악)
+            const mcaJobA = cron.schedule('50 08 * * 1-5', async () => {
+                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
+                await MarketConditionAgent.getInstance().runPrediction('A')
+            }, { timezone: 'Asia/Seoul' })
+
+            // Cycle B: 15:10 (장마감 전 시장 파악)
+            const mcaJobB = cron.schedule('10 15 * * 1-5', async () => {
+                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
+                await MarketConditionAgent.getInstance().runPrediction('B')
+            }, { timezone: 'Asia/Seoul' })
+
+            // [TODO] PerformanceTracker 기록용 (15:35 T+1 / T+5 / T+20) - Step 5에 구현
+            const mcaTrackerJob = cron.schedule('35 15 * * 1-5', async () => {
+                const { PerformanceTracker } = await import('./v2_agents/PerformanceTracker')
+                await PerformanceTracker.getInstance().runDailyTracking()
+            }, { timezone: 'Asia/Seoul' })
+
+            this.scheduledJobs.push(mcaJobA, mcaJobB, mcaTrackerJob)
+            console.log(`[SchedulerService] V2 MarketConditionAgent schedules initialized (Cycle A: 08:50, Cycle B: 15:10, Tracker: 15:35)`)
+        }
     }
 
     /**

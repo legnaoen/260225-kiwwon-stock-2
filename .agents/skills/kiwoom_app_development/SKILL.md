@@ -40,6 +40,49 @@ description: Instructions and guidelines for cleanly scaling the Kiwoom REST API
 * **단방향 통신 집중**: 프론트엔드에서 일어나는 모든 명령은 `window.electronAPI` 인터페이스 핸들러를 통해서만 백엔드에 전달합니다. UI에서 백엔드의 모듈을 직접 참조할 수 없습니다.
 * **설정 UI 분리**: 기능이 거대해짐에 따라 AI나 자동매매 세팅 기능은 기존 화면에 욱여넣지 않고 새로운 탭(Tab)이나 설정(Settings) 다이얼로그로 독립시켜 여백과 사용성을 유지하세요.
 
+## 3.1. UI/UX 디자인 원칙 (Design Principles)
+
+이 프로젝트의 프론트엔드는 **금융 트레이딩 터미널** 수준의 정보 밀도(Information Density)를 목표로 합니다. 모든 새로운 컴포넌트는 아래 원칙을 **무조건** 따라야 합니다.
+
+### 3.1.1. 폰트 사이즈: rem 단위 강제 (시스템 UI Zoom 연동)
+
+> [!IMPORTANT]
+> **고정 px 폰트 사이즈 사용을 절대 금지합니다.**
+
+이 앱은 `useUiStore`를 통해 `html` 루트의 `font-size`를 동적으로 변경하여 모든 UI 요소의 크기를 일괄 제어합니다 (Small=14px, Medium=16px, Large=18px, XLarge=20px).
+
+| ❌ 금지 (무시됨) | ✅ 허용 (시스템 연동) |
+|:---|:---|
+| `text-[9px]`, `text-[10px]`, `text-[11px]` | `text-xs` (0.75rem), `text-sm` (0.875rem) |
+| `text-[13px]`, `text-[14px]` | `text-sm`, `text-base` |
+| `font-size: 12px` (인라인 스타일) | Tailwind class만 사용 |
+
+* Tailwind의 `text-xs`, `text-sm`, `text-base`, `text-lg` 등 **rem 기반 유틸리티 클래스만** 사용합니다.
+* **예외**: `<canvas>` 내부의 렌더링이나 SVG의 고정 크기 속성은 px 사용을 허용합니다.
+
+### 3.1.2. 레이아웃: 고밀도 우선 (High-Density First)
+
+금융 데이터 대시보드는 한 화면에 최대한 많은 정보를 담아야 합니다. 불필요한 공백과 장식성 요소를 지양합니다.
+
+* **여백(Padding)**: 컨테이너 패딩은 `p-4` 이하를 권장합니다. `p-6`이상의 넉넉한 여백은 설정(Settings) 페이지 등 비실시간 화면에만 허용됩니다.
+* **행 간격**: 테이블의 셀 패딩은 `py-2` 이하를 기본으로 합니다.
+* **섹션 구분**: 영역 간 구분은 **카드(Card)로 감싸지 않고** 얇은 디바이더(`border-b border-border/50`)로 처리합니다. 카드는 독립된 위젯(예: 팝업 모달)에만 사용합니다.
+
+### 3.1.3. 색상 규칙 (한국 주식 시장 컨벤션)
+
+* **상승 / 매수 / Long**: `text-rose-500` (빨간색 계열)
+* **하락 / 매도 / Short**: `text-blue-500` (파란색 계열)
+* **보합 / 관망**: `text-muted-foreground` (회색)
+* **AI / Agent 고유색**: `text-indigo-400` ~ `text-indigo-500` (보라색 계열)
+* **경고 / 오답 / 실패**: `text-rose-400` + `bg-rose-500/5` (경고 배경)
+
+### 3.1.4. 팝업 및 모달 (Overlay Pattern)
+
+* **상세 정보 팝업**: 테이블의 행(Row)을 클릭하면 Center Modal로 표시합니다.
+* **사이드 패널 (Drawer)**: 보조적인 정보(Knowledge Hub 등)는 우측에서 슬라이드하는 Drawer 형태로 표시하여, 기존 화면을 완전히 덮지 않습니다.
+* **배경 딤(Dim)**: `bg-black/40 backdrop-blur-sm`을 표준으로 사용합니다.
+* **애니메이션**: `animate-in zoom-in-95 duration-150` (Center Modal), `animate-in slide-in-from-right-full duration-200` (Drawer).
+
 ## 4. 키움 REST API 연동 시 필수 고려사항 (제약 및 특징)
 
 > [!IMPORTANT]

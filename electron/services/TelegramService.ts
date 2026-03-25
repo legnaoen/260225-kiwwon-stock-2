@@ -721,6 +721,38 @@ export class TelegramService {
             this.sendMessage(`🚨 [시스템 오류]\n${error.message || error}`);
         });
 
+        // [V2] Market Condition Agent 브리핑 알림
+        eventBus.on('MARKET_AGENT_PREDICTION_COMPLETE' as any, (data: any) => {
+            const mcaSettings = store.get('market_agent_settings', { telegramEnabled: true }) as any;
+            if (!mcaSettings.telegramEnabled) return;
+            
+            if (data.predict === 'HOLD' && data.confidence === 0) return; // 실행 실패 건 제외
+            
+            const isLong = data.predict === 'LONG';
+            const isShort = data.predict === 'SHORT';
+            const direction = isLong ? '상승' : isShort ? '하락' : '대기';
+            const icon = isLong ? '🚀' : isShort ? '📉' : '⚖️';
+            const cycleText = data.cycle === 'A' ? 'Morning (08:50)' : 'Closing (15:10)';
+            
+            // 텔레그램 가독성 및 마크다운 에러 방지를 위한 텍스트 전처리
+            let formattedRationale = data.rationale || '';
+            // 1. 기존 마크다운 볼드(**, *) 및 이탤릭(_, __) 등 특수문자 제거
+            formattedRationale = formattedRationale.replace(/[*_~`]/g, '');
+            // 2. 큰 섹션(###) 기호를 텔레그램 볼드체(*텍스트*)로 변환하며 위쪽으로 2줄 공백
+            formattedRationale = formattedRationale.replace(/^###\s*(.*)$/gm, '\n\n*$1*\n');
+            // 3. 작은 섹션(블릿포인트 `-`)을 보기 편하게 변경하고, 사이 사이 1줄씩 간격을 벌림
+            formattedRationale = formattedRationale.replace(/^- /gm, '\n• ');
+            // 4. 불필요하게 3줄 이상 벌어진 공백을 2줄로 압축
+            formattedRationale = formattedRationale.replace(/\n{3,}/g, '\n\n').trim();
+
+            let msg = `사이클: ${cycleText}\n`;
+            msg += `포지션: ${data.position} (${direction})\n`;
+            msg += `신뢰도: ${((data.confidence || 0) * 100).toFixed(0)}%\n\n`;
+            msg += `${formattedRationale}\n`;
+            
+            this.sendMessage(msg).catch(e => console.error('[TelegramService] MCA Alert Error:', e));
+        });
+
         /* [V1 Legacy 알림 비활성화]
         // [2.5] 비상 청산 종료 알림
         eventBus.on(SystemEvent.EMERGENCY_LIQUIDATION_COMPLETED, () => {
@@ -847,10 +879,15 @@ export class TelegramService {
         }
 
         try {
+            // Telegram MarkdownV1 엔진은 특수문자 처리에 매우 엄격하므로 에러 발생 가능성 대비
             await this.bot.telegram.sendMessage(this.chatId, message, { parse_mode: 'Markdown' });
         } catch (error: any) {
-            console.error('[TelegramService] Telegram delivery failed:', error);
-            throw new Error(`텔레그램 발송 실패: ${error.message}`);
+            console.error('[TelegramService] Telegram Markdown delivery failed, falling back to plain text:', error.message);
+            try {
+                await this.bot.telegram.sendMessage(this.chatId, message);
+            } catch (fallbackError: any) {
+                console.error('[TelegramService] Plain text fallback also failed:', fallbackError.message);
+            }
         }
     }
 

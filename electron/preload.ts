@@ -241,6 +241,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // V2 Data Pipeline
     runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => ipcRenderer.invoke('v2-pipeline:run', { pipelineId, options }),
 
+    // V2 Agent Swarm: Market Condition Agent
+    getMarketConditionSettings: () => ipcRenderer.invoke('agent:market:settings:get'),
+    saveMarketConditionSettings: (settings: any) => ipcRenderer.invoke('agent:market:settings:save', settings),
+    runMarketConditionAgent: (cycle: 'A' | 'B') => ipcRenderer.invoke('agent:market:run', cycle),
+    getMarketConditionHistory: (limit?: number) => ipcRenderer.invoke('agent:market:history', limit),
+    getMarketConditionLatest: () => ipcRenderer.invoke('agent:market:latest'),
+    getMarketConditionStats: () => ipcRenderer.invoke('agent:market:stats'),
+    getMarketConditionRules: () => ipcRenderer.invoke('agent:market:rules'),
+    onMarketConditionComplete: (callback: (data: any) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('MARKET_AGENT_PREDICTION_COMPLETE', listener)
+        return () => ipcRenderer.removeListener('MARKET_AGENT_PREDICTION_COMPLETE', listener)
+    },
+    onMarketConditionPerformanceUpdated: (callback: (data: any) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('MARKET_AGENT_PERFORMANCE_UPDATED', listener)
+        return () => ipcRenderer.removeListener('MARKET_AGENT_PERFORMANCE_UPDATED', listener)
+    },
+
     onSystemError: (callback: (error: { message: string, code: string, time: string }) => void) => {
         const listener = (_event: any, error: any) => callback(error)
         ipcRenderer.on('system:error', listener)

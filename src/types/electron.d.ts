@@ -151,6 +151,17 @@ export interface IElectronAPI {
 
     // V2 Data Pipeline
     runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => Promise<{ success: boolean, data?: any, error?: string }>
+
+    // V2 Agent Swarm: Market Condition Agent
+    getMarketConditionSettings: () => Promise<{ success: boolean, data?: any, error?: string }>
+    saveMarketConditionSettings: (settings: any) => Promise<{ success: boolean, error?: string }>
+    runMarketConditionAgent: (cycle: 'A' | 'B') => Promise<{ success: boolean, data?: any, error?: string }>
+    getMarketConditionHistory: (limit?: number) => Promise<{ success: boolean, data?: any[], error?: string }>
+    getMarketConditionLatest: () => Promise<{ success: boolean, data?: any, error?: string }>
+    getMarketConditionStats: () => Promise<{ success: boolean, data?: any, error?: string }>
+    getMarketConditionRules: () => Promise<{ success: boolean, data?: string[], error?: string }>
+    onMarketConditionComplete: (callback: (data: any) => void) => () => void
+    onMarketConditionPerformanceUpdated: (callback: (data: any) => void) => () => void
 }
 
 declare global {

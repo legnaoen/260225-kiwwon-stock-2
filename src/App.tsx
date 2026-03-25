@@ -18,6 +18,7 @@ import NarrativeInsightTab from './components/NarrativeInsightTab'
 import MacroDashboard from './components/MacroDashboard'
 import PmTracker from './components/PmTracker'
 import PipelineMonitorTab from './components/v2_dashboard/PipelineMonitorTab'
+import MarketAgentTab from './components/v2_dashboard/MarketAgentTab'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
 import { useNoteStore } from './store/useNoteStore'
@@ -354,8 +355,9 @@ function AppContent() {
                         { activeTab === 'macro-dashboard' && <MacroDashboard />}
                         { activeTab === 'pm-tracker' && <PmTracker />}
                         { activeTab === 'pipeline-monitor' && <PipelineMonitorTab />}
+                        { activeTab === 'market-agent' && <MarketAgentTab />}
 
-                        {(activeTab !== 'dashboard' && activeTab !== 'pipeline-monitor' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'pm-tracker' && activeTab !== 'holdings' && activeTab !== 'rising-stocks' && activeTab !== 'settings' && activeTab !== 'narrative-insight') && (
+                        {(activeTab !== 'dashboard' && activeTab !== 'pipeline-monitor' && activeTab !== 'market-agent' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'pm-tracker' && activeTab !== 'holdings' && activeTab !== 'rising-stocks' && activeTab !== 'settings' && activeTab !== 'narrative-insight') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

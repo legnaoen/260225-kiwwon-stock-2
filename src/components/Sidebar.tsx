@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, ListOrdered, History, Settings, Bot, Calendar, Wallet, Brain, TrendingUp, BookOpen, Network, Globe, LineChart, Server } from 'lucide-react'
+import { LayoutDashboard, ListOrdered, History, Settings, Bot, Calendar, Wallet, Brain, TrendingUp, BookOpen, Network, Globe, LineChart, Server, Sparkles } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -17,6 +17,7 @@ export const menuItems = [
     /* [V1 Legacy] 추후 재활용을 위해 UI 라우팅만 중단 (컴포넌트는 보존)
     { id: 'watchlist', name: '관심종목', icon: ListOrdered },
     */
+    { id: 'market-agent', name: '시황 AI', icon: Sparkles },
     { id: 'rising-stocks', name: '급등주', icon: TrendingUp },
     { id: 'narrative-insight', name: '내러티브', icon: Brain },
     /* [V1 Legacy]

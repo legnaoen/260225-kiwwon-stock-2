@@ -14,7 +14,10 @@ export class MacroAggregator implements IBaseAggregator {
         '^KQ11': 'KOSDAQ',
         '^IXIC': '나스닥',
         '^GSPC': 'S&P 500',
+        'ES=F': 'S&P 500 선물 (ES=F)',
+        'NQ=F': '나스닥 100 선물 (NQ=F)',
         '^SOX': '필라델피아 반도체 (SOX)',
+        'EWY': 'MSCI 한국 ETF (야간/선행)',
         'KRW=X': '원/달러 환율',
         '^TNX': '미국 10년물 국채 금리',
         '^IRX': '미국 3개월물 국채 금리',
@@ -36,6 +39,8 @@ export class MacroAggregator implements IBaseAggregator {
         
         // 데이터 기준 시점 헤더 추가
         const timestamp = rawData._timestamp ? new Date(rawData._timestamp).toLocaleString('ko-KR') : new Date().toLocaleString('ko-KR');
+        const hour = rawData._timestamp ? new Date(rawData._timestamp).getHours() : new Date().getHours();
+        const isCycleB = hour >= 15;
         lines.push(`> ⏳ **데이터 조회 시점**: ${timestamp} (전일 종가 및 실시간 야간 마감 기준)`);
         lines.push('');
 
@@ -118,9 +123,18 @@ export class MacroAggregator implements IBaseAggregator {
         lines.push('#### 📈 증시 및 반도체 지수 (주도력 확인)');
         lines.push(renderItem('^KS11'));
         lines.push(renderItem('^KQ11'));
-        lines.push(renderItem('^GSPC'));
-        lines.push(renderItem('^IXIC'));
+        if (isCycleB) {
+            lines.push(`> ⏳ **(오후 특화)**: 마감된 미 본장 대신 실시간 선물 지수를 집중 반영합니다.`);
+            lines.push(renderItem('ES=F'));
+            lines.push(renderItem('NQ=F'));
+        } else {
+            lines.push(renderItem('^GSPC'));
+            lines.push(renderItem('^IXIC'));
+            lines.push(renderItem('ES=F'));
+            lines.push(renderItem('NQ=F'));
+        }
         lines.push(renderItem('^SOX'));
+        lines.push(renderItem('EWY'));
         lines.push('');
 
         // 카테고리 2: 외환 및 매크로 지표

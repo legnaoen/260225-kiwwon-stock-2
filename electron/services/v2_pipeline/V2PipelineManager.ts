@@ -15,6 +15,15 @@ import { NaverFlowAggregator } from './aggregators/NaverFlowAggregator';
 import { NewsFlowCollector } from './collectors/NewsFlowCollector';
 import { NewsFlowAggregator } from './aggregators/NewsFlowAggregator';
 
+import { NaverSearchCollector } from './collectors/NaverSearchCollector';
+import { NaverSearchAggregator } from './aggregators/NaverSearchAggregator';
+
+import { FinanceInfoCollector } from './collectors/FinanceInfoCollector';
+import { FinanceInfoAggregator } from './aggregators/FinanceInfoAggregator';
+
+import { InvestorFlowCollector } from './collectors/InvestorFlowCollector';
+import { InvestorFlowAggregator } from './aggregators/InvestorFlowAggregator';
+
 export class V2PipelineManager {
     private static instance: V2PipelineManager;
 
@@ -40,6 +49,15 @@ export class V2PipelineManager {
     private newsFlowCollector: NewsFlowCollector;
     private newsFlowAggregator: NewsFlowAggregator;
 
+    private naverSearchCollector: NaverSearchCollector;
+    private naverSearchAggregator: NaverSearchAggregator;
+
+    private financeInfoCollector: FinanceInfoCollector;
+    private financeInfoAggregator: FinanceInfoAggregator;
+
+    private investorFlowCollector: InvestorFlowCollector;
+    private investorFlowAggregator: InvestorFlowAggregator;
+
     private constructor() {
         this.macroCollector = new MacroCollector();
         this.macroAggregator = new MacroAggregator();
@@ -62,6 +80,15 @@ export class V2PipelineManager {
 
         this.newsFlowCollector = new NewsFlowCollector();
         this.newsFlowAggregator = new NewsFlowAggregator();
+
+        this.naverSearchCollector = new NaverSearchCollector();
+        this.naverSearchAggregator = new NaverSearchAggregator();
+
+        this.financeInfoCollector = new FinanceInfoCollector();
+        this.financeInfoAggregator = new FinanceInfoAggregator();
+
+        this.investorFlowCollector = new InvestorFlowCollector();
+        this.investorFlowAggregator = new InvestorFlowAggregator();
     }
 
     public static getInstance(): V2PipelineManager {
@@ -74,7 +101,7 @@ export class V2PipelineManager {
     /**
      * 프론트엔드의 IPC 명령 또는 스케줄러에 의해 호출됩니다.
      */
-    public async runPipeline(pipelineId: PipelineId, options?: { forceFetch?: boolean }): Promise<V2PipelineResult> {
+    public async runPipeline(pipelineId: PipelineId, options?: { forceFetch?: boolean, keyword?: string }): Promise<V2PipelineResult> {
         const startTime = Date.now();
         console.log(`[V2PipelineManager] Running pipeline: ${pipelineId} (force: ${options?.forceFetch})`);
 
@@ -111,6 +138,18 @@ export class V2PipelineManager {
                 case 'PL-NewsFlow':
                     rawData = await this.newsFlowCollector.collect(options);
                     aggregatedMarkdown = await this.newsFlowAggregator.process(rawData);
+                    break;
+                case 'PL-NaverSearch':
+                    rawData = await this.naverSearchCollector.collect(options);
+                    aggregatedMarkdown = await this.naverSearchAggregator.process(rawData);
+                    break;
+                case 'PL-FinanceInfo':
+                    rawData = await this.financeInfoCollector.collect(options);
+                    aggregatedMarkdown = await this.financeInfoAggregator.process(rawData);
+                    break;
+                case 'PL-InvestorFlow':
+                    rawData = await this.investorFlowCollector.collect();
+                    aggregatedMarkdown = await this.investorFlowAggregator.process(rawData);
                     break;
                 default:
                     throw new Error(`Unknown pipeline ID: ${pipelineId}`);

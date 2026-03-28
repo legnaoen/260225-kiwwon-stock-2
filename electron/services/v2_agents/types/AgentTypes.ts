@@ -1,4 +1,5 @@
 // V2 Agent Swarm — 공용 타입 정의
+import { AgentRetrospective } from '../MarketReviewAgent'
 
 export type AgentCycle = 'A' | 'B'
 export type PredictDirection = 'LONG' | 'SHORT' | 'HOLD'
@@ -13,6 +14,11 @@ export interface AgentPrediction {
     rationale: string           // AI가 작성한 판단 근거
     sources: string[]           // 사용된 핵심 소스 데이터 요약
     indicators: string[]        // 사용된 지표 목록
+    t1_target_return?: number
+    t5_predict?: PredictDirection
+    t5_target_return?: number
+    t20_predict?: PredictDirection
+    t20_target_return?: number
     entry_price?: number
     t1_peak?: number
     t1_final?: number
@@ -33,6 +39,9 @@ export interface DataContext {
     cycle: AgentCycle
     activeRules: string[]
     recentHistory: AgentPrediction[]
+    weeklyReview?: AgentRetrospective
+    monthlyReview?: AgentRetrospective
+    todayCycleA?: AgentPrediction
 }
 
 export interface ParsedDecision {
@@ -42,6 +51,12 @@ export interface ParsedDecision {
     rationale: string
     indicators: string[]
     key_sources: string[]
+    morning_feedback?: string
+    t1_target_return?: number
+    t5_predict?: PredictDirection
+    t5_target_return?: number
+    t20_predict?: PredictDirection
+    t20_target_return?: number
 }
 
 export interface PipelineSlot {

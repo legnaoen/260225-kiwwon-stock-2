@@ -116,14 +116,32 @@ export class SchedulerService {
                 await MarketConditionAgent.getInstance().runPrediction('B')
             }, { timezone: 'Asia/Seoul' })
 
-            // [TODO] PerformanceTracker 기록용 (15:35 T+1 / T+5 / T+20) - Step 5에 구현
+            // PerformanceTracker \uae30\ub85d\uc6a9 (15:35 T+1 / T+5 / T+20) + \uc7a5\uc911 \uc778\ud2b8\ub77c\ub370\uc774 \ud3c9\uac00
             const mcaTrackerJob = cron.schedule('35 15 * * 1-5', async () => {
                 const { PerformanceTracker } = await import('./v2_agents/PerformanceTracker')
-                await PerformanceTracker.getInstance().runDailyTracking()
+                const tracker = PerformanceTracker.getInstance()
+                await tracker.runDailyTracking()
+                await tracker.evaluateIntraday()  // \uc7a5\uc911 \uc608\uce21 \uc885\uac00 \ub300\ube44 \ud3c9\uac00
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(mcaJobA, mcaJobB, mcaTrackerJob)
-            console.log(`[SchedulerService] V2 MarketConditionAgent schedules initialized (Cycle A: 08:50, Cycle B: 15:10, Tracker: 15:35)`)
+            // \uc7a5\uc911 \uc778\ud2b8\ub77c\ub370\uc774 \uc608\uce21 (09:30 / 11:00 / 13:00)
+            const intradayJobA = cron.schedule('30 9 * * 1-5', async () => {
+                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
+                await MarketConditionAgent.getInstance().runIntraday('09:30')
+            }, { timezone: 'Asia/Seoul' })
+
+            const intradayJobB = cron.schedule('0 11 * * 1-5', async () => {
+                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
+                await MarketConditionAgent.getInstance().runIntraday('11:00')
+            }, { timezone: 'Asia/Seoul' })
+
+            const intradayJobC = cron.schedule('0 13 * * 1-5', async () => {
+                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
+                await MarketConditionAgent.getInstance().runIntraday('13:00')
+            }, { timezone: 'Asia/Seoul' })
+
+            this.scheduledJobs.push(mcaJobA, mcaJobB, mcaTrackerJob, intradayJobA, intradayJobB, intradayJobC)
+            console.log(`[SchedulerService] V2 MarketConditionAgent schedules initialized (Cycle A: 08:50, Cycle B: 15:10, Tracker+Intraday-Eval: 15:35, Intraday: 09:30/11:00/13:00)`)
         }
     }
 

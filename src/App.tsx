@@ -19,6 +19,7 @@ import MacroDashboard from './components/MacroDashboard'
 import PmTracker from './components/PmTracker'
 import PipelineMonitorTab from './components/v2_dashboard/PipelineMonitorTab'
 import MarketAgentTab from './components/v2_dashboard/MarketAgentTab'
+import CoPilotDrawer from './components/common/CoPilotDrawer'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
 import { useNoteStore } from './store/useNoteStore'
@@ -369,6 +370,9 @@ function AppContent() {
                     </div>
                 </main>
             </div>
+
+            {/* Global Chat AI */}
+            <CoPilotDrawer />
 
             {/* Status Bar */}
             <footer className={cn(

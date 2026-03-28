@@ -745,10 +745,24 @@ export class TelegramService {
             // 4. 불필요하게 3줄 이상 벌어진 공백을 2줄로 압축
             formattedRationale = formattedRationale.replace(/\n{3,}/g, '\n\n').trim();
 
-            let msg = `사이클: ${cycleText}\n`;
+            let msg = `🤖 [시황 에이전트] 판단 완료\n`;
+            msg += `사이클: ${cycleText}\n`;
             msg += `포지션: ${data.position} (${direction})\n`;
             msg += `신뢰도: ${((data.confidence || 0) * 100).toFixed(0)}%\n\n`;
-            msg += `${formattedRationale}\n`;
+            
+            if (data.t1_target_return !== undefined || data.t5_predict) {
+                msg += `⏳ [다중 타임프레임 전망]\n`;
+                const formatTF = (pred: string, ret: number) => {
+                    const s = ret > 0 ? '+' : '';
+                    const emo = pred === 'LONG' ? '📈' : pred === 'SHORT' ? '📉' : '⏸️';
+                    return `${emo} ${pred} (${s}${ret}%)`;
+                };
+                msg += `• T+1 (내일): ${formatTF(data.predict, data.t1_target_return || 0)}\n`;
+                msg += `• T+5 (1주) : ${data.t5_predict ? formatTF(data.t5_predict, data.t5_target_return || 0) : '데이터 없음'}\n`;
+                msg += `• T+20 (1달): ${data.t20_predict ? formatTF(data.t20_predict, data.t20_target_return || 0) : '데이터 없음'}\n\n`;
+            }
+
+            msg += `📝 판단 근거:\n${formattedRationale}\n`;
             
             this.sendMessage(msg).catch(e => console.error('[TelegramService] MCA Alert Error:', e));
         });

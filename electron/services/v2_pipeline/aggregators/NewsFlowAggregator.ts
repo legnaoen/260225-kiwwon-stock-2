@@ -56,9 +56,28 @@ export class NewsFlowAggregator implements IBaseAggregator {
 
             // DB 저장용 페이로드 생성
             const dbPayload: any[] = [];
+            
+            const hour = new Date(rawData.timestamp).getHours();
+            const filterRegex = /(마감시황|마감 시황|상승 마감|하락 마감|마감|특징주|약세|강세)/; // 아침에는 전일 마감 기사 모두 걸러냄
+            const priorityRegex = /(특징주|수급|외국인|상한|마감)/; // 오후 정렬용 우대 키워드
+
+            // 오후장에는 수급/마감/특징주 기사를 상단으로 우선 정렬
+            if (hour >= 15 && articles.length > 0) {
+                articles.sort((a: any, b: any) => {
+                    const titleA = a.title || a.tit || '';
+                    const titleB = b.title || b.tit || '';
+                    return (priorityRegex.test(titleB) ? 1 : 0) - (priorityRegex.test(titleA) ? 1 : 0);
+                });
+            }
 
             for (const article of articles) {
                 const title = article.title || article.tit || '';
+                
+                // 장전(09:00 이전)에는 어제 후행성 마감 뉴스 필터링
+                if (hour < 9 && filterRegex.test(title)) {
+                    continue;
+                }
+
                 const source = article.officeName || article.officeHName || article.office || '';
                 const articleId = String(article.articleId || article.oid || '');
                 const officeId = String(article.officeId || '');

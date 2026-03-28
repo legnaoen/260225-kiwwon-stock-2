@@ -3,14 +3,23 @@ import { IBaseAggregator } from '../types/PipelineTypes';
 export class LocalFlowAggregator implements IBaseAggregator {
     
     public async process(rawData: any): Promise<string> {
-        if (!rawData || !rawData.flows || rawData.flows.length === 0) return '국내 수급 데이터가 없습니다.';
+        const timestamp = rawData?.timestamp ? new Date(rawData.timestamp).toLocaleString('ko-KR') : new Date().toLocaleString('ko-KR');
+        const marketStatus = rawData?.marketStatus || '수집 시점 불명';
+
+        if (!rawData || !rawData.flows || rawData.flows.length === 0) {
+            const lines = [
+                '### 🇰🇷 국내 증시 업종별 실시간 등락률 현황\n',
+                `> ⏳ **장 상태**: \`${marketStatus}\``,
+                `> 📊 수집 시각: ${timestamp}\n`,
+                `> 🛌 **[장 개장 전이므로 실시간 수급 데이터가 없습니다]**`
+            ];
+            return lines.join('\n');
+        }
 
         const flows = rawData.flows;
         const lines: string[] = ['### 🇰🇷 국내 증시 업종별 등락률 현황\n'];
 
-        const timestamp = rawData.timestamp ? new Date(rawData.timestamp).toLocaleString('ko-KR') : new Date().toLocaleString('ko-KR');
         const targetDateStr = rawData.targetDateStr || '가장 최근 거래일';
-        const marketStatus = rawData.marketStatus || '수집 시점 불명';
         const dayLabel = `[${targetDateStr}]`; 
 
         lines.push(`> ⏳ **장 상태**: \`${marketStatus}\``);

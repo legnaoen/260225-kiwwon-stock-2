@@ -15,7 +15,10 @@ export class MacroCollector {
         { symbol: '^KQ11', name: 'KOSDAQ' },
         { symbol: '^GSPC', name: 'S&P 500' },
         { symbol: '^IXIC', name: '나스닥' },
+        { symbol: 'ES=F', name: 'S&P 500 선물 (실시간)' },
+        { symbol: 'NQ=F', name: '나스닥 100 선물 (실시간)' },
         { symbol: '^SOX', name: '필라델피아 반도체 (SOX)' },
+        { symbol: 'EWY', name: 'MSCI 한국 ETF (야간/선행)' },
         
         // 2. 외환 및 매크로 (유동성/위험 선호도)
         { symbol: 'KRW=X', name: '원/달러 환율' },

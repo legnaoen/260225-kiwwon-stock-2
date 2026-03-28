@@ -72,7 +72,7 @@ export class MarketConditionAgent {
             }
 
             // 2. 프롬프트 조립
-            const systemPrompt = buildSystemPrompt(context.activeRules)
+            const systemPrompt = buildSystemPrompt(context)
             const userPrompt = buildUserPrompt(context)
 
             console.log(`[MCA] 가용 데이터: ${context.available.map(a => a.id).join(', ')}`)
@@ -101,10 +101,24 @@ export class MarketConditionAgent {
                 pipelines_used: context.available.map(a => a.id),
                 execution_time_ms: Date.now() - startTime,
                 created_at: this.db.getKstTimestamp(),
-                raw_context: context.available.map(a => `[${a.id}]\n${a.markdown}`).join('\n\n---\n\n')
+                raw_context: context.available.map(a => `[${a.id}]\n${a.markdown}`).join('\n\n---\n\n'),
+                t1_target_return: decision.t1_target_return,
+                t5_predict: decision.t5_predict,
+                t5_target_return: decision.t5_target_return,
+                t20_predict: decision.t20_predict,
+                t20_target_return: decision.t20_target_return
             }
 
             this.savePrediction(prediction)
+
+            // Cycle B이고 morning_feedback(오답노트)이 있으면 오늘 아침 Cycle A에 업데이트(피기배킹 전략)
+            if (cycle === 'B' && decision.morning_feedback && context.todayCycleA) {
+                try {
+                    const rawDb = (this.db as any).db;
+                    rawDb.prepare(`UPDATE agent_predictions SET feedback = ? WHERE id = ?`).run(String(decision.morning_feedback), context.todayCycleA.id);
+                    console.log(`[MCA] 오전 예측 피드백(오답노트) 업데이트 완료: ${context.todayCycleA.id}`);
+                } catch(e) { console.error('[MCA] 피드백 저장 실패:', e); }
+            }
 
             // 6. 이벤트 발행 → UI 갱신
             eventBus.emit('MARKET_AGENT_PREDICTION_COMPLETE' as any, prediction)
@@ -172,8 +186,30 @@ export class MarketConditionAgent {
 
         // 최근 히스토리 로드 (최대 10건)
         const recentHistory = this.getRecentPredictions(10)
+        
+        // 주간/월간 회고 로드 (오직 Cycle 'A' 판단 전용)
+        let weeklyReview, monthlyReview;
+        if (cycle === 'A') {
+            try {
+                const { MarketReviewAgent } = await import('./MarketReviewAgent')
+                const wAll = MarketReviewAgent.getInstance().getRetrospectives('WEEKLY', 1)
+                const mAll = MarketReviewAgent.getInstance().getRetrospectives('MONTHLY', 1)
+                if (wAll.length > 0) weeklyReview = wAll[0]
+                if (mAll.length > 0) monthlyReview = mAll[0]
+            } catch (e) {
+                console.error('[MCA] 실패: 회고 리포트를 불러오지 못했습니다.', e)
+            }
+        }
 
-        return { available, missing, cycle, activeRules, recentHistory }
+        // Cycle B (오후): 오늘 작성된 Cycle A(아침) 예측을 불러와서 일간 오답노트 작성 유도
+        let todayCycleA;
+        if (cycle === 'B') {
+            const dateStr = this.db.getKstDate()
+            const aId = `mca_${dateStr.replace(/-/g, '')}_A`
+            todayCycleA = recentHistory.find(h => h.id === aId)
+        }
+
+        return { available, missing, cycle, activeRules, recentHistory, weeklyReview, monthlyReview, todayCycleA }
     }
 
     /**
@@ -205,8 +241,8 @@ export class MarketConditionAgent {
             const parsed = JSON.parse(jsonMatch[0])
             
             // 유효성 검증
-            const predict = (['LONG', 'SHORT', 'HOLD'].includes(parsed.predict)) 
-                ? parsed.predict : 'HOLD'
+            const predict = parsed.t1?.direction && (['LONG', 'SHORT', 'HOLD'].includes(parsed.t1.direction)) 
+                ? parsed.t1.direction : (['LONG', 'SHORT', 'HOLD'].includes(parsed.predict) ? parsed.predict : 'HOLD')
             
             const positionMap: Record<string, string> = {
                 'LONG': 'KODEX 200',
@@ -220,7 +256,13 @@ export class MarketConditionAgent {
                 confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
                 rationale: String(parsed.rationale || '판단 근거 없음'),
                 indicators: Array.isArray(parsed.indicators) ? parsed.indicators : [],
-                key_sources: Array.isArray(parsed.key_sources) ? parsed.key_sources : []
+                key_sources: Array.isArray(parsed.key_sources) ? parsed.key_sources : [],
+                morning_feedback: parsed.morning_feedback ? String(parsed.morning_feedback) : undefined,
+                t1_target_return: parsed.t1?.target_return ? Number(parsed.t1.target_return) : undefined,
+                t5_predict: parsed.t5?.direction && ['LONG', 'SHORT', 'HOLD'].includes(parsed.t5.direction) ? parsed.t5.direction : undefined,
+                t5_target_return: parsed.t5?.target_return ? Number(parsed.t5.target_return) : undefined,
+                t20_predict: parsed.t20?.direction && ['LONG', 'SHORT', 'HOLD'].includes(parsed.t20.direction) ? parsed.t20.direction : undefined,
+                t20_target_return: parsed.t20?.target_return ? Number(parsed.t20.target_return) : undefined,
             }
         } catch (e) {
             console.error('[MCA] JSON parse error:', e)
@@ -241,8 +283,8 @@ export class MarketConditionAgent {
         const rawDb = (this.db as any).db
         const stmt = rawDb.prepare(`
             INSERT OR REPLACE INTO agent_predictions 
-            (id, date, cycle, predict, position, confidence, rationale, sources_json, indicators_json, pipelines_used, execution_time_ms, created_at, raw_context)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, date, cycle, predict, position, confidence, rationale, sources_json, indicators_json, pipelines_used, execution_time_ms, created_at, raw_context, t1_target_return, t5_predict, t5_target_return, t20_predict, t20_target_return)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         stmt.run(
             p.id, p.date, p.cycle, p.predict, p.position, p.confidence,
@@ -252,7 +294,12 @@ export class MarketConditionAgent {
             JSON.stringify(p.pipelines_used),
             p.execution_time_ms,
             p.created_at,
-            p.raw_context || ''
+            p.raw_context || '',
+            p.t1_target_return ?? null,
+            p.t5_predict ?? null,
+            p.t5_target_return ?? null,
+            p.t20_predict ?? null,
+            p.t20_target_return ?? null
         )
         console.log(`[MCA] 예측 저장 완료: ${p.id}`)
     }
@@ -309,4 +356,116 @@ export class MarketConditionAgent {
             return { total: 0, wins: 0, winRate: 0, totalReturn: 0 }
         }
     }
+
+    /**
+     * 장중 인트라데이 예측 (09:30 / 11:00 / 13:00)
+     * - '(오늘 종가 방향)' 을 UP/HOLD/DOWN 으로 판단
+     * - 실제 평가는 15:35 PerformanceTracker가 종가 데이터로 콜
+     */
+    public async runIntraday(slot: '09:30' | '11:00' | '13:00') {
+        const startTime = Date.now()
+        const now = new Date()
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+        const predId = `INTRADAY_${dateStr}_${slot.replace(':', '')}`
+
+        console.log(`[MCA-Intraday] ═══ ${slot} 장중 예측 시작 ═══`)
+
+        try {
+            // 1. 실시간 데이터 수집 (거시/뉴스는 장중 토큰 낭비이므로 제거. 당일 수급/모멘텀 집중)
+            const [localResult, investorResult] = await Promise.allSettled([
+                this.pipeline.runPipeline('PL-LocalFlow' as any),
+                this.pipeline.runPipeline('PL-InvestorFlow' as any)
+            ])
+
+            const dataParts: string[] = []
+            // 주체별 수급(가장 중요)을 먼저 배치
+            if (investorResult.status === 'fulfilled') dataParts.push(`[PL-InvestorFlow]\n${investorResult.value.aggregatedMarkdown}`)
+            if (localResult.status === 'fulfilled') dataParts.push(`[PL-LocalFlow]\n${localResult.value.aggregatedMarkdown}`)
+
+            // 2. 시간대별 특성 주입 (Time-Context)
+            let timeContext = '';
+            if (slot === '09:30') {
+                timeContext = "시가 갭(Gap) 발생 이후 외국인/기관의 초기 포지셔닝 방향과 아침 변동성(Volatility) 추세를 분석하여 오늘 장 전체의 방향을 예측하라.";
+            } else if (slot === '11:00') {
+                timeContext = "10시 30분 중국/홍콩 증시 개장 이후의 동조화(Coupling) 현황 및 아침 추세의 지속/반전 여부를 판단하라.";
+            } else if (slot === '13:00') {
+                timeContext = "오후장 진입 시점의 외국인 선물 매매 누적 동향, 프로그램 매매 추이, 그리고 추세 반전(Reversal) 가능성을 엄격히 판별하여 최종 종가가 상승마감일지 하락마감일지 예측하라.";
+            }
+
+            // 3. 장중 종가 방향 예측 프롬프트
+            const systemPrompt = `당신은 한국 주식 시장의 당일 수급과 모멘텀을 추적하여 장중 방향성을 예측하는 데이트레이더(Day Trader) 퀀트입니다.`
+            const userPrompt = `[${slot} KST 기준 실시간 시장 데이터]
+
+${dataParts.join('\n\n---\n\n')}
+
+---
+${timeContext}
+위 주체별 수급(Investor Flow) 및 업종별 등락(Local Flow) 데이터를 바탕으로 오늘 장마감 코스피 종가 방향을 예측하시오.
+
+엄격한 분석 지침:
+- 외국인 주가지수 선물 매매 동향을 1순위로, 기관/외국인 현물 쌍끌이 혹은 양매도 여부를 2순위로 강력하게 반영하시오.
+- 반드시 다음 JSON 형식으로만 출력하시오. 다른 텍스트는 일체 금지.
+
+{
+  "predict": "UP" | "HOLD" | "DOWN",
+  "confidence": (0~100 정수, 수급 쏠림이 강력할수록 향상),
+  "trend_status": "현재 장중 추세 판단 요약 (예: 외국인 현선물 양매수로 인한 강한 하락 추세)",
+  "key_trigger": "오후장 방향 전환을 일으킬 수 있는 당일의 핵심 변수 (예: 프로그램 매도세의 매수 전환 여부)",
+  "rationale": "최종 진입 방향에 대한 결과적인 근거 요약"
+}`
+
+            const rawResponse = await this.ai.askGemini(userPrompt, systemPrompt)
+            const jsonMatch = rawResponse.match(/\{[\s\S]*?\}/)
+            if (!jsonMatch) throw new Error('JSON 파싱 실패: ' + rawResponse.substring(0, 100))
+
+            const parsed = JSON.parse(jsonMatch[0])
+            const predict = ['UP', 'HOLD', 'DOWN'].includes(parsed.predict) ? parsed.predict : 'HOLD'
+            const confidence = Math.min(100, Math.max(0, Number(parsed.confidence) || 50))
+            
+            // UI에 보여질 종합 Rationale 텍스트 조립
+            const assembledRationale = `[추세] ${parsed.trend_status || ''}\n[트리거] ${parsed.key_trigger || ''}\n[결론] ${parsed.rationale || ''}`;
+
+            // 4. DB 저장
+            const position = predict === 'UP' ? 'KODEX 200' : predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD'
+            const sourcesArr: string[] = []
+            if (investorResult.status === 'fulfilled') sourcesArr.push('PL-InvestorFlow')
+            if (localResult.status === 'fulfilled') sourcesArr.push('PL-LocalFlow')
+
+            const rawDb = (this.db as any).db
+            rawDb.prepare(`
+                INSERT OR REPLACE INTO intraday_predictions 
+                (id, date, time_slot, predict, confidence, rationale, position, sources_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            `).run(predId, dateStr, slot, predict, confidence, assembledRationale, position, JSON.stringify(sourcesArr))
+
+            const result = { id: predId, date: dateStr, time_slot: slot, predict, confidence, rationale: assembledRationale, position, sources_json: JSON.stringify(sourcesArr) }
+            eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, result)
+
+            console.log(`[MCA-Intraday] ${slot} 완료: ${predict} (${confidence}%) | ${Date.now() - startTime}ms`)
+            return result
+
+        } catch (error: any) {
+            console.error(`[MCA-Intraday] ${slot} \uc2e4\ud328:`, error.message)
+            // \uc2e4\ud328\uc2dc HOLD\ub85c \uae30\ub85d
+            const rawDb = (this.db as any).db
+            rawDb.prepare(`
+                INSERT OR IGNORE INTO intraday_predictions 
+                (id, date, time_slot, predict, confidence, rationale, created_at)
+                VALUES (?, ?, ?, 'HOLD', 0, ?, datetime('now', 'localtime'))
+            `).run(predId, dateStr, slot, `\uc2e4\ud328: ${error.message}`)
+        }
+    }
+
+    public getIntradayPredictions(date?: string): any[] {
+        try {
+            const rawDb = (this.db as any).db
+            if (date) {
+                return rawDb.prepare(`SELECT * FROM intraday_predictions WHERE date = ? ORDER BY time_slot ASC`).all(date)
+            }
+            return rawDb.prepare(`SELECT * FROM intraday_predictions ORDER BY date DESC, time_slot ASC LIMIT 30`).all()
+        } catch {
+            return []
+        }
+    }
 }
+

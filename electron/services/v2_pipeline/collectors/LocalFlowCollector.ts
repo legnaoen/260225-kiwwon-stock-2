@@ -30,6 +30,17 @@ export class LocalFlowCollector implements IBaseCollector {
             // KRX 표준 업종코드 리스트
             const sectorCodes = this.kiwoom.getSectorCodes();
 
+            // 장전 (09:00 이전) API 호출 스킵으로 Rate Limit 및 토큰 방어
+            if (hour < 9) {
+                console.log(`[LocalFlowCollector] 장 개장 전이므로 실시간 수급 API 호출 스킵`);
+                return { 
+                    flows: [], 
+                    timestamp: now.toISOString(),
+                    targetDateStr: now.toLocaleDateString('ko-KR'),
+                    marketStatus 
+                };
+            }
+
             // 각 업종에 대해 ka20002 (업종별주가요청) 순차 호출
             // Rate Limit 방어를 위해 주요 15개만 조회
             const targetSectors = sectorCodes.slice(0, 15);

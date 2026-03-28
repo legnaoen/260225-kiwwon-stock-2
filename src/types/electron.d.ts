@@ -162,6 +162,10 @@ export interface IElectronAPI {
     getMarketConditionRules: () => Promise<{ success: boolean, data?: string[], error?: string }>
     onMarketConditionComplete: (callback: (data: any) => void) => () => void
     onMarketConditionPerformanceUpdated: (callback: (data: any) => void) => () => void
+
+    // V2 Co-Pilot (HITL)
+    sendCoPilotMessage: (message: string, mode?: 'auto' | 'short' | 'detail') => void
+    onCoPilotReply: (callback: (data: {text: string, isDone: boolean}) => void) => () => void
 }
 
 declare global {

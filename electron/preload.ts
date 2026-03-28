@@ -249,6 +249,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMarketConditionLatest: () => ipcRenderer.invoke('agent:market:latest'),
     getMarketConditionStats: () => ipcRenderer.invoke('agent:market:stats'),
     getMarketConditionRules: () => ipcRenderer.invoke('agent:market:rules'),
+    getMarketRetrospectives: (type: 'WEEKLY' | 'MONTHLY', limit?: number) => ipcRenderer.invoke('agent:market:retrospectives:get', type, limit),
+    runMarketRetrospective: (type: 'WEEKLY' | 'MONTHLY') => ipcRenderer.invoke('agent:market:retrospectives:run', type),
     onMarketConditionComplete: (callback: (data: any) => void) => {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('MARKET_AGENT_PREDICTION_COMPLETE', listener)
@@ -258,6 +260,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('MARKET_AGENT_PERFORMANCE_UPDATED', listener)
         return () => ipcRenderer.removeListener('MARKET_AGENT_PERFORMANCE_UPDATED', listener)
+    },
+    // \uc7a5\uc911 \uc778\ud2b8\ub77c\ub370\uc774 \uc608\uce21
+    getIntradayPredictions: () => ipcRenderer.invoke('agent:intraday:predictions'),
+    runIntradayPrediction: (slot: '09:30' | '11:00' | '13:00') => ipcRenderer.invoke('agent:intraday:run', slot),
+    runTracker: () => ipcRenderer.invoke('agent:tracker:run'),
+
+    // V2 Co-Pilot (HITL)
+    sendCoPilotMessage: (message: string, mode: 'auto' | 'short' | 'detail' = 'auto') => ipcRenderer.send('copilot:chat', { message, mode }),
+    onCoPilotReply: (callback: (data: {text: string, isDone: boolean}) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('copilot:reply', listener)
+        return () => ipcRenderer.removeListener('copilot:reply', listener)
     },
 
     onSystemError: (callback: (error: { message: string, code: string, time: string }) => void) => {

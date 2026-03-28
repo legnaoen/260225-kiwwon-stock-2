@@ -4,13 +4,30 @@
  * 에이전트의 이전 예측 명세(agent_predictions)에 대해 실제 KODEX 200 / 인버스 종목의 
  * OHLC(시가/고가/저가/종가) 데이터를 수집하여 T+1, T+5, T+20 성과를 기록하고,
  * 오답일 경우 AiService를 통해 Self-Review(자가학습)를 수행하여 agent_rules에 기록합니다.
+ * 
+ * ═══ Entry Price & T+1 평가 기준 (핵심 규칙) ═══
+ * Cycle A (장전 08:50 예측):
+ *   - entry_price = 당일 시가 (open)     ← 예측 시점에는 전일 종가 뿐이므로 15:35에 backfill
+ *   - T+1 final  = 당일 종가 (close)    ← 같은 날 마감 기준 평가
+ * 
+ * Cycle B (마감 15:10 예측):
+ *   - entry_price = 당일 종가 (close)    ← 15:35에 backfill
+ *   - T+1 final  = 익일 시가 (open)     ← 다음 영업일에 평가 가능
  */
 
 import { DatabaseService } from '../DatabaseService'
 import { KiwoomService } from '../KiwoomService'
 import { AiService } from '../AiService'
 import { AgentPrediction, AgentCycle } from './types/AgentTypes'
-import { eventBus } from '../../utils/EventBus'
+import { eventBus, SystemEvent } from '../../utils/EventBus'
+
+interface ParsedCandle {
+    date: string   // YYYY-MM-DD
+    open: number
+    high: number
+    low: number
+    close: number
+}
 
 export class PerformanceTracker {
     private static instance: PerformanceTracker
@@ -18,10 +35,20 @@ export class PerformanceTracker {
     private kiwoom: KiwoomService
     private ai: AiService
 
+    // 추가: 실시간 가격 추적용 메모리 저장소
+    private latestPrices: Record<string, { price: number, open: number }> = {}
+    private evalTimeout: NodeJS.Timeout | null = null
+
     private constructor() {
         this.db = DatabaseService.getInstance()
         this.kiwoom = KiwoomService.getInstance()
         this.ai = AiService.getInstance()
+
+        // 실시간 장중 평가를 위한 ETF 실시간 가격 구독 (KODEX 200, KODEX 인버스)
+        this.kiwoom.wsRegister(['069500', '114800'])
+
+        // 실시간 장중 평가를 위한 WebSocket 갱신 리스너
+        eventBus.on(SystemEvent.PRICE_UPDATE, (data: any) => this.handleRealtimePriceUpdate(data))
     }
 
     public static getInstance(): PerformanceTracker {
@@ -35,11 +62,22 @@ export class PerformanceTracker {
      * 매일 15:35에 호출되어 미평가된 수익률을 업데이트합니다.
      */
     public async runDailyTracking() {
-        console.log('[MCA-Tracker] ═══ 일일 성과 기록 / 자가학습 파이프라인 시작 ═══')
+        console.log('[MCA-Tracker] ═══ 일일 성과 기록 파이프라인 시작 ═══')
         
         try {
+            // [1회성 교정] 잘못 기록된 -100% 값 초기화
+            const rawDb = (this.db as any).db
+            const corrupted = rawDb.prepare(
+                `SELECT id FROM agent_predictions WHERE t1_final <= -99`
+            ).all()
+            if (corrupted.length > 0) {
+                console.log(`[MCA-Tracker] -100% 오류 데이터 ${corrupted.length}건 초기화`)
+                rawDb.prepare(
+                    `UPDATE agent_predictions SET t1_peak = NULL, t1_final = NULL, entry_price = NULL WHERE t1_final <= -99`
+                ).run()
+            }
+
             await this.updatePendingPerformance()
-            await this.runSelfReviewForFailures()
         } catch (error) {
             console.error('[MCA-Tracker] 에러 발생:', error)
         }
@@ -53,10 +91,10 @@ export class PerformanceTracker {
     private async updatePendingPerformance() {
         const rawDb = (this.db as any).db
         
-        // 평가 대기중인 목록 가져오기 (t20_final이 NULL이고 결과가 나뉘어야 할 것들)
+        // 최근 45일 내의 예측이거나 아직 t20_final이 완료되지 않은(과거 오류로 남은) 대상
         const pendingRows = rawDb.prepare(`
             SELECT * FROM agent_predictions 
-            WHERE predict != 'HOLD' AND t20_final IS NULL
+            WHERE predict != 'HOLD' AND (t20_final IS NULL OR date >= date('now', 'localtime', '-45 days'))
             ORDER BY date ASC
         `).all() as AgentPrediction[]
 
@@ -65,7 +103,7 @@ export class PerformanceTracker {
             return
         }
 
-        // KODEX 200, KODEX 인버스 차트 데이터 조회 (캐싱 목적 포함)
+        // KODEX 200, KODEX 인버스 차트 데이터 조회
         const chartK200 = await this.fetchParsedChart('069500') // KODEX 200 (LONG)
         const chartInv = await this.fetchParsedChart('114800')  // KODEX 인버스 (SHORT)
 
@@ -74,66 +112,100 @@ export class PerformanceTracker {
             return
         }
 
+        // [진단 로그] 날짜 포맷 확인
+        console.log(`[MCA-Tracker] 차트 최신 날짜 - K200: ${chartK200[0]?.date}, INV: ${chartInv[0]?.date}`)
+        console.log(`[MCA-Tracker] 평가 대기 건수: ${pendingRows.length}`)
+        pendingRows.forEach(r => console.log(`[MCA-Tracker]  → 대기중: id=${r.id}, date=${r.date}, cycle=${r.cycle}, entry_price=${(r as any).entry_price || 'null'}`))
+
         let updatedCount = 0
 
         for (const row of pendingRows) {
             const chartData = row.predict === 'LONG' ? chartK200 : chartInv
             
-            // row.date가 배열상 몇 번째 인덱스인지 찾음 (chartData는 내림차순이라고 가정)
-            const todayIdx = chartData.findIndex(candle => candle.date === row.date)
+            // row.date가 배열상 몇 번째 인덱스인지 찾음 (chartData는 내림차순 = [0]이 최신)
+            const rowDateNorm = this.normalizeDate(row.date)
+            const todayIdx = chartData.findIndex(candle => candle.date === rowDateNorm)
             
-            if (todayIdx === -1) continue // 데이터가 차트에 없으면 스킵
+            if (todayIdx === -1) {
+                console.warn(`[MCA-Tracker] row.date('${row.date}' → '${rowDateNorm}')가 차트에서 발견되지 않음. 스킵.`)
+                continue
+            }
 
+            const todayCandle = chartData[todayIdx]
             const updates: any = {}
 
-            // Entry Price 추정: Cycle A(장전)면 당일 시가, Cycle B(장후)면 내일 시가 (또는 당일 종가)
-            let entryPrice = row.entry_price
-            if (!entryPrice) {
+            // ═══ Step 1: Entry Price backfill (핵심 수정) ═══
+            let entryPrice = (row as any).entry_price
+            if (!entryPrice || entryPrice <= 0) {
                 if (row.cycle === 'A') {
-                    entryPrice = chartData[todayIdx].open
+                    // Cycle A(장전 08:50): 진입가 = 당일 시가
+                    entryPrice = todayCandle.open
                 } else {
-                    // Cycle B (15:10 판단) -> 진입은 당일 15:20 또는 15:30. 여기선 당일 종가로 간주.
-                    entryPrice = chartData[todayIdx].close
+                    // Cycle B(마감 15:10): 진입가 = 당일 종가
+                    entryPrice = todayCandle.close
                 }
                 updates.entry_price = entryPrice
+                console.log(`[MCA-Tracker] entry_price backfill: ${row.id} → cycle=${row.cycle}, price=${entryPrice}`)
             }
 
             if (!entryPrice || entryPrice <= 0) continue
 
-            // --- T+1 (단기 목표 달성 여부) ---
-            if (row.t1_final === null) {
+            const isTodayCycleA = row.cycle === 'A' && todayIdx === 0;
+
+            // ═══ Step 2: T+1 평가 ═══
+            if ((row as any).t1_final === null || (row as any).t1_final === undefined || isTodayCycleA) {
                 if (row.cycle === 'A') {
-                    // 오전 08:50 판단: 당일 시가 진입 -> 당일 종가 청산
-                    const todayCandle = chartData[todayIdx]
+                    // Cycle A: 당일 시가 진입 → 당일 종가 청산
                     updates.t1_peak = ((todayCandle.high - entryPrice) / entryPrice) * 100
                     updates.t1_final = ((todayCandle.close - entryPrice) / entryPrice) * 100
-                } else if (row.cycle === 'B' && todayIdx >= 1) {
-                    // 오후 15:10 판단: 당일 종가 진입 -> 다음날 시가 청산
-                    const t1Candle = chartData[todayIdx - 1] // 다음 영업일 캔들
-                    updates.t1_peak = ((t1Candle.high - entryPrice) / entryPrice) * 100 // T+1 중 최고점 기록용
-                    updates.t1_final = ((t1Candle.open - entryPrice) / entryPrice) * 100 // 최종 성과는 다음날 시가 기준 판별
+                    console.log(`[MCA-Tracker] T+1 Cycle A: entry(open)=${entryPrice}, close=${todayCandle.close}, return=${updates.t1_final?.toFixed(2)}%`)
+                } else if (row.cycle === 'B') {
+                    // Cycle B: 당일 종가 진입 → 익일 시가 청산
+                    // 내림차순이므로 todayIdx - 1이 다음 영업일
+                    if (todayIdx >= 1) {
+                        const nextDayCandle = chartData[todayIdx - 1]
+                        updates.t1_peak = ((nextDayCandle.high - entryPrice) / entryPrice) * 100
+                        updates.t1_final = ((nextDayCandle.open - entryPrice) / entryPrice) * 100
+                        console.log(`[MCA-Tracker] T+1 Cycle B: entry(close)=${entryPrice}, next_open=${nextDayCandle.open}, return=${updates.t1_final?.toFixed(2)}%`)
+                    } else {
+                        console.log(`[MCA-Tracker] T+1 Cycle B: 익일 데이터 미도착 (${row.id}). 다음 트래킹에서 평가.`)
+                    }
                 }
             }
 
-            // --- T+5 (5영업일 후) ---
-            if (row.t5_final === null && todayIdx >= 5) {
-                // 1~5일 동안의 최대 고가
-                let maxHigh = 0
-                for (let i = todayIdx - 1; i >= todayIdx - 5; i--) {
-                    if (chartData[i].high > maxHigh) maxHigh = chartData[i].high
+            // ═══ Step 3 & 4: T+5, T+20 다이나믹 트래킹 ═══
+            const calcT = (targetDays: number) => {
+                if (todayIdx < targetDays) {
+                    // 진행 중 (아직 목표일 도달 안됨) -> 가장 최신(0) 캔들 종가로 현재까지의 수익률 계산
+                    let maxHigh = 0
+                    for (let i = todayIdx - 1; i >= 0; i--) {
+                        if (chartData[i]?.high > maxHigh) maxHigh = chartData[i].high
+                    }
+                    const peak = maxHigh > 0 ? ((maxHigh - entryPrice) / entryPrice) * 100 : null
+                    const final = ((chartData[0].close - entryPrice) / entryPrice) * 100
+                    return { peak, final }
+                } else {
+                    // 목표일 경과 안착 -> 목표일 인덱스(todayIdx - targetDays)의 확정 종가로 계산
+                    let maxHigh = 0
+                    for (let i = todayIdx - 1; i >= todayIdx - targetDays; i--) {
+                        if (chartData[i]?.high > maxHigh) maxHigh = chartData[i].high
+                    }
+                    const peak = maxHigh > 0 ? ((maxHigh - entryPrice) / entryPrice) * 100 : null
+                    const final = ((chartData[todayIdx - targetDays].close - entryPrice) / entryPrice) * 100
+                    return { peak, final }
                 }
-                updates.t5_peak = ((maxHigh - entryPrice) / entryPrice) * 100
-                updates.t5_final = ((chartData[todayIdx - 5].close - entryPrice) / entryPrice) * 100
             }
 
-            // --- T+20 (20영업일 후) ---
-            if (row.t20_final === null && todayIdx >= 20) {
-                let maxHigh = 0
-                for (let i = todayIdx - 1; i >= todayIdx - 20; i--) {
-                    if (chartData[i].high > maxHigh) maxHigh = chartData[i].high
-                }
-                updates.t20_peak = ((maxHigh - entryPrice) / entryPrice) * 100
-                updates.t20_final = ((chartData[todayIdx - 20].close - entryPrice) / entryPrice) * 100
+            const t5 = calcT(5)
+            if ((row as any).t5_peak !== t5.peak || (row as any).t5_final !== t5.final) {
+                updates.t5_peak = t5.peak
+                updates.t5_final = t5.final
+            }
+
+            const t20 = calcT(20)
+            if ((row as any).t20_peak !== t20.peak || (row as any).t20_final !== t20.final) {
+                updates.t20_peak = t20.peak
+                updates.t20_final = t20.final
             }
 
             if (Object.keys(updates).length > 0) {
@@ -149,100 +221,241 @@ export class PerformanceTracker {
     }
 
     /**
-     * 오답(손실)으로 확정된 예측 건에 대해 Gemini 복기를 수행합니다.
+     * 날짜 문자열을 YYYY-MM-DD 형태로 정규화
      */
-    private async runSelfReviewForFailures() {
-        const rawDb = (this.db as any).db
+    private normalizeDate(d: string): string {
+        const clean = String(d || '').trim().replace(/\s+/g, '')
+        if (clean.length === 8 && !clean.includes('-')) {
+            return `${clean.substring(0, 4)}-${clean.substring(4, 6)}-${clean.substring(6, 8)}`
+        }
+        return clean
+    }
 
-        // 피드백이 기록 안됐고 T1결과가 마이너스(잘못 짚음)인 것
-        const failureRows = rawDb.prepare(`
-            SELECT * FROM agent_predictions 
-            WHERE predict != 'HOLD' AND t1_final IS NOT NULL AND t1_final < 0 AND feedback IS NULL
-            ORDER BY date ASC
-        `).all() as AgentPrediction[]
+    /**
+     * 통일된 캔들 맵으로 파싱
+     * Kiwoom ka10081 응답 필드: dt, opn_prc, hg_prc, lw_prc, cur_prc
+     */
+    private async fetchParsedChart(stk_cd: string): Promise<ParsedCandle[]> {
+        const list = await this.kiwoom.getDailyChartData(stk_cd)
 
-        if (failureRows.length === 0) return
+        // [진단] 실제 API 응답 필드명 덤프 (첫 항목)
+        if (list.length > 0) {
+            const sampleKeys = Object.keys(list[0])
+            console.log(`[MCA-Tracker] RAW KEYS for ${stk_cd}: [${sampleKeys.join(', ')}]`)
+            console.log(`[MCA-Tracker] RAW SAMPLE for ${stk_cd}:`, JSON.stringify(list[0]))
+        }
 
-        console.log(`[MCA-Tracker] 오답 예측 ${failureRows.length}건에 대한 자가복기(Self-Review) 진행...`)
+        // Kiwoom 데이터는 보통 최신이 0번 인덱스 (내림차순)
+        const parsed = list.map(item => {
+            const rawDate = String(item.dt || item.stck_bsop_date || item.date || item.trd_dt || '')
+            const fmtDate = this.normalizeDate(rawDate)
+            
+            // Kiwoom ka10081 실제 필드: open_pric, high_pric, low_pric, cur_prc
+            const open = Math.abs(Number(
+                item.open_pric || item.opn_prc || item.stck_oprc || item.open_prc || item.oprc || item.open || 0
+            ))
+            const high = Math.abs(Number(
+                item.high_pric || item.hg_prc || item.stck_hgpr || item.high_prc || item.hgprc || item.high || 0
+            ))
+            const low = Math.abs(Number(
+                item.low_pric || item.lw_prc || item.stck_lwpr || item.low_prc || item.lwprc || item.low || 0
+            ))
+            const close = Math.abs(Number(
+                item.cur_prc || item.stck_clpr || item.clprc || item.close || 0
+            ))
+            
+            return { date: fmtDate, open, high, low, close }
+        })
 
-        for (const row of failureRows) {
-            try {
-                const prompt = `
-과거 KOSPI 방향성을 예측했으나 틀렸습니다. (수익률 ${row.t1_final?.toFixed(2)}%)
-아래는 당시 당신이 내린 판단 내역입니다:
-- 날짜: ${row.date}
-- 사이클: ${row.cycle}
-- 예측: ${row.predict}
-- 당시 근거(Rationale): ${row.rationale}
-- 주요 참고 지표: ${row.indicators_json}
+        // 파싱 결과 검증 로그 (첫 3건)
+        if (parsed.length > 0) {
+            console.log(`[MCA-Tracker] fetchParsedChart(${stk_cd}): ${parsed.length}건 파싱됨.`)
+            parsed.slice(0, 3).forEach((c, i) => 
+                console.log(`  [${i}] date=${c.date}, O=${c.open}, H=${c.high}, L=${c.low}, C=${c.close}`)
+            )
+        }
 
-왜 방향성을 틀렸는지 2문장으로 반성(Self-Review)하고, 같은 실수를 반복하지 않기 위해 
-시스템에 추가해야 할 교훈 1가지를 "RULE: 당월 옵션만기일 주간은 VIX가 튀어도 하락 베팅을 자제한다" 형식으로 1줄 작성해 주세요.
+        return parsed
+    }
 
-## 출력 (엄격한 JSON):
-{
-  "feedback_text": "왜 틀렸는지 반성문 (마크다운 포맷)",
-  "new_rule": "RULE: ... (없으면 빈 문자열)"
-}
-`
-                const rawResponse = await this.ai.askGemini(prompt, "너는 엄격한 자기 복기를 수행하는 트레이더다.")
+    /**
+     * WebSocket 가격 변동 이벤트 수신 핸들러
+     */
+    private handleRealtimePriceUpdate(data: any) {
+        const code = String(data.code).replace(/[^0-9]/g, '')
+        if (code === '069500' || code === '114800') {
+            const currentPrice = Number(data.price)
+            const openPrice = Number(data.open || 0)
+            
+            if (currentPrice > 0) {
+                this.latestPrices[code] = { price: currentPrice, open: openPrice }
                 
-                let jsonStr = rawResponse
-                const codeBlockMatch = rawResponse.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/)
-                if (codeBlockMatch) {
-                    jsonStr = codeBlockMatch[1]
-                }
-                
-                const parsed = JSON.parse(jsonStr)
-                const rule = parsed.new_rule || ''
-                const feedbackText = parsed.feedback_text || ''
-
-                // DB 기록
-                const updateStmt = rawDb.prepare(`UPDATE agent_predictions SET feedback = ? WHERE id = ?`)
-                updateStmt.run(feedbackText, row.id)
-
-                if (rule.trim()) {
-                    const insertRule = rawDb.prepare(`
-                        INSERT INTO agent_rules (agent_type, rule_text, source_prediction_id, is_active, created_at)
-                        VALUES (?, ?, ?, ?, ?)
-                    `)
-                    insertRule.run('market_condition', rule.trim(), row.id, 1, this.db.getKstTimestamp())
-                    console.log(`[MCA-Tracker] 신규 학습 룰 등록 완료: ${rule}`)
-                }
-
-            } catch (e: any) {
-                console.error(`[MCA-Tracker] 리뷰 실패 (${row.id}):`, e.message)
+                // 디바운스 처리 (1초에 한 번만 평가)
+                if (this.evalTimeout) clearTimeout(this.evalTimeout)
+                this.evalTimeout = setTimeout(() => {
+                    this.evaluateIntradayRealtime()
+                }, 1000)
             }
         }
     }
 
     /**
-     * 통일된 캔들 맵으로 파싱
+     * WebSocket 실시간 메모리 데이터만 사용하여 장중 수익률 즉시 갱신 (DB부하 최소화)
      */
-    private async fetchParsedChart(stk_cd: string) {
-        const list = await this.kiwoom.getDailyChartData(stk_cd)
-        // Kiwoom 데이터는 보통 최신이 0번 인덱스 (내림차순)
-        return list.map(item => {
-            const dateStr = String(item.dt || item.stck_bsop_date || item.date || item.trd_dt)
-            const fmtDate = dateStr.length === 8 ? `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}` : dateStr
+    private evaluateIntradayRealtime() {
+        // 둘 다 없으면 조기 반환 (하나라도 있으면 가능)
+        if (!this.latestPrices['069500'] && !this.latestPrices['114800']) return
+
+        const rawDb = (this.db as any).db
+        const today = new Date()
+        const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
+        const pending = rawDb.prepare(
+            `SELECT * FROM intraday_predictions WHERE date = ?`
+        ).all(dateStr) as any[]
+
+        if (pending.length === 0) return
+
+        let evaluated = 0
+        for (const row of pending) {
+            const position = row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : null
+            const etfData = row.predict === 'UP' ? this.latestPrices['069500'] : row.predict === 'DOWN' ? this.latestPrices['114800'] : null
+
+            if (!position || !etfData || etfData.open <= 0) continue
+
+            // 기존 엔트리 가격이 있으면 유지, 없으면 최신 실시간 데이터의 시가 사용
+            const entryPrice = row.entry_price && row.entry_price > 0 ? row.entry_price : etfData.open
+            const closePrice = etfData.price
+            const returnPct = ((closePrice - entryPrice) / entryPrice) * 100
+
+            let result: string
+            if (returnPct > 0) result = 'HIT'
+            else if (returnPct < 0) result = 'MISS'
+            else result = 'HOLD'
+
+            rawDb.prepare(`
+                UPDATE intraday_predictions 
+                SET position = ?, entry_price = ?, close_price = ?, return_pct = ?, result = ?
+                WHERE id = ?
+            `).run(position, entryPrice, closePrice, returnPct, result, row.id)
+            evaluated++
+        }
+
+        // Daily Predictions (장전 예측 Cycle A) 실시간 갱신 적용
+        const dailyPending = rawDb.prepare(
+            `SELECT * FROM agent_predictions WHERE date = ? AND cycle = 'A' AND predict != 'HOLD'`
+        ).all(dateStr) as any[]
+        
+        for (const row of dailyPending) {
+            const etfData = row.predict === 'LONG' ? this.latestPrices['069500'] : row.predict === 'SHORT' ? this.latestPrices['114800'] : null
+            if (!etfData || etfData.open <= 0) continue
+
+            const entryPrice = row.entry_price && row.entry_price > 0 ? row.entry_price : etfData.open
+            const returnPct = ((etfData.price - entryPrice) / entryPrice) * 100
             
-            // Kiwoom 값은 양/음 부호가 붙어있을 수 있으므로 Math.abs 처리
-            const open = Math.abs(Number(item.opn_prc || item.oprc || item.open || 0))
-            const high = Math.abs(Number(item.hg_prc || item.hgprc || item.high || 0))
-            const low = Math.abs(Number(item.lw_prc || item.lwprc || item.low || 0))
-            const close = Math.abs(Number(item.cur_prc || item.clprc || item.close || 0))
-            
-            return { date: fmtDate, open, high, low, close }
-        })
+            rawDb.prepare(`
+                UPDATE agent_predictions 
+                SET entry_price = ?, t1_final = ?
+                WHERE id = ?
+            `).run(entryPrice, returnPct, row.id)
+            evaluated++
+        }
+
+        if (evaluated > 0) {
+            eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, null)
+        }
     }
 
     private updatePredictionDb(id: string, updates: Record<string, number>) {
         const rawDb = (this.db as any).db;
         const setClauses = Object.keys(updates).map(k => `${k} = ?`).join(', ')
         const values = Object.values(updates)
-        values.push(id)
+        values.push(id as any)
 
         const stmt = rawDb.prepare(`UPDATE agent_predictions SET ${setClauses} WHERE id = ?`)
         stmt.run(...values)
+    }
+
+    /**
+     * 장중 예측(intraday_predictions) 평가
+     * - 15:35에 호출
+     * - 장전·마감 예측과 동일하게 KODEX 200 / KODEX 인버스 ETF 수익률 기준 평가
+     * - UP → KODEX 200, DOWN → KODEX 인버스
+     * - entry = 당일 시가, exit = 당일 종가
+     */
+    public async evaluateIntraday() {
+        console.log('[MCA-Tracker] ═══ 장중 예측 평가 시작 ═══')
+        const rawDb = (this.db as any).db
+        const today = new Date()
+        const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
+        // 오늘 장중 예측 전체 (장중에는 가격이 변하므로 매번 재평가)
+        const pending = rawDb.prepare(
+            `SELECT * FROM intraday_predictions WHERE date = ?`
+        ).all(dateStr) as any[]
+
+        if (pending.length === 0) {
+            console.log('[MCA-Tracker] 장중 평가 대상 없음')
+            return
+        }
+
+        // KODEX 200, KODEX 인버스 차트 (장전·마감 예측과 동일 상품)
+        const chartK200 = await this.fetchParsedChart('069500')
+        const chartInv = await this.fetchParsedChart('114800')
+
+        const todayK200 = chartK200.find(c => c.date === dateStr) || chartK200[0]
+        const todayInv = chartInv.find(c => c.date === dateStr) || chartInv[0]
+
+        if (!todayK200 || !todayInv) {
+            console.error('[MCA-Tracker] 장중 평가: 오늘 ETF 데이터 없음')
+            return
+        }
+
+        console.log(`[MCA-Tracker] 장중 평가 ETF - K200: O=${todayK200.open} C=${todayK200.close} | INV: O=${todayInv.open} C=${todayInv.close}`)
+
+        let evaluated = 0
+        for (const row of pending) {
+            // UP → KODEX 200, DOWN → KODEX 인버스
+            const position = row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : null
+            const etfCandle = row.predict === 'UP' ? todayK200 : row.predict === 'DOWN' ? todayInv : null
+
+            if (!position || !etfCandle || etfCandle.open <= 0) {
+                // HOLD 예측이거나 데이터 없음
+                rawDb.prepare(`UPDATE intraday_predictions SET position = 'HOLD', result = 'HOLD', close_kospi = ? WHERE id = ?`)
+                    .run(todayK200.close, row.id)
+                evaluated++
+                continue
+            }
+
+            const entryPrice = etfCandle.open   // 당일 시가
+            const closePrice = etfCandle.close   // 당일 종가
+            const returnPct = ((closePrice - entryPrice) / entryPrice) * 100
+
+            // 적중 판정: 수익률 > 0이면 HIT
+            const THRESHOLD = 0.0 // ETF 기준이므로 방향만 맞으면 OK
+            let result: string
+            if (returnPct > THRESHOLD) {
+                result = 'HIT'
+            } else if (returnPct < -THRESHOLD) {
+                result = 'MISS'
+            } else {
+                result = 'HOLD'
+            }
+
+            rawDb.prepare(`
+                UPDATE intraday_predictions 
+                SET position = ?, entry_price = ?, close_price = ?, return_pct = ?, 
+                    close_kospi = ?, result = ?
+                WHERE id = ?
+            `).run(position, entryPrice, closePrice, returnPct, todayK200.close, result, row.id)
+
+            console.log(`[MCA-Tracker] 장중 ${row.time_slot}: ${position} entry=${entryPrice} close=${closePrice} return=${returnPct.toFixed(2)}% → ${result}`)
+            evaluated++
+        }
+        
+        if (evaluated > 0) {
+            console.log(`[MCA-Tracker] 장중 예측 ${evaluated}건 평가 완료`)
+            eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, null)
+        }
     }
 }

@@ -539,6 +539,11 @@ export class DatabaseService {
                 rationale TEXT,
                 sources_json TEXT,
                 indicators_json TEXT,
+                t1_target_return REAL,
+                t5_predict TEXT,
+                t5_target_return REAL,
+                t20_predict TEXT,
+                t20_target_return REAL,
                 entry_price REAL,
                 t1_peak REAL,
                 t1_final REAL,
@@ -567,12 +572,56 @@ export class DatabaseService {
             );
         `
 
+        const createAgentRetrospectivesTable = `
+            CREATE TABLE IF NOT EXISTS agent_retrospectives (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL, -- 'WEEKLY' | 'MONTHLY'
+                target_period TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(type, target_period)
+            );
+        `
+
         this.db.exec(createAgentPredictionsTable)
-        try {
-            this.db.exec("ALTER TABLE agent_predictions ADD COLUMN raw_context TEXT;");
-        } catch { } // Ignore if already exists
+        try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN raw_context TEXT;"); } catch { }
+        try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN t1_target_return REAL;"); } catch { }
+        try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN t5_predict TEXT;"); } catch { }
+        try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN t5_target_return REAL;"); } catch { }
+        try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN t20_predict TEXT;"); } catch { }
+        try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN t20_target_return REAL;"); } catch { }
 
         this.db.exec(createAgentRulesTable)
+        this.db.exec(createAgentRetrospectivesTable)
+
+        // V2 MCA: \uc7a5\uc911 \uc778\ud2b8\ub77c\ub370\uc774 \uc608\uce21 \ud14c\uc774\ube14
+        const createIntradayPredictionsTable = `
+            CREATE TABLE IF NOT EXISTS intraday_predictions (
+                id TEXT PRIMARY KEY,
+                date TEXT NOT NULL,
+                time_slot TEXT NOT NULL,
+                predict TEXT NOT NULL,
+                confidence INTEGER,
+                rationale TEXT,
+                entry_kospi REAL,
+                close_kospi REAL,
+                result TEXT,
+                position TEXT,
+                entry_price REAL,
+                close_price REAL,
+                return_pct REAL,
+                sources_json TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                UNIQUE(date, time_slot)
+            );
+        `
+        this.db.exec(createIntradayPredictionsTable)
+
+        // 기존 테이블에 새 컬럼 추가 (ALTER TABLE은 이미 존재하면 무시)
+        const intradayAlterColumns = ['position', 'entry_price', 'close_price', 'return_pct', 'sources_json']
+        for (const col of intradayAlterColumns) {
+            try { this.db.exec(`ALTER TABLE intraday_predictions ADD COLUMN ${col} ${col === 'sources_json' || col === 'position' ? 'TEXT' : 'REAL'}`) } catch {}
+        }
 
         // Phase 2: Portfolio State Machine
         const createMaiisPortfolioTable = `

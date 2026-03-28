@@ -55,6 +55,11 @@ import('./services/SkillsService').then(({ SkillsService }) => {
     SkillsService.getInstance().initSnapshots()
 }).catch(console.error)
 
+// 실시간 트래커 백그라운드 구동 보장
+import('./services/v2_agents/PerformanceTracker').then(({ PerformanceTracker }) => {
+    PerformanceTracker.getInstance()
+}).catch(console.error)
+
 // Global Error Handling
 process.on('uncaughtException', (error) => {
     console.error('CRITICAL: Uncaught Exception:', error);
@@ -151,6 +156,13 @@ function createWindow() {
 
     // Forward Market Agent Performance Updated
     eventBus.on('MARKET_AGENT_PERFORMANCE_UPDATED' as any, (data) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('MARKET_AGENT_PERFORMANCE_UPDATED', data)
+        }
+    })
+
+    // Forward Intraday Prediction Updated to trigger UI refresh
+    eventBus.on('INTRADAY_PREDICTION_UPDATED' as any, (data) => {
         if (win && !win.isDestroyed()) {
             win.webContents.send('MARKET_AGENT_PERFORMANCE_UPDATED', data)
         }
@@ -462,6 +474,20 @@ ipcMain.handle('agent:market:settings:save', async (_event, settings) => {
     return { success: true }
 })
 
+// V2 Co-Pilot IPC
+ipcMain.on('copilot:chat', async (event, data: { message: string, mode: 'auto'|'short'|'detail' }) => {
+    const { message, mode } = data;
+    try {
+        const { CoPilotAgent } = await import('./services/v2_agents/CoPilotAgent')
+        await CoPilotAgent.getInstance().chat(message, mode, (text, isDone) => {
+            event.reply('copilot:reply', { text, isDone })
+        })
+    } catch (error: any) {
+        console.error(`[CoPilot] chat error:`, error)
+        event.reply('copilot:reply', { text: `⚠️ 에러가 발생했습니다: ${error.message}\nGemini API 키가 올바른지 확인해 주세요.`, isDone: true })
+    }
+})
+
 ipcMain.handle('agent:market:run', async (_event, cycle: 'A' | 'B') => {
     try {
         const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
@@ -517,6 +543,63 @@ ipcMain.handle('agent:market:rules', async () => {
         return { success: false, error: error.message }
     }
 })
+
+ipcMain.handle('agent:market:retrospectives:get', async (_event, type: 'WEEKLY' | 'MONTHLY', limit?: number) => {
+    try {
+        const { MarketReviewAgent } = await import('./services/v2_agents/MarketReviewAgent')
+        return { success: true, data: MarketReviewAgent.getInstance().getRetrospectives(type, limit) }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:market:retrospectives:run', async (_event, type: 'WEEKLY' | 'MONTHLY') => {
+    try {
+        const { MarketReviewAgent } = await import('./services/v2_agents/MarketReviewAgent')
+        const data = type === 'WEEKLY' 
+            ? await MarketReviewAgent.getInstance().runWeeklyReview() 
+            : await MarketReviewAgent.getInstance().runMonthlyReview()
+        return { success: true, data }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+// ═══ \uc7a5\uc911 \uc778\ud2b8\ub77c\ub370\uc774 \uc608\uce21 IPC ═══
+ipcMain.handle('agent:intraday:predictions', async () => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        return { success: true, data: MarketConditionAgent.getInstance().getIntradayPredictions() }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:intraday:run', async (_event, slot: '09:30' | '11:00' | '13:00') => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const result = await MarketConditionAgent.getInstance().runIntraday(slot)
+        return { success: true, data: result }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+// 수동 트래커 실행 (디버깅 & 즉시 성과 업데이트용 — 장전·마감 + 장중 모두 평가)
+ipcMain.handle('agent:tracker:run', async () => {
+    try {
+        const { PerformanceTracker } = await import('./services/v2_agents/PerformanceTracker')
+        const tracker = PerformanceTracker.getInstance()
+        await tracker.runDailyTracking()
+        await tracker.evaluateIntraday()
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+
+
 
 ipcMain.handle('maiis:get-portfolio-tracker', async () => {
     try {

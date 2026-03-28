@@ -13,7 +13,10 @@ const PIPELINES = [
     { id: 'PL-NewsKeyword', name: 'News Hot Keywords', description: '네이버 시황 메가 키워드 TOP 5 압축', status: 'failed', lastRun: '09:12:35', timeMs: 1250 },
     { id: 'PL-NewsFlow', name: 'Naver Market News', description: '네이버 증권 핵심 뉴스 (주요/해외) 수집', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
     { id: 'PL-NaverFlow', name: 'Sector/Theme Context', description: '네이버 증권 업종/테마 분석 및 주도주 태깅', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
-    { id: 'PL-Research', name: 'Naver Research (Top 3)', description: '최근 1주간 애널리스트 집중 산업 및 리포트 본문', status: 'idle', lastRun: '--:--:--', timeMs: 0 }
+    { id: 'PL-InvestorFlow', name: 'Intraday Investor Flow', description: '실시간 현선물 외인/기관 주체별 수급 (네이버 모바일)', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
+    { id: 'PL-Research', name: 'Naver Research (Top 3)', description: '최근 1주간 애널리스트 집중 산업 및 리포트 본문', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
+    { id: 'PL-NaverSearch', name: 'Dynamic Naver Search', description: '키워드 기반 맞춤형 동적 네이버 뉴스 검색 (테스트/디버깅용)', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
+    { id: 'PL-FinanceInfo', name: 'Naver Finance (coinfo)', description: '종목명 기반 재무제표 및 기업개요 (md_browse)', status: 'idle', lastRun: '--:--:--', timeMs: 0 }
 ];
 
 export default function PipelineMonitorTab() {
@@ -22,6 +25,7 @@ export default function PipelineMonitorTab() {
     const [isExecuting, setIsExecuting] = useState(false);
     const [pipelineResults, setPipelineResults] = useState<Record<string, any>>({});
     const [forceFetch, setForceFetch] = useState(false);
+    const [searchKeyword, setSearchKeyword] = useState<string>('');
 
     // YouTube 채널 관리 상태
     const [ytChannels, setYtChannels] = useState<any[]>([]);
@@ -78,7 +82,17 @@ export default function PipelineMonitorTab() {
         
         setIsExecuting(true);
         try {
-            const res = await window.electronAPI.runV2Pipeline(activePipeline.id, { forceFetch });
+            const options: any = { forceFetch };
+            if (activePipeline.id === 'PL-NaverSearch' || activePipeline.id === 'PL-FinanceInfo') {
+                if (!searchKeyword.trim()) {
+                    alert('검색 텍스트 필드에 테스트할 종목명/키워드를 입력하세요.');
+                    setIsExecuting(false);
+                    return;
+                }
+                options.keyword = searchKeyword.trim();
+            }
+
+            const res = await window.electronAPI.runV2Pipeline(activePipeline.id, options);
             if (res.success && res.data) {
                 setPipelineResults(prev => ({
                     ...prev,
@@ -165,6 +179,17 @@ export default function PipelineMonitorTab() {
                             </div>
                             
                             <div className="flex items-center gap-4">
+                                {(activePipeline.id === 'PL-NaverSearch' || activePipeline.id === 'PL-FinanceInfo') && (
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            type="text" 
+                                            value={searchKeyword}
+                                            onChange={(e) => setSearchKeyword(e.target.value)}
+                                            placeholder="검색어 (예: 삼성전자)" 
+                                            className="px-2 py-1 text-xs border border-muted-foreground/30 bg-background/50 rounded w-40 text-foreground focus:outline-none focus:border-primary"
+                                        />
+                                    </div>
+                                )}
                                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer hover:text-foreground">
                                     <input 
                                         type="checkbox" 

@@ -12,10 +12,12 @@
 
 import { V2PipelineManager } from '../v2_pipeline/V2PipelineManager'
 import { AiService } from '../AiService'
+import { AiExecutionQueue } from '../AiExecutionQueue'
 import { DatabaseService } from '../DatabaseService'
 import { eventBus, SystemEvent } from '../../utils/EventBus'
 import { AgentCycle, AgentPrediction, DataContext, ParsedDecision, PipelineSlot } from './types/AgentTypes'
 import { buildSystemPrompt, buildUserPrompt } from './prompts/market_condition'
+import { IntradaySwarmAgent } from './IntradaySwarmAgent'
 
 // ═══ 유연한 파이프라인 레지스트리 ═══
 // 새 파이프라인 추가 시 여기에 한 줄만 추가하면 자동 통합
@@ -80,9 +82,15 @@ export class MarketConditionAgent {
                 console.log(`[MCA] 누락 데이터: ${context.missing.join(', ')}`)
             }
 
-            // 3. AI 판단 요청
-            console.log('[MCA] Gemini 판단 요청 중...')
-            const rawResponse = await this.ai.askGemini(userPrompt, systemPrompt)
+            // 3. AI 판단 요청 (AiExecutionQueue 경유)
+            console.log('[MCA] Gemini 판단 요청 중 (큐 대기)...')
+            const rawResponse = await AiExecutionQueue.getInstance().enqueue({
+                agentId: 'MCA',
+                agentName: '시황 AI',
+                triggerType: 'CRON',
+                prompt: userPrompt,
+                systemInstruction: systemPrompt,
+            })
 
             // 4. 결과 파싱
             const decision = this.parseResponse(rawResponse)
@@ -122,6 +130,11 @@ export class MarketConditionAgent {
 
             // 6. 이벤트 발행 → UI 갱신
             eventBus.emit('MARKET_AGENT_PREDICTION_COMPLETE' as any, prediction)
+
+            // 비동기로 군집 AI의 댓글 작성 및 여론 생성 (agent_predictions 타겟)
+            IntradaySwarmAgent.getInstance().runSwarmCommentary(predId, decision.predict, decision.rationale, 'agent_predictions').catch(e => {
+                console.error('[MCA] 군집 댓글(Swarm Commentary) 생성 중 에러:', e.message);
+            });
 
             console.log(`[MCA] ═══ Cycle ${cycle} 완료 | ${decision.predict} (${(decision.confidence * 100).toFixed(0)}%) | ${Date.now() - startTime}ms ═══`)
             return prediction
@@ -187,13 +200,15 @@ export class MarketConditionAgent {
         // 최근 히스토리 로드 (최대 10건)
         const recentHistory = this.getRecentPredictions(10)
         
-        // 주간/월간 회고 로드 (오직 Cycle 'A' 판단 전용)
-        let weeklyReview, monthlyReview;
+        // 일간/주간/월간 회고 로드 (오직 Cycle 'A' 판단 전용)
+        let dailyReview, weeklyReview, monthlyReview;
         if (cycle === 'A') {
             try {
                 const { MarketReviewAgent } = await import('./MarketReviewAgent')
+                const dAll = MarketReviewAgent.getInstance().getRetrospectives('DAILY', 1)
                 const wAll = MarketReviewAgent.getInstance().getRetrospectives('WEEKLY', 1)
                 const mAll = MarketReviewAgent.getInstance().getRetrospectives('MONTHLY', 1)
+                if (dAll.length > 0) dailyReview = dAll[0]
                 if (wAll.length > 0) weeklyReview = wAll[0]
                 if (mAll.length > 0) monthlyReview = mAll[0]
             } catch (e) {
@@ -209,7 +224,21 @@ export class MarketConditionAgent {
             todayCycleA = recentHistory.find(h => h.id === aId)
         }
 
-        return { available, missing, cycle, activeRules, recentHistory, weeklyReview, monthlyReview, todayCycleA }
+        // 로컬 트래커 및 스웜 군집 투표 결과 (이슈 장부) 수집 추가
+        let trackerBriefingBlock = undefined;
+        try {
+            const { IssueLedgerDB } = await import('./IssueLedgerDB');
+            const activeIssues = IssueLedgerDB.getInstance().getActiveIssues();
+            if (activeIssues && activeIssues.length > 0) {
+                trackerBriefingBlock = activeIssues.map(i => 
+                    `- [${i.name}] (위험 지정: ${i.severity}, 진행: ${i.status})\n  * 현장 트래커 통보: ${i.summary}\n  * 현장 군집 투표 결과: ${i.swarmSummary || '투표 없음'}`
+                ).join('\n\n');
+            }
+        } catch(e) { 
+            console.error('[MCA] 현장 트래커(이슈 장부) 브리핑 로드 실패:', e); 
+        }
+
+        return { available, missing, cycle, activeRules, recentHistory, dailyReview, weeklyReview, monthlyReview, todayCycleA, trackerBriefingBlock }
     }
 
     /**
@@ -339,6 +368,28 @@ export class MarketConditionAgent {
         return list.length > 0 ? list[0] : null
     }
 
+    /**
+     * 특정 리포트(장전/장마감 혹은 장중)를 데이터베이스에서 완전 삭제합니다.
+     */
+    public deletePrediction(id: string, tableName: 'agent_predictions' | 'intraday_predictions' = 'agent_predictions'): boolean {
+        try {
+            const rawDb = (this.db as any).db;
+            if (tableName === 'agent_predictions') {
+                rawDb.prepare(`DELETE FROM agent_predictions WHERE id = ?`).run(id);
+                // 관련된 ui 이벤트 발행 (목록 갱신유도)
+                eventBus.emit('MARKET_CONDITION_COMPLETE' as any, null);
+            } else if (tableName === 'intraday_predictions') {
+                rawDb.prepare(`DELETE FROM intraday_predictions WHERE id = ?`).run(id);
+                eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, null);
+            }
+            console.log(`[MCA] 리포트 삭제 완료: ${tableName}의 ${id}`);
+            return true;
+        } catch (error: any) {
+            console.error(`[MCA] 리포트 삭제 실패 (${id}):`, error.message);
+            return false;
+        }
+    }
+
     public getStats(): { total: number; wins: number; winRate: number; totalReturn: number } {
         try {
             const rawDb = (this.db as any).db
@@ -358,11 +409,11 @@ export class MarketConditionAgent {
     }
 
     /**
-     * 장중 인트라데이 예측 (09:30 / 11:00 / 13:00)
+     * 장중 인트라데이 예측 (하이브리드 모드: 09:30 / 13:00)
      * - '(오늘 종가 방향)' 을 UP/HOLD/DOWN 으로 판단
      * - 실제 평가는 15:35 PerformanceTracker가 종가 데이터로 콜
      */
-    public async runIntraday(slot: '09:30' | '11:00' | '13:00') {
+    public async runIntraday(slot: '09:30' | '13:00') {
         const startTime = Date.now()
         const now = new Date()
         const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -386,8 +437,6 @@ export class MarketConditionAgent {
             let timeContext = '';
             if (slot === '09:30') {
                 timeContext = "시가 갭(Gap) 발생 이후 외국인/기관의 초기 포지셔닝 방향과 아침 변동성(Volatility) 추세를 분석하여 오늘 장 전체의 방향을 예측하라.";
-            } else if (slot === '11:00') {
-                timeContext = "10시 30분 중국/홍콩 증시 개장 이후의 동조화(Coupling) 현황 및 아침 추세의 지속/반전 여부를 판단하라.";
             } else if (slot === '13:00') {
                 timeContext = "오후장 진입 시점의 외국인 선물 매매 누적 동향, 프로그램 매매 추이, 그리고 추세 반전(Reversal) 가능성을 엄격히 판별하여 최종 종가가 상승마감일지 하락마감일지 예측하라.";
             }
@@ -414,7 +463,13 @@ ${timeContext}
   "rationale": "최종 진입 방향에 대한 결과적인 근거 요약"
 }`
 
-            const rawResponse = await this.ai.askGemini(userPrompt, systemPrompt)
+            const rawResponse = await AiExecutionQueue.getInstance().enqueue({
+                agentId: 'MCA_INTRA',
+                agentName: '시황 AI (하이브리드 장중)',
+                triggerType: 'CRON',
+                prompt: userPrompt,
+                systemInstruction: systemPrompt,
+            })
             const jsonMatch = rawResponse.match(/\{[\s\S]*?\}/)
             if (!jsonMatch) throw new Error('JSON 파싱 실패: ' + rawResponse.substring(0, 100))
 
@@ -442,6 +497,12 @@ ${timeContext}
             eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, result)
 
             console.log(`[MCA-Intraday] ${slot} 완료: ${predict} (${confidence}%) | ${Date.now() - startTime}ms`)
+
+            // 5. 비동기 군집 댓글 (Asynchronous Swarm Commentary) 트리거 - 백그라운드 구동
+            IntradaySwarmAgent.getInstance().runSwarmCommentary(predId, predict, assembledRationale).catch(e => {
+                console.error('[MCA-Intraday] 댓글 작성기 비동기 호출 에러:', e.message);
+            });
+
             return result
 
         } catch (error: any) {

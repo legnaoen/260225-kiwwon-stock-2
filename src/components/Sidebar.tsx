@@ -18,6 +18,7 @@ export const menuItems = [
     { id: 'watchlist', name: '관심종목', icon: ListOrdered },
     */
     { id: 'market-agent', name: '시황 AI', icon: Sparkles },
+    { id: 'issue-agent', name: '이슈 AI', icon: Brain },
     { id: 'rising-stocks', name: '급등주', icon: TrendingUp },
     { id: 'narrative-insight', name: '내러티브', icon: Brain },
     /* [V1 Legacy]

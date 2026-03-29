@@ -39,9 +39,11 @@ export interface DataContext {
     cycle: AgentCycle
     activeRules: string[]
     recentHistory: AgentPrediction[]
+    dailyReview?: AgentRetrospective
     weeklyReview?: AgentRetrospective
     monthlyReview?: AgentRetrospective
     todayCycleA?: AgentPrediction
+    trackerBriefingBlock?: string
 }
 
 export interface ParsedDecision {

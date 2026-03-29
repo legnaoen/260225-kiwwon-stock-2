@@ -1,4 +1,5 @@
 import { AiService } from '../AiService'
+import { AiExecutionQueue } from '../AiExecutionQueue'
 import { V2PipelineManager } from '../v2_pipeline/V2PipelineManager'
 
 interface ChatMessage {
@@ -98,8 +99,15 @@ export class CoPilotAgent {
             let currentPrompt = await this.buildPrompt(message);
             const sysInst = this.getSystemInstruction(mode);
             
-            console.log(`[CoPilotAgent] Gemini 판단 요청... (mode: ${mode})`);
-            let responseText = await this.ai.askGemini(currentPrompt, sysInst);
+            console.log(`[CoPilotAgent] 로컬 AI 판단 요청... (mode: ${mode})`);
+            let responseText = await AiExecutionQueue.getInstance().enqueue({
+                agentId: 'COPILOT',
+                agentName: '코파일럿',
+                triggerType: 'CHAT',
+                targetType: 'local',
+                prompt: currentPrompt,
+                systemInstruction: sysInst,
+            });
 
             // ==== [Intercept Dynamic Tool Calling] ====
             const trimmed = responseText.trim();
@@ -137,14 +145,21 @@ export class CoPilotAgent {
                 
                 const toolResponse = `[시스템 도구 실행 결과: ${plId}${customKeyword ? ` - ${customKeyword}` : ''}]\n${toolMarkdown}\n\n사령관은 처음에 너에게 물었다: "${message}"\n위 최신 데이터를 바탕으로 사령관이 방금 한 질문에 완벽하게 대답하십시오.`;
                 
-                console.log(`[CoPilotAgent] Tool 데이터 입수 완료. Gemini 재요청...`);
+                console.log(`[CoPilotAgent] Tool 데이터 입수 완료. 로컬 AI 재요청...`);
                 // 내역에 주입
                 this.history.push({ role: 'model', text: `(속마음: 최신 데이터를 가져오기 위해 '${plId}' 도구를 호출했다)` });
                 this.history.push({ role: 'user', text: `시스템 메세지: \n${toolResponse}` });
                 
                 // 다시 프롬프트 빌드 (재요청)
                 currentPrompt = await this.buildPrompt(`방금 시스템이 가져온 [${plId}]${customKeyword ? `('${customKeyword}' 검색결과)` : ''} 데이터를 바탕으로, 내가 처음에 물어본 "${message}" 에 대해 분석과 답변을 진행해 줘.`);
-                responseText = await this.ai.askGemini(currentPrompt, sysInst);
+                responseText = await AiExecutionQueue.getInstance().enqueue({
+                    agentId: 'COPILOT',
+                    agentName: '코파일럿 (Tool 후속)',
+                    triggerType: 'CHAT',
+                    targetType: 'local',
+                    prompt: currentPrompt,
+                    systemInstruction: sysInst,
+                });
             }
             // ==================================
 

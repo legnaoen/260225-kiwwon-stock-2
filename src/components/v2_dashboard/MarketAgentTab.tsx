@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { Brain, X, ShieldAlert, Sparkles, Clock, Target, ArrowUpRight, ArrowDownRight, Minus, Activity, ChevronRight, Search, Settings } from 'lucide-react'
+import { Brain, X, ShieldAlert, Sparkles, Clock, Target, ArrowUpRight, ArrowDownRight, Minus, Activity, ChevronRight, Search, Settings, Trash2 } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import ReactMarkdown from 'react-markdown'
@@ -150,15 +150,16 @@ export default function MarketAgentTab() {
     const [telegramEnabled, setTelegramEnabled] = useState(true)
     const [layout, setLayout] = useState<Layout>(loadLayout)
     const [chartRedraw, setChartRedraw] = useState(0)
-    const [knowledgeTab, setKnowledgeTab] = useState<'RULES'|'WEEKLY'|'MONTHLY'>('RULES')
+    const [knowledgeTab, setKnowledgeTab] = useState<'RULES'|'DAILY'|'WEEKLY'|'MONTHLY'>('RULES')
     const [retrospectives, setRetrospectives] = useState<any[]>([])
     const [isRetroRunning, setIsRetroRunning] = useState(false)
     const [autoWeeklyReview, setAutoWeeklyReview] = useState(true)
     const [autoMonthlyReview, setAutoMonthlyReview] = useState(true)
+    const [returnView, setReturnView] = useState<'T+1' | 'T+5' | 'T+20'>('T+1')
 
     const topRef = useRef<HTMLDivElement>(null)
 
-    const loadRetrospectives = useCallback(async (type: 'WEEKLY'|'MONTHLY') => {
+    const loadRetrospectives = useCallback(async (type: 'DAILY'|'WEEKLY'|'MONTHLY') => {
         try {
             const res = await window.electronAPI.getMarketRetrospectives(type, 10)
             if (res.success && res.data) setRetrospectives(res.data)
@@ -169,13 +170,13 @@ export default function MarketAgentTab() {
 
     useEffect(() => {
         if (showKnowledgeBase) {
-            if (knowledgeTab === 'WEEKLY' || knowledgeTab === 'MONTHLY') {
+            if (knowledgeTab === 'DAILY' || knowledgeTab === 'WEEKLY' || knowledgeTab === 'MONTHLY') {
                 loadRetrospectives(knowledgeTab)
             }
         }
     }, [showKnowledgeBase, knowledgeTab, loadRetrospectives])
 
-    const handleRunRetrospective = async (type: 'WEEKLY'|'MONTHLY') => {
+    const handleRunRetrospective = async (type: 'DAILY'|'WEEKLY'|'MONTHLY') => {
         setIsRetroRunning(true)
         try {
             await window.electronAPI.runMarketRetrospective(type)
@@ -185,6 +186,22 @@ export default function MarketAgentTab() {
         }
     }
 
+    const handleDeletePrediction = async (id: string, tableName: 'agent_predictions' | 'intraday_predictions') => {
+        if (window.confirm(`이 리포트(${id})를 정말 삭제하시겠습니까?\n삭제 시 복구할 수 없습니다.`)) {
+            try {
+                const result = await window.electronAPI.deleteMarketPrediction(id, tableName);
+                if (result.success) {
+                    if (tableName === 'agent_predictions') setSelectedTrade(null);
+                    if (tableName === 'intraday_predictions') setSelectedIntraday(null);
+                    fetchData();
+                } else {
+                    alert(`삭제 실패: ${result.error}`);
+                }
+            } catch (err: any) {
+                alert(`삭제 중 오류 발생: ${err.message}`);
+            }
+        }
+    }
 
     // Save layout on change (debounced via ref)
     const saveTimer = useRef<any>(null)
@@ -429,7 +446,25 @@ export default function MarketAgentTab() {
                             ⚡ 장중 타이밍
                         </button>
                     </div>
-                    <span className="text-xs text-muted-foreground opacity-60">Click row for details</span>
+                    <div className="flex items-center gap-3">
+                        {decisionTab === 'classic' && (
+                            <div className="flex bg-muted/30 rounded p-0.5" title="표시 주기 선택">
+                                {['T+1', 'T+5', 'T+20'].map(opt => (
+                                    <button
+                                        key={opt}
+                                        onClick={() => setReturnView(opt as any)}
+                                        className={cn(
+                                            "px-2.5 py-1 text-[10px] font-bold rounded transition-colors",
+                                            returnView === opt ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >
+                                        {opt}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <span className="text-xs text-muted-foreground opacity-60">Click row for details</span>
+                    </div>
                 </div>
                 <div className="flex-1 overflow-auto px-4">
                     {decisionTab === 'classic' ? (
@@ -439,12 +474,9 @@ export default function MarketAgentTab() {
                                 <th className="py-2 pr-4 font-bold">Date</th>
                                 <th className="py-2 pr-4 font-bold text-center w-16">Cycle</th>
                                 <th className="py-2 pr-4 font-bold">Position</th>
-                                <th className="py-2 pr-4 font-bold text-right">T+1 Peak</th>
-                                <th className="py-2 pr-4 font-bold text-right">T+1</th>
-                                <th className="py-2 pr-4 font-bold text-right">T+5 Peak</th>
-                                <th className="py-2 pr-4 font-bold text-right">T+5</th>
-                                <th className="py-2 pr-4 font-bold text-right">T+20 Peak</th>
-                                <th className="py-2 pr-4 font-bold text-right">T+20</th>
+                                <th className="py-2 pr-4 font-bold text-right">{returnView} Peak</th>
+                                <th className="py-2 pr-4 font-bold text-right">{returnView}</th>
+                                <th className="py-2 pr-4 font-bold">Swarm Sentiment</th>
                                 <th className="py-2 font-bold">Indicators</th>
                                 <th className="py-2 w-8"></th>
                             </tr>
@@ -460,24 +492,32 @@ export default function MarketAgentTab() {
                                         </span>
                                     </td>
                                     <td className="py-2 pr-4 font-mono text-right opacity-60">
-                                        {t.t1_peak === null ? '-' : `${t.t1_peak > 0 ? '+' : ''}${t.t1_peak?.toFixed(1)}%`}
+                                        {returnView === 'T+1' && (t.t1_peak === null ? '-' : `${t.t1_peak > 0 ? '+' : ''}${t.t1_peak?.toFixed(1)}%`)}
+                                        {returnView === 'T+5' && (t.t5_peak === null ? '-' : `${t.t5_peak > 0 ? '+' : ''}${t.t5_peak?.toFixed(1)}%`)}
+                                        {returnView === 'T+20' && (t.t20_peak === null ? '-' : `${t.t20_peak > 0 ? '+' : ''}${t.t20_peak?.toFixed(1)}%`)}
                                     </td>
                                     <td className="py-2 pr-4 font-mono text-right font-bold">
-                                        {t.t1_final === null ? <span className="text-xs text-indigo-400 animate-pulse">⏳</span> : (
-                                            <span className={t.t1_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t1_final > 0 ? '+' : ''}{t.t1_final?.toFixed(2)}%</span>
-                                        )}
+                                        {returnView === 'T+1' && (t.t1_final === null ? <span className="text-xs text-indigo-400 animate-pulse">⏳</span> : <span className={t.t1_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t1_final > 0 ? '+' : ''}{t.t1_final?.toFixed(2)}%</span>)}
+                                        {returnView === 'T+5' && (t.t5_final === null ? '-' : <span className={t.t5_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t5_final > 0 ? '+' : ''}{t.t5_final?.toFixed(2)}%</span>)}
+                                        {returnView === 'T+20' && (t.t20_final === null ? '-' : <span className={t.t20_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t20_final > 0 ? '+' : ''}{t.t20_final?.toFixed(2)}%</span>)}
                                     </td>
-                                    <td className="py-2 pr-4 font-mono text-right opacity-60">
-                                        {t.t5_peak === null ? '-' : `${t.t5_peak > 0 ? '+' : ''}${t.t5_peak?.toFixed(1)}%`}
-                                    </td>
-                                    <td className="py-2 pr-4 font-mono text-right font-bold">
-                                        {t.t5_final === null ? '-' : <span className={t.t5_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t5_final > 0 ? '+' : ''}{t.t5_final?.toFixed(1)}%</span>}
-                                    </td>
-                                    <td className="py-2 pr-4 font-mono text-right opacity-60">
-                                        {t.t20_peak === null ? '-' : `${t.t20_peak > 0 ? '+' : ''}${t.t20_peak?.toFixed(1)}%`}
-                                    </td>
-                                    <td className="py-2 pr-4 font-mono text-right font-bold">
-                                        {t.t20_final === null ? '-' : <span className={t.t20_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t20_final > 0 ? '+' : ''}{t.t20_final?.toFixed(1)}%</span>}
+                                    <td className="py-2 pr-4">
+                                        {t.swarm_sentiment ? (
+                                            <div className="flex items-center gap-1.5">
+                                                <span className={cn("text-[10px] uppercase font-bold px-1.5 py-0.5 rounded", 
+                                                    t.swarm_sentiment.includes('UP') ? "bg-rose-500/10 text-rose-500" :
+                                                    t.swarm_sentiment.includes('DOWN') ? "bg-blue-500/10 text-blue-500" : "bg-muted/30 text-muted-foreground"
+                                                )}>
+                                                    {t.swarm_sentiment.split(' ')[0]}
+                                                </span>
+                                                <span className="text-xs text-muted-foreground opacity-80">{t.swarm_sentiment.split(' ')[1]}</span>
+                                                
+                                                {/* 이견 충돌 경고 */}
+                                                {((t.predict === 'LONG' && t.swarm_sentiment.includes('DOWN')) || (t.predict === 'SHORT' && t.swarm_sentiment.includes('UP'))) && (
+                                                    <span className="text-amber-500 ml-1" title="메인 AI와 군집의 예측이 엇갈렸습니다."><ShieldAlert className="w-3.5 h-3.5" /></span>
+                                                )}
+                                            </div>
+                                        ) : <span className="text-xs text-muted-foreground opacity-50">-</span>}
                                     </td>
                                     <td className="py-2">
                                         <div className="flex gap-1 overflow-hidden" style={{ maxWidth: 150 }}>
@@ -502,6 +542,7 @@ export default function MarketAgentTab() {
                                 <th className="py-2 pr-4 font-bold">Date</th>
                                 <th className="py-2 pr-4 font-bold text-center">Time</th>
                                 <th className="py-2 pr-4 font-bold">Position</th>
+                                <th className="py-2 pr-4 font-bold">Swarm Sentiment</th>
                                 <th className="py-2 pr-4 font-bold text-right">Entry Price</th>
                                 <th className="py-2 pr-4 font-bold text-right">Return</th>
                                 <th className="py-2 pr-4 font-bold text-center">Result</th>
@@ -537,6 +578,24 @@ export default function MarketAgentTab() {
                                                 {posIcon} {posLabel}
                                             </span>
                                         </td>
+                                        <td className="py-2 pr-4">
+                                            {row.swarm_sentiment ? (
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className={cn("text-[10px] uppercase font-bold px-1.5 py-0.5 rounded", 
+                                                        row.swarm_sentiment.includes('UP') ? "bg-rose-500/10 text-rose-500" :
+                                                        row.swarm_sentiment.includes('DOWN') ? "bg-blue-500/10 text-blue-500" : "bg-muted/30 text-muted-foreground"
+                                                    )}>
+                                                        {row.swarm_sentiment.split(' ')[0]}
+                                                    </span>
+                                                    <span className="text-xs text-muted-foreground opacity-80">{row.swarm_sentiment.split(' ')[1]}</span>
+                                                    
+                                                    {/* 이견 충돌 경고 아이콘 */}
+                                                    {row.predict && row.swarm_sentiment && row.predict !== row.swarm_sentiment.split(' ')[0] && row.swarm_sentiment.split(' ')[0] !== 'HOLD' && (
+                                                        <span className="text-amber-500 ml-1" title="메인 AI와 군집의 예측이 엇갈렸습니다."><ShieldAlert className="w-3.5 h-3.5" /></span>
+                                                    )}
+                                                </div>
+                                            ) : <span className="text-xs text-muted-foreground opacity-50">진행중...</span>}
+                                        </td>
                                         <td className="py-2 pr-4 font-mono text-right text-muted-foreground">{row.entry_price ? row.entry_price.toLocaleString() : '-'}</td>
                                         <td className={cn("py-2 pr-4 font-mono text-right font-bold", returnVal > 0 ? "text-rose-500" : returnVal < 0 ? "text-blue-500" : "")}>
                                             {returnVal != null ? `${returnVal > 0 ? '+' : ''}${Number(returnVal).toFixed(2)}%` : '⏳'}
@@ -564,7 +623,12 @@ export default function MarketAgentTab() {
                                 <span className="text-sm font-bold">Trade Intel</span>
                                 <span className="text-xs text-muted-foreground px-2 py-0.5 bg-background rounded border border-border/50">{selectedTrade.date} · {selectedTrade.id}</span>
                             </div>
-                            <button onClick={() => setSelectedTrade(null)} className="p-1 hover:bg-muted rounded text-muted-foreground"><X className="w-4 h-4" /></button>
+                            <div className="flex items-center gap-1">
+                                <button onClick={() => handleDeletePrediction(selectedTrade.id, 'agent_predictions')} className="p-1 hover:bg-rose-500/10 hover:text-rose-500 rounded text-muted-foreground transition-colors" title="리포트 삭제">
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => setSelectedTrade(null)} className="p-1 hover:bg-muted rounded text-muted-foreground transition-colors"><X className="w-4 h-4" /></button>
+                            </div>
                         </div>
                         <div className="p-5 overflow-y-auto space-y-4">
                             <div className="flex gap-4 p-3 bg-muted/20 rounded-lg border border-border/40 text-sm">
@@ -581,13 +645,76 @@ export default function MarketAgentTab() {
                                 {selectedTrade.t5_final !== null && (<><div className="w-px bg-border/40" /><div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">T+5</div><div className="font-mono"><span className="opacity-50">{selectedTrade.t5_peak > 0 ? '+' : ''}{Number(selectedTrade.t5_peak).toFixed(2)}%</span> / <span className="font-bold">{selectedTrade.t5_final > 0 ? '+' : ''}{Number(selectedTrade.t5_final).toFixed(2)}%</span></div></div></>)}
                                 {selectedTrade.t20_final !== null && (<><div className="w-px bg-border/40" /><div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">T+20</div><div className="font-mono"><span className="opacity-50">{selectedTrade.t20_peak > 0 ? '+' : ''}{Number(selectedTrade.t20_peak).toFixed(2)}%</span> / <span className="font-bold">{selectedTrade.t20_final > 0 ? '+' : ''}{Number(selectedTrade.t20_final).toFixed(2)}%</span></div></div></>)}
                             </div>
-                            <div>
-                                <div className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5"><Brain className="w-3.5 h-3.5" /> Rationale</div>
+
+                            {/* Quick Anchor Tabs */}
+                            <div className="flex items-center gap-2 border-b border-border/40 pb-3">
+                                <button onClick={() => document.getElementById('trade-rationale')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">🧠 메인 AI 분석</button>
+                                {selectedTrade.comments_json && <button onClick={() => document.getElementById('trade-swarm')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">👥 군집 AI 의견</button>}
+                                <button onClick={() => document.getElementById('trade-source')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">📊 소스 데이터</button>
+                            </div>
+                            <div id="trade-rationale" className="scroll-mt-4">
+                                <div className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5"><Brain className="w-3.5 h-3.5" /> Main AI Rationale</div>
                                 <div className="p-3 bg-primary/5 border border-primary/10 rounded-lg text-sm text-foreground/90 leading-relaxed max-w-none prose prose-sm dark:prose-invert">
                                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedTrade.rationale}</ReactMarkdown>
                                 </div>
                             </div>
-                            <div>
+
+                            {selectedTrade.comments_json && (
+                            <div id="trade-swarm" className="scroll-mt-4 pt-4 border-t border-border/20">
+                                <div className="text-xs font-bold text-indigo-400 uppercase mb-2 flex items-center justify-between">
+                                    <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Swarm Local Sentiment</div>
+                                    {selectedTrade.swarm_sentiment && (
+                                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/30 rounded text-[10px] text-indigo-400">
+                                            종합: {selectedTrade.swarm_sentiment}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="space-y-2">
+                                    {(() => {
+                                        try {
+                                            const comments = JSON.parse(selectedTrade.comments_json);
+                                            return comments.map((c: any, i: number) => (
+                                                <div key={i} className="flex gap-3 p-3 bg-muted/10 border border-border/40 rounded-xl group/comment">
+                                                    <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-background border border-border/50 text-base shadow-sm">
+                                                        {c.name.includes('모멘텀') ? '🐂' : c.name.includes('역발상') ? '🐻' : c.name.includes('데이 퀀트') ? '📊' : c.name.includes('기관 딜러') ? '🏦' : '🤖'}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex justify-between items-start mb-1">
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <span className="text-xs font-bold text-foreground/80">{c.name}</span>
+                                                                <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold border", 
+                                                                    c.predict === 'UP' || c.predict === 'LONG' ? "text-rose-500 bg-rose-500/10 border-rose-500/20" :
+                                                                    c.predict === 'DOWN' || c.predict === 'SHORT' ? "text-blue-500 bg-blue-500/10 border-blue-500/20" : "text-slate-400 bg-slate-500/10 border-slate-500/20"
+                                                                )}>
+                                                                    {c.predict}
+                                                                </span>
+                                                            </div>
+                                                            {c.winRate !== null && c.winRate !== undefined && (
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span className={cn("text-[10px] font-mono", c.winRate >= 60 ? "text-amber-500 font-bold" : "text-muted-foreground opacity-60")}>
+                                                                        🎯 적중률 {c.winRate}%
+                                                                    </span>
+                                                                    {c.weight !== undefined && (
+                                                                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-muted/50 text-foreground/70 border border-border/40">
+                                                                            입김 {Number(c.weight).toFixed(1)}x
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="text-sm text-foreground/80 leading-relaxed bg-muted/40 p-3 rounded-lg rounded-tl-none border border-transparent group-hover/comment:border-border/40 transition-colors">
+                                                            {c.comment}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ));
+                                        } catch { return <div className="text-xs text-muted-foreground opacity-50 p-2">댓글 파싱 오류 발생</div> }
+                                    })()}
+                                </div>
+                            </div>
+                            )}
+
+                            <div id="trade-source" className="scroll-mt-4 pt-4 border-t border-border/20">
                                 <div className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Source Data Summaries</div>
                                 <div className="p-3 bg-[#0d0d0d] border border-black/50 rounded-lg font-mono text-xs text-gray-400 space-y-1 mb-3">
                                     {(()=>{
@@ -632,7 +759,12 @@ export default function MarketAgentTab() {
                                 <span className="text-sm font-bold">장중 예측 상세</span>
                                 <span className="text-xs text-muted-foreground px-2 py-0.5 bg-background rounded border border-border/50">{selectedIntraday.date} · {selectedIntraday.time_slot}</span>
                             </div>
-                            <button onClick={() => setSelectedIntraday(null)} className="p-1 hover:bg-muted rounded text-muted-foreground"><X className="w-4 h-4" /></button>
+                            <div className="flex items-center gap-1">
+                                <button onClick={() => handleDeletePrediction(selectedIntraday.id, 'intraday_predictions')} className="p-1 hover:bg-rose-500/10 hover:text-rose-500 rounded text-muted-foreground transition-colors" title="리포트 삭제">
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => setSelectedIntraday(null)} className="p-1 hover:bg-muted rounded text-muted-foreground transition-colors"><X className="w-4 h-4" /></button>
+                            </div>
                         </div>
                         <div className="p-5 overflow-y-auto space-y-4">
                             <div className="flex gap-4 p-3 bg-muted/20 rounded-lg border border-border/40 text-sm">
@@ -664,13 +796,76 @@ export default function MarketAgentTab() {
                                     </div>
                                 </div>
                             </div>
-                            <div>
-                                <div className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5"><Brain className="w-3.5 h-3.5" /> Rationale</div>
+
+                            {/* Quick Anchor Tabs */}
+                            <div className="flex items-center gap-2 border-b border-border/40 pb-3">
+                                <button onClick={() => document.getElementById('intraday-rationale')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">🧠 메인 AI 분석</button>
+                                {selectedIntraday.comments_json && <button onClick={() => document.getElementById('intraday-swarm')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">👥 군집 AI 의견</button>}
+                                <button onClick={() => document.getElementById('intraday-source')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">📊 소스 데이터</button>
+                            </div>
+                            <div id="intraday-rationale" className="scroll-mt-4">
+                                <div className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5"><Brain className="w-3.5 h-3.5" /> Main AI Rationale</div>
                                 <div className="p-3 bg-primary/5 border border-primary/10 rounded-lg text-sm text-foreground/90 leading-relaxed max-w-none prose prose-sm dark:prose-invert">
                                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedIntraday.rationale || '분석 내용 없음'}</ReactMarkdown>
                                 </div>
                             </div>
-                            <div>
+
+                            {selectedIntraday.comments_json && (
+                            <div id="intraday-swarm" className="scroll-mt-4 pt-4 border-t border-border/20">
+                                <div className="text-xs font-bold text-indigo-400 uppercase mb-2 flex items-center justify-between">
+                                    <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Swarm Local Sentiment</div>
+                                    {selectedIntraday.swarm_sentiment && (
+                                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/30 rounded text-[10px] text-indigo-400">
+                                            종합: {selectedIntraday.swarm_sentiment}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex flex-col w-full">
+                                    {(() => {
+                                        try {
+                                            const comments = JSON.parse(selectedIntraday.comments_json);
+                                            return comments.map((c: any, index: number) => (
+                                                <div key={index} className={cn("flex gap-3 py-4 px-2 group/comment hover:bg-muted/10 transition-colors", index > 0 && "border-t border-border/40")}>
+                                                    <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-background border border-border/50 text-base shadow-sm">
+                                                        {c.name.includes('모멘텀') ? '🐂' : c.name.includes('역발상') ? '🐻' : c.name.includes('데이 퀀트') ? '📊' : c.name.includes('기관 딜러') ? '🏦' : '🤖'}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex justify-between items-start mb-1">
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <span className="text-xs font-bold text-foreground/80">{c.name}</span>
+                                                                <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold border", 
+                                                                    c.predict === 'UP' || c.predict === 'LONG' ? "text-rose-500 bg-rose-500/10 border-rose-500/20" :
+                                                                    c.predict === 'DOWN' || c.predict === 'SHORT' ? "text-blue-500 bg-blue-500/10 border-blue-500/20" : "text-slate-400 bg-slate-500/10 border-slate-500/20"
+                                                                )}>
+                                                                    {c.predict}
+                                                                </span>
+                                                            </div>
+                                                            {c.winRate !== null && c.winRate !== undefined && (
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span className={cn("text-[10px] font-mono", c.winRate >= 60 ? "text-amber-500 font-bold" : "text-muted-foreground opacity-60")}>
+                                                                        🎯 적중률 {c.winRate}%
+                                                                    </span>
+                                                                    {c.weight !== undefined && (
+                                                                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-muted/50 text-foreground/70 border border-border/40">
+                                                                            입김 {Number(c.weight).toFixed(1)}x
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="text-[13px] text-foreground/90 leading-relaxed mt-1.5 break-keep">
+                                                            {c.comment}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ));
+                                        } catch { return <div className="text-xs text-muted-foreground opacity-50 p-2">댓글 파싱 오류 발생</div> }
+                                    })()}
+                                </div>
+                            </div>
+                            )}
+
+                            <div id="intraday-source" className="scroll-mt-4 pt-4 border-t border-border/20">
                                 <div className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Source Data</div>
                                 <div className="p-3 bg-[#0d0d0d] border border-black/50 rounded-lg font-mono text-xs text-gray-400 space-y-1">
                                     {(() => {
@@ -700,6 +895,7 @@ export default function MarketAgentTab() {
                         </div>
                         <div className="flex bg-muted/20 border-b border-border/50">
                             <button onClick={() => setKnowledgeTab('RULES')} className={cn("flex-1 py-2 text-xs font-bold uppercase transition-colors", knowledgeTab === 'RULES' ? "text-indigo-400 border-b-2 border-indigo-500" : "text-muted-foreground hover:bg-muted/30")}>지표 & 룰</button>
+                            <button onClick={() => setKnowledgeTab('DAILY')} className={cn("flex-1 py-2 text-xs font-bold uppercase transition-colors", knowledgeTab === 'DAILY' ? "text-indigo-400 border-b-2 border-indigo-500" : "text-muted-foreground hover:bg-muted/30")}>일간 리캡</button>
                             <button onClick={() => setKnowledgeTab('WEEKLY')} className={cn("flex-1 py-2 text-xs font-bold uppercase transition-colors", knowledgeTab === 'WEEKLY' ? "text-indigo-400 border-b-2 border-indigo-500" : "text-muted-foreground hover:bg-muted/30")}>주간 리캡</button>
                             <button onClick={() => setKnowledgeTab('MONTHLY')} className={cn("flex-1 py-2 text-xs font-bold uppercase transition-colors", knowledgeTab === 'MONTHLY' ? "text-indigo-400 border-b-2 border-indigo-500" : "text-muted-foreground hover:bg-muted/30")}>월간 리캡</button>
                         </div>
@@ -754,30 +950,32 @@ export default function MarketAgentTab() {
                                     </section>
                                 </>
                             )}
-                            {(knowledgeTab === 'WEEKLY' || knowledgeTab === 'MONTHLY') && (
+                            {(knowledgeTab === 'DAILY' || knowledgeTab === 'WEEKLY' || knowledgeTab === 'MONTHLY') && (
                                 <div className="space-y-4">
                                     <div className="p-3 bg-muted/20 border border-border/40 rounded-lg flex flex-col gap-3">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-2">
                                                 <Clock className="w-4 h-4 text-indigo-400" />
-                                                <span className="text-sm font-bold">{knowledgeTab === 'WEEKLY' ? '주간' : '월간'} 회고 스케줄러</span>
+                                                <span className="text-sm font-bold">{knowledgeTab === 'DAILY' ? '일간' : knowledgeTab === 'WEEKLY' ? '주간' : '월간'} 회고 스케줄러</span>
                                             </div>
-                                            <label className="relative inline-flex items-center cursor-pointer">
-                                                <input type="checkbox" className="sr-only peer" checked={knowledgeTab === 'WEEKLY' ? autoWeeklyReview : autoMonthlyReview} onChange={async (e) => {
-                                                    const next = e.target.checked
-                                                    if (knowledgeTab === 'WEEKLY') {
-                                                        setAutoWeeklyReview(next)
-                                                        await window.electronAPI.saveMarketConditionSettings({ autoWeeklyReview: next })
-                                                    } else {
-                                                        setAutoMonthlyReview(next)
-                                                        await window.electronAPI.saveMarketConditionSettings({ autoMonthlyReview: next })
-                                                    }
-                                                }} />
-                                                <div className="w-7 h-4 bg-muted/50 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-500"></div>
-                                            </label>
+                                            {knowledgeTab !== 'DAILY' && (
+                                                <label className="relative inline-flex items-center cursor-pointer">
+                                                    <input type="checkbox" className="sr-only peer" checked={knowledgeTab === 'WEEKLY' ? autoWeeklyReview : autoMonthlyReview} onChange={async (e) => {
+                                                        const next = e.target.checked
+                                                        if (knowledgeTab === 'WEEKLY') {
+                                                            setAutoWeeklyReview(next)
+                                                            await window.electronAPI.saveMarketConditionSettings({ autoWeeklyReview: next })
+                                                        } else {
+                                                            setAutoMonthlyReview(next)
+                                                            await window.electronAPI.saveMarketConditionSettings({ autoMonthlyReview: next })
+                                                        }
+                                                    }} />
+                                                    <div className="w-7 h-4 bg-muted/50 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-500"></div>
+                                                </label>
+                                            )}
                                         </div>
                                         <div className="text-xs text-muted-foreground flex justify-between items-center border-t border-border/40 pt-2">
-                                            <span>실행: {knowledgeTab === 'WEEKLY' ? '매주 금요일 15:40' : '매월 마지막 금요일 15:50'}</span>
+                                            <span>실행: {knowledgeTab === 'DAILY' ? '매일 15:40' : knowledgeTab === 'WEEKLY' ? '매주 금요일 15:40' : '매월 마지막 금요일 15:50'}</span>
                                             <button disabled={isRetroRunning} onClick={() => handleRunRetrospective(knowledgeTab)} className="px-2 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded text-xs transition-colors disabled:opacity-50">
                                                 {isRetroRunning ? '생성 중...' : '지금 강제 실행'}
                                             </button>
@@ -786,7 +984,7 @@ export default function MarketAgentTab() {
                                     
                                     <div className="space-y-3">
                                         <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                                            <Target className="w-3.5 h-3.5" /> {knowledgeTab === 'WEEKLY' ? '주간' : '월간'} 리포트 목록
+                                            <Target className="w-3.5 h-3.5" /> {knowledgeTab === 'DAILY' ? '일간' : knowledgeTab === 'WEEKLY' ? '주간' : '월간'} 리포트 목록
                                         </div>
                                         {retrospectives.length === 0 ? (
                                             <div className="p-4 text-center text-xs text-muted-foreground border border-border/30 rounded-lg bg-muted/10">작성된 회고가 없습니다.</div>

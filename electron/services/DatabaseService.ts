@@ -590,11 +590,13 @@ export class DatabaseService {
         try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN t5_target_return REAL;"); } catch { }
         try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN t20_predict TEXT;"); } catch { }
         try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN t20_target_return REAL;"); } catch { }
+        try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN comments_json TEXT;"); } catch { }
+        try { this.db.exec("ALTER TABLE agent_predictions ADD COLUMN swarm_sentiment TEXT;"); } catch { }
 
         this.db.exec(createAgentRulesTable)
         this.db.exec(createAgentRetrospectivesTable)
 
-        // V2 MCA: \uc7a5\uc911 \uc778\ud2b8\ub77c\ub370\uc774 \uc608\uce21 \ud14c\uc774\ube14
+        // V2 MCA: 장중 인트라데이 예측 테이블
         const createIntradayPredictionsTable = `
             CREATE TABLE IF NOT EXISTS intraday_predictions (
                 id TEXT PRIMARY KEY,
@@ -617,10 +619,34 @@ export class DatabaseService {
         `
         this.db.exec(createIntradayPredictionsTable)
 
+        // Phase 2: Persona Performance (AI 댓글 적중률 채점용)
+        try {
+            const check = this.db.prepare("PRAGMA table_info(persona_performance)").all() as any[];
+            if (check.length > 0 && !check.find(c => c.name === 'time_slot')) {
+                console.log('[DatabaseService] Migrating persona_performance to add time_slot...');
+                this.db.exec("DROP TABLE persona_performance");
+            }
+        } catch (e) {}
+
+        const createPersonaPerformanceTable = `
+            CREATE TABLE IF NOT EXISTS persona_performance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                time_slot TEXT NOT NULL,
+                persona_id TEXT NOT NULL,
+                predict TEXT NOT NULL,
+                actual_result TEXT NOT NULL,
+                is_hit INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(date, time_slot, persona_id)
+            );
+        `
+        this.db.exec(createPersonaPerformanceTable)
+
         // 기존 테이블에 새 컬럼 추가 (ALTER TABLE은 이미 존재하면 무시)
-        const intradayAlterColumns = ['position', 'entry_price', 'close_price', 'return_pct', 'sources_json']
+        const intradayAlterColumns = ['position', 'entry_price', 'close_price', 'return_pct', 'sources_json', 'comments_json', 'swarm_sentiment']
         for (const col of intradayAlterColumns) {
-            try { this.db.exec(`ALTER TABLE intraday_predictions ADD COLUMN ${col} ${col === 'sources_json' || col === 'position' ? 'TEXT' : 'REAL'}`) } catch {}
+            try { this.db.exec(`ALTER TABLE intraday_predictions ADD COLUMN ${col} ${['sources_json', 'position', 'comments_json', 'swarm_sentiment'].includes(col) ? 'TEXT' : 'REAL'}`) } catch {}
         }
 
         // Phase 2: Portfolio State Machine

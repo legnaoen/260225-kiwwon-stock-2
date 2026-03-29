@@ -246,11 +246,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveMarketConditionSettings: (settings: any) => ipcRenderer.invoke('agent:market:settings:save', settings),
     runMarketConditionAgent: (cycle: 'A' | 'B') => ipcRenderer.invoke('agent:market:run', cycle),
     getMarketConditionHistory: (limit?: number) => ipcRenderer.invoke('agent:market:history', limit),
+    deleteMarketPrediction: (id: string, tableName?: 'agent_predictions' | 'intraday_predictions') => ipcRenderer.invoke('agent:market:delete', id, tableName),
     getMarketConditionLatest: () => ipcRenderer.invoke('agent:market:latest'),
     getMarketConditionStats: () => ipcRenderer.invoke('agent:market:stats'),
     getMarketConditionRules: () => ipcRenderer.invoke('agent:market:rules'),
-    getMarketRetrospectives: (type: 'WEEKLY' | 'MONTHLY', limit?: number) => ipcRenderer.invoke('agent:market:retrospectives:get', type, limit),
-    runMarketRetrospective: (type: 'WEEKLY' | 'MONTHLY') => ipcRenderer.invoke('agent:market:retrospectives:run', type),
+    getMarketRetrospectives: (type: 'DAILY' | 'WEEKLY' | 'MONTHLY', limit?: number) => ipcRenderer.invoke('agent:market:retrospectives:get', type, limit),
+    runMarketRetrospective: (type: 'DAILY' | 'WEEKLY' | 'MONTHLY') => ipcRenderer.invoke('agent:market:retrospectives:run', type),
     onMarketConditionComplete: (callback: (data: any) => void) => {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('MARKET_AGENT_PREDICTION_COMPLETE', listener)
@@ -266,6 +267,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runIntradayPrediction: (slot: '09:30' | '11:00' | '13:00') => ipcRenderer.invoke('agent:intraday:run', slot),
     runTracker: () => ipcRenderer.invoke('agent:tracker:run'),
 
+    // V2 이슈 관리 (Macro/News) Agent
+    getActiveIssues: () => ipcRenderer.invoke('agent:issues:active'),
+    getIssueTimeline: (issueId: string) => ipcRenderer.invoke('agent:issues:timeline', issueId),
+    resolveIssue: (issueId: string) => ipcRenderer.invoke('agent:issues:resolve', issueId),
+    runIssueAnalysis: () => ipcRenderer.invoke('agent:issues:run'),
+    getIssueBriefing: () => ipcRenderer.invoke('agent:issues:briefing'),
+
     // V2 Co-Pilot (HITL)
     sendCoPilotMessage: (message: string, mode: 'auto' | 'short' | 'detail' = 'auto') => ipcRenderer.send('copilot:chat', { message, mode }),
     onCoPilotReply: (callback: (data: {text: string, isDone: boolean}) => void) => {
@@ -273,6 +281,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('copilot:reply', listener)
         return () => ipcRenderer.removeListener('copilot:reply', listener)
     },
+
+    runIssueSwarm: (issueId: string, dummyData?: any) => ipcRenderer.invoke('agent:issues:run-swarm', issueId, dummyData),
+    getIssueSwarm: (issueId: string) => ipcRenderer.invoke('agent:issues:get-swarm', issueId),
+    deleteSwarmSession: (sessionId: string) => ipcRenderer.invoke('agent:issues:delete-swarm-session', sessionId),
+
+    // AI Orchestrator Dashboard
+    getAiQueueStatus: () => ipcRenderer.invoke('ai:get-queue-status'),
+    getAiExecutionLog: (limit: number = 50) => ipcRenderer.invoke('ai:get-execution-log', limit),
+    testLocalAi: (prompt: string) => ipcRenderer.invoke('ai:test-local-ai', prompt),
 
     onSystemError: (callback: (error: { message: string, code: string, time: string }) => void) => {
         const listener = (_event: any, error: any) => callback(error)

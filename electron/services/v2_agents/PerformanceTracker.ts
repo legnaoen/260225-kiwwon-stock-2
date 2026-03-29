@@ -339,6 +339,9 @@ export class PerformanceTracker {
                 WHERE id = ?
             `).run(position, entryPrice, closePrice, returnPct, result, row.id)
             evaluated++
+
+            // 페르소나 개별 성적 기록
+            this.trackPersonaPerformance(row, returnPct)
         }
 
         // Daily Predictions (장전 예측 Cycle A) 실시간 갱신 적용
@@ -451,11 +454,112 @@ export class PerformanceTracker {
 
             console.log(`[MCA-Tracker] 장중 ${row.time_slot}: ${position} entry=${entryPrice} close=${closePrice} return=${returnPct.toFixed(2)}% → ${result}`)
             evaluated++
+
+            // 페르소나 개별 성적 기록
+            this.trackPersonaPerformance(row, returnPct)
         }
         
         if (evaluated > 0) {
             console.log(`[MCA-Tracker] 장중 예측 ${evaluated}건 평가 완료`)
             eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, null)
         }
+    }
+
+    /**
+     * 메인 예측 평가 시점에 개별 페르소나의 댓글들도 모아서 채점.
+     * @param row intraday_predictions DB row
+     * @param masterReturnPct 선택된 포지션 KODEX의 최종 수익률
+     */
+    private trackPersonaPerformance(row: any, masterReturnPct: number) {
+        if (!row.comments_json) return;
+        
+        try {
+            const comments = JSON.parse(row.comments_json);
+            const rawDb = (this.db as any).db;
+            
+            for (const c of comments) {
+                if (!c.id || !c.predict) continue;
+
+                // 마스터가 UP 예측하여 KODEX 200 수익률이 returnPct이 된 경우:
+                // 페르소나가 동일하게 UP이면 수익률 그대로 사용, 반대면 역산 필요.
+                // 직관적으로 방향이 맞았는지(returnPct > 0인지)로 판별.
+                let pResult = 'HOLD';
+                let pIsHit = 0;
+
+                // 마스터 방향에 맞춘 수익률(masterReturnPct)을 이용해 현재 시장이 상승장인지 하락장인지 유추:
+                // row.predict === 'UP' -> 마스터가 매수함. masterReturnPct > 0 이면 주가 올랐음(UP Hit).
+                // row.predict === 'DOWN' -> 마스터가 인버스 매수함. masterReturnPct > 0 이면 주가 내렸음(DOWN Hit).
+                const marketWentUp = (row.predict === 'UP' && masterReturnPct > 0) || (row.predict === 'DOWN' && masterReturnPct < 0);
+                const marketWentDown = (row.predict === 'DOWN' && masterReturnPct > 0) || (row.predict === 'UP' && masterReturnPct < 0);
+
+                if (c.predict === 'UP') {
+                    pResult = marketWentUp ? 'HIT' : 'MISS';
+                    pIsHit = marketWentUp ? 1 : 0;
+                } else if (c.predict === 'DOWN') {
+                    pResult = marketWentDown ? 'HIT' : 'MISS';
+                    pIsHit = marketWentDown ? 1 : 0;
+                } else {
+                    // HOLD는 타율에서 제외하거나 중립
+                    pResult = 'HOLD';
+                    pIsHit = 0;
+                }
+
+                rawDb.prepare(`
+                    INSERT OR REPLACE INTO persona_performance 
+                    (date, time_slot, persona_id, predict, actual_result, is_hit, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+                `).run(row.date, row.time_slot, c.id, c.predict, pResult, pIsHit);
+            }
+        } catch (error: any) {
+            console.error('[MCA-Tracker] 페르소나 성적 업데이트 에러:', error.message);
+        }
+    }
+
+    /**
+     * Phase 3: 페르소나별 적중률 (입김/Weight) 추출
+     * 최근 N개의 예측 기록을 기반으로 각자 승률을 계산하여 가중치 맵 반환 (기본값 1.0)
+     */
+    public getPersonaWeights(): Record<string, { winRate: number, weight: number, hits: number, total: number }> {
+        const rawDb = (this.db as any).db;
+        const weights: Record<string, { winRate: number, weight: number, hits: number, total: number }> = {};
+        
+        try {
+            // 최근 30일(또는 30건)만 평가
+            const records = rawDb.prepare(`
+                SELECT persona_id, is_hit, predict
+                FROM persona_performance
+                WHERE date >= date('now', 'localtime', '-30 days')
+                AND predict != 'HOLD'
+            `).all() as any[];
+
+            const stats: Record<string, { hits: number, total: number }> = {};
+            for (const r of records) {
+                if (!stats[r.persona_id]) stats[r.persona_id] = { hits: 0, total: 0 };
+                stats[r.persona_id].total++;
+                if (r.is_hit === 1) stats[r.persona_id].hits++;
+            }
+
+            for (const personaId in stats) {
+                const total = stats[personaId].total;
+                const hits = stats[personaId].hits;
+                const winRate = total > 0 ? (hits / total) * 100 : 50;
+                
+                // 가중치(Weight) 공식: 50%를 1.0으로 기준.
+                // 70%면 1.4배의 입김 (또는 특정 배수 공식 적용 가능)
+                let weight = 1.0;
+                if (total >= 5) { // 최소 5건 이상이어야 신뢰도 부여
+                    weight = Math.max(0.5, winRate / 50.0);
+                }
+                
+                weights[personaId] = {
+                    winRate: Math.round(winRate),
+                    weight: Number(weight.toFixed(2)),
+                    hits,
+                    total
+                };
+            }
+        } catch(e) {}
+
+        return weights;
     }
 }

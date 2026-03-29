@@ -514,6 +514,16 @@ ipcMain.handle('agent:market:history', async (_event, limit: number = 30) => {
     }
 })
 
+ipcMain.handle('agent:market:delete', async (_event, id: string, tableName?: 'agent_predictions' | 'intraday_predictions') => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const result = MarketConditionAgent.getInstance().deletePrediction(id, tableName)
+        return { success: result }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
 ipcMain.handle('agent:market:latest', async () => {
     try {
         const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
@@ -544,7 +554,7 @@ ipcMain.handle('agent:market:rules', async () => {
     }
 })
 
-ipcMain.handle('agent:market:retrospectives:get', async (_event, type: 'WEEKLY' | 'MONTHLY', limit?: number) => {
+ipcMain.handle('agent:market:retrospectives:get', async (_event, type: 'DAILY' | 'WEEKLY' | 'MONTHLY', limit?: number) => {
     try {
         const { MarketReviewAgent } = await import('./services/v2_agents/MarketReviewAgent')
         return { success: true, data: MarketReviewAgent.getInstance().getRetrospectives(type, limit) }
@@ -553,12 +563,17 @@ ipcMain.handle('agent:market:retrospectives:get', async (_event, type: 'WEEKLY' 
     }
 })
 
-ipcMain.handle('agent:market:retrospectives:run', async (_event, type: 'WEEKLY' | 'MONTHLY') => {
+ipcMain.handle('agent:market:retrospectives:run', async (_event, type: 'DAILY' | 'WEEKLY' | 'MONTHLY') => {
     try {
         const { MarketReviewAgent } = await import('./services/v2_agents/MarketReviewAgent')
-        const data = type === 'WEEKLY' 
-            ? await MarketReviewAgent.getInstance().runWeeklyReview() 
-            : await MarketReviewAgent.getInstance().runMonthlyReview()
+        let data;
+        if (type === 'DAILY') {
+            data = await MarketReviewAgent.getInstance().runDailyReview()
+        } else if (type === 'WEEKLY') {
+            data = await MarketReviewAgent.getInstance().runWeeklyReview()
+        } else {
+            data = await MarketReviewAgent.getInstance().runMonthlyReview()
+        }
         return { success: true, data }
     } catch (error: any) {
         return { success: false, error: error.message }
@@ -598,7 +613,112 @@ ipcMain.handle('agent:tracker:run', async () => {
     }
 })
 
+// ═══ 이슈 관리 (Macro/News) Agent IPC ═══
+ipcMain.handle('agent:issues:active', async () => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        return { success: true, data: IssueLedgerDB.getInstance().getActiveIssues() }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
 
+ipcMain.handle('agent:issues:timeline', async (_event, issueId: string) => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        return { success: true, data: IssueLedgerDB.getInstance().getIssueTimeline(issueId) }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:issues:resolve', async (_event, issueId: string) => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        IssueLedgerDB.getInstance().resolveIssue(issueId)
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:issues:run', async () => {
+    try {
+        const { IssueManagementAgent } = await import('./services/v2_agents/IssueManagementAgent')
+        await IssueManagementAgent.getInstance().runDailyAnalysis()
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:issues:briefing', async () => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        const briefing = IssueLedgerDB.getInstance().getLatestBriefing()
+        return { success: true, data: briefing }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:issues:run-swarm', async (_event, issueId: string, dummyData?: any) => {
+    try {
+        const { SwarmSimulationAgent } = await import('./services/v2_agents/SwarmSimulationAgent')
+        const session = await SwarmSimulationAgent.getInstance().evaluateIssue(issueId, dummyData)
+        return { success: true, data: session }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:issues:get-swarm', async (_event, issueId: string) => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        const sessions = IssueLedgerDB.getInstance().getSwarmSessionsForIssue(issueId)
+        return { success: true, data: sessions }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:issues:delete-swarm-session', async (_event, sessionId: string) => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        IssueLedgerDB.getInstance().deleteSwarmSession(sessionId)
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+// ═══ AI Orchestrator Dashboard ═══
+ipcMain.handle('ai:get-queue-status', async () => {
+    const { AiExecutionQueue } = await import('./services/AiExecutionQueue')
+    return AiExecutionQueue.getInstance().getQueueStatus()
+})
+
+ipcMain.handle('ai:get-execution-log', async (_event, limit: number = 50) => {
+    const { AiExecutionQueue } = await import('./services/AiExecutionQueue')
+    return AiExecutionQueue.getInstance().getExecutionLog(limit)
+})
+
+ipcMain.handle('ai:test-local-ai', async (_event, prompt: string) => {
+    const { AiExecutionQueue } = await import('./services/AiExecutionQueue')
+    try {
+        const result = await AiExecutionQueue.getInstance().enqueue({
+            agentId: 'LOCAL_TEST',
+            agentName: '로컬 AI 테스터',
+            triggerType: 'MANUAL',
+            targetType: 'local',
+            prompt: prompt || '안녕! 너는 누구야? 10단어 이내로 한국어로 대답해 확인용.',
+            systemInstruction: '명령에 짧게 단답하는 테스트 봇이다.'
+        })
+        return { success: true, result }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
 
 
 ipcMain.handle('maiis:get-portfolio-tracker', async () => {

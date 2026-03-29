@@ -142,3 +142,29 @@ description: Instructions and guidelines for cleanly scaling the Kiwoom REST API
 ### 9.4. 장애 발생 시 회로 차단 (Circuit Breaker)
 *   **원칙**: 키움 서버와의 통신에서 `ETIMEDOUT` 등이 발생할 경우, 시스템은 즉시 모든 비필수적 배칭 및 스캔 작업을 **5분간 전면 중단(Halt)**합니다.
 *   **복구**: 일정 시간 대기 후 테스트 요청이 성공할 때만 자동화 프로세스를 재개합니다.
+
+### 9.5. AI Gemini 호출 큐 중계인 강제 (AI Execution Queue Policy)
+
+> [!IMPORTANT]
+> 모든 AI 에이전트(기존 & 신규)는 `AiService.askGemini()`를 **절대 직접 호출해서는 안 됩니다.**
+> 반드시 `AiExecutionQueue.enqueue()`를 거쳐야만 합니다.
+
+*   **원칙**: Gemini API는 RPM(Requests Per Minute) 제한이 있으므로, 동시 호출 시 429 에러가 발생합니다. 이를 원천 차단하기 위해 모든 Gemini 호출은 **`AiExecutionQueue`(큐 중계인)**를 통해 직렬화(Serialize)합니다.
+*   **구조**: `Agent → AiExecutionQueue.enqueue() → AiService.askGemini() → Gemini API` (한 번에 1건만 호출)
+*   **우선순위**: CRON(자동 스케줄) > MANUAL(수동 버튼) > CHAT(코파일럿 채팅) 순서로 처리됩니다.
+*   **파일 위치**: `electron/services/AiExecutionQueue.ts`
+*   **사용법**:
+    ```typescript
+    import { AiExecutionQueue } from '../AiExecutionQueue'
+    
+    const result = await AiExecutionQueue.getInstance().enqueue({
+        agentId: 'MY_AGENT',          // 에이전트 고유 ID
+        agentName: '내 에이전트',       // UI 표시용 이름
+        triggerType: 'CRON',           // 'CRON' | 'MANUAL' | 'CHAT'
+        prompt: userPrompt,
+        systemInstruction: systemPrompt,
+    })
+    ```
+*   **금지사항**: 새로운 AI 기능을 추가할 때 `this.ai.askGemini()`를 직접 호출하는 코드를 작성하면, 코드 리뷰에서 반드시 거부(Reject)합니다.
+*   **실행 이력**: 큐는 최근 100건의 실행 이력을 메모리에 보관하며, `getExecutionLog()` 메서드로 조회할 수 있습니다. 향후 설정 UI의 'AI 오케스트레이터' 대시보드에서 시각화할 예정입니다.
+

@@ -1,0 +1,299 @@
+/**
+ * AiExecutionQueue — 하이브리드 AI 듀얼 큐 호출 중계인 (Broker)
+ * 
+ * 모든 AI 에이전트의 API 호출을 직렬화(Serialize)하여 에러 및 충돌을 원천 차단합니다.
+ * - Gemini 전용(Cloud) 큐와 Local(LM Studio) 전용 큐를 듀얼 레인(Two-Track)으로 분리.
+ * - 로컬 모델이 장시간 점유하더라도 Gemini 요청은 즉각 병렬 실행 가능.
+ * 
+ * ═══ 설계 원칙 ═══
+ * - 모든 새로운 AI 기능은 AiService.askGemini()를 직접 호출하지 않고,
+ *   반드시 AiExecutionQueue.enqueue()를 통해서만 호출해야 합니다.
+ * - 대상별 독립 FIFO 큐 기반, 한 번에 하나의 요청만 허용 (경로별 1채널)
+ * - 크론잡(CRON) > 수동(MANUAL) > 채팅(CHAT) 우선순위
+ * - 실행 이력을 메모리에 보관하여 UI에서 조회 가능
+ */
+
+import { AiService } from './AiService'
+import { LocalAiService } from './LocalAiService'
+import { eventBus } from '../utils/EventBus'
+
+export interface AiQueueJob {
+    id: string
+    agentId: string           // 'MCA', 'IMA', 'COPILOT', 'MRA' 등
+    agentName: string         // '시황 AI', '이슈 AI' 등
+    triggerType: 'CRON' | 'MANUAL' | 'CHAT'
+    targetType: 'gemini' | 'local'  // 듀얼 레인 라우팅 (Phase 7)
+    priority: number          // 낮을수록 높은 우선순위 (CRON=1, MANUAL=2, CHAT=3)
+    prompt: string
+    systemInstruction?: string
+    customModel?: string      // 기본 모델 대신 사용할 모델
+    customKey?: string        // 기본 키 대신 사용할 API 키
+    status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED'
+    queuedAt: number
+    startedAt?: number
+    finishedAt?: number
+    durationMs?: number
+    result?: string
+    error?: string
+}
+
+export interface AiExecutionLogEntry {
+    id: string
+    agentId: string
+    agentName: string
+    triggerType: string
+    targetType: string
+    status: string
+    queuedAt: string
+    startedAt?: string
+    finishedAt?: string
+    durationMs?: number
+    error?: string
+}
+
+export class AiExecutionQueue {
+    private static instance: AiExecutionQueue
+    private ai: AiService
+    private localAi: LocalAiService
+    
+    // 듀얼 레인 큐 시스템 도입
+    private geminiQueue: AiQueueJob[] = []
+    private localQueue: AiQueueJob[] = []
+    private isProcessingGemini = false
+    private isProcessingLocal = false
+    
+    private executionLog: AiExecutionLogEntry[] = []  // 최근 100건 보관
+    private jobCounter = 0
+
+    private constructor() {
+        this.ai = AiService.getInstance()
+        this.localAi = LocalAiService.getInstance()
+    }
+
+    public static getInstance(): AiExecutionQueue {
+        if (!AiExecutionQueue.instance) {
+            AiExecutionQueue.instance = new AiExecutionQueue()
+        }
+        return AiExecutionQueue.instance
+    }
+
+    /**
+     * AI 호출을 큐에 등록하고, 결과를 Promise로 반환합니다.
+     */
+    public enqueue(params: {
+        agentId: string
+        agentName: string
+        triggerType: 'CRON' | 'MANUAL' | 'CHAT'
+        targetType?: 'gemini' | 'local' // 생략 시 gemini(기본값)
+        prompt: string
+        systemInstruction?: string
+        customModel?: string
+        customKey?: string
+    }): Promise<string> {
+        const priorityMap = { CRON: 1, MANUAL: 2, CHAT: 3 }
+        const jobTarget = params.targetType || 'gemini'
+
+        const job: AiQueueJob = {
+            id: `aiq_${++this.jobCounter}_${Date.now()}`,
+            agentId: params.agentId,
+            agentName: params.agentName,
+            triggerType: params.triggerType,
+            targetType: jobTarget,
+            priority: priorityMap[params.triggerType],
+            prompt: params.prompt,
+            systemInstruction: params.systemInstruction,
+            customModel: params.customModel,
+            customKey: params.customKey,
+            status: 'QUEUED',
+            queuedAt: Date.now(),
+        }
+
+        // 라우팅 분기
+        const targetQueue = jobTarget === 'local' ? this.localQueue : this.geminiQueue
+        targetQueue.push(job)
+        
+        // 우선순위 정렬 (낮은 숫자 = 높은 우선순위, 같으면 먼저 들어온 것 우선)
+        targetQueue.sort((a, b) => a.priority - b.priority || a.queuedAt - b.queuedAt)
+
+        console.log(`[AiQueue] 📥 등록: ${job.agentName} (${job.triggerType}/${job.targetType}) | 대기열 (Gemini:${this.geminiQueue.length}, Local:${this.localQueue.length})`)
+        this.emitQueueUpdate()
+
+        return new Promise<string>((resolve, reject) => {
+            const checkResult = setInterval(() => {
+                if (job.status === 'SUCCESS') {
+                    clearInterval(checkResult)
+                    resolve(job.result!)
+                } else if (job.status === 'FAILED') {
+                    clearInterval(checkResult)
+                    reject(new Error(job.error || 'AI 호출 실패'))
+                }
+            }, 100)
+
+            // 큐 처리 시작 (이미 처리 중이면 스킵됨)
+            if (jobTarget === 'local') {
+                this.processLocalQueue()
+            } else {
+                this.processGeminiQueue()
+            }
+        })
+    }
+
+    /**
+     * Gemini 전용 큐 (클라우드망)
+     */
+    private async processGeminiQueue() {
+        if (this.isProcessingGemini) return
+        this.isProcessingGemini = true
+
+        while (this.geminiQueue.length > 0) {
+            const job = this.geminiQueue[0]
+            job.status = 'RUNNING'
+            job.startedAt = Date.now()
+
+            console.log(`[AiQueue][☁️Gemini] ▶️ 실행: ${job.agentName} | 남은 대기: ${this.geminiQueue.length - 1}건`)
+            this.emitQueueUpdate()
+
+            try {
+                const result = await this.ai.askGemini(
+                    job.prompt,
+                    job.systemInstruction,
+                    job.customKey,
+                    job.customModel,
+                )
+                
+                job.status = 'SUCCESS'
+                job.result = result
+                job.finishedAt = Date.now()
+                job.durationMs = job.finishedAt - job.startedAt
+
+                console.log(`[AiQueue][☁️Gemini] ✅ 완료: ${job.agentName} (${job.durationMs}ms)`)
+            } catch (error: any) {
+                job.status = 'FAILED'
+                job.error = error.message
+                job.finishedAt = Date.now()
+                job.durationMs = job.finishedAt - (job.startedAt || job.queuedAt)
+
+                console.error(`[AiQueue][☁️Gemini] ❌ 실패: ${job.agentName} — ${error.message}`)
+            }
+
+            this.recordLog(job)
+            this.geminiQueue.shift()
+            this.emitQueueUpdate()
+        }
+
+        this.isProcessingGemini = false
+    }
+
+    /**
+     * Local 전용 큐 (로컬망 분리)
+     */
+    private async processLocalQueue() {
+        if (this.isProcessingLocal) return
+        this.isProcessingLocal = true
+
+        while (this.localQueue.length > 0) {
+            const job = this.localQueue[0]
+            job.status = 'RUNNING'
+            job.startedAt = Date.now()
+
+            console.log(`[AiQueue][🖥️Local] ▶️ 실행: ${job.agentName} | 남은 대기: ${this.localQueue.length - 1}건`)
+            this.emitQueueUpdate()
+
+            try {
+                const result = await this.localAi.askLocalAi(
+                    job.prompt,
+                    job.systemInstruction,
+                    job.customModel
+                )
+                
+                job.status = 'SUCCESS'
+                job.result = result
+                job.finishedAt = Date.now()
+                job.durationMs = job.finishedAt - job.startedAt
+
+                console.log(`[AiQueue][🖥️Local] ✅ 완료: ${job.agentName} (${job.durationMs}ms)`)
+            } catch (error: any) {
+                job.status = 'FAILED'
+                job.error = error.message
+                job.finishedAt = Date.now()
+                job.durationMs = job.finishedAt - (job.startedAt || job.queuedAt)
+
+                console.error(`[AiQueue][🖥️Local] ❌ 실패: ${job.agentName} — ${error.message}`)
+            }
+
+            this.recordLog(job)
+            this.localQueue.shift()
+            this.emitQueueUpdate()
+        }
+
+        this.isProcessingLocal = false
+    }
+
+    /**
+     * 실행 이력 기록 (최근 100건 보관)
+     */
+    private recordLog(job: AiQueueJob) {
+        const kstNow = (ts: number) => new Date(ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+
+        this.executionLog.unshift({
+            id: job.id,
+            agentId: job.agentId,
+            agentName: job.agentName,
+            triggerType: job.triggerType,
+            targetType: job.targetType,
+            status: job.status,
+            queuedAt: kstNow(job.queuedAt),
+            startedAt: job.startedAt ? kstNow(job.startedAt) : undefined,
+            finishedAt: job.finishedAt ? kstNow(job.finishedAt) : undefined,
+            durationMs: job.durationMs,
+            error: job.error,
+        })
+
+        if (this.executionLog.length > 100) {
+            this.executionLog = this.executionLog.slice(0, 100)
+        }
+    }
+
+    /**
+     * UI에 큐 상태 변경 알림
+     */
+    private emitQueueUpdate() {
+        const totalQueueLength = this.geminiQueue.length + this.localQueue.length;
+        const currentJob = this.geminiQueue[0] || this.localQueue[0] || null;
+
+        eventBus.emit('AI_QUEUE_UPDATE' as any, {
+            queueLength: totalQueueLength,
+            isProcessing: this.isProcessingGemini || this.isProcessingLocal,
+            currentJob: currentJob ? {
+                agentId: currentJob.agentId,
+                agentName: currentJob.agentName,
+                status: currentJob.status,
+            } : null,
+        })
+    }
+
+    // ═══ 조회 API (IPC용) ═══
+
+    /** 현재 큐 상태 (두 큐 합산) */
+    public getQueueStatus() {
+        const allJobs = [...this.geminiQueue, ...this.localQueue];
+        return {
+            queueLength: allJobs.length,
+            isProcessing: this.isProcessingGemini || this.isProcessingLocal,
+            pendingJobs: allJobs.map(j => ({
+                id: j.id,
+                agentId: j.agentId,
+                agentName: j.agentName,
+                triggerType: j.triggerType,
+                targetType: j.targetType,
+                status: j.status,
+                waitingMs: Date.now() - j.queuedAt,
+            })),
+        }
+    }
+
+    /** 최근 실행 이력 */
+    public getExecutionLog(limit: number = 50): AiExecutionLogEntry[] {
+        return this.executionLog.slice(0, limit)
+    }
+}

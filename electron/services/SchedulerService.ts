@@ -6,7 +6,7 @@ import { eventBus, SystemEvent } from '../utils/EventBus'
 import Store from 'electron-store'
 import { IngestionManager } from './IngestionManager'
 import { DatabaseService } from './DatabaseService'
-import { PipelineLogger } from './PipelineLogger'
+
 
 const store = new Store()
 
@@ -37,74 +37,17 @@ export class SchedulerService {
         this.scheduledJobs.forEach(job => job.stop())
         this.scheduledJobs = []
 
-        /* [V1 Legacy 방치 모듈 - V2 이벤트 드리븐 설계 시 부활 예정]
-        const settings = store.get('ai_schedule_settings') as any || {
-            enabled: true,
-            preMarketTime: '08:30',
-            morningTime: '09:30',
-            eveningTime: '15:40',
-            telegramNotify: true
-        }
-
-        if (!settings.enabled) {
-            console.log('[SchedulerService] Automated analysis is disabled.')
-            return
-        }
-
-        // 1. 장 시작 전 매크로/유튜브 분석 (08:30)
-        const [pHour, pMinute] = settings.preMarketTime.split(':')
-        const preMarketJob = cron.schedule(`${pMinute} ${pHour} * * 1-5`, () => {
-            console.log(`[SchedulerService] Starting PRE_MARKET analysis (${settings.preMarketTime})...`)
-            this.runPreMarketAnalysis()
-        }, { timezone: 'Asia/Seoul' })
-
-        // 1-5. 예약 매수(PENDING_ENTRY) 확정 체결 스케줄러 (09:15 고정)
-        const pendingExecutionJob = cron.schedule('15 09 * * 1-5', () => this.runPendingExecution(), { timezone: 'Asia/Seoul' })
-
-        // 2. 오전 급등주/주도주 분석 + 마스터 AI 장초반 + PM 리뷰 (Step 4)
-        const [mHour, mMinute] = settings.morningTime.split(':')
-        const morningJob = cron.schedule(`${mMinute} ${mHour} * * 1-5`, () => this.runMorningPipeline(), { timezone: 'Asia/Seoul' })
-
-        // 3. 장 마감 급등주 분석 + 마스터 AI 장마감 + PM 리뷰 (Step 6)
-        const [eHour, eMinute] = settings.eveningTime.split(':')
-        const eveningJob = cron.schedule(`${eMinute} ${eHour} * * 1-5`, () => this.runEveningPipeline(), { timezone: 'Asia/Seoul' })
-
-        this.scheduledJobs.push(preMarketJob, pendingExecutionJob, morningJob, eveningJob)
-        */
-
-        // [MAIIS 통합] 독립 뉴스/유튜브 크론 제거 완료.
-        // 뉴스 수집+분석, 유튜브 수집+분석은 모두 PRE_MARKET 파이프라인 내
-        // MaiisDomainService에서 직접 수행합니다. (AI 중복 호출 방지, Source of Truth 단일화)
-
-        /* [V1 Legacy 방치 모듈 - V2 개편 위해 비활성화]
-        // 6. PM INTRADAY 하드룰 체크 (Step 5: 14:50)
-        const { StrategyProfileService } = await import('./StrategyProfileService')
-        const reviewSchedule = StrategyProfileService.getInstance().getReviewSchedule()
-        if (reviewSchedule.autoEnabled) {
-            const [iHour, iMinute] = reviewSchedule.intradayTime.split(':')
-            const intradayJob = cron.schedule(`${iMinute} ${iHour} * * 1-5`, () => this.runIntradayReview(), { timezone: 'Asia/Seoul' })
-            this.scheduledJobs.push(intradayJob)
-
-            // 7. PM CLOSING 최종 리뷰 + NAV 스냅샷 (Step 7: 16:00)
-            const [cHour, cMinute] = reviewSchedule.closingTime.split(':')
-            const closingJob = cron.schedule(`${cMinute} ${cHour} * * 1-5`, () => this.runClosingReview(), { timezone: 'Asia/Seoul' })
-            this.scheduledJobs.push(closingJob)
-            
-            console.log(`[SchedulerService] PM Review schedules: INTRADAY=${reviewSchedule.intradayTime}, CLOSING=${reviewSchedule.closingTime}`)
-        }
-
-        // 8. 시스템 재기동 시 놓친 PENDING 가비지/주문 Catch-up
-        this.catchUpMissedOrders()
-
-        console.log(`[SchedulerService] Automated MAIIS Main Pipeline schedules (PRE: ${settings.preMarketTime}, AM: ${settings.morningTime}, PM: ${settings.eveningTime}) initialized.`)
-        */
-        
-        console.log(`[SchedulerService] V1 Legacy schedules disabled for V2 Agentic Swarm refactoring.`)
 
         // ═══ V2 Agent Swarm Schedules ═══
         const settings = store.get('ai_schedule_settings') as any || { enabled: true }
         if (settings.enabled) {
-            // Cycle A: 08:50 (장전 시장 파악)
+            // [신규] Tracker: 08:30 (밤사이 발생한 뉴스 읽고, 이슈 장부 개별 요약)
+            const itaJob = cron.schedule('30 08 * * 1-5', async () => {
+                const { IssueTrackerAgent } = await import('./v2_agents/IssueTrackerAgent')
+                await IssueTrackerAgent.getInstance().runMorningAnalysis()
+            }, { timezone: 'Asia/Seoul' })
+
+            // Cycle A: 08:50 (장전 시장 파악 - 제미나이가 트래커들의 의견을 종합)
             const mcaJobA = cron.schedule('50 08 * * 1-5', async () => {
                 const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
                 await MarketConditionAgent.getInstance().runPrediction('A')
@@ -130,380 +73,52 @@ export class SchedulerService {
                 await MarketConditionAgent.getInstance().runIntraday('09:30')
             }, { timezone: 'Asia/Seoul' })
 
-            const intradayJobB = cron.schedule('0 11 * * 1-5', async () => {
-                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
-                await MarketConditionAgent.getInstance().runIntraday('11:00')
-            }, { timezone: 'Asia/Seoul' })
-
             const intradayJobC = cron.schedule('0 13 * * 1-5', async () => {
                 const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
                 await MarketConditionAgent.getInstance().runIntraday('13:00')
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(mcaJobA, mcaJobB, mcaTrackerJob, intradayJobA, intradayJobB, intradayJobC)
-            console.log(`[SchedulerService] V2 MarketConditionAgent schedules initialized (Cycle A: 08:50, Cycle B: 15:10, Tracker+Intraday-Eval: 15:35, Intraday: 09:30/11:00/13:00)`)
+            // 장중 무제한 로컬 스웜 A/B 테스트 (09:45 ~ 13:45 간 30분 단위, 총 9회)
+            const swarmJobs: cron.ScheduledTask[] = []
+            const swarmSlots = ['09:45', '10:15', '10:45', '11:15', '11:45', '12:15', '12:45', '13:15', '13:45']
+            for (const slot of swarmSlots) {
+                const [hr, min] = slot.split(':')
+                const job = cron.schedule(`${parseInt(min)} ${parseInt(hr)} * * 1-5`, async () => {
+                    const { IntradaySwarmAgent } = await import('./v2_agents/IntradaySwarmAgent')
+                    await IntradaySwarmAgent.getInstance().runSwarm(slot)
+                }, { timezone: 'Asia/Seoul' })
+                swarmJobs.push(job)
+            }
+
+            // 주간 회고 AI (금요일 16:00 종료 후)
+            const weeklyReviewJob = cron.schedule('0 16 * * 5', async () => {
+                const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
+                await MarketReviewAgent.getInstance().runWeeklyReview()
+            }, { timezone: 'Asia/Seoul' })
+
+            // 월간 회고 AI (매월 28일 16:30)
+            const monthlyReviewJob = cron.schedule('30 16 28 * *', async () => {
+                const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
+                await MarketReviewAgent.getInstance().runMonthlyReview()
+            }, { timezone: 'Asia/Seoul' })
+
+            // Option 1: Pre-Close 일간 피드백 (로컬 감시 스웜) (15:00)
+            const preCloseRetroJob = cron.schedule('0 15 * * 1-5', async () => {
+                const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
+                await MarketReviewAgent.getInstance().runPreCloseFeedback()
+            }, { timezone: 'Asia/Seoul' })
+
+            // Option 2: Post-Market 일간 회고 AI (로컬) (15:40)
+            const dailyRetroJob = cron.schedule('40 15 * * 1-5', async () => {
+                const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
+                await MarketReviewAgent.getInstance().runDailyReview()
+            }, { timezone: 'Asia/Seoul' })
+
+            this.scheduledJobs.push(itaJob, mcaJobA, mcaJobB, mcaTrackerJob, intradayJobA, intradayJobC, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, ...swarmJobs)
+            console.log(`[SchedulerService] V2 AI schedules initialized (ITA: 08:30, MCA: 08:50, Swarms, Retros)`)
         }
     }
 
-    /**
-     * Recovery Catch-up: 앱 구동 시 장중이라면 처리되지 못하고 쌓여있는 PENDING 주문을 파악해 즉결 처리합니다.
-     */
-    private async catchUpMissedOrders() {
-        try {
-            const { VirtualPortfolioEngine } = await import('./VirtualPortfolioEngine')
-            const vpe = VirtualPortfolioEngine.getInstance()
-            
-            // 장중일 때만 강제 처리 (비장중에는 예약 상태 유지)
-            if (vpe.isMarketOpen()) {
-                const db = DatabaseService.getInstance().getDb()
-                const pendingCount = db.prepare(`SELECT COUNT(*) as cnt FROM maiis_portfolio WHERE entry_pending = 1 AND status NOT IN ('CLOSED', 'DROPPED')`).get() as any
-                
-                if (pendingCount && pendingCount.cnt > 0) {
-                    console.log(`[SchedulerService] 🚀 Recovery Catch-up: ${pendingCount.cnt}건의 미체결 대기주문 발견. 처리 스케줄 편입...`)
-                    // 키움 API 연결 등의 시간을 위해 15초 뒤에 백그라운드로 실행
-                    setTimeout(() => {
-                        this.runPendingExecution()
-                    }, 15000)
-                }
-            }
-        } catch (e) {
-            console.error('[SchedulerService] Catch-up 복원 실패:', e)
-        }
-    }
-
-    private async runMarketNewsAnalysis() {
-        const { MarketNewsService } = await import('./MarketNewsService');
-        await MarketNewsService.getInstance().generateMarketBriefing();
-    }
-
-    private async sendMarketNewsTelegram() {
-        /* [V1 Legacy 알림 비활성화]
-        const { MarketNewsService } = await import('./MarketNewsService');
-        const latest = MarketNewsService.getInstance().getLatestBriefings(1)[0];
-        if (latest) {
-            try {
-                const parsed = JSON.parse(latest.summary_json);
-                let message = `📣 *[MAIIS 시장 뉴스 브리핑]*\n\n`;
-                message += `📅 *기준일자*: ${latest.date}\n`;
-                message += `🌡️ *시장온도*: ${parsed.sentiment > 0.5 ? '🔥 탐욕' : parsed.sentiment < -0.5 ? '😨 공포' : '😐 중립'} (${parsed.sentiment})\n\n`;
-                const summaryLines = Array.isArray(parsed.summary) ? parsed.summary : (typeof parsed.summary === 'string' ? [parsed.summary] : []);
-                message += `✅ *핵심 요약*\n${summaryLines.map((s: string) => `• ${s}`).join('\n')}\n\n`;
-                message += `🔄 *피보팅 분석*\n${parsed.pivot}\n\n`;
-                message += `🔥 *HOT 테마*\n`;
-                parsed.themes.forEach((t: any) => {
-                    message += `- *${t.theme_name}*: ${t.reason}\n`;
-                });
-                
-                this.telegram.sendMessage(message);
-            } catch (e) {
-                this.telegram.sendMessage(`📣 *[MAIIS 시장 뉴스 브리핑]*\n분석이 완료되었습니다. 앱에서 확인하세요.`);
-            }
-        }
-        */
-    }
-
-    private async runYoutubeAnalysis() {
-        const { YoutubeService } = await import('./YoutubeService');
-        const apiKey = store.get('youtube_api_key') as string;
-        if (apiKey) {
-            await YoutubeService.getInstance().collectLatestVideos(apiKey);
-        } else {
-            console.warn('[SchedulerService] YouTube API Key missing. Skipping auto-analysis.');
-        }
-    }
-
-    /**
-     * 장 시작 전 전체 파이프라인 (08:30)
-     * 
-     * [MAIIS 통합] PRE_MARKET 파이프라인 (08:30)
-     * 
-     * Phase 0: 매크로 지표 수집 (MaiisMacroService)
-     * Phase 1: 도메인 수집+분석 (MaiisDomainService - 유튜브/뉴스 직접 수집 → AI 분석)
-     * Phase 2: 테마/키워드 랭킹 집계 (MaiisRankingAggregator)
-     * Phase 3: 마스터 AI 장전 대전제 (MasterAiService - 최신 테마 포함)
-     * Phase 4: PM AI 포트폴리오 리뷰 (PortfolioManagerService)
-     */
-    public async runPreMarketAnalysis() {
-        const log = PipelineLogger.getInstance()
-        const runId = log.startPipeline('PRE_MARKET')
-        console.log('[SchedulerService] ═══ PRE_MARKET 통합 파이프라인 시작 ═══');
-        
-        // Phase 0: 매크로 지표 수집 (유튜브/뉴스는 Phase 1에서 MaiisDomainService가 직접 수집)
-        const p0 = log.startPhase(runId, '매크로 지표 수집', 'MaiisMacroService', 'getDailyMacroSnapshot')
-        try {
-            const { MaiisMacroService } = await import('./MaiisMacroService')
-            await MaiisMacroService.getInstance().getDailyMacroSnapshot()
-            log.endPhase(runId, p0, 'SUCCESS', '글로벌 매크로 지표(환율/금리/유가 등) 수집 완료')
-        } catch (e: any) {
-            log.endPhase(runId, p0, 'FAILED', undefined, e.message)
-        }
-
-        // Phase 1: 도메인 수집+분석 (수집과 분석이 하나의 함수 내에서 완결)
-        const p1 = log.startPhase(runId, '도메인 수집+분석', 'MaiisDomainService', 'analyzeNewsDomain+analyzeYoutubeDomain')
-        try {
-            const { MaiisDomainService } = await import('./MaiisDomainService')
-            const domain = MaiisDomainService.getInstance()
-            const [newsRes, ytRes] = await Promise.all([
-                domain.analyzeNewsDomain(),
-                domain.analyzeYoutubeDomain(),
-            ])
-            
-            let resultParts = [];
-            if (newsRes.success && newsRes.data) {
-                resultParts.push(`📰 [뉴스 수집+분석]\n${newsRes.data.domain_summary || '성공'}\n분위기 점수: ${newsRes.data.sentiment_index}`);
-            } else {
-                resultParts.push(`📰 [뉴스 실패] ${newsRes.error}`);
-            }
-            if (ytRes.success && ytRes.data) {
-                resultParts.push(`▶️ [유튜브 수집+분석]\n${ytRes.data.domain_summary || '성공'}\n광기(FOMO) 점수: ${ytRes.data.sentiment_index}`);
-            } else {
-                resultParts.push(`▶️ [유튜브 실패] ${ytRes.error}`);
-            }
-
-            log.endPhase(runId, p1, (newsRes.success || ytRes.success) ? 'SUCCESS' : 'FAILED', resultParts.join('\n\n'))
-        } catch (e: any) {
-            log.endPhase(runId, p1, 'FAILED', undefined, e.message)
-        }
-
-        // Phase 2: 테마/키워드 랭킹 집계 (마스터 AI 이전에 실행 → 마스터 AI가 최신 테마 활용)
-        const p2 = log.startPhase(runId, '테마/키워드 랭킹 집계', 'MaiisRankingAggregator', 'runDailyAggregation')
-        try {
-            const { MaiisRankingAggregator } = await import('./MaiisRankingAggregator')
-            const aggResult = await MaiisRankingAggregator.getInstance().runDailyAggregation()
-            log.endPhase(runId, p2, 'SUCCESS', `📈 섹터 ${aggResult.themes?.length || 0}건, 키워드 ${aggResult.keywords?.length || 0}건 집계 완료`)
-        } catch (e: any) {
-            log.endPhase(runId, p2, 'FAILED', undefined, e.message)
-        }
-
-        // Phase 3: 마스터 AI 장전 대전제 (최신 테마/키워드 집계 후 실행)
-        const p3 = log.startPhase(runId, '마스터 AI 0845', 'MasterAiService', 'generateWorldState')
-        try {
-            const { MasterAiService } = await import('./MasterAiService')
-            const masterRes = await MasterAiService.getInstance().generateWorldState('0845')
-            if (masterRes.success && masterRes.data) {
-                const summary = masterRes.data.market_thesis || '마스터 AI 컨센서스 생성 완료';
-                log.endPhase(runId, p3, 'SUCCESS', `🧠 [마스터 AI 대전제]\n${summary}\n(센티먼트: ${masterRes.data.sentiment_score})`)
-            } else {
-                log.endPhase(runId, p3, 'FAILED', undefined, masterRes.error)
-            }
-        } catch (e: any) {
-            log.endPhase(runId, p3, 'FAILED', undefined, e.message)
-        }
-
-        // Phase 4: PM AI 포트폴리오 리뷰
-        const p4 = log.startPhase(runId, 'PM AI 리뷰', 'PortfolioManagerService', 'runPortfolioReview')
-        try {
-            const { PortfolioManagerService } = await import('./PortfolioManagerService')
-            const pmRes = await PortfolioManagerService.getInstance().runPortfolioReview()
-            if (pmRes.success && pmRes.data) {
-                log.endPhase(runId, p4, 'SUCCESS', `📊 [포트폴리오 리뷰 반영 완료]\n갱신: ${pmRes.data.updated}건, 신규: ${pmRes.data.newEntries}건\nBUY 판단: ${pmRes.data.buySignals}건, SELL 판단: ${pmRes.data.sellSignals}건`)
-            } else {
-                log.endPhase(runId, p4, 'FAILED', undefined, pmRes.error)
-            }
-        } catch (e: any) {
-            log.endPhase(runId, p4, 'FAILED', undefined, e.message)
-        }
-
-        log.endPipeline(runId)
-        console.log(`[SchedulerService] ═══ PRE_MARKET 통합 파이프라인 완료 (${log.getRunDetail(runId)?.durationMs}ms) ═══`);
-    }
-
-    /**
-     * AM_EXECUTION: 예약 매수(PENDING_ENTRY) 확정 체결 (09:15)
-     */
-    public async runPendingExecution() {
-        const log = PipelineLogger.getInstance()
-        const runId = log.startPipeline('AM_EXECUTION')
-        console.log('[SchedulerService] ═══ 오전 예약 매수(PENDING) 확정 연산 시작 ═══')
-        
-        const p0 = log.startPhase(runId, '예약 주문 체결', 'PortfolioReviewEngine', 'processPendingOrders')
-        try {
-            const { PortfolioReviewEngine } = await import('./PortfolioReviewEngine')
-            const processed = await PortfolioReviewEngine.getInstance().processPendingOrders()
-            log.endPhase(runId, p0, 'SUCCESS', `💸 예약 매수 체결 완료: ${processed}건 확정`)
-        } catch (e: any) {
-            log.endPhase(runId, p0, 'FAILED', undefined, e.message)
-        }
-        log.endPipeline(runId)
-    }
-
-    /**
-     * MORNING: 급등주 분석 → 마스터 AI(0930) → PM 리뷰
-     */
-    public async runMorningPipeline() {
-        const log = PipelineLogger.getInstance()
-        const runId = log.startPipeline('MORNING')
-        console.log('[SchedulerService] ═══ MORNING 파이프라인 시작 ═══')
-        
-        const p0 = log.startPhase(runId, '급등주 분석', 'RisingStockAnalysis', 'analyzeBatchAndSave')
-        try {
-            const res = await this.runManualBatchAnalysis('MORNING') as any
-            if (res?.success === false) {
-                log.endPhase(runId, p0, 'FAILED', undefined, res.error)
-            } else {
-                log.endPhase(runId, p0, 'SUCCESS', '당일 장초반 주도주 및 테마 분석 완료')
-            }
-        } catch (e: any) { log.endPhase(runId, p0, 'FAILED', undefined, e.message) }
-        
-        const p1 = log.startPhase(runId, '마스터 AI 0930', 'MasterAiService', 'generateWorldState')
-        try {
-            const { MasterAiService } = await import('./MasterAiService')
-            const masterRes = await MasterAiService.getInstance().generateWorldState('0930')
-            if (masterRes.success && masterRes.data) {
-                const summary = masterRes.data.market_thesis || '마스터 AI 컨센서스 생성 완료';
-                log.endPhase(runId, p1, 'SUCCESS', `🧠 [마스터 AI 대전제]\n${summary}\n(센티먼트: ${masterRes.data.sentiment_score})`)
-            } else {
-                log.endPhase(runId, p1, 'FAILED', undefined, masterRes.error)
-            }
-        } catch (e: any) { log.endPhase(runId, p1, 'FAILED', undefined, e.message) }
-
-        const p2 = log.startPhase(runId, 'PM AI 리뷰', 'PortfolioManagerService', 'runPortfolioReview')
-        try {
-            const { PortfolioManagerService } = await import('./PortfolioManagerService')
-            const pmRes = await PortfolioManagerService.getInstance().runPortfolioReview()
-            if (pmRes.success && pmRes.data) {
-                log.endPhase(runId, p2, 'SUCCESS', `📊 [포트폴리오 리뷰 반영 완료]\n갱신: ${pmRes.data.updated}건, 신규: ${pmRes.data.newEntries}건\nBUY 판단: ${pmRes.data.buySignals}건, SELL 판단: ${pmRes.data.sellSignals}건`)
-            } else {
-                log.endPhase(runId, p2, 'FAILED', undefined, pmRes.error)
-            }
-        } catch (e: any) { log.endPhase(runId, p2, 'FAILED', undefined, e.message) }
-
-        const p3 = log.startPhase(runId, '테마/키워드 랭킹 집계', 'MaiisRankingAggregator', 'runDailyAggregation')
-        try {
-            const { MaiisRankingAggregator } = await import('./MaiisRankingAggregator')
-            const aggResult = await MaiisRankingAggregator.getInstance().runDailyAggregation()
-            log.endPhase(runId, p3, 'SUCCESS', `📈 섹터 ${aggResult.themes?.length || 0}건, 키워드 ${aggResult.keywords?.length || 0}건 집계 완료`)
-        } catch (e: any) { log.endPhase(runId, p3, 'FAILED', undefined, e.message) }
-        
-        log.endPipeline(runId)
-        console.log('[SchedulerService] ═══ MORNING 파이프라인 완료 ═══')
-    }
-
-    /**
-     * EVENING: 급등주 분석 → 마스터 AI(1530) → PM 리뷰
-     */
-    public async runEveningPipeline() {
-        const log = PipelineLogger.getInstance()
-        const runId = log.startPipeline('EVENING')
-        console.log('[SchedulerService] ═══ EVENING 파이프라인 시작 ═══')
-        
-        const p0 = log.startPhase(runId, '급등주 분석', 'RisingStockAnalysis', 'analyzeBatchAndSave')
-        try {
-            const res = await this.runManualBatchAnalysis('EVENING') as any
-            if (res?.success === false) {
-                log.endPhase(runId, p0, 'FAILED', undefined, res.error)
-            } else {
-                log.endPhase(runId, p0, 'SUCCESS', '당일 장마감 주도주 및 테마 분석 완료')
-            }
-        } catch (e: any) { log.endPhase(runId, p0, 'FAILED', undefined, e.message) }
-        
-        const p1 = log.startPhase(runId, '마스터 AI 1530', 'MasterAiService', 'generateWorldState')
-        try {
-            const { MasterAiService } = await import('./MasterAiService')
-            const masterRes = await MasterAiService.getInstance().generateWorldState('1530')
-            if (masterRes.success && masterRes.data) {
-                const summary = masterRes.data.market_thesis || '마스터 AI 컨센서스 생성 완료';
-                log.endPhase(runId, p1, 'SUCCESS', `🧠 [마스터 AI 대전제]\n${summary}\n(센티먼트: ${masterRes.data.sentiment_score})`)
-            } else {
-                log.endPhase(runId, p1, 'FAILED', undefined, masterRes.error)
-            }
-        } catch (e: any) { log.endPhase(runId, p1, 'FAILED', undefined, e.message) }
-
-        const p2 = log.startPhase(runId, 'PM AI 리뷰', 'PortfolioManagerService', 'runPortfolioReview')
-        try {
-            const { PortfolioManagerService } = await import('./PortfolioManagerService')
-            const pmRes = await PortfolioManagerService.getInstance().runPortfolioReview()
-            if (pmRes.success && pmRes.data) {
-                log.endPhase(runId, p2, 'SUCCESS', `📊 [포트폴리오 리뷰 반영 완료]\n갱신: ${pmRes.data.updated}건, 신규: ${pmRes.data.newEntries}건\nBUY 판단: ${pmRes.data.buySignals}건, SELL 판단: ${pmRes.data.sellSignals}건`)
-            } else {
-                log.endPhase(runId, p2, 'FAILED', undefined, pmRes.error)
-            }
-        } catch (e: any) { log.endPhase(runId, p2, 'FAILED', undefined, e.message) }
-
-        const p3 = log.startPhase(runId, '테마/키워드 랭킹 집계', 'MaiisRankingAggregator', 'runDailyAggregation')
-        try {
-            const { MaiisRankingAggregator } = await import('./MaiisRankingAggregator')
-            const aggResult = await MaiisRankingAggregator.getInstance().runDailyAggregation()
-            log.endPhase(runId, p3, 'SUCCESS', `📈 섹터 ${aggResult.themes?.length || 0}건, 키워드 ${aggResult.keywords?.length || 0}건 집계 완료`)
-        } catch (e: any) { log.endPhase(runId, p3, 'FAILED', undefined, e.message) }
-        
-        log.endPipeline(runId)
-        console.log('[SchedulerService] ═══ EVENING 파이프라인 완료 ═══')
-    }
-
-    /**
-     * INTRADAY: 현재가 갱신 → 하드룰 체크 (손절/익절/트레일링 스탑)
-     */
-    public async runIntradayReview() {
-        const log = PipelineLogger.getInstance()
-        const runId = log.startPipeline('INTRADAY')
-        
-        const p0 = log.startPhase(runId, '현재가 갱신', 'PortfolioReviewEngine', 'refreshCurrentPrices')
-        try {
-            const { PortfolioReviewEngine } = await import('./PortfolioReviewEngine')
-            const engine = PortfolioReviewEngine.getInstance()
-            const cnt = await engine.refreshCurrentPrices()
-            log.endPhase(runId, p0, 'SUCCESS', `${cnt}건 갱신`)
-            
-            const p1 = log.startPhase(runId, '하드룰 체크', 'PortfolioReviewEngine', 'runReviewLoop')
-            const result = await engine.runReviewLoop('INTRADAY')
-            log.endPhase(runId, p1, 'SUCCESS', `강제청산 ${result.forceSellCount}건, AI재심사 ${result.aiReviewCount}건`)
-        } catch (e: any) {
-            log.endPhase(runId, p0, 'FAILED', undefined, e.message)
-        }
-        log.endPipeline(runId)
-    }
-
-    /**
-     * CLOSING: 현재가 갱신 → 하드룰 최종 → NAV 일간 스냅샷
-     */
-    public async runClosingReview() {
-        const log = PipelineLogger.getInstance()
-        const runId = log.startPipeline('CLOSING')
-
-        const p0 = log.startPhase(runId, '현재가 갱신', 'PortfolioReviewEngine', 'refreshCurrentPrices')
-        try {
-            const { PortfolioReviewEngine } = await import('./PortfolioReviewEngine')
-            const engine = PortfolioReviewEngine.getInstance()
-            const cnt = await engine.refreshCurrentPrices()
-            log.endPhase(runId, p0, 'SUCCESS', `${cnt}건 갱신`)
-            
-            const p1 = log.startPhase(runId, '하드룰 최종 체크', 'PortfolioReviewEngine', 'runReviewLoop')
-            const result = await engine.runReviewLoop('CLOSING')
-            log.endPhase(runId, p1, 'SUCCESS', `강제청산 ${result.forceSellCount}건`)
-        } catch (e: any) {
-            log.endPhase(runId, p0, 'FAILED', undefined, e.message)
-        }
-
-        const p2 = log.startPhase(runId, 'NAV 스냅샷', 'VirtualPortfolioEngine', 'recordDailySnapshot')
-        try {
-            const { VirtualPortfolioEngine } = await import('./VirtualPortfolioEngine')
-            const { KiwoomService } = await import('./KiwoomService')
-            const vpe = VirtualPortfolioEngine.getInstance()
-            const db = DatabaseService.getInstance()
-            const today = db.getKstDate().replace(/-/g, '')
-            
-            let kospiClose = 0
-            try {
-                const kospiData = await KiwoomService.getInstance().getCurrentPrice('001')
-                kospiClose = Math.abs(Number(kospiData?.cur_prc || kospiData?.stck_prpr || 0))
-            } catch (_) {}
-            
-            const active = db.getActivePortfolio()
-            const closingPrices = new Map<string, number>()
-            for (const item of active) {
-                if (item.current_price && item.current_price > 0) {
-                    closingPrices.set(item.stock_code, item.current_price)
-                }
-            }
-            vpe.recordDailySnapshot(closingPrices, kospiClose, today)
-            log.endPhase(runId, p2, 'SUCCESS', `NAV 기록 (KOSPI=${kospiClose})`)
-        } catch (e: any) {
-            log.endPhase(runId, p2, 'FAILED', undefined, e.message)
-        }
-        
-        log.endPipeline(runId)
-    }
 
     /**
      * 일괄 분석 실행 로직 (수동/자동 공용)

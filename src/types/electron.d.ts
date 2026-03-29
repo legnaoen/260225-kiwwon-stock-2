@@ -157,11 +157,19 @@ export interface IElectronAPI {
     saveMarketConditionSettings: (settings: any) => Promise<{ success: boolean, error?: string }>
     runMarketConditionAgent: (cycle: 'A' | 'B') => Promise<{ success: boolean, data?: any, error?: string }>
     getMarketConditionHistory: (limit?: number) => Promise<{ success: boolean, data?: any[], error?: string }>
+    deleteMarketPrediction: (id: string, tableName?: 'agent_predictions' | 'intraday_predictions') => Promise<{ success: boolean, error?: string }>
     getMarketConditionLatest: () => Promise<{ success: boolean, data?: any, error?: string }>
     getMarketConditionStats: () => Promise<{ success: boolean, data?: any, error?: string }>
     getMarketConditionRules: () => Promise<{ success: boolean, data?: string[], error?: string }>
     onMarketConditionComplete: (callback: (data: any) => void) => () => void
     onMarketConditionPerformanceUpdated: (callback: (data: any) => void) => () => void
+
+    // V2 Issues Agent
+    getActiveIssues: () => Promise<{ success: boolean, data?: any[], error?: string }>
+    getIssueTimeline: (issueId: string) => Promise<{ success: boolean, data?: any[], error?: string }>
+    resolveIssue: (issueId: string) => Promise<{ success: boolean, error?: string }>
+    runIssueAnalysis: () => Promise<{ success: boolean, error?: string }>
+    getIssueBriefing: () => Promise<{ success: boolean, data?: any, error?: string }>
 
     // V2 Co-Pilot (HITL)
     sendCoPilotMessage: (message: string, mode?: 'auto' | 'short' | 'detail') => void

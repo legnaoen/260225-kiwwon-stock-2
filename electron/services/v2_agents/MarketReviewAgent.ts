@@ -1,10 +1,11 @@
 import { AiService } from '../AiService'
+import { AiExecutionQueue } from '../AiExecutionQueue'
 import { DatabaseService } from '../DatabaseService'
 import { eventBus } from '../../utils/EventBus'
 
 export interface AgentRetrospective {
     id: number
-    type: 'WEEKLY' | 'MONTHLY'
+    type: 'DAILY' | 'WEEKLY' | 'MONTHLY'
     target_period: string
     content: string
     created_at: string
@@ -25,6 +26,111 @@ export class MarketReviewAgent {
             MarketReviewAgent.instance = new MarketReviewAgent()
         }
         return MarketReviewAgent.instance
+    }
+
+    /**
+     * Option 1: Pre-Close 일간 오답노트 작성 (15:00 실행)
+     * 오늘 아침 Cycle A의 예측을 평가하고 `agent_predictions`의 feedback 컬럼에 기록
+     */
+    public async runPreCloseFeedback(): Promise<boolean> {
+        const rawDb = (this.db as any).db;
+        const dateStr = this.db.getKstDate();
+        const aId = `mca_${dateStr.replace(/-/g, '')}_A`;
+
+        const row = rawDb.prepare('SELECT predict, rationale FROM agent_predictions WHERE id = ?').get(aId);
+        if (!row) {
+            console.log('[MarketReview] 오늘 Cycle A 예측이 없어 Pre-Close 비판을 건너뜁니다.');
+            return false;
+        }
+
+        const systemPrompt = `당신은 대한민국 거시경제 및 주식시장 트레이딩의 날카로운 퀀트 애널리스트입니다.
+주요 임무: 메인 AI가 오늘 아침 개장 전(08:50)에 내렸던 시장 예측을 신랄하게 비판(Feedback)하는 것입니다.
+현재 오후 3시(장마감 30분 전) 시점의 실제 장세와 아침의 예측이 일치했는지 평가하고, 내일 장을 준비하기 위한 짧고 강렬한 1~2줄짜리 오답/성공 노트를 작성하세요.
+절대로 인사말이나 불필요한 서술 없이 핵심 비평만 텍스트로 즉시 출력하세요.`;
+
+        const userPrompt = `[오늘 아침 08:50 메인 AI의 예측 내역]
+판단 방향: ${row.predict}
+작성 근거: ${row.rationale.substring(0, 500)}...
+
+현재 코스피/코스닥 체감 지수와 아침의 위 근거를 대조하여, 1~2줄의 신랄한 '수정/보완 피드백'을 남겨라.`;
+
+        console.log('[MarketReview] Pre-Close 로컬 피드백 프롬프트 전송 중...');
+        try {
+            const rawResponse = await AiExecutionQueue.getInstance().enqueue({
+                agentId: 'MRA_DAILY_FEEDBACK',
+                agentName: '로컬 감시 스웜 (Pre-Close)',
+                triggerType: 'CRON',
+                targetType: 'local', // 로컬 AI 강제 호춟
+                prompt: userPrompt,
+                systemInstruction: systemPrompt,
+            });
+
+            // DB 업데이트 (Cycle A의 feedback 컬럼)
+            rawDb.prepare('UPDATE agent_predictions SET feedback = ? WHERE id = ?').run(rawResponse.trim(), aId);
+            console.log(`[MarketReview] Pre-Close 피드백(오답노트) 작성 완료: ${aId}`);
+            return true;
+        } catch(e: any) {
+            console.error('[MarketReview] Pre-Close 피드백 생성 에러:', e.message);
+            return false;
+        }
+    }
+
+    /**
+     * Option 2: Post-Market 일간 회고 AI (15:40 실행)
+     * 오늘 하루 전체(Cycle A, B) 결과를 요약하여 Daily Retrospective 저장
+     */
+    public async runDailyReview(): Promise<AgentRetrospective> {
+        const rawDb = (this.db as any).db;
+        const dateStr = this.db.getKstDate();
+        
+        const rows = rawDb.prepare(`
+            SELECT cycle, predict, rationale, t1_final, feedback
+            FROM agent_predictions 
+            WHERE date = ?
+            ORDER BY cycle ASC
+        `).all(dateStr) as any[];
+
+        if (rows.length === 0) {
+            throw new Error("일간 회고를 위한 오늘 예측 데이터가 없습니다.");
+        }
+
+        let logText = `[오늘(${dateStr}) 하루 동안의 AI 판단 내역]\n\n`;
+        for (const r of rows) {
+            logText += `사이클: ${r.cycle}\n`;
+            logText += `예측방향: ${r.predict}\n`;
+            logText += `작성근거: ${r.rationale.substring(0, 300)}...\n`;
+            if (r.t1_final !== null) logText += `수익률: ${r.t1_final}%\n`;
+            if (r.feedback) logText += `오답노트: ${r.feedback}\n`;
+            logText += `\n`;
+        }
+
+        const systemPrompt = `당신은 대한민국 거시경제 및 주식시장 트레이딩의 최상위 AI 시황 전략가입니다.
+당신의 역할은 오늘 하루 동안 AI 시스템이 쏟아낸 '아침 예측', '오후 예측' 로그들을 모두 훑어보고, 오늘의 가장 치명적인 실수나 중요한 시장의 변화를 포착하여 <일간 회고 리포트>를 작성하는 것입니다.
+
+출력은 반드시 마크다운 포맷의 짧고 간결한 <일보> 형식이어야 합니다.
+1. 오늘 시장 한 평 (가장 큰 이슈)
+2. 오늘의 치명적 오판 / 성공 요인 (AI 판단에 대한 팩트체크)
+3. 내일(T+1) 시초가를 위한 핵심 교훈 (Actionable Insight)`;
+
+        const userPrompt = `다음은 오늘 하루 동안 기록된 매매 예측 로그입니다.\n\n${logText}\n\n위 데이터를 바탕으로 <일간 회고 리포트>를 마크다운 텍스트로 즉시 작성하라. (JSON 금지)`;
+
+        console.log('[MarketReview] 일간 회고(Daily Retro) 로컬 프롬프트 전송 중...');
+        let reportMarkdown = "분석 실패";
+        try {
+            reportMarkdown = await AiExecutionQueue.getInstance().enqueue({
+                agentId: 'MRA_DAILY_RETRO',
+                agentName: '회고 AI (일간)',
+                triggerType: 'CRON',
+                targetType: 'local', // 로컬 AI 호출
+                prompt: userPrompt,
+                systemInstruction: systemPrompt,
+            });
+        } catch(e: any) {
+            console.error('[MarketReview] 일간 회고 생성 에러:', e.message);
+            reportMarkdown = "일간 회고 생성 실패: " + e.message;
+        }
+
+        return this.saveRetrospective('DAILY', dateStr, reportMarkdown.trim());
     }
 
     /**
@@ -87,7 +193,13 @@ export class MarketReviewAgent {
         const userPrompt = `다음은 지난 5일간의 오전 매매 예측 기록입니다.\n\n${logText}\n\n위 데이터를 바탕으로 이번 주 주간 회고 리포트와 새로운 시스템 룰을 JSON으로 작성하세요.`;
 
         console.log('[MarketReview] 주간 회고 프롬프트 전송 중...');
-        const rawResponse = await this.ai.askGemini(userPrompt, systemPrompt);
+        const rawResponse = await AiExecutionQueue.getInstance().enqueue({
+            agentId: 'MRA',
+            agentName: '회고 AI (주간)',
+            triggerType: 'MANUAL',
+            prompt: userPrompt,
+            systemInstruction: systemPrompt,
+        });
 
         let reportMarkdown = "분석 실패"
         let newRules: string[] = []
@@ -158,7 +270,13 @@ export class MarketReviewAgent {
         const userPrompt = `아래 4주 치의 주간 회고를 종합하여 ${targetPeriod} 월간 리캡과 새로운 시스템 룰을 JSON으로 작성해라.\n\n${logText}`;
 
         console.log('[MarketReview] 월간 회고 프롬프트 전송 중...');
-        const rawResponse = await this.ai.askGemini(userPrompt, systemPrompt);
+        const rawResponse = await AiExecutionQueue.getInstance().enqueue({
+            agentId: 'MRA',
+            agentName: '회고 AI (월간)',
+            triggerType: 'MANUAL',
+            prompt: userPrompt,
+            systemInstruction: systemPrompt,
+        });
 
         let reportMarkdown = "분석 실패"
         let newRules: string[] = []
@@ -187,7 +305,7 @@ export class MarketReviewAgent {
         return this.saveRetrospective('MONTHLY', targetPeriod, reportMarkdown);
     }
 
-    private saveRetrospective(type: 'WEEKLY' | 'MONTHLY', target_period: string, content: string): AgentRetrospective {
+    private saveRetrospective(type: 'DAILY' | 'WEEKLY' | 'MONTHLY', target_period: string, content: string): AgentRetrospective {
         const rawDb = (this.db as any).db;
         const createdAt = this.db.getKstTimestamp();
         
@@ -210,7 +328,7 @@ export class MarketReviewAgent {
         return saved;
     }
 
-    public getRetrospectives(type?: 'WEEKLY' | 'MONTHLY', limit: number = 10): AgentRetrospective[] {
+    public getRetrospectives(type?: 'DAILY' | 'WEEKLY' | 'MONTHLY', limit: number = 10): AgentRetrospective[] {
         const rawDb = (this.db as any).db;
         try {
             if (type) {

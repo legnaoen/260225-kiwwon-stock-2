@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database, Globe, BrainCircuit, Info, Activity, MonitorSmartphone, Bot } from 'lucide-react'
+import { Save, ShieldCheck, AlertCircle, RefreshCw, Send, MessageCircle, Bell, Clock, Database, Globe, BrainCircuit, Info, Activity, MonitorSmartphone, Bot, Newspaper } from 'lucide-react'
 import { Input } from './ui/Input'
 import { Button } from './ui/Button'
 import { Switch } from './ui/Switch'
@@ -8,6 +8,7 @@ import { useUiStore, FontSizeTier } from '../store/useUiStore'
 import ApiDiagnosticsTab from './ApiDiagnosticsTab'
 import MaiisMonitorTab from './MaiisMonitorTab'
 import AiOrchestratorTab from './AiOrchestratorTab'
+import NewsHubSettingsTab from './NewsHubSettingsTab'
 
 export default function Settings() {
     const [keys, setKeys] = useState({ appkey: '', secretkey: '' })
@@ -89,7 +90,7 @@ export default function Settings() {
     const [messageAi, setMessageAi] = useState('')
     const [isTestingAi, setIsTestingAi] = useState(false)
 
-    const [activeTab, setActiveTab] = useState<'monitor' | 'accounts' | 'strategy' | 'system' | 'diagnostics' | 'telegram' | 'ai-orchestrator'>('monitor')
+    const [activeTab, setActiveTab] = useState<'monitor' | 'accounts' | 'strategy' | 'system' | 'diagnostics' | 'telegram' | 'ai-orchestrator' | 'news-hub'>('monitor')
     
     // UI Global State
     const { fontSizeTier, setFontSizeTier } = useUiStore()
@@ -543,6 +544,7 @@ export default function Settings() {
     const menuItems = [
         { id: 'monitor', label: 'MAIIS 관제 센터', icon: Activity, color: 'text-primary' },
         { id: 'ai-orchestrator', label: 'AI 관제', icon: Bot, color: 'text-violet-500' },
+        { id: 'news-hub', label: '뉴스 허브 설정', icon: Newspaper, color: 'text-sky-500' },
         { id: 'system', label: '시스템 및 UI 설정', icon: MonitorSmartphone, color: 'text-zinc-500' },
         { id: 'accounts', label: '계정 및 인프라', icon: ShieldCheck, color: 'text-blue-500' },
         { id: 'telegram', label: '텔레그램 통합 설정', icon: MessageCircle, color: 'text-sky-500' },
@@ -582,6 +584,10 @@ export default function Settings() {
                     <MaiisMonitorTab />
                 ) : activeTab === 'ai-orchestrator' ? (
                     <AiOrchestratorTab />
+                ) : activeTab === 'news-hub' ? (
+                    <div className="max-w-3xl mx-auto animate-in slide-in-from-right-4 fade-in duration-500 delay-75 py-10">
+                        <NewsHubSettingsTab />
+                    </div>
                 ) : (
                     <div className="max-w-3xl mx-auto space-y-10 animate-in slide-in-from-right-4 fade-in duration-500 delay-75">
 

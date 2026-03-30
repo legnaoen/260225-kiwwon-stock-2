@@ -1,5 +1,4 @@
 import { IssueLedgerDB } from './IssueLedgerDB';
-import { LocalAiService } from '../LocalAiService';
 import { AiExecutionQueue } from '../AiExecutionQueue';
 import { eventBus, SystemEvent } from '../../utils/EventBus';
 
@@ -17,6 +16,11 @@ export class IssueTrackerAgent {
 
     /**
      * 오전 시장 개장 전 (08:30) 이슈 장부 일점검 및 상태 진단
+     * 
+     * 설계 원칙:
+     * - AiExecutionQueue는 "prompt → AI 텍스트" 변환 중계인 역할만 담당.
+     * - 여러 이슈를 순차 처리하는 흐름 제어는 Queue 밖에서 for...of await로 처리.
+     * - 각 이슈 분석 내부의 AI 호출만 Queue를 경유.
      */
     public async runMorningAnalysis() {
         console.log('[IssueTrackerAgent] 🕵️ 오전 08:30 이슈 트래킹 및 진단 시작...');
@@ -28,42 +32,30 @@ export class IssueTrackerAgent {
             return;
         }
 
-        // 큐 기반 오케스트레이션을 활용하여 안전하게 직렬화 실행
-        AiExecutionQueue.getInstance().enqueue({
-            id: 'MORNING_TRACKER_ALL',
-            priority: 'CRON',
-            targetModel: 'local',
-            task: async () => {
-                for (const issue of activeIssues) {
-                    await this.analyzeIssue(issue);
-                }
-                
-                // 모든 개별 이슈 분석이 끝나고 (필요 시 Swarm 작업들이 큐에 예약된 후)
-                // 파이프라인의 가장 마지막(Tail)에 텔레그램 전송 작업을 추가합니다.
-                // FIFO(선입선출) 구조이므로 스웜 투표가 전부 끝난 08:35 부근에 안전하게 텔레그램이 전송됩니다.
-                AiExecutionQueue.getInstance().enqueue({
-                    id: 'MORNING_TRACKER_TELEGRAM',
-                    priority: 'CRON',
-                    targetModel: 'local',
-                    task: async () => {
-                        await this.sendTelegramReport();
-                        eventBus.emit(SystemEvent.AGENT_KICKOFF, { agent: 'ITA_MORNING_COMPLETE', timestamp: new Date().toISOString() });
-                    }
-                });
-            }
+        console.log(`[IssueTrackerAgent] 총 ${activeIssues.length}개 이슈 순차 분석 시작...`);
+
+        // 순차 실행 — Queue에 task를 넣지 않고 직접 for...of await
+        for (const issue of activeIssues) {
+            await this.analyzeIssue(issue);
+        }
+
+        // 모든 분석(+Swarm)이 완료된 후 텔레그램 전송
+        await this.sendTelegramReport();
+        eventBus.emit(SystemEvent.AGENT_KICKOFF, {
+            agent: 'ITA_MORNING_COMPLETE',
+            timestamp: new Date().toISOString()
         });
+
+        console.log('[IssueTrackerAgent] ✅ 오전 분석 파이프라인 완료.');
     }
 
     /**
-     * 개별 이슈 트래커 동작: 로컬 AI에게 상황 악화 여부 분석 요청
+     * 개별 이슈 트래커 동작: AiExecutionQueue를 통해 로컬 AI에게 분석 요청
      */
     private async analyzeIssue(issue: any) {
         console.log(`[IssueTrackerAgent] 🔍 [${issue.name}] 단독 분석 중...`);
-        const localAi = LocalAiService.getInstance();
-        
-        // 4-Tier 아키텍처에 따르면, 여기서 Local Data Hub(캐시)에서 뉴스를 불러와야 함.
-        // 현재는 로컬 AI의 자체 추론과 이슈 컨텍스트를 활용한 분석 파이프라인으로 1차 연결.
-        
+        const queue = AiExecutionQueue.getInstance();
+
         const systemPrompt = `당신은 특정 거시 경제 이슈를 전담 추적하는 파견 기자이자 '이슈 트래커(Tracker)'입니다.
 과거 타임라인과 입력된 이슈 맥락, 그리고 (가상의) 간밤 뉴스 흐름을 독해하여 이슈의 현재 진행 상태를 재평가하세요.
 오직 아래의 JSON 포맷으로만 깔끔하게 응답하세요. 마크다운이나 다른 설명은 덧붙이지 마세요.
@@ -86,25 +78,34 @@ export class IssueTrackerAgent {
 위 정보와 현재 밤사이 시장의 보편적 상식(혹은 수집된 뉴스 캐시)을 바탕으로 이 이슈가 시장에 미칠 위협 및 상태를 재진단(JSON)해주세요.`;
 
         try {
-            const aiResponse = await localAi.askLocalAi(userPrompt, systemPrompt);
+            // AiExecutionQueue 올바른 인터페이스 사용 (prompt → 텍스트 응답)
+            const aiResponse = await queue.enqueue({
+                agentId: 'ITA',
+                agentName: `이슈 트래커 [${issue.name.substring(0, 10)}]`,
+                triggerType: 'CRON',
+                targetType: 'local',
+                prompt: userPrompt,
+                systemInstruction: systemPrompt,
+            });
+
             const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
                 console.error(`[IssueTrackerAgent] JSON 파싱 실패 답변: ${aiResponse}`);
                 return;
             }
-            
+
             const result = JSON.parse(jsonMatch[0]);
-            console.log(`[IssueTrackerAgent] 📝 [${issue.name}] 분석 결과: Status=${result.status}, Swarm=${result.needsSwarm}`);
+            console.log(`[IssueTrackerAgent] 📝 [${issue.name}] 결과: Status=${result.status}, needsSwarm=${result.needsSwarm}`);
 
             const db = IssueLedgerDB.getInstance();
-            
-            // 이슈 원장(상태, 심각도) 업데이트
+
+            // 이슈 원장 업데이트
             issue.status = result.status;
             issue.severity = result.severity;
-            issue.updated_date = new Date().toISOString();
-            
+            issue.updated_date = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD 형식 유지
+
             db.upsertIssue(issue);
-            
+
             // 타임라인(히스토리) 노드 추가
             db.addTimelineNode(issue.id, {
                 status_snapshot: result.status,
@@ -113,24 +114,23 @@ export class IssueTrackerAgent {
                 ai_analysis: '[IssueTracker] 08:30 Morning Scan'
             });
 
-            // 🌟 4-Tier 라우팅 로직: 트래커가 비상 사태 선언 시 군집(Swarm) 비상 소집
+            // 🌟 4-Tier 라우팅: 트래커가 ESCALATING 선언 시 군집(Swarm) 직접 호출
             if (result.status === 'ESCALATING' || result.needsSwarm) {
-                console.log(`[IssueTrackerAgent] 🚨 [${issue.name}] 사태 악화 감지! 군집 위원회(Swarm) 비상 소집 큐 등록...`);
-                
-                AiExecutionQueue.getInstance().enqueue({
-                    id: `SWARM_${issue.id}_MORNING`,
-                    priority: 'CRON',
-                    targetModel: 'local',
-                    task: async () => {
-                        const { SwarmSimulationAgent } = await import('./SwarmSimulationAgent');
-                        await SwarmSimulationAgent.getInstance().runIssueSwarm(issue.id);
-                        
-                        console.log(`[IssueTrackerAgent] 🏁 [${issue.name}] 군집 다수결 회의 종료.`);
-                    }
-                });
+                // 당일 중복 방지
+                if (db.hasSwarmToday(issue.id)) {
+                    console.log(`[IssueTrackerAgent] [${issue.name}] 오늘 이미 Swarm 완료 — 스킵.`);
+                    return;
+                }
+                console.log(`[IssueTrackerAgent] 🚨 [${issue.name}] 사태 악화! 군집 위원회(Swarm) 소집...`);
+
+                // evaluateIssue()는 내부에서 Queue를 per-persona 단위로 올바르게 사용함
+                const { SwarmSimulationAgent } = await import('./SwarmSimulationAgent');
+                await SwarmSimulationAgent.getInstance().evaluateIssue(issue.id);
+
+                console.log(`[IssueTrackerAgent] 🏁 [${issue.name}] 군집 다수결 완료.`);
             }
         } catch (error) {
-            console.error(`[IssueTrackerAgent] Issue ${issue.name} 분석 중 에러 발생:`, error);
+            console.error(`[IssueTrackerAgent] [${issue.name}] 분석 중 에러:`, error);
         }
     }
 
@@ -140,10 +140,10 @@ export class IssueTrackerAgent {
     private async sendTelegramReport() {
         console.log('[IssueTrackerAgent] 📱 텔레그램 데일리 브리핑 조립 및 전송 시작...');
         const db = IssueLedgerDB.getInstance();
-        
+
         // 투표 결과(swarmSummary)가 포함된 최신 장부 데이터 다시 불러오기
         const activeIssues = db.getActiveIssues();
-        
+
         const escalatingIssues = activeIssues.filter(i => i.status === 'ESCALATING');
         const fadingIssues = activeIssues.filter(i => i.status === 'FADING');
 
@@ -156,8 +156,8 @@ export class IssueTrackerAgent {
             escalatingIssues.forEach((issue, idx) => {
                 message += `${idx + 1}. ${issue.name} (위험도 ➡️ ${issue.severity})\n`;
                 message += `   ▫️ 트래커: ${issue.summary}\n`;
-                if (issue.swarmSummary) {
-                    message += `   ▫️ ${issue.swarmSummary}\n`;
+                if ((issue as any).swarmSummary) {
+                    message += `   ▫️ ${(issue as any).swarmSummary}\n`;
                 }
                 message += `\n`;
             });
@@ -168,8 +168,8 @@ export class IssueTrackerAgent {
             fadingIssues.forEach((issue) => {
                 message += `* ${issue.name} (위험도 ➡️ ${issue.severity})\n`;
                 message += `   ▫️ 트래커: ${issue.summary}\n`;
-                if (issue.swarmSummary) {
-                     message += `   ▫️ ${issue.swarmSummary}\n`;
+                if ((issue as any).swarmSummary) {
+                    message += `   ▫️ ${(issue as any).swarmSummary}\n`;
                 }
                 message += `\n`;
             });

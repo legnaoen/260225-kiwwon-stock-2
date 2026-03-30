@@ -36,6 +36,8 @@ function DragV({ onDrag }: { onDrag: (dy: number) => void }) {
 }
 
 import { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip, CartesianGrid, Area } from 'recharts'
+import IntradayChart from './IntradayChart'
+import { useLivePriceStore } from '../../store/useLivePriceStore'
 
 // ── Chart ──
 function PerformanceChart({ redrawKey, history }: { redrawKey: number, history: any[] }) {
@@ -147,7 +149,24 @@ export default function MarketAgentTab() {
     const [selectedTrade, setSelectedTrade] = useState<any | null>(null)
     const [showKnowledgeBase, setShowKnowledgeBase] = useState(false)
     const [showSettings, setShowSettings] = useState(false)
+    const [showDigestModal, setShowDigestModal] = useState(false)
+    const [digestContent, setDigestContent] = useState('')
+    const [isDigestLoading, setIsDigestLoading] = useState(false)
     const [telegramEnabled, setTelegramEnabled] = useState(true)
+
+    const handleFetchDigest = async () => {
+        setIsDigestLoading(true)
+        setShowDigestModal(true)
+        try {
+            const result = await window.electronAPI.getIntradayTechnicalDigest()
+            setDigestContent(result)
+        } catch (e: any) {
+            setDigestContent('오류가 발생했습니다: ' + e.message)
+        } finally {
+            setIsDigestLoading(false)
+        }
+    }
+
     const [layout, setLayout] = useState<Layout>(loadLayout)
     const [chartRedraw, setChartRedraw] = useState(0)
     const [knowledgeTab, setKnowledgeTab] = useState<'RULES'|'DAILY'|'WEEKLY'|'MONTHLY'>('RULES')
@@ -243,6 +262,7 @@ export default function MarketAgentTab() {
     const [decisionTab, setDecisionTab] = useState<'classic' | 'intraday'>('classic')
     const [intradayData, setIntradayData] = useState<any[]>([])
     const [selectedIntraday, setSelectedIntraday] = useState<any | null>(null)
+    const livePrices = useLivePriceStore(state => state.prices)
 
     const fetchData = async () => {
         try {
@@ -280,11 +300,30 @@ export default function MarketAgentTab() {
         const unsubPerf = window.electronAPI.onMarketConditionPerformanceUpdated(() => {
             fetchData() // Refresh chart / table when performance updates (like entry_price)
         })
+
+        let unsubRt: (() => void) | null = null;
+        if (decisionTab === 'intraday') {
+            window.electronAPI.wsRegister(['069500', '114800']).catch(e => console.error('WS:', e));
+            unsubRt = window.electronAPI.onRealTimeData((data) => {
+                // websocket.ts emits: { stk_cd, cur_prc, ... }
+                if (data && data.stk_cd && data.cur_prc) {
+                    const code = data.stk_cd.replace(/[^0-9]/g, '');
+                    const priceStr = String(data.cur_prc).replace(/[^0-9-]/g, '');
+                    const currentPrice = Math.abs(Number(priceStr));
+                    
+                    if (code && currentPrice > 0) {
+                        useLivePriceStore.getState().updatePrice(code, currentPrice);
+                    }
+                }
+            });
+        }
+
         return () => {
             unsubComplete()
             unsubPerf()
+            if (unsubRt) unsubRt();
         }
-    }, [])
+    }, [decisionTab])
 
     const handleRunCycleA = async () => {
         setIsRunning(true)
@@ -348,16 +387,32 @@ export default function MarketAgentTab() {
             {/* ── Top: Chart + Report (horizontally draggable) ── */}
             <div ref={topRef} className="flex px-4 pt-3" style={{ height: layout.topH }}>
                 {/* Left: Chart */}
-                <div className="flex flex-col min-w-0 overflow-hidden" style={{ width: `${layout.chartPct * 100}%` }}>
-                    <div className="flex items-center gap-4 mb-1.5">
-                        <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Cumulative Performance (30D)</span>
-                        <div className="flex items-center gap-3 text-xs ml-auto">
-                            <div className="flex items-center gap-1.5"><div className="w-5 h-0 border-t-[1.5px] border-dashed border-slate-400/50" /><span className="text-muted-foreground">KOSPI</span></div>
-                            <div className="flex items-center gap-1.5"><div className="w-5 h-[2px] bg-indigo-500 rounded" /><span className="text-indigo-400 font-bold">Agent</span></div>
-                        </div>
+                <div className="flex flex-col min-w-0 overflow-hidden border border-border/20 rounded-lg bg-muted/5 p-1.5" style={{ width: `${layout.chartPct * 100}%` }}>
+                    <div className="flex items-center gap-4 mb-2">
+                        {decisionTab === 'classic' ? (
+                            <>
+                                <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider ml-1">Cumulative Performance (30D)</span>
+                                <div className="flex items-center gap-3 text-xs ml-auto pr-1">
+                                    <div className="flex items-center gap-1.5"><div className="w-5 h-0 border-t-[1.5px] border-dashed border-slate-400/50" /><span className="text-muted-foreground">KOSPI</span></div>
+                                    <div className="flex items-center gap-1.5"><div className="w-5 h-[2px] bg-indigo-500 rounded" /><span className="text-indigo-400 font-bold">Agent</span></div>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider ml-1 flex items-center gap-1.5"><Activity className="w-3.5 h-3.5"/> Intraday Momentum 5m (KODEX)</span>
+                                <div className="flex items-center gap-3 text-xs ml-auto pr-1">
+                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-rose-500" /><span className="text-muted-foreground text-[10px]">LONG</span></div>
+                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-blue-500" /><span className="text-muted-foreground text-[10px]">SHORT</span></div>
+                                </div>
+                            </>
+                        )}
                     </div>
-                    <div className="flex-1 min-h-0">
-                        <PerformanceChart redrawKey={chartRedraw} history={history} />
+                    <div className="flex-1 min-h-0 bg-background rounded border border-border/40 overflow-hidden">
+                        {decisionTab === 'classic' ? (
+                            <PerformanceChart redrawKey={chartRedraw} history={history} />
+                        ) : (
+                            <IntradayChart ticker="122630" intradayData={intradayData} />
+                        )}
                     </div>
                 </div>
 
@@ -463,6 +518,16 @@ export default function MarketAgentTab() {
                                 ))}
                             </div>
                         )}
+                        {decisionTab === 'intraday' && (
+                            <button
+                                onClick={handleFetchDigest}
+                                disabled={isDigestLoading}
+                                className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50"
+                            >
+                                {isDigestLoading ? <span className="animate-spin text-[10px]">⚙</span> : <Activity className="w-3.5 h-3.5" />}
+                                전처리 다이제스트
+                            </button>
+                        )}
                         <span className="text-xs text-muted-foreground opacity-60">Click row for details</span>
                     </div>
                 </div>
@@ -561,14 +626,33 @@ export default function MarketAgentTab() {
                                     ? 'text-blue-500 bg-blue-500/10 border-blue-500/20'
                                     : 'text-muted-foreground bg-muted/50 border-border'
                                 const posIcon = posLabel.includes('200') ? '↗' : posLabel.includes('인버스') ? '↘' : '—'
-                                const returnVal = row.return_pct
+                                
+                                const isUp = posLabel.includes('200')
+                                const isDown = posLabel.includes('인버스')
+                                const code = isUp ? '069500' : isDown ? '114800' : null
+                                
+                                let returnVal = row.return_pct
+                                let isLive = false
+
+                                // 당일 마감 전(return_pct가 null)이고 진입가가 있으며 실시간 현재가가 존재할 때
+                                if (returnVal == null && row.entry_price && code && livePrices[code]) {
+                                    const curPrice = livePrices[code]
+                                    returnVal = ((curPrice - row.entry_price) / row.entry_price) * 100
+                                    isLive = true
+                                }
+
                                 const resultBadge = row.result === 'HIT'
                                     ? <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded text-xs font-bold">✅ HIT</span>
                                     : row.result === 'MISS'
                                     ? <span className="px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded text-xs font-bold">❌ MISS</span>
                                     : row.result === 'HOLD'
                                     ? <span className="px-2 py-0.5 bg-muted/50 border border-border text-muted-foreground rounded text-xs font-bold">— HOLD</span>
+                                    : isLive && returnVal != null
+                                    ? <span className={cn("px-2 py-0.5 border rounded text-xs font-bold flex items-center gap-1 justify-center w-min mx-auto", returnVal > 0 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-rose-500/10 border-rose-500/20 text-rose-500")}>
+                                          <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse opacity-70" /> RUNNING
+                                      </span>
                                     : <span className="text-xs text-indigo-400 animate-pulse">⏳</span>
+                                    
                                 return (
                                     <tr key={row.id} onClick={() => setSelectedIntraday(row)} className="border-b border-border/20 hover:bg-accent/30 cursor-pointer transition-colors group">
                                         <td className="py-2 pr-4 font-mono text-muted-foreground">{row.date}</td>
@@ -598,7 +682,11 @@ export default function MarketAgentTab() {
                                         </td>
                                         <td className="py-2 pr-4 font-mono text-right text-muted-foreground">{row.entry_price ? row.entry_price.toLocaleString() : '-'}</td>
                                         <td className={cn("py-2 pr-4 font-mono text-right font-bold", returnVal > 0 ? "text-rose-500" : returnVal < 0 ? "text-blue-500" : "")}>
-                                            {returnVal != null ? `${returnVal > 0 ? '+' : ''}${Number(returnVal).toFixed(2)}%` : '⏳'}
+                                            {returnVal != null ? (
+                                                <span className={cn(isLive && "opacity-80 transition-all")}>
+                                                    {returnVal > 0 ? '+' : ''}{Number(returnVal).toFixed(2)}%
+                                                </span>
+                                            ) : '⏳'}
                                         </td>
                                         <td className="py-2 pr-4 text-center">{resultBadge}</td>
                                         <td className="py-2 pr-4 font-mono text-xs text-muted-foreground">{row.confidence ?? '-'}%</td>
@@ -1036,6 +1124,33 @@ export default function MarketAgentTab() {
                                     <span className={cn("pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out", telegramEnabled ? 'translate-x-4' : 'translate-x-0')} />
                                 </div>
                             </label>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {/* Technical Digest Modal */}
+            {showDigestModal && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowDigestModal(false)}>
+                    <div className="bg-background border border-border/60 rounded-xl shadow-2xl w-[600px] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-border/40 bg-muted/20 flex justify-between items-center">
+                            <h3 className="font-bold flex items-center gap-2"><Activity className="w-4 h-4 text-indigo-400" /> 데이터 전처리 파이프라인 열람</h3>
+                            <button onClick={() => setShowDigestModal(false)} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-6 overflow-y-auto max-h-[70vh]">
+                            {isDigestLoading ? (
+                                <div className="text-center text-muted-foreground py-10 flex flex-col items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full border-2 border-indigo-500/30 border-t-indigo-500 animate-spin"></div>
+                                    <p className="text-sm font-medium">실시간 주가 데이터를 수학적으로 연산 중입니다...</p>
+                                </div>
+                            ) : (
+                                <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed p-4 bg-muted/30 rounded-lg text-foreground/90 border border-border/40">
+                                    {digestContent || '내용이 없습니다.'}
+                                </pre>
+                            )}
+                        </div>
+                        <div className="p-4 border-t border-border/40 bg-muted/10 text-xs text-muted-foreground opacity-70">
+                            이 데이터는 로컬 전담 분석 AI(Front-line Analyst)에게 전달되어 추세 예측의 핵심 사료로 사용됩니다.
                         </div>
                     </div>
                 </div>

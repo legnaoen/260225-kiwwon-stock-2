@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getTopTradingValueStocks: () => ipcRenderer.invoke('kiwoom:get-top-trading-value-stocks'),
     getCombinedTopStocks: (options: { risingLimit?: number, tradingValueLimit?: number }) => ipcRenderer.invoke('kiwoom:get-combined-top-stocks', options),
     getChartData: (options: { stk_cd: string, base_dt?: string }) => ipcRenderer.invoke('kiwoom:get-chart-data', options),
+    getChart5m: (ticker: string, days?: number) => ipcRenderer.invoke('kiwoom:get-chart-5m', ticker, days),
     wsRegister: (symbols: string[]) => ipcRenderer.invoke('kiwoom:ws-register', symbols),
     onRealTimeData: (callback: (data: any) => void) => {
         const listener = (_event: any, data: any) => callback(data)
@@ -147,6 +148,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
     testAiConnection: (settings: { geminiKey: string, modelName: string }) => ipcRenderer.invoke('ai:test-connection', settings),
     
+    // Market Condition Agent V2
+    getIntradayTechnicalDigest: () => ipcRenderer.invoke('mca:get-technical-digest'),
+
     // YouTube
     saveYoutubeApiKey: (key: string) => ipcRenderer.invoke('youtube:save-key', key),
     getYoutubeApiKey: () => ipcRenderer.invoke('youtube:get-key'),
@@ -296,4 +300,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('system:error', listener)
         return () => ipcRenderer.removeListener('system:error', listener)
     },
+
+    // NewsDataHub
+    getNewsHubSettings: () => ipcRenderer.invoke('news-hub:get-settings'),
+    saveNewsHubSettings: (settings: any) => ipcRenderer.invoke('news-hub:save-settings', settings),
+    collectNewsHubNow: () => ipcRenderer.invoke('news-hub:collect-now'),
+    getNewsHubCacheStatus: () => ipcRenderer.invoke('news-hub:get-cache-status'),
 })

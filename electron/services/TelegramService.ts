@@ -767,6 +767,36 @@ export class TelegramService {
             this.sendMessage(msg).catch(e => console.error('[TelegramService] MCA Alert Error:', e));
         });
 
+        // [V2] 장중 예측 알림 (MCA Gemini 09:30/13:00 + 로컬 Swarm 09:45~13:45, 총 11슬롯)
+        // IntradaySwarm.runSwarm() / MCA.runIntraday() 양쪽 모두 동일 이벤트를 발행하므로 단일 리스너로 처리
+        eventBus.on('INTRADAY_PREDICTION_UPDATED' as any, (data: any) => {
+            const mcaSettings = store.get('market_agent_settings', { telegramEnabled: true }) as any;
+            if (!mcaSettings.telegramEnabled) return;
+
+            if (!data || data.confidence === 0) return; // 실패 건 (confidence=0) 제외
+
+            // sources_json 파싱으로 Gemini / 로컬 Swarm 출처 구분
+            let sourcesArr: string[] = [];
+            try { sourcesArr = JSON.parse(data.sources_json || '[]'); } catch (_) {}
+            const isSwarm = sourcesArr.includes('SWARM_LOCAL');
+            const sourceLabel = isSwarm ? '🧠 로컬 군집 위원회' : '🤖 시황 AI (Gemini)';
+
+            const predict = (data.predict || 'HOLD').toUpperCase();
+            const icon = predict === 'UP' ? '📈' : predict === 'DOWN' ? '📉' : '⚖️';
+
+            // rationale 텍스트 전처리 (특수문자 제거, 400자 제한)
+            let rationale = (data.rationale || '').replace(/[*_~`]/g, '').trim();
+            if (rationale.length > 400) rationale = rationale.substring(0, 397) + '...';
+
+            let msg = `${icon} [장중 예측 | ${data.time_slot}]\n`;
+            msg += `출처: ${sourceLabel}\n`;
+            msg += `방향: ${predict} | 신뢰도: ${data.confidence}%\n`;
+            msg += `포지션: ${data.position || '-'}\n\n`;
+            msg += `📝 ${rationale}`;
+
+            this.sendMessage(msg).catch(e => console.error('[TelegramService] Intraday Alert Error:', e));
+        });
+
         /* [V1 Legacy 알림 비활성화]
         // [2.5] 비상 청산 종료 알림
         eventBus.on(SystemEvent.EMERGENCY_LIQUIDATION_COMPLETED, () => {

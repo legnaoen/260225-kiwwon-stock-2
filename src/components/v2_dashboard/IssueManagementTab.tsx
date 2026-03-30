@@ -173,7 +173,8 @@ export default function IssueManagementTab() {
         if (res.success && res.data && res.data.length > 0) {
           const formatted = res.data.map((d: any) => ({
             ...d,
-            date: d.updated_date || d.created_date,
+            date: d.created_date,           // 최초 생성일 기준
+            lastUpdated: d.updated_date,
             swarmSummary: d.swarmSummary,
           }));
           setIssues(formatted);
@@ -200,7 +201,8 @@ export default function IssueManagementTab() {
         if (issuesRes.success && issuesRes.data) {
           const formatted = issuesRes.data.map((d: any) => ({
             ...d,
-            date: d.updated_date || d.created_date,
+            date: d.created_date,           // 최초 생성일 기준
+            lastUpdated: d.updated_date,
           }));
           setIssues(formatted);
           if (formatted.length > 0) setSelectedIssue(formatted[0]);
@@ -501,9 +503,14 @@ export default function IssueManagementTab() {
                           <span className="text-muted-foreground/60 font-medium">평가 요약 없음</span>
                         )}
                       </div>
-                      <div className="flex items-center text-slate-500 dark:text-slate-400 font-medium">
-                        <Clock className="w-3.5 h-3.5 mr-1.5" />
-                        <span className="text-[10px] font-mono tracking-tight">{formatDaysFrom(issue.date)}</span>
+                      <div className="flex flex-col items-end text-slate-500 dark:text-slate-400">
+                        <div className="flex items-center">
+                          <Clock className="w-3.5 h-3.5 mr-1.5" />
+                          <span className="text-[10px] font-mono tracking-tight">{formatDaysFrom(issue.date)}</span>
+                        </div>
+                        {issue.lastUpdated && issue.lastUpdated !== issue.date && (
+                          <span className="text-[9px] font-mono text-muted-foreground/50">갱신: {issue.lastUpdated?.substring(0,10)}</span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -585,9 +592,14 @@ export default function IssueManagementTab() {
                           <span className="text-muted-foreground/60 font-medium text-[10px]">평가 요약 없음</span>
                         )}
                       </div>
-                      <div className="flex items-center text-slate-500 dark:text-slate-400 font-medium shrink-0">
-                        <Clock className="w-3 h-3 mr-1" />
-                        <span className="text-[10px] font-mono tracking-tight">{formatDaysFrom(issue.date)}</span>
+                      <div className="flex flex-col items-end shrink-0">
+                        <div className="flex items-center text-slate-500 dark:text-slate-400 font-medium">
+                          <Clock className="w-3 h-3 mr-1" />
+                          <span className="text-[10px] font-mono tracking-tight">{formatDaysFrom(issue.date)}</span>
+                        </div>
+                        {issue.lastUpdated && issue.lastUpdated !== issue.date && (
+                          <span className="text-[9px] font-mono text-muted-foreground/50">갱신: {issue.lastUpdated?.substring(0,10)}</span>
+                        )}
                       </div>
                     </div>
                   </button>
@@ -611,9 +623,16 @@ export default function IssueManagementTab() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center text-muted-foreground/80">
-                    <Clock className="w-3.5 h-3.5 mr-1.5 opacity-70" />
-                    <span className="text-xs font-mono font-medium tracking-tight">{formatDaysFrom(selectedIssue?.date || '')}</span>
+                  <div className="flex items-center gap-3 text-muted-foreground/80">
+                    <div className="flex items-center">
+                      <Clock className="w-3.5 h-3.5 mr-1.5 opacity-70" />
+                      <span className="text-xs font-mono font-medium tracking-tight">{formatDaysFrom(selectedIssue?.date || '')}</span>
+                    </div>
+                    {selectedIssue?.lastUpdated && selectedIssue.lastUpdated !== selectedIssue.date && (
+                      <span className="text-[10px] font-mono text-muted-foreground/50 bg-muted/40 px-1.5 py-0.5 rounded">
+                        최종갱신 {selectedIssue.lastUpdated?.substring(0, 10)}
+                      </span>
+                    )}
                   </div>
                 </div>
                 

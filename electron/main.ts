@@ -312,6 +312,15 @@ ipcMain.handle('kiwoom:get-api-logs', () => {
     return kiwoomService.getApiLogs()
 })
 
+ipcMain.handle('kiwoom:get-chart-5m', async (_event, ticker: string, days: number = 2) => {
+    try {
+        return await kiwoomService.getOhlcv5m(ticker, days);
+    } catch (e: any) {
+        console.error('[Main] get-chart-5m Error:', e);
+        return [];
+    }
+})
+
 ipcMain.handle('maiis:get-inventory', () => {
     try {
         return IngestionManager.getInstance().getInventory()
@@ -1228,6 +1237,17 @@ ipcMain.handle('ai:test-connection', async (_event, { geminiKey, modelName }: { 
     }
 })
 
+// === Market Condition Agent V2 ===
+ipcMain.handle('mca:get-technical-digest', async () => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const digest = await MarketConditionAgent.getInstance().getIntradayTechnicalDigest()
+        return digest
+    } catch (err: any) {
+        return `[오류] 다이제스트 생성 실패: ${err.message}`
+    }
+})
+
 // === Naver API Handlers ===
 ipcMain.handle('naver:save-keys', (_event, keys: { clientId: string, clientSecret: string }) => {
     store.set('naver_api_keys', keys)
@@ -1640,3 +1660,43 @@ ipcMain.handle('skills:save', async (_event, { fileName, content, diffSummary }:
 })
 
 // End of Handlers
+
+// ═══ NewsDataHub IPC Handlers ═══════════════════════════════════════════════
+
+ipcMain.handle('news-hub:get-settings', () => {
+    const { DEFAULT_NEWS_HUB_SETTINGS } = require('./types/NewsHubSettings')
+    return store.get('news_hub_settings') || DEFAULT_NEWS_HUB_SETTINGS
+})
+
+ipcMain.handle('news-hub:save-settings', async (_event, settings: any) => {
+    try {
+        const { validateHubTimeline } = require('./types/NewsHubSettings')
+        const validation = validateHubTimeline(settings)
+        store.set('news_hub_settings', settings)
+        // 크론 즉시 재등록
+        const { SchedulerService } = await import('./services/SchedulerService')
+        SchedulerService.getInstance().initSchedules()
+        return { success: true, warnings: validation.warnings }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('news-hub:collect-now', async () => {
+    try {
+        const { NewsDataHub } = await import('./services/NewsDataHub')
+        const result = await NewsDataHub.getInstance().runBatchCollect()
+        return { success: true, ...result }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('news-hub:get-cache-status', async () => {
+    try {
+        const { NewsDataHub } = await import('./services/NewsDataHub')
+        return NewsDataHub.getInstance().getCacheStatus()
+    } catch (err: any) {
+        return { isValid: false, error: err.message }
+    }
+})

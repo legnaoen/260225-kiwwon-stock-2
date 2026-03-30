@@ -3,6 +3,8 @@ import { AiExecutionQueue } from '../AiExecutionQueue';
 import { DatabaseService } from '../DatabaseService';
 import { eventBus } from '../../utils/EventBus';
 import { PerformanceTracker } from './PerformanceTracker';
+import { PriceStore } from '../PriceStore';
+import { KiwoomService } from '../KiwoomService';
 
 export const INTRADAY_PERSONAS = [
     {
@@ -157,22 +159,58 @@ ${voteSummary}
             const predict = ['UP', 'DOWN', 'HOLD'].includes((finalParsed.final_predict || '').toUpperCase()) ? (finalParsed.final_predict || '').toUpperCase() : 'HOLD';
             const confidence = typeof finalParsed.confidence === 'number' ? finalParsed.confidence : 50;
             
-            // 4. 합산 Rationale 조립
+            // 4. 합산 Rationale 조립 및 UI 표시용 Comments 생성
             const totalRationale = `[군집 위원회 종합판결]\n${finalParsed.judge_rationale}\n\n[위원별 상세의견]\n${votes.map(v => `• ${v.name.split(' ')[0]}: ${v.predict}`).join('\n')}`;
 
-            // 5. DB 저장
+            const enrichedComments = votes.map(v => ({
+                id: v.id,
+                name: v.name,
+                predict: v.predict,
+                comment: v.rationale,
+                weight: weights[v.id]?.weight || 1.0,
+                winRate: weights[v.id]?.winRate !== undefined ? weights[v.id].winRate : null
+            }));
+            const swarmSentiment = `${predict} (${confidence}%)`;
+
+            // 5. DB 저장 및 진입가(entry_price) 조회
             const position = predict === 'UP' ? 'KODEX 200' : predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD';
+            const code = predict === 'UP' ? '069500' : predict === 'DOWN' ? '114800' : null;
+            let entryPrice = 0;
+            
+            if (code) {
+                // 1차: 실시간 WebSocket 연동된 PriceStore 확인
+                entryPrice = PriceStore.getInstance().getPrice(code) || 0;
+                if (!entryPrice || entryPrice <= 0) {
+                    // 2차: REST API로 현재가 백업 조회
+                    try {
+                        const res = await KiwoomService.getInstance().getCurrentPrice(code);
+                        const body = res?.Body || res?.output || res;
+                        const p = body?.stck_prpr || body?.cur_prc || body?.prpr || body?.close;
+                        if (p) {
+                            entryPrice = Math.abs(Number(p));
+                            PriceStore.getInstance().setPrice(code, entryPrice);
+                        }
+                    } catch (e) {
+                        console.error('[IntradaySwarm] 진입가 조회 실패:', e);
+                    }
+                }
+            }
+
             const sourcesArr: string[] = ['SWARM_LOCAL'];
             const rawDb = (this.db as any).db;
 
             rawDb.prepare(`
                 INSERT OR REPLACE INTO intraday_predictions 
-                (id, date, time_slot, predict, confidence, rationale, position, sources_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-            `).run(predId, dateStr, slot, predict, confidence, totalRationale, position, JSON.stringify(sourcesArr));
+                (id, date, time_slot, predict, confidence, rationale, position, entry_price, sources_json, comments_json, swarm_sentiment, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            `).run(predId, dateStr, slot, predict, confidence, totalRationale, position, entryPrice, JSON.stringify(sourcesArr), JSON.stringify(enrichedComments), swarmSentiment);
 
             // 6. UI 이벤트 발송
-            const resultPayload = { id: predId, date: dateStr, time_slot: slot, predict, confidence, rationale: totalRationale, position, sources_json: JSON.stringify(sourcesArr) };
+            const resultPayload = { 
+                id: predId, date: dateStr, time_slot: slot, predict, confidence, rationale: totalRationale, 
+                position, entry_price: entryPrice, sources_json: JSON.stringify(sourcesArr), 
+                comments_json: JSON.stringify(enrichedComments), swarm_sentiment: swarmSentiment 
+            };
             eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, resultPayload);
 
             console.log(`[IntradaySwarm] ${slot} 전체 프로세스 완료: ${predict} (${confidence}%) | 소요시간: ${Date.now() - startTime}ms`);
@@ -272,19 +310,34 @@ ${voteSummary}
             const swarmSentiment = `${dominantSentiment} (${sentimentPercentage}%)`;
 
             // 댓글 배열 자체에도 가중치, 승률(UI 표시용) 객체를 포함해서 저장
-            const enrichedComments = comments.map(c => ({
+            let finalCommentsToSave = comments.map(c => ({
                 ...c,
                 weight: weights[c.id]?.weight || 1.0,
                 winRate: weights[c.id]?.winRate !== undefined ? weights[c.id].winRate : null
             }));
 
-            // 3. DB 업데이트 (comments_json, swarm_sentiment 컬럼)
+            // (C) DB 저장 전, 이미 존재하는 Pre-Comments (전담 AI 브리핑) 이 있는지 확인하고 병합
             const rawDb = (this.db as any).db;
+            try {
+                const existingRow = rawDb.prepare(`SELECT comments_json FROM ${tableName} WHERE id = ?`).get(predId);
+                if (existingRow && existingRow.comments_json) {
+                    const existingComments = JSON.parse(existingRow.comments_json);
+                    const analystComments = existingComments.filter((c: any) => c.predict === 'INFO' || c.id.startsWith('ANALYST_'));
+                    if (analystComments.length > 0) {
+                        // 전담 분석가 코멘트를 맨 위로 올리거나 합칩니다.
+                        finalCommentsToSave = [...analystComments, ...finalCommentsToSave];
+                    }
+                }
+            } catch (e: any) {
+                console.error(`[IntradaySwarm-Comment] 기존 전처리 댓글 파싱 실패:`, e.message);
+            }
+
+            // 3. DB 업데이트 (comments_json, swarm_sentiment 컬럼)
             rawDb.prepare(`
                 UPDATE ${tableName} 
                 SET comments_json = ?, swarm_sentiment = ?
                 WHERE id = ?
-            `).run(JSON.stringify(enrichedComments), swarmSentiment, predId);
+            `).run(JSON.stringify(finalCommentsToSave), swarmSentiment, predId);
 
             // 4. UI 갱신 이벤트 발송 (기존 데이터 다시 읽어서 전송하거나, 간단히 아이디만 전송)
             const updatedRow = rawDb.prepare(`SELECT * FROM ${tableName} WHERE id = ?`).get(predId);

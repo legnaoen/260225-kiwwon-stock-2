@@ -39,7 +39,8 @@ export class LocalAiService {
     public async askLocalAi(
         prompt: string, 
         systemInstruction?: string, 
-        customModel?: string
+        customModel?: string,
+        customMessages?: any[]
     ): Promise<string> {
         const settings = this.getSettings();
         const model = customModel || settings.modelName;
@@ -48,10 +49,14 @@ export class LocalAiService {
         console.log(`[LocalAi] 🚀 서버 요청: ${endpoint} (Model: ${model})`);
 
         const messages: any[] = [];
-        if (systemInstruction) {
-            messages.push({ role: 'system', content: systemInstruction });
+        if (customMessages && customMessages.length > 0) {
+            messages.push(...customMessages);
+        } else {
+            if (systemInstruction) {
+                messages.push({ role: 'system', content: systemInstruction });
+            }
+            messages.push({ role: 'user', content: prompt });
         }
-        messages.push({ role: 'user', content: prompt });
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 180000); 
@@ -68,7 +73,9 @@ export class LocalAiService {
                     messages: messages,
                     temperature: 0.7,
                     max_tokens: 4000,
-                    stream: true // 60초 HTTP 타임아웃 방지를 위해 스트리밍 강제 사용
+                    stream: true, // 60초 HTTP 타임아웃 방지를 위해 스트리밍 강제 사용
+                    repetition_penalty: 1.15, // 소형 로컬 모델의 자기 반복 버그 방지
+                    frequency_penalty: 0.2 // 과도한 반복성 억제 유도
                 })
             });
             clearTimeout(timeoutId);

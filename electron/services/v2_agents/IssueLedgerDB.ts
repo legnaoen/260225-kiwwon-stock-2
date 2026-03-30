@@ -262,7 +262,7 @@ export class IssueLedgerDB {
      * Get a specific issue timeline
      */
     public getIssueTimeline(issueId: string): IssueTimelineNode[] {
-        return this.db.prepare(`SELECT * FROM issue_timeline WHERE issue_id = ? ORDER BY timestamp ASC`).all(issueId) as any[];
+        return this.db.prepare(`SELECT * FROM issue_timeline WHERE issue_id = ? ORDER BY timestamp DESC`).all(issueId) as any[];
     }
 
     /**
@@ -389,6 +389,17 @@ export class IssueLedgerDB {
         });
 
         saveTransaction();
+    }
+
+    /**
+     * 해당 이슈에 대해 오늘 이미 Swarm 세션이 생성되었는지 확인 (중복 방지)
+     */
+    public hasSwarmToday(issueId: string): boolean {
+        const today = new Date().toLocaleDateString('sv-SE'); // 'YYYY-MM-DD'
+        const row = this.db.prepare(
+            `SELECT id FROM swarm_sessions WHERE issue_id = ? AND session_date = ? LIMIT 1`
+        ).get(issueId, today);
+        return !!row;
     }
 
     /**

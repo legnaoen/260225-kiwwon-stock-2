@@ -6,6 +6,7 @@ import { eventBus, SystemEvent } from '../utils/EventBus'
 import Store from 'electron-store'
 import { IngestionManager } from './IngestionManager'
 import { DatabaseService } from './DatabaseService'
+import { DEFAULT_NEWS_HUB_SETTINGS, NewsHubSettings } from '../types/NewsHubSettings'
 
 
 const store = new Store()
@@ -37,8 +38,15 @@ export class SchedulerService {
         this.scheduledJobs.forEach(job => job.stop())
         this.scheduledJobs = []
 
+        // ═══ [Step 1] NewsDataHub 크론 (AI보다 반드시 먼저 등록) ═══
+        const hubSettings = store.get('news_hub_settings') as NewsHubSettings || DEFAULT_NEWS_HUB_SETTINGS
+        if (hubSettings.enabled) {
+            const hubJobs = this.initNewsHubJobs(hubSettings)
+            this.scheduledJobs.push(...hubJobs)
+            console.log(`[SchedulerService] 📡 NewsDataHub 크론 ${hubJobs.length}개 등록`)
+        }
 
-        // ═══ V2 Agent Swarm Schedules ═══
+        // ═══ [Step 2] V2 Agent Swarm Schedules ═══
         const settings = store.get('ai_schedule_settings') as any || { enabled: true }
         if (settings.enabled) {
             // [신규] Tracker: 08:30 (밤사이 발생한 뉴스 읽고, 이슈 장부 개별 요약)
@@ -117,6 +125,36 @@ export class SchedulerService {
             this.scheduledJobs.push(itaJob, mcaJobA, mcaJobB, mcaTrackerJob, intradayJobA, intradayJobC, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, ...swarmJobs)
             console.log(`[SchedulerService] V2 AI schedules initialized (ITA: 08:30, MCA: 08:50, Swarms, Retros)`)
         }
+    }
+
+    /**
+     * NewsDataHub 크론 동적 등록 (설정 기반)
+     */
+    private initNewsHubJobs(settings: NewsHubSettings): cron.ScheduledTask[] {
+        const jobs: cron.ScheduledTask[] = []
+        const daysExpr = settings.operatingDays.join(',') || '1-5'
+
+        for (const slot of settings.scheduleSlots) {
+            if (!slot.enabled) continue
+            const [hrStr, minStr] = slot.time.split(':')
+            const hr = parseInt(hrStr, 10)
+            const min = parseInt(minStr, 10)
+            if (isNaN(hr) || isNaN(min)) continue
+
+            const cronExpr = `${min} ${hr} * * ${daysExpr}`
+            const job = cron.schedule(cronExpr, async () => {
+                try {
+                    console.log(`[NewsDataHub] 🗞️  ${slot.label}(${slot.time}) 배치 수집 시작`)
+                    const { NewsDataHub } = await import('./NewsDataHub')
+                    const result = await NewsDataHub.getInstance().runBatchCollect()
+                    console.log(`[NewsDataHub] ✅ ${result.collected}건 완료 (버킷: ${result.bucket}, ${result.duration_ms}ms)`)
+                } catch (err: any) {
+                    console.error(`[NewsDataHub] ❌ 배치 수집 실패 (${slot.time}):`, err.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+            jobs.push(job)
+        }
+        return jobs
     }
 
 

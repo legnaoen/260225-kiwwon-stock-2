@@ -13,6 +13,7 @@ export interface IElectronAPI {
     getAllStocks: (marketType: string) => Promise<any>
     getWatchlist: (symbols: string[]) => Promise<any>
     getChartData: (options: { stk_cd: string, base_dt?: string }) => Promise<any>
+    getChart5m: (ticker: string, days?: number) => Promise<any[]>
     wsRegister: (symbols: string[]) => Promise<any>
     onRealTimeData: (callback: (data: any) => void) => () => void
     saveWatchlistSymbols: (symbols: string[]) => Promise<any>
@@ -105,11 +106,14 @@ export interface IElectronAPI {
     getAiSettings: () => Promise<{
         geminiKey: string,
         modelName?: string,
-        virtualInitialBalance: number,
+        virtualInitialBalance?: number,
         buyStartTime?: string,
         buyEndTime?: string
     } | null>
     testAiConnection: (settings: { geminiKey: string, modelName: string }) => Promise<{ success: boolean, response?: string, error?: string }>
+    
+    // Market Condition Agent V2
+    getIntradayTechnicalDigest: () => Promise<string>
 
     // Rising Stocks Report
     onBatchProgress: (callback: (data: any) => void) => () => void

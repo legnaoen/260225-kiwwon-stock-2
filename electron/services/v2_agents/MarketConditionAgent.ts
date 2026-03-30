@@ -15,9 +15,11 @@ import { AiService } from '../AiService'
 import { AiExecutionQueue } from '../AiExecutionQueue'
 import { DatabaseService } from '../DatabaseService'
 import { eventBus, SystemEvent } from '../../utils/EventBus'
+import { KiwoomService } from '../KiwoomService'
 import { AgentCycle, AgentPrediction, DataContext, ParsedDecision, PipelineSlot } from './types/AgentTypes'
 import { buildSystemPrompt, buildUserPrompt } from './prompts/market_condition'
 import { IntradaySwarmAgent } from './IntradaySwarmAgent'
+import { TechnicalAnalyzer } from './TechnicalAnalyzer'
 
 // ═══ 유연한 파이프라인 레지스트리 ═══
 // 새 파이프라인 추가 시 여기에 한 줄만 추가하면 자동 통합
@@ -45,8 +47,27 @@ export class MarketConditionAgent {
     public static getInstance(): MarketConditionAgent {
         if (!MarketConditionAgent.instance) {
             MarketConditionAgent.instance = new MarketConditionAgent()
+            // 서버나 앱 시작 시점에 1회 호출해 누락된 과거 가격들을 자동 복구
+            setTimeout(() => {
+                MarketConditionAgent.instance.syncMissingIntradayPrices().catch(e => {
+                    console.error('[MCA-Init] 누락 진입가 복구 에러:', e.message);
+                });
+            }, 5000); // KiwoomService.getInstance() 안전성을 위해 약간의 지연
         }
         return MarketConditionAgent.instance
+    }
+
+    /**
+     * 프론트엔드 프리뷰 및 로컬 전담 AI 전처리용: 순수 수학적 기술적 다이제스트 생성
+     */
+    public async getIntradayTechnicalDigest(): Promise<string> {
+        try {
+            const analyzer = new TechnicalAnalyzer(KiwoomService.getInstance());
+            return await analyzer.generateMarketTechnicalDigest();
+        } catch (e: any) {
+            console.error('[MCA-Digest] 오류:', e);
+            return `오류: ${e.message}`;
+        }
     }
 
     /**
@@ -433,6 +454,54 @@ export class MarketConditionAgent {
             if (investorResult.status === 'fulfilled') dataParts.push(`[PL-InvestorFlow]\n${investorResult.value.aggregatedMarkdown}`)
             if (localResult.status === 'fulfilled') dataParts.push(`[PL-LocalFlow]\n${localResult.value.aggregatedMarkdown}`)
 
+            const queue = AiExecutionQueue.getInstance();
+
+            // 1.5 전담 AI (Front-line Analyst) 병렬 호출 - Chart & News
+            let chartAnalystOpinion = "차트 데이터 요약 실패";
+            let newsAnalystOpinion = "뉴스 스크랩 실패";
+
+            try {
+                // (A) 기술적 다이제스트 생성 및 로컬 AI(CHART_ANALYST) 판독
+                const technicalDigest = await this.getIntradayTechnicalDigest();
+                const chartPrompt = `[실시간 수학적 전처리 차트 브리핑]\n${technicalDigest}\n\n당신은 위 다이제스트에서 20/60일선 지지여부와 분봉 추세를 직관적으로 읽고, 앞으로의 단기 주가 향방을 단 3문장 이내로 평가하는 기술적 분석 전담 AI입니다. 상승/하락 모멘텀에 대한 명확한 견해를 제시하세요.`;
+                
+                // (B) 네이버 실시간 뉴스 스크랩 및 로컬 AI(NEWS_ANALYST) 판독
+                let newsHeadlinesText = "뉴스 없음";
+                try {
+                    const { NaverNewsService } = await import('../NaverNewsService');
+                    const news = await NaverNewsService.getInstance().searchNews("코스피 시황", 5);
+                    const headlines = news.items?.map((n: any) => n.title.replace(/<[^>]*>?/gm, '')).join('\n') || '';
+                    if (headlines) newsHeadlinesText = headlines;
+                } catch(e) {}
+
+                const newsPrompt = `[방금 들어온 코스피 실시간 속보 헤드라인 5개]\n${newsHeadlinesText}\n\n당신은 시장의 공포와 탐욕을 읽어내는 투심 분석 AI입니다. 위 헤드라인들에서 치명적 악재나 강한 호재가 있는지 살펴보고, 시장 분위기가 긍정적인지 부정적인지 단 3문장 이내로 요약 평가하세요.`;
+
+                // 두 로컬 AI를 병렬로 실행 시도
+                const [chartRes, newsRes] = await Promise.allSettled([
+                    queue.enqueue({
+                        agentId: 'ANALYST_CHART',
+                        agentName: '로컬 차트 전담 AI',
+                        triggerType: 'CRON',
+                        targetType: 'local', // 반드시 로컬로 실행
+                        prompt: chartPrompt,
+                        systemInstruction: "당신은 차트 데이터를 감정없이 읽고 핵심만 브리핑하는 전담 분석가입니다."
+                    }),
+                    queue.enqueue({
+                        agentId: 'ANALYST_NEWS',
+                        agentName: '로컬 뉴스 전담 AI',
+                        triggerType: 'CRON',
+                        targetType: 'local', // 반드시 로컬로 실행
+                        prompt: newsPrompt,
+                        systemInstruction: "당신은 속보 헤드라인의 긍정/부정 뉘앙스만 빠르게 요약 보고하는 전담 분석가입니다."
+                    })
+                ]);
+
+                if (chartRes.status === 'fulfilled') chartAnalystOpinion = chartRes.value;
+                if (newsRes.status === 'fulfilled') newsAnalystOpinion = newsRes.value;
+            } catch (e: any) {
+                console.error("[MCA-Intraday] 전담 AI 분석 실패:", e.message);
+            }
+
             // 2. 시간대별 특성 주입 (Time-Context)
             let timeContext = '';
             if (slot === '09:30') {
@@ -441,18 +510,26 @@ export class MarketConditionAgent {
                 timeContext = "오후장 진입 시점의 외국인 선물 매매 누적 동향, 프로그램 매매 추이, 그리고 추세 반전(Reversal) 가능성을 엄격히 판별하여 최종 종가가 상승마감일지 하락마감일지 예측하라.";
             }
 
-            // 3. 장중 종가 방향 예측 프롬프트
-            const systemPrompt = `당신은 한국 주식 시장의 당일 수급과 모멘텀을 추적하여 장중 방향성을 예측하는 데이트레이더(Day Trader) 퀀트입니다.`
+            // 3. 메인 위원회 (장중 종가 방향 예측 프롬프트)
+            const systemPrompt = `당신은 한국 주식 시장의 당일 수급과 모멘텀을 추적하여 장중 방향성을 예측하는 데이트레이더(Day Trader) 퀀트이자 최고 의사결정자입니다.`
             const userPrompt = `[${slot} KST 기준 실시간 시장 데이터]
 
 ${dataParts.join('\n\n---\n\n')}
 
 ---
+[로컬 차트 전담 AI(Front-line Analyst)의 브리핑]
+${chartAnalystOpinion}
+
+[로컬 투심 전담 AI(Front-line Analyst)의 브리핑]
+${newsAnalystOpinion}
+
+---
 ${timeContext}
-위 주체별 수급(Investor Flow) 및 업종별 등락(Local Flow) 데이터를 바탕으로 오늘 장마감 코스피 종가 방향을 예측하시오.
+위 주체별 수급(Investor Flow) 및 업종별 등락 데이터와 전담 AI 패널들의 브리핑을 바탕으로 결합하여 오늘 장마감 코스피 종가 방향을 예측하시오.
 
 엄격한 분석 지침:
 - 외국인 주가지수 선물 매매 동향을 1순위로, 기관/외국인 현물 쌍끌이 혹은 양매도 여부를 2순위로 강력하게 반영하시오.
+- 차트/투심 브리핑은 참고 지표로 삼되 수급 데이터와 충돌한다면 수급을 더 우선시 하시오.
 - 반드시 다음 JSON 형식으로만 출력하시오. 다른 텍스트는 일체 금지.
 
 {
@@ -477,11 +554,40 @@ ${timeContext}
             const predict = ['UP', 'HOLD', 'DOWN'].includes(parsed.predict) ? parsed.predict : 'HOLD'
             const confidence = Math.min(100, Math.max(0, Number(parsed.confidence) || 50))
             
-            // UI에 보여질 종합 Rationale 텍스트 조립
+            // UI에 보여질 종합 Rationale 텍스트 조립 (여기에 전문 요약을 넣는 대신 댓글로 뺌)
             const assembledRationale = `[추세] ${parsed.trend_status || ''}\n[트리거] ${parsed.key_trigger || ''}\n[결론] ${parsed.rationale || ''}`;
 
-            // 4. DB 저장
+            // (C) 전담 AI 브리핑을 "댓글" 처럼 표시하기 위한 초기 댓글 (Pre-comments)
+            const initialComments = [
+                { id: 'ANALYST_CHART', name: '차트 스페셜리스트 📈', predict: 'INFO', comment: chartAnalystOpinion, weight: 1.0, winRate: null },
+                { id: 'ANALYST_NEWS', name: '투심 스페셜리스트 📰', predict: 'INFO', comment: newsAnalystOpinion, weight: 1.0, winRate: null }
+            ];
+
+            // 4. DB 저장 및 진입가(entry_price) 실시간 조회
             const position = predict === 'UP' ? 'KODEX 200' : predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD'
+            const code = predict === 'UP' ? '069500' : predict === 'DOWN' ? '114800' : null;
+            let entryPrice = 0;
+            
+            if (code) {
+                const { PriceStore } = await import('../PriceStore');
+                const { KiwoomService } = await import('../KiwoomService');
+                
+                try {
+                    // 확실한 REST API인 5분봉의 마지막 종가를 현재가(진입가)로 타겟팅
+                    const candles = await KiwoomService.getInstance().getOhlcv5m(code, 1);
+                    if (candles && candles.length > 0) {
+                        entryPrice = candles[candles.length - 1].close;
+                        PriceStore.getInstance().setPrice(code, entryPrice);
+                    } else {
+                        // API 데이터가 비어있으면 메모리 폴백
+                        entryPrice = PriceStore.getInstance().getPrice(code) || 0;
+                    }
+                } catch (e: any) {
+                    console.error('[MCA-Intraday] 진입가(5분봉 종가) 조회 실패:', e.message);
+                    entryPrice = PriceStore.getInstance().getPrice(code) || 0;
+                }
+            }
+
             const sourcesArr: string[] = []
             if (investorResult.status === 'fulfilled') sourcesArr.push('PL-InvestorFlow')
             if (localResult.status === 'fulfilled') sourcesArr.push('PL-LocalFlow')
@@ -489,11 +595,15 @@ ${timeContext}
             const rawDb = (this.db as any).db
             rawDb.prepare(`
                 INSERT OR REPLACE INTO intraday_predictions 
-                (id, date, time_slot, predict, confidence, rationale, position, sources_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-            `).run(predId, dateStr, slot, predict, confidence, assembledRationale, position, JSON.stringify(sourcesArr))
+                (id, date, time_slot, predict, confidence, rationale, position, entry_price, sources_json, comments_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            `).run(predId, dateStr, slot, predict, confidence, assembledRationale, position, entryPrice, JSON.stringify(sourcesArr), JSON.stringify(initialComments))
 
-            const result = { id: predId, date: dateStr, time_slot: slot, predict, confidence, rationale: assembledRationale, position, sources_json: JSON.stringify(sourcesArr) }
+            const result = { 
+                id: predId, date: dateStr, time_slot: slot, predict, confidence, 
+                rationale: assembledRationale, position, entry_price: entryPrice, sources_json: JSON.stringify(sourcesArr),
+                comments_json: JSON.stringify(initialComments)
+            }
             eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, result)
 
             console.log(`[MCA-Intraday] ${slot} 완료: ${predict} (${confidence}%) | ${Date.now() - startTime}ms`)
@@ -501,6 +611,11 @@ ${timeContext}
             // 5. 비동기 군집 댓글 (Asynchronous Swarm Commentary) 트리거 - 백그라운드 구동
             IntradaySwarmAgent.getInstance().runSwarmCommentary(predId, predict, assembledRationale).catch(e => {
                 console.error('[MCA-Intraday] 댓글 작성기 비동기 호출 에러:', e.message);
+            });
+
+            // 6. 누락된 과거 진입가 채우기 (백그라운드 자가 치유)
+            this.syncMissingIntradayPrices().catch(e => {
+                console.error('[MCA-Intraday] 누락 진입가 복구 에러:', e.message);
             });
 
             return result
@@ -521,11 +636,78 @@ ${timeContext}
         try {
             const rawDb = (this.db as any).db
             if (date) {
-                return rawDb.prepare(`SELECT * FROM intraday_predictions WHERE date = ? ORDER BY time_slot ASC`).all(date)
+                return rawDb.prepare(`SELECT * FROM intraday_predictions WHERE date = ? ORDER BY time_slot DESC`).all(date)
             }
-            return rawDb.prepare(`SELECT * FROM intraday_predictions ORDER BY date DESC, time_slot ASC LIMIT 30`).all()
+            return rawDb.prepare(`SELECT * FROM intraday_predictions ORDER BY date DESC, time_slot DESC LIMIT 30`).all()
         } catch {
             return []
+        }
+    }
+
+    /**
+     * 과거 기록 중 진입가(entry_price)가 누락된 데이터가 있다면
+     * 해당하는 날짜의 과거 5분봉 데이터를 탐색하여 진입가를 자동 보완
+     */
+    public async syncMissingIntradayPrices() {
+        console.log('[MCA-Intraday] 누락된 진입가(entry_price) 복구 검사 시작...');
+        try {
+            const rawDb = (this.db as any).db;
+            const missings = rawDb.prepare(`
+                SELECT id, date, time_slot, predict 
+                FROM intraday_predictions 
+                WHERE (entry_price IS NULL OR entry_price = 0)
+                  AND predict IN ('UP', 'DOWN', 'LONG', 'SHORT') 
+                  AND date >= date('now', '-3 days') -- 최근 3영업일만 대상
+                ORDER BY date ASC
+            `).all();
+
+            if (missings.length === 0) {
+                console.log('[MCA-Intraday] 누락된 진입가 없음. 완료.');
+                return;
+            }
+
+            const { KiwoomService } = await import('../KiwoomService');
+            const kiwoom = KiwoomService.getInstance();
+            let updatedCount = 0;
+
+            for (const row of missings) {
+                const isUp = row.predict === 'UP' || row.predict === 'LONG';
+                const code = isUp ? '069500' : '114800';
+                const dateStr = `${row.date}T${row.time_slot}:00+09:00`; // KST
+                const targetTimestamp = Math.floor(new Date(dateStr).getTime() / 1000);
+                
+                // 해당일 포함 과거 5분봉 데이터 요청 (넉넉히 최대 4일)
+                const candles = await kiwoom.getOhlcv5m(code, 4);
+                
+                // 대상 시간과 정확히 일치하거나 가장 근접한 5분봉 검색 (10분 이내)
+                let matchedPrice = 0;
+                let minDiff = 86400; // 큰 값으로 초기화
+
+                for (const candle of candles) {
+                    const diff = Math.abs(candle.time - targetTimestamp);
+                    if (diff <= 600 && diff < minDiff) { 
+                        minDiff = diff;
+                        matchedPrice = candle.close;
+                    }
+                }
+
+                if (matchedPrice > 0) {
+                    rawDb.prepare(`UPDATE intraday_predictions SET entry_price = ? WHERE id = ?`).run(matchedPrice, row.id);
+                    console.log(`[MCA-Intraday] 복구 완료: ${row.id} -> 진입가 ${matchedPrice} 적용`);
+                    updatedCount++;
+                } else {
+                    console.warn(`[MCA-Intraday] 복구 불가: ${row.id} (조건에 맞는 차트 데이터 캔들 없음)`);
+                }
+
+                // 키움 API 제한 방지용 딜레이
+                await new Promise(r => setTimeout(r, 600));
+            }
+
+            if (updatedCount > 0) {
+                eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, null);
+            }
+        } catch (e: any) {
+            console.error('[MCA-Intraday] 진입가 복구 프로세스 에러:', e.message);
         }
     }
 }

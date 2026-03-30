@@ -434,12 +434,155 @@ export class KiwoomService {
     }
 
     /**
-     * AI 분석을 위해 최근 80거래일 일봉 데이터를 가져옵니다.
+     * AI 분석을 위해 설정된 거래일의 일봉 데이터를 가져옵니다. 기본 80, 최대 가용 수량까지.
      */
-    public async getDailyChartData(stk_cd: string): Promise<any[]> {
+    public async getDailyChartData(stk_cd: string, count: number = 80): Promise<any[]> {
         const data = await this.getChartData(stk_cd);
         const list = data?.stk_dt_pole_chart_qry || data?.output2 || data?.Body || data?.list || [];
-        return Array.isArray(list) ? list.slice(0, 80) : [];
+        return Array.isArray(list) ? list.slice(0, count) : [];
+    }
+
+    /**
+     * 일봉 연속 데이터를 가져와서 timestamp 형태의 통일된 규격으로 반환 (AI 및 차트 렌더링용)
+     */
+    public async getOhlcvDaily(ticker: string, count: number = 80): Promise<any[]> {
+        const data = await this.getDailyChartData(ticker, count);
+        const candles: any[] = [];
+        
+        for (const row of Object.values(data).slice(0, count) as any[]) {
+            const dateStr = String(row.dt || row.stnd_dt || row.stck_bsop_date || row.date || '').replace(/[-]/g, '');
+            if (dateStr.length !== 8) continue;
+            
+            const year = parseInt(dateStr.substring(0, 4));
+            const month = parseInt(dateStr.substring(4, 6)) - 1;
+            const day = parseInt(dateStr.substring(6, 8));
+            // Set to 00:00:00 UTC for EOD
+            const epochSec = Date.UTC(year, month, day) / 1000;
+
+            const v = Object.keys(row).reduce((acc: any, k) => { acc[k] = row[k]; return acc; }, {});
+            const getVal = (keys: string[]) => {
+                for(const k of keys) {
+                    if (v[k] !== undefined && String(v[k]).trim() !== '') return String(v[k]).replace(/[,]/g, '').replace(/[-]/g, '');
+                }
+                return '0';
+            };
+
+            candles.push({
+                time: epochSec,
+                open: parseFloat(getVal(["open", "open_pric", "opn_prc"])),
+                high: parseFloat(getVal(["high", "high_pric", "hgpr"])),
+                low: parseFloat(getVal(["low", "low_pric", "lwpr"])),
+                close: parseFloat(getVal(["close", "cur_prc", "prpr"])),
+                volume: parseInt(getVal(["volume", "trde_qty", "vol"]))
+            });
+        }
+        
+        return candles.sort((a, b) => a.time - b.time);
+    }
+
+    /**
+     * ETF/주식의 5분봉 연속 데이터를 가져옵니다 (기본 최근 3거래일치 수집)
+     * Vwap 및 Intraday Swarm 차트 모멘텀 파싱용
+     */
+    public async getOhlcv5m(ticker: string, days: number = 3): Promise<any[]> {
+        const url = `/api/dostk/chart`;
+        let candles: any[] = [];
+        let contYn = 'N';
+        let nextKey = '';
+        let uniqueDates = new Set<string>();
+        let limitReached = false;
+
+        while (!limitReached) {
+            const headers: any = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'api-id': 'ka10080',
+                'cont-yn': contYn,
+                'next-key': nextKey
+            };
+
+            const response = await this.makeApiRequestWithRetry((t) => this.kiwoomAxios.post(url, {
+                stk_cd: ticker,
+                tic_scope: '5',
+                upd_stkpc_tp: '1'
+            }, {
+                headers: { ...headers, 'authorization': `Bearer ${t}` }
+            }));
+
+            const data = response.data;
+            const rows = data?.stk_min_pole_chart_qry || data?.output || data?.output1 || data?.chart || data?.data || [];
+            
+            if (!Array.isArray(rows) || rows.length === 0) break;
+
+            for (const row of rows) {
+                // Determine timestamp string
+                let tStr = String(row.cntr_tm || row.stnd_tm || row.stck_bsop_date || row.date || row.dt || '').replace(/[-:\s]/g, '');
+                if (tStr.length === 8) tStr += '000000';
+                else if (tStr.length < 8) {
+                    const stndDt = String(row.stnd_dt || '');
+                    const stndTm = String(row.stnd_tm || '');
+                    tStr = stndDt + stndTm;
+                    if (tStr.length < 8) continue;
+                }
+
+                const dStr = tStr.substring(0, 8);
+                uniqueDates.add(dStr);
+
+                if (uniqueDates.size > days) {
+                    limitReached = true;
+                    break;
+                }
+
+                // parse values
+                const v = Object.keys(row).reduce((acc: any, k) => { acc[k] = row[k]; return acc; }, {});
+                
+                // Helper to get first valid num from keys
+                const getVal = (keys: string[]) => {
+                    for(const k of keys) {
+                        if (v[k] !== undefined && String(v[k]).trim() !== '') return String(v[k]).replace(/[,]/g, '').replace(/[-]/g, '');
+                    }
+                    return '0';
+                };
+
+                const openStr = getVal(["open", "open_pric", "opn_prc"]);
+                const highStr = getVal(["high", "high_pric", "hgpr"]);
+                const lowStr = getVal(["low", "low_pric", "lwpr"]);
+                const closeStr = getVal(["close", "cur_prc", "prpr"]);
+                const volStr = getVal(["volume", "trde_qty", "vol"]);
+
+                // Parse KST to Epoch UTC manually for TradingView / Unix timestamp
+                // Using YYYYMMDDHHMMSS format
+                tStr = tStr.padEnd(14, '0').substring(0, 14);
+                const year = parseInt(tStr.substring(0, 4));
+                const month = parseInt(tStr.substring(4, 6)) - 1;
+                const day = parseInt(tStr.substring(6, 8));
+                const hour = parseInt(tStr.substring(8, 10));
+                const min = parseInt(tStr.substring(10, 12));
+                const sec = parseInt(tStr.substring(12, 14));
+                
+                // We create a UTC Date corresponding to the KST time (subtract 9 hrs)
+                const epochSec = Date.UTC(year, month, day, hour - 9, min, sec) / 1000;
+
+                candles.push({
+                    time: epochSec,
+                    open: parseFloat(openStr),
+                    high: parseFloat(highStr),
+                    low: parseFloat(lowStr),
+                    close: parseFloat(closeStr),
+                    volume: parseInt(volStr)
+                });
+            }
+
+            const resContYn = response.headers['cont-yn'] || response.headers['Cont-Yn'];
+            if (resContYn === 'Y' && !limitReached) {
+                contYn = 'Y';
+                nextKey = response.headers['next-key'] || response.headers['Next-Key'] || '';
+            } else {
+                break;
+            }
+        }
+
+        // Sort ascending by time
+        return candles.sort((a, b) => a.time - b.time);
     }
 
     /**

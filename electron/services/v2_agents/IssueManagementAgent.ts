@@ -140,7 +140,9 @@ ${dataParts.join('\n\n---\n\n')}
                 )
             }
 
-            // 6. 실행 (DB 갱신)
+            // 6. 실행 (DB 갱신) + 갱신된 이슈 ID 수집
+            const updatedIssueIds: string[] = []
+
             for (const act of actions) {
                 try {
                     if (act.action === 'CREATE' || act.action === 'UPDATE') {
@@ -171,6 +173,8 @@ ${dataParts.join('\n\n---\n\n')}
                                 market_reaction: act.timelineDetails.market_reaction
                             })
                         }
+
+                        updatedIssueIds.push(act.issue_id)
                     } else if (act.action === 'RESOLVE') {
                         this.ledger.resolveIssue(act.issue_id)
                     }
@@ -180,6 +184,24 @@ ${dataParts.join('\n\n---\n\n')}
             }
 
             console.log(`[IssueAgent] ═══ 이슈 분석 및 반영 완료 ═══`)
+
+            // 7. 갱신된 이슈에 대해서만 Swarm 자동 소집 (당일 중복 방지, 최대 3개)
+            const MAX_SWARM_PER_RUN = 3
+            const swarmTargets = updatedIssueIds
+                .filter(id => !this.ledger.hasSwarmToday(id))
+                .slice(0, MAX_SWARM_PER_RUN)
+
+            if (swarmTargets.length > 0) {
+                console.log(`[IssueAgent] 🌀 Swarm 자동 소집 대상: ${swarmTargets.length}개 이슈`)
+                const { SwarmSimulationAgent } = await import('./SwarmSimulationAgent')
+                for (const issueId of swarmTargets) {
+                    console.log(`[IssueAgent] 🐟 Swarm 시작: ${issueId}`)
+                    await SwarmSimulationAgent.getInstance().evaluateIssue(issueId)
+                    console.log(`[IssueAgent] 🏁 Swarm 완료: ${issueId}`)
+                }
+            } else {
+                console.log('[IssueAgent] Swarm 소집 대상 없음 (모두 당일 이미 완료 또는 갱신 없음)')
+            }
         } catch (error: any) {
             console.error(`[IssueAgent] 실행 실패:`, error)
         }

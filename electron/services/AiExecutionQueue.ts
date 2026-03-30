@@ -26,6 +26,7 @@ export interface AiQueueJob {
     priority: number          // 낮을수록 높은 우선순위 (CRON=1, MANUAL=2, CHAT=3)
     prompt: string
     systemInstruction?: string
+    customMessages?: any[]    // 로컬 AI 전용 채팅 기록 배열 전달
     customModel?: string      // 기본 모델 대신 사용할 모델
     customKey?: string        // 기본 키 대신 사용할 API 키
     status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED'
@@ -87,6 +88,7 @@ export class AiExecutionQueue {
         targetType?: 'gemini' | 'local' // 생략 시 gemini(기본값)
         prompt: string
         systemInstruction?: string
+        customMessages?: any[]
         customModel?: string
         customKey?: string
     }): Promise<string> {
@@ -102,6 +104,7 @@ export class AiExecutionQueue {
             priority: priorityMap[params.triggerType],
             prompt: params.prompt,
             systemInstruction: params.systemInstruction,
+            customMessages: params.customMessages,
             customModel: params.customModel,
             customKey: params.customKey,
             status: 'QUEUED',
@@ -203,7 +206,8 @@ export class AiExecutionQueue {
                 const result = await this.localAi.askLocalAi(
                     job.prompt,
                     job.systemInstruction,
-                    job.customModel
+                    job.customModel,
+                    job.customMessages
                 )
                 
                 job.status = 'SUCCESS'

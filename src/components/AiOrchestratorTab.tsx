@@ -69,6 +69,15 @@ const AI_AGENTS = [
             { time: '15:35', label: '일일 성과 기록', description: '오전 예측 대비 실제 종가 비교' },
         ],
     },
+    {
+        id: 'THEME', name: '테마 수명 분석기', fullName: 'Theme Intelligence Agent',
+        description: '장중/장마감 주도 테마와 섹터를 수집(NaverFlow)하고 모멘텀의 수명(Lifespan)을 예측합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '09:40', label: '오전 주도테마 요약', description: '09:40 정규 수집 시 연계 분석' },
+            { time: '15:45', label: '장마감 메가트렌드 요약', description: '15:45 최종 수집 시 연계 분석' },
+        ],
+    },
 ] as const
 
 interface QueueStatus {

@@ -155,6 +155,11 @@ export interface IElectronAPI {
 
     // V2 Data Pipeline
     runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => Promise<{ success: boolean, data?: any, error?: string }>
+    getThemeTrackerData: (type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => Promise<{ success: boolean, data?: any, error?: string }>
+    analyzeThemes: (date: string) => Promise<{ success: boolean, data?: any, error?: string }>
+    verifyThemeIntelligence: (params: { date: string, type: 'SECTOR' | 'THEME', name: string, userOpinion: string, currentReason: string }) => Promise<{ success: boolean, data?: any, error?: string }>
+    getThemeRelatedNews: (themeName: string, keywords: string[]) => Promise<{ success: boolean, data?: any[], error?: string }>
+    searchLiveNews: (keyword: string) => Promise<{ success: boolean, data?: any[], error?: string }>
 
     // V2 Agent Swarm: Market Condition Agent
     getMarketConditionSettings: () => Promise<{ success: boolean, data?: any, error?: string }>

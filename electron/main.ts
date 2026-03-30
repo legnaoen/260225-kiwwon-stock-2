@@ -472,7 +472,137 @@ ipcMain.handle('v2-pipeline:run', async (_event, { pipelineId, options }) => {
     }
 })
 
+// NaverFlow Settings
+ipcMain.handle('naverflow:get-settings', async () => {
+    const raw: any = store.get('naverflow_settings') || { enabled: false, scheduleSlots: [{ time: '09:30', enabled: true }, { time: '15:30', enabled: true }] };
+    // [Collision Avoidance] 09:30 => 09:40 / 15:30 => 15:45
+    let changed = false;
+    if (raw && Array.isArray(raw.scheduleSlots)) {
+        raw.scheduleSlots = raw.scheduleSlots.map((s: any) => {
+            if (s.time === '09:30') { changed = true; return { ...s, time: '09:40' }; }
+            if (s.time === '15:30') { changed = true; return { ...s, time: '15:45' }; }
+            return s;
+        });
+    }
+    if (changed) { store.set('naverflow_settings', raw); }
+    return raw;
+})
+
+ipcMain.handle('naverflow:save-settings', async (_event, settings) => {
+    store.set('naverflow_settings', settings)
+    try {
+        const { SchedulerService } = await import('./services/SchedulerService')
+        await SchedulerService.getInstance().initSchedules()
+        return { success: true }
+    } catch (e: any) {
+        return { success: false, error: e.message }
+    }
+})
+
+ipcMain.handle('naverflow:get-tracker-data', async (_event, type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => {
+    try {
+        const db = DatabaseService.getInstance()
+        return { success: true, data: db.getThemeTrackerData(type, date, limitDays, topN) }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('naverflow:analyze-themes', async (_event, date: string) => {
+    try {
+        const { ThemeIntelligenceAgent } = await import('./services/v2_agents/ThemeIntelligenceAgent')
+        const data = await ThemeIntelligenceAgent.getInstance().runBatchAnalysis(date)
+        return { success: true, data }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('naverflow:search-live-news', async (_event, keyword: string) => {
+    try {
+        const { NaverSearchCollector } = await import('./services/v2_pipeline/collectors/NaverSearchCollector')
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const collector = new NaverSearchCollector()
+        const rawSearch = await collector.collect({ keyword })
+        
+        const dbSvc = DatabaseService.getInstance()
+        const rawDb = (dbSvc as any).db;
+        const now = new Date();
+        const dateStr = dbSvc.getKstDate();
+        const timeBucket = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+        const stmtInsertNews = rawDb.prepare(`
+            INSERT INTO naver_news_flow
+                (date, category, title, body_snippet, source, article_id, url, collected_at, time_bucket, article_hash, search_keyword)
+            VALUES
+                (@date, @category, @title, @body_snippet, @source, @article_id, @url, @collected_at, @time_bucket, @article_hash, @search_keyword)
+        `);
+
+        // Map Naver open API array items & Save to DB
+        const formattedList = (rawSearch?.articles || []).map((item: any) => {
+            const title = item.title?.replace(/<[^>]+>/g, '') || '';
+            const snippet = item.description?.replace(/<[^>]+>/g, '') || '';
+            let source = 'NaverSearchAPI';
+            try { source = item.originallink ? new URL(item.originallink).hostname.replace('www.', '') : 'Naver'; } catch(e){}
+            const pubDate = item.pubDate ? new Date(item.pubDate).toISOString() : now.toISOString();
+            const url = item.originallink || item.link || '';
+            const hash = Math.abs((Math.imul(31, 0) + title.charCodeAt(0)) | 0).toString(16) + (item.pubDate || Date.now());
+
+            try {
+                stmtInsertNews.run({
+                    date: dateStr,
+                    category: 'THEME_TARGET_MANUAL', // 연관 뉴스 캐시에 걸리도록 통합
+                    title: title,
+                    body_snippet: snippet,
+                    source: source,
+                    article_id: hash,
+                    url: url,
+                    collected_at: now.toISOString(),
+                    time_bucket: timeBucket,
+                    article_hash: hash,
+                    search_keyword: keyword
+                });
+            } catch (e) {
+                // Ignore unique constraint errors
+            }
+
+            return {
+                title: title,
+                source: source,
+                date: pubDate,
+                url: url,
+                category: 'LIVE_SEARCH_MANUAL'
+            }
+        });
+
+        return { success: true, data: formattedList }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('naverflow:verify-theme', async (_event, params) => {
+    try {
+        const { ThemeIntelligenceAgent } = await import('./services/v2_agents/ThemeIntelligenceAgent')
+        const data = await ThemeIntelligenceAgent.getInstance().verifyIntelligence(params)
+        return { success: true, data }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
 // ═══ V2 Agent Swarm: Market Condition Agent IPC ═══
+
+ipcMain.handle('naverflow:get-theme-news', async (_event, themeName: string, keywords: string[]) => {
+    try {
+        const { NewsDataHub } = await import('./services/NewsDataHub')
+        const data = NewsDataHub.getInstance().getNewsForIssue(themeName, keywords)
+        // 상위 5~10개만 리턴
+        return { success: true, data: data.slice(0, 5) }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
 
 ipcMain.handle('agent:market:settings:get', async () => {
     return { success: true, data: store.get('market_agent_settings', { telegramEnabled: true }) }
@@ -1663,14 +1793,14 @@ ipcMain.handle('skills:save', async (_event, { fileName, content, diffSummary }:
 
 // ═══ NewsDataHub IPC Handlers ═══════════════════════════════════════════════
 
-ipcMain.handle('news-hub:get-settings', () => {
-    const { DEFAULT_NEWS_HUB_SETTINGS } = require('./types/NewsHubSettings')
+ipcMain.handle('news-hub:get-settings', async () => {
+    const { DEFAULT_NEWS_HUB_SETTINGS } = await import('./types/NewsHubSettings')
     return store.get('news_hub_settings') || DEFAULT_NEWS_HUB_SETTINGS
 })
 
 ipcMain.handle('news-hub:save-settings', async (_event, settings: any) => {
     try {
-        const { validateHubTimeline } = require('./types/NewsHubSettings')
+        const { validateHubTimeline } = await import('./types/NewsHubSettings')
         const validation = validateHubTimeline(settings)
         store.set('news_hub_settings', settings)
         // 크론 즉시 재등록
@@ -1698,5 +1828,14 @@ ipcMain.handle('news-hub:get-cache-status', async () => {
         return NewsDataHub.getInstance().getCacheStatus()
     } catch (err: any) {
         return { isValid: false, error: err.message }
+    }
+})
+
+ipcMain.handle('news-hub:get-articles', async (_event, options?: { category?: string; limit?: number }) => {
+    try {
+        const { NewsDataHub } = await import('./services/NewsDataHub')
+        return NewsDataHub.getInstance().getCachedArticles(options)
+    } catch (err: any) {
+        return []
     }
 })

@@ -300,72 +300,54 @@ export class PerformanceTracker {
     }
 
     /**
-     * WebSocket 실시간 메모리 데이터만 사용하여 장중 수익률 즉시 갱신 (DB부하 최소화)
+     * WebSocket 실시간 메모리 데이터만 사용하여 장중/장전 수익률 즉시 갱신 (DB부하 최소화)
+     * - DB에는 아직 entry_price가 없는 항목에 대해 최초 1회 진입가만 기록함
+     * - 실시간 수익률 계산 및 UI 렌더링은 프론트엔드로 전적인 계산을 위임함.
      */
     private evaluateIntradayRealtime() {
-        // 둘 다 없으면 조기 반환 (하나라도 있으면 가능)
+        // 둘 다 실시간 데이터가 수집되지 않았으면 조기 반환
         if (!this.latestPrices['069500'] && !this.latestPrices['114800']) return
 
         const rawDb = (this.db as any).db
         const today = new Date()
         const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
-        const pending = rawDb.prepare(
-            `SELECT * FROM intraday_predictions WHERE date = ?`
+        let evaluated = 0
+
+        // 1. 장중 예측 (Intraday) 중 진입가가 없는 행에 진입가 최초 1회 등록
+        const pendingIntraday = rawDb.prepare(
+            `SELECT id, predict FROM intraday_predictions WHERE date = ? AND (entry_price IS NULL OR entry_price <= 0) AND predict IN ('UP', 'DOWN')`
         ).all(dateStr) as any[]
 
-        if (pending.length === 0) return
-
-        let evaluated = 0
-        for (const row of pending) {
-            const position = row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : null
+        for (const row of pendingIntraday) {
             const etfData = row.predict === 'UP' ? this.latestPrices['069500'] : row.predict === 'DOWN' ? this.latestPrices['114800'] : null
+            if (!etfData || etfData.open <= 0) continue
 
-            if (!position || !etfData || etfData.open <= 0) continue
-
-            // 기존 엔트리 가격이 있으면 유지, 없으면 최신 실시간 데이터의 시가 사용
-            const entryPrice = row.entry_price && row.entry_price > 0 ? row.entry_price : etfData.open
-            const closePrice = etfData.price
-            const returnPct = ((closePrice - entryPrice) / entryPrice) * 100
-
-            let result: string
-            if (returnPct > 0) result = 'HIT'
-            else if (returnPct < 0) result = 'MISS'
-            else result = 'HOLD'
-
-            rawDb.prepare(`
-                UPDATE intraday_predictions 
-                SET position = ?, entry_price = ?, close_price = ?, return_pct = ?, result = ?
-                WHERE id = ?
-            `).run(position, entryPrice, closePrice, returnPct, result, row.id)
+            // 최초 실시간 가격의 시가(open)를 진입가로 사용 (5분봉 등에서 정확히 추출되지 않았을 때 폴백)
+            rawDb.prepare(`UPDATE intraday_predictions SET entry_price = ? WHERE id = ?`).run(etfData.open, row.id)
             evaluated++
-
-            // 페르소나 개별 성적 기록
-            this.trackPersonaPerformance(row, returnPct)
         }
 
-        // Daily Predictions (장전 예측 Cycle A) 실시간 갱신 적용
-        const dailyPending = rawDb.prepare(
-            `SELECT * FROM agent_predictions WHERE date = ? AND cycle = 'A' AND predict != 'HOLD'`
-        ).all(dateStr) as any[]
+        // 2. 일간 시황 예측 (Cycle A/B) 중 진입가가 없는 행에 진입가 최초 1회 등록
+        // Cycle A (장전): 아침 시가가 진입가 (etfData.open)
+        // Cycle B (마감): 어제 생성된 후 아직 진입가가 없는 경우 (추후 백엔드가 정확한 종가로 교정하지만 UI를 위해 채움)
+        const pendingDaily = rawDb.prepare(
+            `SELECT id, predict, cycle FROM agent_predictions WHERE (entry_price IS NULL OR entry_price <= 0) AND predict IN ('LONG', 'SHORT')`
+        ).all() as any[]
         
-        for (const row of dailyPending) {
+        for (const row of pendingDaily) {
             const etfData = row.predict === 'LONG' ? this.latestPrices['069500'] : row.predict === 'SHORT' ? this.latestPrices['114800'] : null
             if (!etfData || etfData.open <= 0) continue
 
-            const entryPrice = row.entry_price && row.entry_price > 0 ? row.entry_price : etfData.open
-            const returnPct = ((etfData.price - entryPrice) / entryPrice) * 100
-            
-            rawDb.prepare(`
-                UPDATE agent_predictions 
-                SET entry_price = ?, t1_final = ?
-                WHERE id = ?
-            `).run(entryPrice, returnPct, row.id)
+            const entryPrice = row.cycle === 'A' ? etfData.open : etfData.price;
+            rawDb.prepare(`UPDATE agent_predictions SET entry_price = ? WHERE id = ?`).run(entryPrice, row.id)
             evaluated++
         }
 
+        // 변경사항(최초 진입가 세팅)이 있었을 때만 UI 새로고침 이벤트 발송 (무한 DB/소켓 통신 방지)
         if (evaluated > 0) {
             eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, null)
+            eventBus.emit('MARKET_CONDITION_COMPLETE' as any, null)
         }
     }
 

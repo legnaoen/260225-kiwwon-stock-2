@@ -23,6 +23,10 @@
     - **내용**: MAIIS용 통합 수집 레이어 상세 구현안 (유튜브, 뉴스, 지표 통합).
 *   **[[SUB_COGNITIVE_LAYER_SPEC.md]]** (L3 Spec)
     - **내용**: MAIIS용 인지 및 판단 레이어 상세 구현안 (하향식 대전략 및 에이전트 관계).
+*   **[[SUB_TACTICAL_THEME_AGENT_SPEC.md]]** (L3-Tactical Spec)
+    - **내용**: 테마/모멘텀/스윙 주도주 매매를 위한 전술 에이전트 상세 명세.
+*   **[[THEME_MANAGEMENT_PLAN.md]]** (Theme Management)
+    - **내용**: PL-NaverFlow 기반 현재 주도 섹터(테마) 분석 및 장부 추적 시스템 구축 계획.
 
 ---
 

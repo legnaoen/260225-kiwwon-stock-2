@@ -448,8 +448,23 @@ export class DatabaseService {
                 stock_name TEXT NOT NULL,
                 tag_name TEXT NOT NULL,
                 is_auto_tagged INTEGER DEFAULT 0,
+                change_rate REAL DEFAULT 0,
                 added_date TEXT NOT NULL,
                 PRIMARY KEY(stock_code, tag_name)
+            );
+        `
+
+        // PL-NaverFlow: 마켓 테마 AI 분석 리포트 (Gemini 연동)
+        const createThemeIntelligenceTable = `
+            CREATE TABLE IF NOT EXISTS theme_intelligence (
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                reason TEXT,
+                lifespan_type TEXT,
+                lifespan_reasoning TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(date, type, name)
             );
         `
 
@@ -488,6 +503,12 @@ export class DatabaseService {
 
         this.db.exec(createNaverMarketFlowTable)
         this.db.exec(createStockThemeTagsTable)
+        try {
+            this.db.exec('ALTER TABLE stock_theme_tags ADD COLUMN change_rate REAL DEFAULT 0;');
+        } catch (e: any) {
+            // Ignore error if column already exists
+        }
+        this.db.exec(createThemeIntelligenceTable)
         this.db.exec(createNaverNewsFlowTable)
         try {
             this.db.exec('ALTER TABLE naver_news_flow ADD COLUMN body_snippet TEXT;');
@@ -1739,23 +1760,33 @@ export class DatabaseService {
     }
 
     public upsertNaverMarketFlow(flows: { date: string, type: string, rank_num: number, name: string, change_rate: number }[]) {
-        const stmt = this.db.prepare(`
-            INSERT INTO naver_market_flow (date, type, rank_num, name, change_rate)
+        if (flows.length === 0) return;
+
+        const deleteStmt = this.db.prepare(`DELETE FROM naver_market_flow WHERE date = ? AND type = ?`);
+        const insertStmt = this.db.prepare(`
+            INSERT OR REPLACE INTO naver_market_flow (date, type, rank_num, name, change_rate)
             VALUES (@date, @type, @rank_num, @name, @change_rate)
-            ON CONFLICT(date, type, name) DO UPDATE SET
-                rank_num = excluded.rank_num,
-                change_rate = excluded.change_rate
-        `)
-        const insertMany = this.db.transaction((items) => {
-            for (const item of items) {
-                stmt.run(item)
+        `);
+
+        // Get unique date/type combinations
+        const groups = [...new Set(flows.map(f => `${f.date}|${f.type}`))];
+
+        const replaceMany = this.db.transaction((items) => {
+            // 날짜당 가장 최신 정보만 남기기 위해 기존 데이터 삭제
+            for (const g of groups) {
+                const [date, type] = g.split('|');
+                deleteStmt.run(date, type);
             }
-        })
-        insertMany(flows)
+            // 최신 데이터 삽입
+            for (const item of items) {
+                insertStmt.run(item);
+            }
+        });
+        
+        replaceMany(flows);
     }
 
     public getRecentNaverMarketFlows(type: string, limitDays: number = 5) {
-        // limitDays 만큼의 고유 날짜 조회 후 필터링
         return this.db.prepare(`
             SELECT * FROM naver_market_flow 
             WHERE type = ? 
@@ -1763,10 +1794,112 @@ export class DatabaseService {
         `).all(type) as any[]
     }
 
-    public upsertStockThemeTags(tags: { stock_code: string, stock_name: string, tag_name: string, is_auto_tagged: number, added_date: string }[]) {
+    public getThemeTrackerData(type: string, targetDate: string, limitDays: number = 14, topN: number = 5) {
+        // 1) Get recent distinct trading dates
+        const dates = this.db.prepare(`
+            SELECT DISTINCT date FROM naver_market_flow
+            WHERE type = ? AND date <= ?
+            ORDER BY date DESC LIMIT ?
+        `).all(type, targetDate, limitDays + 1) as {date: string}[];
+        
+        if (dates.length === 0) return { current: [], topNames: [], trendData: [], date: targetDate };
+
+        const latestDate = dates[0].date;
+        const prevDate = dates.length > 1 ? dates[1].date : null;
+        
+        // 2) Load history data
+        const historyData = this.db.prepare(`
+            SELECT * FROM naver_market_flow 
+            WHERE type = ? AND date IN (${dates.map(()=>'?').join(',')})
+            ORDER BY date DESC, rank_num ASC
+        `).all(type, ...dates.map(d => d.date)) as any[];
+
+        // 3) Calculate current vs prev
+        const latestItems = historyData.filter(d => d.date === latestDate);
+        const prevItems = prevDate ? historyData.filter(d => d.date === prevDate) : [];
+
+        // Load theme intelligence for the latest date
+        const intelligences = this.db.prepare(`
+            SELECT * FROM theme_intelligence WHERE date = ? AND type = ?
+        `).all(latestDate, type) as any[];
+
+        // Prepare statement for fetching top stocks
+        const getAlphaStocks = this.db.prepare(`
+            SELECT stock_name, stock_code, change_rate FROM stock_theme_tags 
+            WHERE tag_name = ? AND added_date = ?
+            ORDER BY change_rate DESC
+        `);
+
+        const currentWithChange = latestItems.map(item => {
+            const prevItem = prevItems.find(p => p.name === item.name);
+            let change = 'NEW';
+            let changeNum = 0;
+            if (prevItem) {
+                changeNum = prevItem.rank_num - item.rank_num; // positive means went up
+                change = changeNum > 0 ? `▲${changeNum}` : changeNum < 0 ? `▼${Math.abs(changeNum)}` : '-';
+            }
+            
+            const aiData = intelligences.find(ai => ai.name === item.name);
+            
+            // Fetch leading stocks from DB
+            const alphaStocks = getAlphaStocks.all(item.name, latestDate) as {stock_name: string, stock_code: string}[];
+
+            return {
+                ...item,
+                changeStr: change,
+                changeNum,
+                reason: aiData ? aiData.reason : null,
+                lifespan_type: aiData ? aiData.lifespan_type : null,
+                lifespan_reasoning: aiData ? aiData.lifespan_reasoning : null,
+                top_stocks: alphaStocks // added top stocks!
+            };
+        });
+
+        // 4) Get top N names for trend
+        const topNames = latestItems.slice(0, topN).map(item => item.name);
+
+        // 5) Build trend series (chronological order)
+        const chartDates = dates.slice(0, limitDays).map(d => d.date).reverse();
+        const trendData = chartDates.map(date => {
+            const dayData: any = { date };
+            const dayItems = historyData.filter(d => d.date === date);
+            topNames.forEach(name => {
+                const found = dayItems.find(d => d.name === name);
+                dayData[name] = found ? found.rank_num : null;
+            });
+            return dayData;
+        });
+
+        return {
+            date: latestDate,
+            current: currentWithChange,
+            topNames,
+            trendData,
+            historyData // pass raw history just in case detail view needs it
+        };
+    }
+
+    public upsertThemeIntelligence(data: { date: string, type: string, name: string, reason: string, lifespan_type: string, lifespan_reasoning: string }[]) {
         const stmt = this.db.prepare(`
-            INSERT OR IGNORE INTO stock_theme_tags (stock_code, stock_name, tag_name, is_auto_tagged, added_date)
-            VALUES (@stock_code, @stock_name, @tag_name, @is_auto_tagged, @added_date)
+            INSERT OR REPLACE INTO theme_intelligence (date, type, name, reason, lifespan_type, lifespan_reasoning)
+            VALUES (@date, @type, @name, @reason, @lifespan_type, @lifespan_reasoning)
+        `)
+        const replaceMany = this.db.transaction((items) => {
+            for (const item of items) {
+                stmt.run(item)
+            }
+        })
+        replaceMany(data)
+    }
+
+    public getThemeIntelligence(date: string) {
+        return this.db.prepare('SELECT * FROM theme_intelligence WHERE date = ?').all(date) as any[]
+    }
+
+    public upsertStockThemeTags(tags: { stock_code: string, stock_name: string, tag_name: string, is_auto_tagged: number, change_rate?: number, added_date: string }[]) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO stock_theme_tags (stock_code, stock_name, tag_name, is_auto_tagged, change_rate, added_date)
+            VALUES (@stock_code, @stock_name, @tag_name, @is_auto_tagged, @change_rate, @added_date)
         `)
         const insertMany = this.db.transaction((items) => {
             for (const item of items) {

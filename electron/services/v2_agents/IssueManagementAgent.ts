@@ -27,22 +27,38 @@ export class IssueManagementAgent {
         console.log(`[IssueAgent] ═══ 일일 이슈 분석 시작 ═══`)
         
         try {
-            // 1. 수집
-            const results = await Promise.allSettled([
+            // 1. 수집 — Macro/Research는 파이프라인, 뉴스는 Hub 캐시
+            const [macroResult, researchResult] = await Promise.allSettled([
                 this.pipeline.runPipeline('PL-Macro' as any, { forceFetch: false }),
-                this.pipeline.runPipeline('PL-NewsFlow' as any, { forceFetch: false }),
-                this.pipeline.runPipeline('PL-NewsKeyword' as any, { forceFetch: false }),
-                this.pipeline.runPipeline('PL-Research' as any, { forceFetch: false })
+                this.pipeline.runPipeline('PL-Research' as any, { forceFetch: false }),
             ])
             
             const dataParts: string[] = []
-            results.forEach((r, i) => {
-                const names = ['PL-Macro', 'PL-NewsFlow', 'PL-NewsKeyword', 'PL-Research']
-                if (r.status === 'fulfilled' && r.value.status === 'success') {
-                    const markdown = (r.value as any).aggregatedMarkdown || (r.value as any).aggregated_markdown || ''
-                    if(markdown) dataParts.push(`[${names[i]}]\n${markdown}`)
+
+            // Macro
+            if (macroResult.status === 'fulfilled' && macroResult.value.status === 'success') {
+                const md = (macroResult.value as any).aggregatedMarkdown || ''
+                if (md) dataParts.push(`[PL-Macro]\n${md}`)
+            }
+            // Research
+            if (researchResult.status === 'fulfilled' && researchResult.value.status === 'success') {
+                const md = (researchResult.value as any).aggregatedMarkdown || ''
+                if (md) dataParts.push(`[PL-Research]\n${md}`)
+            }
+
+            // 뉴스 — NewsDataHub 캐시 읽기 (PL-NewsFlow + PL-NewsKeyword 대체)
+            try {
+                const { NewsDataHub } = await import('../NewsDataHub')
+                const hubMarkdown = NewsDataHub.getInstance().getNewsAsMarkdown({ maxPerCategory: 10 })
+                if (!hubMarkdown.includes('캐시 없음')) {
+                    dataParts.push(`[NEWS_HUB]\n${hubMarkdown}`)
+                    console.log('[IssueAgent] NewsDataHub 캐시 주입 완료')
+                } else {
+                    console.warn('[IssueAgent] NewsDataHub 캐시 없음 — 뉴스 컨텍스트 누락')
                 }
-            })
+            } catch(e: any) {
+                console.error('[IssueAgent] NewsDataHub 오류:', e.message)
+            }
 
             if (dataParts.length === 0) {
                 throw new Error('데이터 파이프라인 수집 실패')

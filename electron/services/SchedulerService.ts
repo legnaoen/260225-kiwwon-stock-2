@@ -125,6 +125,45 @@ export class SchedulerService {
             this.scheduledJobs.push(itaJob, mcaJobA, mcaJobB, mcaTrackerJob, intradayJobA, intradayJobC, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, ...swarmJobs)
             console.log(`[SchedulerService] V2 AI schedules initialized (ITA: 08:30, MCA: 08:50, Swarms, Retros)`)
         }
+
+        // ═══ [Step 3] NaverFlow 크론 등록 ═══
+        const nfSettings = store.get('naverflow_settings') as any
+        if (nfSettings?.enabled && Array.isArray(nfSettings?.scheduleSlots)) {
+            // Collision Avoidance: adjust legacy times
+            nfSettings.scheduleSlots.forEach((s: any) => {
+                if (s.time === '09:30') s.time = '09:40';
+                if (s.time === '15:30') s.time = '15:45';
+            });
+            nfSettings.scheduleSlots.forEach((slot: any) => {
+                if (!slot.enabled || !slot.time) return
+                try {
+                    const [hrStr, minStr] = slot.time.split(':')
+                    const hr = parseInt(hrStr, 10)
+                    const min = parseInt(minStr, 10)
+                    if (isNaN(hr) || isNaN(min)) return
+
+                    const cronExpr = `${min} ${hr} * * 1-5`
+                    const nfJob = cron.schedule(cronExpr, async () => {
+                        console.log(`[SchedulerService] 📊 NaverFlow 배치 수집 시작 (${cronExpr})`)
+                        const { V2PipelineManager } = await import('./v2_pipeline/V2PipelineManager')
+                        await V2PipelineManager.getInstance().runPipeline('PL-NaverFlow', { forceFetch: true })
+
+                        // 수집 성공 후 테마/섹터 AI 분석 추가 실행
+                        try {
+                            console.log(`[SchedulerService] 🤖 ThemeIntelligence AI 일괄 분석 연계 시작`)
+                            const { ThemeIntelligenceAgent } = await import('./v2_agents/ThemeIntelligenceAgent')
+                            await ThemeIntelligenceAgent.getInstance().runBatchAnalysis()
+                        } catch (aiErr: any) {
+                            console.error(`[SchedulerService] ThemeIntelligence AI 분석 연계 실패:`, aiErr.message)
+                        }
+                    }, { timezone: 'Asia/Seoul' })
+                    this.scheduledJobs.push(nfJob)
+                    console.log(`[SchedulerService] 📊 NaverFlow 크론 등록 완료 (${cronExpr})`)
+                } catch (err: any) {
+                    console.error(`[SchedulerService] NaverFlow 크론 등록 실패 (${slot.time}):`, err.message)
+                }
+            })
+        }
     }
 
     /**

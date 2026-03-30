@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Database, Play, CheckCircle2, XCircle, Clock, Server, FileJson, FileText, Bug, Plus, Trash2, Youtube, Settings as SettingsIcon } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Database, Play, CheckCircle2, XCircle, Clock, Server, FileJson, FileText, Bug, Plus, Trash2, Youtube, Settings as SettingsIcon, Radio, RefreshCw, ExternalLink, ChevronDown, ChevronRight, Newspaper } from 'lucide-react';
 import { cn } from '../../utils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -27,18 +27,75 @@ export default function PipelineMonitorTab() {
     const [forceFetch, setForceFetch] = useState(false);
     const [searchKeyword, setSearchKeyword] = useState<string>('');
 
+    // ── News Hub 상태 ──
+    const [newsHubSelected, setNewsHubSelected] = useState(false);
+    const [hubStatus, setHubStatus] = useState<any>(null);
+    const [hubArticles, setHubArticles] = useState<any[]>([]);
+    const [hubCollecting, setHubCollecting] = useState(false);
+    const [hubExpandedCategories, setHubExpandedCategories] = useState<Record<string, boolean>>({ MAJOR: true, GLOBAL: true, KEYWORD_SEARCH: false, STOCK_ANALYSIS: false, GLOBAL_MARKET: false });
+
     // YouTube 채널 관리 상태
     const [ytChannels, setYtChannels] = useState<any[]>([]);
     const [newChannelId, setNewChannelId] = useState('');
     const [newChannelName, setNewChannelName] = useState('');
     const [isAddingChannel, setIsAddingChannel] = useState(false);
 
-    // 유튜브 파이프라인 선택 시 채널 목록 로드
+    // NaverFlow 설정 상태
+    const [showNfSettings, setShowNfSettings] = useState(false);
+    const [nfSettings, setNfSettings] = useState({ enabled: false, scheduleSlots: [{ time: '09:30', enabled: true }, { time: '15:30', enabled: true }] });
+
+    // 파이프라인 선택 시 관련 데이터 로드
     useEffect(() => {
         if (selectedId === 'PL-YoutubeContext') {
             loadYtChannels();
+        } else if (selectedId === 'PL-NaverFlow') {
+            const api = window.electronAPI as any;
+            if (api.getNaverFlowSettings) {
+                api.getNaverFlowSettings().then((s: any) => setNfSettings(s));
+            }
         }
     }, [selectedId]);
+
+    // News Hub 선택 시 데이터 로드
+    const loadNewsHubData = useCallback(async () => {
+        try {
+            const api = window.electronAPI as any;
+            const [status, articles] = await Promise.all([
+                api.getNewsHubCacheStatus(),
+                api.getNewsHubArticles()
+            ]);
+            setHubStatus(status);
+            setHubArticles(articles || []);
+        } catch (e) { console.error('[NewsHub] 데이터 로드 실패:', e); }
+    }, []);
+
+    useEffect(() => {
+        if (newsHubSelected) {
+            loadNewsHubData();
+            const interval = setInterval(loadNewsHubData, 30000); // 30초 자동 갱신
+            return () => clearInterval(interval);
+        }
+    }, [newsHubSelected, loadNewsHubData]);
+
+    const handleNewsHubCollectNow = async () => {
+        setHubCollecting(true);
+        try {
+            const api = window.electronAPI as any;
+            const res = await api.collectNewsHubNow();
+            if (res && res.success === false) {
+                alert(`[Hub 수집 실패]: ${res.error || '알 수 없는 오류'}`);
+            } else if (res && res.collected === 0) {
+                alert(`수집 결과 0건. (네이버 API 키가 없거나, proxy_json 서버가 에러를 반환했을 수 있습니다.)`);
+            }
+            await loadNewsHubData();
+        } catch (e: any) { alert(`수집 실행 에러: ${e.message}`); }
+        finally { setHubCollecting(false); }
+    };
+
+    const toggleCategory = (cat: string) => {
+        setHubExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+    };
+
 
     const loadYtChannels = async () => {
         try {
@@ -77,6 +134,16 @@ export default function PipelineMonitorTab() {
 
     const activePipeline = PIPELINES.find(p => p.id === selectedId);
 
+    // PL 선택 시 News Hub 해제, News Hub 선택 시 PL 해제
+    const handlePipelineSelect = (id: string) => {
+        setNewsHubSelected(false);
+        setSelectedId(id);
+    };
+    const handleNewsHubSelect = () => {
+        setNewsHubSelected(true);
+        setSelectedId('');
+    };
+
     const handleRunClick = async () => {
         if (!activePipeline) return;
         
@@ -109,6 +176,21 @@ export default function PipelineMonitorTab() {
         }
     };
 
+    const handleSaveNfSettings = async () => {
+        try {
+            const api = window.electronAPI as any;
+            if (api.saveNaverFlowSettings) {
+                const res = await api.saveNaverFlowSettings(nfSettings);
+                if (res.success) {
+                    alert('설정이 저장되었으며 백그라운드 스케줄러가 재시작 되었습니다.');
+                    setShowNfSettings(false);
+                } else {
+                    alert('설정 저장 실패: ' + res.error);
+                }
+            }
+        } catch (e: any) { alert(`오류: ${e.message}`); }
+    };
+
     return (
         <div className="flex w-full h-full bg-background overflow-hidden text-sm">
             
@@ -126,10 +208,10 @@ export default function PipelineMonitorTab() {
                     {PIPELINES.map(pl => (
                         <button
                             key={pl.id}
-                            onClick={() => setSelectedId(pl.id)}
+                            onClick={() => handlePipelineSelect(pl.id)}
                             className={cn(
                                 "w-full text-left px-4 py-2 flex flex-col gap-0.5 transition-colors",
-                                selectedId === pl.id 
+                                selectedId === pl.id && !newsHubSelected
                                     ? "bg-primary/5 border-r-2 border-primary" 
                                     : "hover:bg-muted/50 border-r-2 border-transparent"
                             )}
@@ -137,7 +219,7 @@ export default function PipelineMonitorTab() {
                             <div className="flex items-center justify-between">
                                 <span className={cn(
                                     "font-medium tracking-tight text-sm",
-                                    selectedId === pl.id ? "text-primary font-bold" : "text-foreground/80"
+                                    selectedId === pl.id && !newsHubSelected ? "text-primary font-bold" : "text-foreground/80"
                                 )}>
                                     {pl.id}
                                 </span>
@@ -148,14 +230,53 @@ export default function PipelineMonitorTab() {
                             <div className="text-xs text-muted-foreground line-clamp-1">{pl.name}</div>
                         </button>
                     ))}
+
+                    {/* ── News Hub 구분선 ── */}
+                    <div className="mx-4 my-2 border-t border-border/50" />
+                    <div className="px-4 py-1">
+                        <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">Watchtower</span>
+                    </div>
+                    <button
+                        onClick={handleNewsHubSelect}
+                        className={cn(
+                            "w-full text-left px-4 py-2 flex flex-col gap-0.5 transition-colors",
+                            newsHubSelected
+                                ? "bg-amber-500/5 border-r-2 border-amber-500"
+                                : "hover:bg-muted/50 border-r-2 border-transparent"
+                        )}
+                    >
+                        <div className="flex items-center justify-between">
+                            <span className={cn(
+                                "font-medium tracking-tight text-sm flex items-center gap-1.5",
+                                newsHubSelected ? "text-amber-500 font-bold" : "text-foreground/80"
+                            )}>
+                                <Radio size={13} className={newsHubSelected ? "text-amber-500" : "text-muted-foreground"} />
+                                NEWS_HUB
+                            </span>
+                            {hubStatus?.isValid
+                                ? <CheckCircle2 size={14} className="text-amber-400" />
+                                : <XCircle size={14} className="text-muted-foreground/30" />}
+                        </div>
+                        <div className="text-xs text-muted-foreground line-clamp-1">중앙 뉴스 감시탑</div>
+                    </button>
                 </div>
             </div>
 
             {/* ====== [Detail] Right Main Content ====== */}
             <div className="flex-1 flex flex-col min-w-0 bg-background">
-                {activePipeline ? (
+                {/* ── News Hub 상세 뷰 ── */}
+                {newsHubSelected ? (
+                    <NewsHubDetailView
+                        status={hubStatus}
+                        articles={hubArticles}
+                        collecting={hubCollecting}
+                        expandedCategories={hubExpandedCategories}
+                        onCollectNow={handleNewsHubCollectNow}
+                        onRefresh={loadNewsHubData}
+                        onToggleCategory={toggleCategory}
+                    />
+                ) : activePipeline ? (
                     <>
-                        {/* Header Controller (여백 및 패딩 대폭 축소) */}
                         <div className="px-4 py-3 border-b flex items-center justify-between bg-muted/5">
                             <div className="flex items-center gap-4">
                                 <h1 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-3">
@@ -179,6 +300,14 @@ export default function PipelineMonitorTab() {
                             </div>
                             
                             <div className="flex items-center gap-4">
+                                {activePipeline.id === 'PL-NaverFlow' && (
+                                    <button
+                                        onClick={() => setShowNfSettings(true)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 border rounded text-xs font-semibold hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                        <SettingsIcon size={12} /> 설정
+                                    </button>
+                                )}
                                 {(activePipeline.id === 'PL-NaverSearch' || activePipeline.id === 'PL-FinanceInfo') && (
                                     <div className="flex items-center gap-2">
                                         <input 
@@ -402,6 +531,290 @@ export default function PipelineMonitorTab() {
                     </div>
                 )}
             </div>
+
+            {/* NaverFlow 설정 모달 */}
+            {showNfSettings && (
+                <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="bg-card w-[450px] rounded-xl shadow-lg border p-6 flex flex-col">
+                        <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+                            <SettingsIcon size={18} />
+                            PL-NaverFlow 크론 설정
+                        </h2>
+                        
+                        <div className="space-y-4 flex-1">
+                            <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    checked={nfSettings.enabled}
+                                    onChange={e => setNfSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                                    className="rounded border-muted w-4 h-4 bg-background"
+                                />
+                                매일 자동 수집 실행 (크론잡)
+                            </label>
+
+                            <div className="p-4 border rounded-lg bg-muted/10 space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-xs font-semibold text-muted-foreground">자동 수집 예약 시간</label>
+                                    <button
+                                        onClick={() => {
+                                            const slots = nfSettings.scheduleSlots || [];
+                                            setNfSettings(prev => ({
+                                                ...prev,
+                                                scheduleSlots: [...slots, { time: '12:00', enabled: true }]
+                                            }));
+                                        }}
+                                        disabled={!nfSettings.enabled}
+                                        className="text-[10px] bg-primary/10 text-primary px-2 py-1 rounded hover:bg-primary/20 transition-colors disabled:opacity-50"
+                                    >
+                                        + 시간 추가
+                                    </button>
+                                </div>
+                                
+                                <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+                                    {(nfSettings.scheduleSlots || []).map((slot: any, idx: number) => (
+                                        <div key={idx} className="flex items-center gap-3 bg-background p-2 rounded border">
+                                            <input
+                                                type="checkbox"
+                                                checked={slot.enabled}
+                                                disabled={!nfSettings.enabled}
+                                                onChange={(e) => {
+                                                    const newSlots = [...nfSettings.scheduleSlots];
+                                                    newSlots[idx].enabled = e.target.checked;
+                                                    setNfSettings(prev => ({ ...prev, scheduleSlots: newSlots }));
+                                                }}
+                                                className="rounded border-muted w-3.5 h-3.5"
+                                            />
+                                            <input
+                                                type="time"
+                                                value={slot.time}
+                                                disabled={!nfSettings.enabled || !slot.enabled}
+                                                onChange={(e) => {
+                                                    const newSlots = [...nfSettings.scheduleSlots];
+                                                    newSlots[idx].time = e.target.value;
+                                                    setNfSettings(prev => ({ ...prev, scheduleSlots: newSlots }));
+                                                }}
+                                                className="px-2 py-1 text-sm border rounded bg-background flex-1 disabled:opacity-50"
+                                            />
+                                            <button
+                                                onClick={() => {
+                                                    const newSlots = nfSettings.scheduleSlots.filter((_: any, i: number) => i !== idx);
+                                                    setNfSettings(prev => ({ ...prev, scheduleSlots: newSlots }));
+                                                }}
+                                                disabled={!nfSettings.enabled}
+                                                className="p-1 text-muted-foreground hover:text-destructive disabled:opacity-50"
+                                                title="삭제"
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {(!nfSettings.scheduleSlots || nfSettings.scheduleSlots.length === 0) && (
+                                        <div className="text-center py-4 text-xs text-muted-foreground">
+                                            등록된 예약 시간이 없습니다.
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="text-[11px] text-muted-foreground leading-relaxed p-2 bg-muted/20 rounded">
+                                    💡 저장된 시간에 평일(월~금) 기준으로 파이프라인이 자동 실행됩니다.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-2 mt-6 border-t pt-4">
+                            <button onClick={() => setShowNfSettings(false)} className="px-4 py-2 border rounded font-medium hover:bg-muted text-sm">
+                                취소
+                            </button>
+                            <button onClick={handleSaveNfSettings} className="px-4 py-2 bg-primary text-primary-foreground rounded font-medium shadow-sm hover:opacity-90 text-sm">
+                                설정 저장
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
+    );
+}
+
+// ═══ News Hub 상세 뷰 컴포넌트 ═══════════════════════════════════════════
+
+const CATEGORY_LABELS: Record<string, { label: string; emoji: string }> = {
+    MAJOR: { label: '국내 주요 뉴스', emoji: '📰' },
+    GLOBAL: { label: '해외 시장 뉴스', emoji: '🌐' },
+    GLOBAL_MARKET: { label: '글로벌 마켓', emoji: '📊' },
+    STOCK_ANALYSIS: { label: '종목 분석', emoji: '🔍' },
+    KEYWORD_SEARCH: { label: '키워드 검색', emoji: '🔑' },
+};
+
+function NewsHubDetailView({
+    status, articles, collecting, expandedCategories, onCollectNow, onRefresh, onToggleCategory
+}: {
+    status: any;
+    articles: any[];
+    collecting: boolean;
+    expandedCategories: Record<string, boolean>;
+    onCollectNow: () => void;
+    onRefresh: () => void;
+    onToggleCategory: (cat: string) => void;
+}) {
+    // 카테고리별 그룹핑
+    const grouped = articles.reduce((acc: Record<string, any[]>, a: any) => {
+        const cat = a.category || 'KEYWORD_SEARCH';
+        if (!acc[cat]) acc[cat] = [];
+        acc[cat].push(a);
+        return acc;
+    }, {});
+
+    const categoryOrder = ['MAJOR', 'GLOBAL', 'GLOBAL_MARKET', 'STOCK_ANALYSIS', 'KEYWORD_SEARCH'];
+
+    return (
+        <>
+            {/* 헤더 */}
+            <div className="px-4 py-3 border-b flex items-center justify-between bg-amber-500/5">
+                <div className="flex items-center gap-3">
+                    <h1 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2">
+                        <Radio size={18} className="text-amber-500" />
+                        News Watchtower
+                    </h1>
+                    <span className={cn(
+                        "text-xs px-2 py-0.5 rounded font-medium border uppercase tracking-wider",
+                        status?.isValid
+                            ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                            : "bg-muted text-muted-foreground border-border"
+                    )}>
+                        {status?.isValid ? 'LIVE' : 'NO CACHE'}
+                    </span>
+                    {status?.articleCount > 0 && (
+                        <span className="text-xs text-muted-foreground px-2 py-0.5 bg-muted rounded border">
+                            총 {status.articleCount}건
+                        </span>
+                    )}
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={onRefresh}
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded border border-border hover:border-foreground/30 transition-colors"
+                    >
+                        <RefreshCw size={12} />
+                        새로고침
+                    </button>
+                    <button
+                        onClick={onCollectNow}
+                        disabled={collecting}
+                        className="flex items-center gap-1.5 text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded font-medium transition-colors disabled:opacity-50"
+                    >
+                        {collecting ? <RefreshCw size={12} className="animate-spin" /> : <Play size={12} />}
+                        {collecting ? '수집 중...' : '지금 수집'}
+                    </button>
+                </div>
+            </div>
+
+            {/* 상태 배너 */}
+            <div className="px-4 py-2 border-b bg-muted/5 flex items-center gap-6 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                    <Clock size={11} />
+                    마지막 수집: {status?.collectedAt
+                        ? new Date(status.collectedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                        : '없음'
+                    }
+                </span>
+                {status?.ageMinutes != null && (
+                    <span className={cn(
+                        "flex items-center gap-1",
+                        status.ageMinutes > status.ttlMinutes * 0.8 ? "text-amber-500" : "text-green-500"
+                    )}>
+                        <CheckCircle2 size={11} />
+                        {status.ageMinutes}분 전 ({status.ttlMinutes}분 TTL)
+                    </span>
+                )}
+                <span className="flex items-center gap-1">
+                    <Database size={11} />
+                    버킷: {status?.bucket || '--'}
+                </span>
+            </div>
+
+            {/* 기사 목록 */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {articles.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
+                        <Newspaper size={32} className="opacity-20" />
+                        <p className="text-sm">캐시된 뉴스가 없습니다.</p>
+                        <p className="text-xs opacity-60">"지금 수집" 버튼을 눌러 뉴스를 가져오세요.</p>
+                    </div>
+                ) : (
+                    categoryOrder.map(cat => {
+                        const catArticles = grouped[cat];
+                        if (!catArticles || catArticles.length === 0) return null;
+                        const { label, emoji } = CATEGORY_LABELS[cat] || { label: cat, emoji: '📄' };
+                        const isExpanded = expandedCategories[cat] ?? true;
+
+                        return (
+                            <div key={cat} className="border rounded-lg overflow-hidden">
+                                {/* 카테고리 헤더 */}
+                                <button
+                                    onClick={() => onToggleCategory(cat)}
+                                    className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors"
+                                >
+                                    <span className="font-semibold text-sm flex items-center gap-2">
+                                        {emoji} {label}
+                                        <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                                            {catArticles.length}건
+                                        </span>
+                                    </span>
+                                    {isExpanded ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
+                                </button>
+
+                                {/* 기사 목록 */}
+                                {isExpanded && (
+                                    <div className="divide-y divide-border/50">
+                                        {catArticles.map((article: any, idx: number) => (
+                                            <div key={idx} className="px-4 py-2.5 hover:bg-muted/20 transition-colors group">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 mb-0.5">
+                                                            {article.searchKeyword && (
+                                                                <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20 shrink-0">
+                                                                    #{article.searchKeyword}
+                                                                </span>
+                                                            )}
+                                                            <p className="text-sm font-medium line-clamp-1 text-foreground/90">
+                                                                {article.title}
+                                                            </p>
+                                                        </div>
+                                                        {article.bodySnippet && (
+                                                            <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
+                                                                {article.bodySnippet}
+                                                            </p>
+                                                        )}
+                                                        <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground/60">
+                                                            <span>{article.source}</span>
+                                                            <span>·</span>
+                                                            <span>{article.date}</span>
+                                                            {article.timeBucket && <span>({article.timeBucket} 버킷)</span>}
+                                                        </div>
+                                                    </div>
+                                                    {(article.url || article.link) && (
+                                                        <a
+                                                            href="#"
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                (window.electronAPI as any).openExternal?.(article.url || article.link);
+                                                            }}
+                                                            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary shrink-0"
+                                                            title="원문 열기"
+                                                        >
+                                                            <ExternalLink size={13} />
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })
+                )}
+            </div>
+        </>
     );
 }

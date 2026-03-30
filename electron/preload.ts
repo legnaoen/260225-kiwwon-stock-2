@@ -244,6 +244,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // V2 Data Pipeline
     runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => ipcRenderer.invoke('v2-pipeline:run', { pipelineId, options }),
+    getThemeTrackerData: (type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => ipcRenderer.invoke('naverflow:get-tracker-data', type, date, limitDays, topN),
+    analyzeThemes: (date: string) => ipcRenderer.invoke('naverflow:analyze-themes', date),
+    verifyThemeIntelligence: (params: any) => ipcRenderer.invoke('naverflow:verify-theme', params),
+    getThemeRelatedNews: (themeName: string, keywords: string[]) => ipcRenderer.invoke('naverflow:get-theme-news', themeName, keywords),
+    searchLiveNews: (keyword: string) => ipcRenderer.invoke('naverflow:search-live-news', keyword),
 
     // V2 Agent Swarm: Market Condition Agent
     getMarketConditionSettings: () => ipcRenderer.invoke('agent:market:settings:get'),
@@ -306,4 +311,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveNewsHubSettings: (settings: any) => ipcRenderer.invoke('news-hub:save-settings', settings),
     collectNewsHubNow: () => ipcRenderer.invoke('news-hub:collect-now'),
     getNewsHubCacheStatus: () => ipcRenderer.invoke('news-hub:get-cache-status'),
+    getNewsHubArticles: (options?: { category?: string; limit?: number }) => ipcRenderer.invoke('news-hub:get-articles', options),
+
+    getNaverFlowSettings: () => ipcRenderer.invoke('naverflow:get-settings'),
+    saveNaverFlowSettings: (settings: any) => ipcRenderer.invoke('naverflow:save-settings', settings),
+    getThemeTrackerData: (type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => ipcRenderer.invoke('naverflow:get-tracker-data', type, date, limitDays, topN),
+    analyzeThemes: (date: string) => ipcRenderer.invoke('naverflow:analyze-themes', date),
 })

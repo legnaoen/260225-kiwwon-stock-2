@@ -108,6 +108,7 @@ export class NaverFlowAggregator implements IBaseAggregator {
                                             stock_name: stockName,
                                             tag_name: topItem.name,
                                             is_auto_tagged: 1,
+                                            change_rate: changeRate,
                                             added_date: dateStr
                                         });
                                         const arrow = changeRate > 0 ? '+' : '';

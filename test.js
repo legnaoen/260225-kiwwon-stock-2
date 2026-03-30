@@ -1,6 +1,11 @@
-const fs = require('fs');
-const ts = require('typescript');
-const code = fs.readFileSync('src/components/MaiisAgentTester.tsx', 'utf8');
-const sf = ts.createSourceFile('test.tsx', code, ts.ScriptTarget.Latest, true);
-console.log('Errors:', sf.parseDiagnostics.length);
-sf.parseDiagnostics.forEach(d => console.log(d.messageText));
+const path = require('path');
+const os = require('os');
+const Database = require('better-sqlite3');
+
+const dbPath = path.join(os.homedir(), 'AppData', 'Roaming', 'kiwoom-trader', 'db', 'kiwoom.db');
+const db = new Database(dbPath);
+
+console.log("THEME types:");
+console.log(db.prepare("SELECT type FROM theme_intelligence WHERE type LIKE '%THEME%' LIMIT 5").all());
+console.log("SECTOR types:");
+console.log(db.prepare("SELECT type FROM theme_intelligence WHERE type LIKE '%SECTOR%' LIMIT 5").all());

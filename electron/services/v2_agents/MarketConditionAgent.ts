@@ -23,11 +23,10 @@ import { TechnicalAnalyzer } from './TechnicalAnalyzer'
 
 // ═══ 유연한 파이프라인 레지스트리 ═══
 // 새 파이프라인 추가 시 여기에 한 줄만 추가하면 자동 통합
+// ※ PL-NewsFlow, PL-NewsKeyword는 NewsDataHub 캐시로 대체됨 (API 절약)
 const PIPELINE_REGISTRY: PipelineSlot[] = [
     { id: 'PL-Macro',       label: '글로벌 매크로',      required: true,  cycles: ['A', 'B'] },
     { id: 'PL-LocalFlow',   label: '국내 수급',          required: true,  cycles: ['A', 'B'] },
-    { id: 'PL-NewsFlow',    label: '네이버 뉴스',        required: false, cycles: ['A', 'B'] },
-    { id: 'PL-NewsKeyword', label: '뉴스 키워드',        required: false, cycles: ['A', 'B'] },
     // 미구현 파이프라인은 주석 처리. 구현 후 주석 해제만 하면 됨:
     // { id: 'PL-NXT',      label: 'NXT 프리마켓 수급', required: false, cycles: ['A'] },
 ]
@@ -214,6 +213,22 @@ export class MarketConditionAgent {
                 }
             }
         })
+
+        // ── NewsDataHub 캐시 주입 (PL-NewsFlow + PL-NewsKeyword 대체) ──
+        // 외부 API 호출 없이 미리 수집된 캐시를 읽음 (키워드 빈도 테이블 포함)
+        try {
+            const { NewsDataHub } = await import('../NewsDataHub');
+            const hubMarkdown = NewsDataHub.getInstance().getNewsAsMarkdown({ maxPerCategory: 10 });
+            if (!hubMarkdown.includes('캐시 없음')) {
+                available.push({ id: 'NEWS_HUB', markdown: hubMarkdown });
+                console.log('[MCA] NewsDataHub 캐시 주입 완료');
+            } else {
+                missing.push('NEWS_HUB (캐시 미준비 — Hub 배치 수집 대기 중)');
+                console.warn('[MCA] NewsDataHub 캐시 없음 — 뉴스 컨텍스트 누락');
+            }
+        } catch(e: any) {
+            missing.push(`NEWS_HUB (오류: ${e.message})`);
+        }
 
         // Active Rules 로드
         const activeRules = this.getActiveRules()
@@ -465,16 +480,18 @@ export class MarketConditionAgent {
                 const technicalDigest = await this.getIntradayTechnicalDigest();
                 const chartPrompt = `[실시간 수학적 전처리 차트 브리핑]\n${technicalDigest}\n\n당신은 위 다이제스트에서 20/60일선 지지여부와 분봉 추세를 직관적으로 읽고, 앞으로의 단기 주가 향방을 단 3문장 이내로 평가하는 기술적 분석 전담 AI입니다. 상승/하락 모멘텀에 대한 명확한 견해를 제시하세요.`;
                 
-                // (B) 네이버 실시간 뉴스 스크랩 및 로컬 AI(NEWS_ANALYST) 판독
-                let newsHeadlinesText = "뉴스 없음";
+                // (B) NewsDataHub 캐시에서 뉴스 읽기 (직접 API 호출 금지 — NewsDataHub 싱글톤 독점)
+                let newsHeadlinesText = "뉴스 없음 (캐시 미준비)";
                 try {
-                    const { NaverNewsService } = await import('../NaverNewsService');
-                    const news = await NaverNewsService.getInstance().searchNews("코스피 시황", 5);
-                    const headlines = news.items?.map((n: any) => n.title.replace(/<[^>]*>?/gm, '')).join('\n') || '';
-                    if (headlines) newsHeadlinesText = headlines;
-                } catch(e) {}
+                    const { NewsDataHub } = await import('../NewsDataHub');
+                    const hubMarkdown = NewsDataHub.getInstance().getNewsAsMarkdown({ maxPerCategory: 5 });
+                    // 캐시가 실제로 있으면 헤드라인 텍스트로 사용
+                    if (!hubMarkdown.includes('캐시 없음')) {
+                        newsHeadlinesText = hubMarkdown;
+                    }
+                } catch(e) { console.warn('[MCA-Intraday] NewsDataHub 캐시 읽기 실패:', (e as Error).message); }
 
-                const newsPrompt = `[방금 들어온 코스피 실시간 속보 헤드라인 5개]\n${newsHeadlinesText}\n\n당신은 시장의 공포와 탐욕을 읽어내는 투심 분석 AI입니다. 위 헤드라인들에서 치명적 악재나 강한 호재가 있는지 살펴보고, 시장 분위기가 긍정적인지 부정적인지 단 3문장 이내로 요약 평가하세요.`;
+                const newsPrompt = `[NewsDataHub 수집 뉴스 캐시 — 장중 시황 참고용]\n${newsHeadlinesText}\n\n당신은 시장의 공포와 탐욕을 읽어내는 투심 분석 AI입니다. 위 뉴스들에서 치명적 악재나 강한 호재가 있는지 살펴보고, 시장 분위기가 긍정적인지 부정적인지 단 3문장 이내로 요약 평가하세요.`;
 
                 // 두 로컬 AI를 병렬로 실행 시도
                 const [chartRes, newsRes] = await Promise.allSettled([

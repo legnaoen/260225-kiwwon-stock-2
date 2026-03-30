@@ -20,6 +20,7 @@ import PmTracker from './components/PmTracker'
 import PipelineMonitorTab from './components/v2_dashboard/PipelineMonitorTab'
 import MarketAgentTab from './components/v2_dashboard/MarketAgentTab'
 import IssueManagementTab from './components/v2_dashboard/IssueManagementTab'
+import { ThemeTrackerTab } from './components/v2_dashboard/ThemeTrackerTab'
 import CoPilotDrawer from './components/common/CoPilotDrawer'
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
@@ -359,8 +360,9 @@ function AppContent() {
                         { activeTab === 'pipeline-monitor' && <PipelineMonitorTab />}
                         { activeTab === 'market-agent' && <MarketAgentTab />}
                         { activeTab === 'issue-agent' && <IssueManagementTab />}
+                        { activeTab === 'theme-tracker' && <ThemeTrackerTab />}
 
-                        {(activeTab !== 'dashboard' && activeTab !== 'pipeline-monitor' && activeTab !== 'market-agent' && activeTab !== 'issue-agent' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'pm-tracker' && activeTab !== 'holdings' && activeTab !== 'rising-stocks' && activeTab !== 'settings' && activeTab !== 'narrative-insight') && (
+                        {(activeTab !== 'dashboard' && activeTab !== 'pipeline-monitor' && activeTab !== 'market-agent' && activeTab !== 'issue-agent' && activeTab !== 'theme-tracker' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'pm-tracker' && activeTab !== 'holdings' && activeTab !== 'rising-stocks' && activeTab !== 'settings' && activeTab !== 'narrative-insight') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

@@ -45,22 +45,39 @@ export class CoPilotAgent {
         }
 
         ctx += `--- 도구 호출(Function Calling) 강제 가이드라인 ---\n`;
-        ctx += `1. 사령관(사용자)이 현재 시점의 새로운 데이터나 종목 정보를 요구하거나 고도의 추론을 요구할 때 즉시 아래 특수 명령 중 하나만을 명확히 출력하고 당신은 대답을 정지하십시오.\n`;
-        ctx += `   - [CALL_TOOL: ESCALATE_GEMINI] : 사령관의 질문 난이도가 너무 높거나(거시 경제 딥 브리핑, 방대한 데이터 통합 분석, 복잡한 시나리오 추론), 고품질 마크다운 리포트를 요구한다고 판단될 때 무조건 호출하라. 당신(로컬)을 대신하여 클라우드망의 대형 AI가 심층 분석을 전담하게 된다.\n`;
-        ctx += `   - [CALL_TOOL: PL-Macro] : 나스닥선물, 환율, VIX, 글로벌 경제 지표 조회\n`;
-        ctx += `   - [CALL_TOOL: PL-LocalFlow] : 코스피/코스닥 외국인, 기관 자금 동향 등 수급 조회\n`;
-        ctx += `   - [CALL_TOOL: PL-RisingStock] : 당일 상한가, 급등주, 시장 주도 테마 조회 ("오늘 뭐가 올라?", "급등주 뭐야?")\n`;
-        ctx += `   - [CALL_TOOL: PL-NaverFlow] : 실시간 검색 상위 종목, 개인투자자 관심 테마 조회\n`;
-        ctx += `   - [CALL_TOOL: PL-NewsFlow] : 실시간 경제 및 주식 장중 속보/뉴스 흐름 조회\n`;
-        ctx += `   - [CALL_TOOL: PL-Research] : 최신 증권사 분석 리포트 요약본 조회\n`;
-        ctx += `   - [CALL_TOOL: PL-NewsKeyword] : 최신 뉴스 핵심 키워드 클라우드 조회\n`;
-        ctx += `   - [CALL_TOOL: PL-FinanceInfo, "종목명"] : 특정 기업의 실적(매출/영업이익), 사업개요(BM), 배당, PER/PBR 적정주가 등 팩트 펀더멘털을 물을 때 무조건 호출 (예: [CALL_TOOL: PL-FinanceInfo, "삼성전자"])\n`;
-        ctx += `   - [CALL_TOOL: PL-NaverSearch, "핵심검색어"] : 특정 종목/테마 딥다이브가 필요할 때 스스로 키워드를 도출해 맞춤 웹 검색 (예: [CALL_TOOL: PL-NaverSearch, "메쥬 특징주"])\n`;
-        ctx += `   [경고] 목적을 명확히 분리하세요. "회사 사업 내용이 뭐야?", "적자 기업이야?" 등은 PL-FinanceInfo를 쓰고, "왜 오늘 올랐지?" 등 단기 호재나 뉴스 파악은 PL-NaverSearch를 쓰십시오.\n`;
-        ctx += `   [경고] PL-NaverSearch 사용 시 검색어는 반드시 '메쥬 특징주', '제지 테마' 처럼 핵심 명사 1~2개로만 매우 짧게 구성하십시오. '메쥬 기업 개요 사업 내용' 처럼 문장형이나 3단어 이상의 검색어를 쓰면 아무 뉴스도 검색되지 않는 시스템 페이탈 에러가 발생합니다.\n`;
-        ctx += `2. 도구 코드를 출력하면, 백그라운드 시스템이 즉시 해당 데이터를 수집하여 공급합니다.\n`;
-        ctx += `3. 혼합된 질문(예: "오늘 상승 종목이랑 뉴스 어때?")엔 가장 핵심이 되는 도구 1개만 선택하세요.\n`;
-        ctx += `4. 단순 팩트나 당신(작은 엔진)이 충분히 논리적으로 답할 수 있는 일상적인 질문이라면 도구를 전혀 호출하지 말고 그냥 대답하십시오.\n`;
+        ctx += `1. 사령관(사용자)이 현재 시점의 새로운 데이터나 종목 정보를 요구할 때 아래 도구 중 하나만 출력하고 즉시 멈추십시오.\n`;
+        ctx += `\n`;
+        ctx += `★ 도구 선택 결정 트리 (순서대로 확인하라) ★\n`;
+        ctx += `  [Step 1] 질문에 "뉴스, 소식, 이슈, 기사, 헤드라인, 속보, 탑뉴스, 분위기, 흐름, 장세" 단어가 있는가?\n`;
+        ctx += `           → YES: 무조건 [CALL_TOOL: NEWS_HUB] 사용. PL-Macro·PL-LocalFlow·PL-FinanceInfo 절대 금지.\n`;
+        ctx += `  [Step 2] 질문에 "달러, 환율, 나스닥, VIX, 금리, 유가, 선물" 단어가 있는가?\n`;
+        ctx += `           → YES: [CALL_TOOL: PL-Macro] 사용.\n`;
+        ctx += `  [Step 3] 질문에 "수급, 외국인, 기관, 개인, 순매수, 순매도" 단어가 있는가?\n`;
+        ctx += `           → YES: [CALL_TOOL: PL-LocalFlow] 사용.\n`;
+        ctx += `  [Step 4] 질문에 "상한가, 급등, 급락, 오늘 뭐가 올라, 상승 종목" 단어가 있는가?\n`;
+        ctx += `           → YES: [CALL_TOOL: PL-RisingStock] 사용.\n`;
+        ctx += `  [Step 5] 특정 종목명이 명시되고 회사 실적·사업 내용을 묻는가? ("적자야?", "PER 얼마야?", "뭐 만들어?")\n`;
+        ctx += `           → YES: [CALL_TOOL: PL-FinanceInfo, "종목명"] 사용.\n`;
+        ctx += `  [Step 6] 특정 종목·테마의 오늘 이유/원인/실시간 검색이 필요한가? ("왜 올랐어?", "메쥬 특징주")\n`;
+        ctx += `           → YES: [CALL_TOOL: PL-NaverSearch, "핵심검색어"] 사용. 검색어는 2단어 이내.\n`;
+        ctx += `  [Step 7] 복잡한 거시 분석·시나리오·심층 리포트인가?\n`;
+        ctx += `           → YES: [CALL_TOOL: ESCALATE_GEMINI] 사용.\n`;
+        ctx += `  [Step 8] 위 어디에도 해당 없으면 도구 없이 직접 대답하라.\n`;
+        ctx += `\n`;
+        ctx += `━━ 도구별 상세 설명 ━━\n`;
+        ctx += `[CALL_TOOL: NEWS_HUB]      뉴스·기사·이슈·헤드라인 전용. 캐시에서 즉시 반환. (뉴스 질문에 Macro/LocalFlow 금지)\n`;
+        ctx += `[CALL_TOOL: PL-Macro]      숫자 지표 전용: 환율·나스닥선물·VIX·금리·유가. (뉴스 질문에 사용 절대 금지)\n`;
+        ctx += `[CALL_TOOL: PL-LocalFlow]  수급 전용: 외국인·기관 순매수·자금 동향.\n`;
+        ctx += `[CALL_TOOL: PL-RisingStock] 상한가·급등주·오늘 주도 테마.\n`;
+        ctx += `[CALL_TOOL: PL-NaverFlow]  네이버 실시간 검색 상위 종목·개인 관심 테마.\n`;
+        ctx += `[CALL_TOOL: PL-Research]   증권사 분석 리포트.\n`;
+        ctx += `[CALL_TOOL: PL-FinanceInfo, "종목명"] 기업 실적·재무·BM·배당·PER (회사 기본 정보 질문).\n`;
+        ctx += `[CALL_TOOL: PL-NaverSearch, "검색어"] 특정 종목·테마 실시간 검색 (검색어 2단어 이내 필수).\n`;
+        ctx += `[CALL_TOOL: ESCALATE_GEMINI] 고난도 복합 분석·심층 리포트 요청 시.\n`;
+        ctx += `\n`;
+        ctx += `2. 도구 코드를 출력하면 백그라운드 시스템이 데이터를 수집 후 재질문합니다. 그 전까지 대답을 완전히 멈추십시오.\n`;
+        ctx += `3. 혼합 질문엔 Step 1부터 순서대로 판단해 먼저 해당하는 도구 1개만 선택하세요.\n`;
+        ctx += `4. 일상적·간단한 질문은 도구 없이 직접 대답하세요.\n`;
         ctx += `-------------------------------------------------\n\n`;
 
         return ctx;
@@ -73,7 +90,39 @@ export class CoPilotAgent {
         } else if (mode === 'detail') {
             return base + " [최우선 명령: 어떠한 질문이든 (1.현상 2.근거 3.액션플랜)의 3단 구조를 갖춘 마크다운 리포트로 심층 분석하여 친절히 보고하라.]";
         }
-        return base + " [명령: 사령관의 질문 길이나 의도를 파악해 상황에 맟게 알아서 답변 깊이를 유동적으로 조절하라.]";
+        // auto 모드: 답변 길이 제한으로 히스토리 오염 방지 (Harness Context 무결성)
+        return base + " [명령: 질문의 깊이에 맞게 답변 수준을 조절하되, 도구 없이 직접 답할 때는 최대 5줄 이내로 요약하라. 목록은 최대 5개 항목까지만 허용한다. 사령관이 '자세히', '분석해줘' 등 심층 요청 시에만 그 이상 서술해도 좋다.]";
+    }
+
+    // ─── [Harness Layer] 도구 선택 검증 및 자동 교정 ─────────────────────
+    // 로컬 LLM의 잘못된 도구 선택을 키워드 규칙으로 오버라이드 (Reflection)
+    private resolveToolId(rawToolId: string, userMessage: string): { toolId: string; overridden: boolean } {
+        const msg = userMessage.toLowerCase();
+
+        // Rule 1: 뉴스/이슈 키워드 → 무조건 NEWS_HUB
+        const newsPattern = /뉴스|소식|이슈|기사|헤드라인|속보|탑뉴스|top\s*\.?뉴스|주요\s*뉴스|오늘\s*뉴스|분위기|장세|흐름이 어때|흐름은/;
+        const wrongForNews = ['PL-MACRO', 'PL-LOCALFLOW', 'PL-RISINGSTOCK', 'PL-FINANCEINFO', 'PL-NAVERSEARCH', 'PL-NAVERFLOW'];
+        if (newsPattern.test(msg) && wrongForNews.includes(rawToolId)) {
+            console.warn(`[Harness Override] 뉴스 키워드 감지: ${rawToolId} → NEWS_HUB`);
+            return { toolId: 'NEWS_HUB', overridden: true };
+        }
+
+        // Rule 2: 수급/외국인 키워드 → PL-LocalFlow
+        const flowPattern = /수급|외국인|기관|개인|순매수|순매도|자금|투자자/;
+        const wrongForFlow = ['PL-MACRO', 'PL-NAVERSEARCH', 'NEWS_HUB'];
+        if (flowPattern.test(msg) && wrongForFlow.includes(rawToolId)) {
+            console.warn(`[Harness Override] 수급 키워드 감지: ${rawToolId} → PL-LocalFlow`);
+            return { toolId: 'PL-LocalFlow', overridden: true };
+        }
+
+        // Rule 3: 급등/상한가 키워드 → PL-RisingStock
+        const risingPattern = /급등|상한가|상승 종목|오늘 뭐가 올라|강세 종목|뭐가 올라/;
+        if (risingPattern.test(msg) && rawToolId !== 'PL-RISINGSTOCK') {
+            console.warn(`[Harness Override] 급등 키워드 감지: ${rawToolId} → PL-RisingStock`);
+            return { toolId: 'PL-RisingStock', overridden: true };
+        }
+
+        return { toolId: rawToolId, overridden: false };
     }
 
     private async buildMessages(sysInst: string): Promise<any[]> {
@@ -135,8 +184,17 @@ export class CoPilotAgent {
             const toolMatch = trimmed.match(/\[CALL_TOOL:\s+([A-Z0-9_-]+)(?:,\s*["']([^"']+)["'])?\]/i);
 
             if (toolMatch) {
-                const plId = toolMatch[1].toUpperCase();
+                const rawPlId = toolMatch[1].toUpperCase();
                 const customKeyword = toolMatch[2]; // undefined일 수 있음
+
+                // ─── [Harness Validation Layer] 도구 선택 검증 ───
+                const { toolId: resolvedId, overridden } = this.resolveToolId(rawPlId, message);
+                const plId = resolvedId;
+                if (overridden) {
+                    onUpdate(`🔀 [Harness 교정] ${rawPlId} → ${plId} (질문 의도 분석 기반 자동 교정)`, false);
+                    // 짧은 지연 후 실제 데이터 로딩 메시지로 덮음
+                    await new Promise(r => setTimeout(r, 800));
+                }
                 
                 if (plId === 'ESCALATE_GEMINI') {
                     console.log(`[CoPilotAgent] Gemini Escalation 감지!`);
@@ -164,6 +222,7 @@ export class CoPilotAgent {
                         case 'PL-LOCALFLOW': krName = '국내 자금 수급'; break;
                         case 'PL-RISINGSTOCK': krName = '급등주 및 주도테마'; break;
                         case 'PL-NAVERFLOW': krName = '네이버 실검/관심도'; break;
+                        case 'NEWS_HUB': krName = '뉴스 허브 (캐시)'; break;
                         case 'PL-NEWSFLOW': krName = '실시간 속보/뉴스'; break;
                         case 'PL-RESEARCH': krName = '증권사 리포트'; break;
                         case 'PL-NEWSKEYWORD': krName = '뉴스 키워드'; break;
@@ -177,10 +236,19 @@ export class CoPilotAgent {
                     
                     let toolMarkdown = '';
                     try {
-                        const v2 = V2PipelineManager.getInstance();
-                        const plIdOriginal = toolMatch[1]; // PL-Macro 등 원래 대소문자 유지된 값 사용 필요
-                        const plResult = await v2.runPipeline(plIdOriginal as any, { forceFetch: true, keyword: customKeyword });
-                        toolMarkdown = plResult.aggregatedMarkdown;
+                        if (plId === 'NEWS_HUB') {
+                            // NewsDataHub 캐시에서 즉시 읽기 (외부 API 호출 없음)
+                            const { NewsDataHub } = await import('../NewsDataHub');
+                            toolMarkdown = NewsDataHub.getInstance().getNewsAsMarkdown({ maxPerCategory: 10 });
+                            if (toolMarkdown.includes('캐시 없음')) {
+                                toolMarkdown = '> ⚠️ 뉴스 캐시가 준비되지 않았습니다. 잠시 후 다시 시도하거나 News Hub에서 수동 수집을 실행하세요.';
+                            }
+                        } else {
+                            const v2 = V2PipelineManager.getInstance();
+                            const plIdOriginal = toolMatch[1];
+                            const plResult = await v2.runPipeline(plIdOriginal as any, { forceFetch: true, keyword: customKeyword });
+                            toolMarkdown = plResult.aggregatedMarkdown;
+                        }
                     } catch(e: any) {
                         toolMarkdown = `데이터 수집 실패: ${e.message}`;
                     }

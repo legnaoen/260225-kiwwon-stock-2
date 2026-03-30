@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Brain, X, ShieldAlert, Sparkles, Clock, Target, ArrowUpRight, ArrowDownRight, Minus, Activity, ChevronRight, Search, Settings, Trash2 } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -264,6 +264,46 @@ export default function MarketAgentTab() {
     const [selectedIntraday, setSelectedIntraday] = useState<any | null>(null)
     const livePrices = useLivePriceStore(state => state.prices)
 
+    const calculatedStats = useMemo(() => {
+        let total = 0;
+        let wins = 0;
+        let totalReturn = 0;
+
+        history.forEach(t => {
+            if (t.predict === 'HOLD') return;
+
+            let finalReturn: number | null = null;
+            if (returnView === 'T+1') {
+                finalReturn = t.t1_final;
+                if (finalReturn === null && t.entry_price && t.entry_price > 0) {
+                    const code = t.predict === 'LONG' ? '069500' : t.predict === 'SHORT' ? '114800' : null;
+                    if (code && livePrices[code]) {
+                        finalReturn = ((livePrices[code] - t.entry_price) / t.entry_price) * 100;
+                    }
+                }
+            } else if (returnView === 'T+5') {
+                finalReturn = t.t5_final;
+            } else if (returnView === 'T+20') {
+                finalReturn = t.t20_final;
+            }
+
+            if (finalReturn !== null && finalReturn !== undefined) {
+                total++;
+                totalReturn += finalReturn;
+                if (finalReturn > 0) {
+                    wins++;
+                }
+            }
+        });
+
+        return {
+            total,
+            wins,
+            winRate: total > 0 ? wins / total : 0,
+            totalReturn
+        }
+    }, [history, returnView, livePrices]);
+
     const fetchData = async () => {
         try {
             const [histRes, latRes, statRes, rulesRes, setRes] = await Promise.all([
@@ -356,20 +396,12 @@ export default function MarketAgentTab() {
                     <span className="text-xs text-muted-foreground ml-1">KOSPI Directional Agent</span>
                 </div>
                 <div className="flex items-center gap-3 text-xs">
-                    <div className="flex items-center gap-4 px-3 py-1 bg-muted/30 rounded border border-border/50">
-                        <div><span className="text-muted-foreground uppercase font-bold mr-1.5">Win</span><span className="font-mono font-bold">{(stats.winRate * 100).toFixed(1)}%</span> <span className="opacity-50">({stats.wins}/{stats.total})</span></div>
-                        <div className="w-px h-3 bg-border/60" />
-                        <div><span className="text-muted-foreground uppercase font-bold mr-1.5">Return</span><span className={cn("font-mono font-bold", stats.totalReturn > 0 ? "text-rose-500" : stats.totalReturn < 0 ? "text-blue-500" : "")}>{stats.totalReturn > 0 ? '+' : ''}{stats.totalReturn.toFixed(2)}%</span></div>
-                    </div>
                     <div className="flex items-center gap-1">
                         <button disabled={isRunning} onClick={handleRunCycleA} className="px-3 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50">
                             Run A
                         </button>
                         <button disabled={isRunning} onClick={handleRunCycleB} className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50">
                             Run B
-                        </button>
-                        <button onClick={async () => { await window.electronAPI.runTracker(); await new Promise(r => setTimeout(r, 300)); await fetchData() }} className="px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 rounded text-xs font-bold transition-colors">
-                            📊 Eval
                         </button>
                         <button onClick={async () => { await window.electronAPI.runIntradayPrediction('09:30'); await new Promise(r => setTimeout(r, 300)); await fetchData() }} className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded text-xs font-bold transition-colors">
                             ⚡
@@ -503,20 +535,27 @@ export default function MarketAgentTab() {
                     </div>
                     <div className="flex items-center gap-3">
                         {decisionTab === 'classic' && (
-                            <div className="flex bg-muted/30 rounded p-0.5" title="표시 주기 선택">
-                                {['T+1', 'T+5', 'T+20'].map(opt => (
-                                    <button
-                                        key={opt}
-                                        onClick={() => setReturnView(opt as any)}
-                                        className={cn(
-                                            "px-2.5 py-1 text-[10px] font-bold rounded transition-colors",
-                                            returnView === opt ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                                        )}
-                                    >
-                                        {opt}
-                                    </button>
-                                ))}
-                            </div>
+                            <>
+                                <div className="flex items-center gap-4 px-3 py-1 bg-muted/30 rounded border border-border/50 text-xs">
+                                    <div><span className="text-muted-foreground uppercase font-bold mr-1.5">Win</span><span className="font-mono font-bold">{(calculatedStats.winRate * 100).toFixed(1)}%</span> <span className="opacity-50">({calculatedStats.wins}/{calculatedStats.total})</span></div>
+                                    <div className="w-px h-3 bg-border/60" />
+                                    <div><span className="text-muted-foreground uppercase font-bold mr-1.5">Return</span><span className={cn("font-mono font-bold", calculatedStats.totalReturn > 0 ? "text-rose-500" : calculatedStats.totalReturn < 0 ? "text-blue-500" : "")}>{calculatedStats.totalReturn > 0 ? '+' : ''}{calculatedStats.totalReturn.toFixed(2)}%</span></div>
+                                </div>
+                                <div className="flex bg-muted/30 rounded p-0.5" title="표시 주기 선택">
+                                    {['T+1', 'T+5', 'T+20'].map(opt => (
+                                        <button
+                                            key={opt}
+                                            onClick={() => setReturnView(opt as any)}
+                                            className={cn(
+                                                "px-2.5 py-1 text-[10px] font-bold rounded transition-colors",
+                                                returnView === opt ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            {opt}
+                                        </button>
+                                    ))}
+                                </div>
+                            </>
                         )}
                         {decisionTab === 'intraday' && (
                             <button
@@ -562,9 +601,34 @@ export default function MarketAgentTab() {
                                         {returnView === 'T+20' && (t.t20_peak === null ? '-' : `${t.t20_peak > 0 ? '+' : ''}${t.t20_peak?.toFixed(1)}%`)}
                                     </td>
                                     <td className="py-2 pr-4 font-mono text-right font-bold">
-                                        {returnView === 'T+1' && (t.t1_final === null ? <span className="text-xs text-indigo-400 animate-pulse">⏳</span> : <span className={t.t1_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t1_final > 0 ? '+' : ''}{t.t1_final?.toFixed(2)}%</span>)}
-                                        {returnView === 'T+5' && (t.t5_final === null ? '-' : <span className={t.t5_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t5_final > 0 ? '+' : ''}{t.t5_final?.toFixed(2)}%</span>)}
-                                        {returnView === 'T+20' && (t.t20_final === null ? '-' : <span className={t.t20_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t20_final > 0 ? '+' : ''}{t.t20_final?.toFixed(2)}%</span>)}
+                                        {(() => {
+                                            const code = t.predict === 'LONG' ? '069500' : t.predict === 'SHORT' ? '114800' : null;
+                                            const isPending = t.t1_final === null;
+                                            let liveVal = t.t1_final;
+                                            let isLive = false;
+                                            
+                                            if (isPending && returnView === 'T+1' && t.entry_price && t.entry_price > 0 && code && livePrices[code]) {
+                                                liveVal = ((livePrices[code] - t.entry_price) / t.entry_price) * 100;
+                                                isLive = true;
+                                            }
+
+                                            if (returnView === 'T+1' && isPending && !isLive) {
+                                                return <span className="text-xs text-indigo-400 animate-pulse">⏳ 대기</span>;
+                                            }
+
+                                            return (
+                                                <>
+                                                    {returnView === 'T+1' && liveVal !== null && (
+                                                        <span className={cn(liveVal > 0 ? "text-rose-500" : "text-blue-500", isLive && "animate-pulse brightness-125")}>
+                                                            {isLive && <span className="text-[10px] bg-indigo-500 text-white px-1 rounded mr-1 animate-none">🔴 RUNNING</span>}
+                                                            {liveVal > 0 ? '+' : ''}{liveVal.toFixed(2)}%
+                                                        </span>
+                                                    )}
+                                                    {returnView === 'T+5' && (t.t5_final === null ? '-' : <span className={t.t5_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t5_final > 0 ? '+' : ''}{t.t5_final?.toFixed(2)}%</span>)}
+                                                    {returnView === 'T+20' && (t.t20_final === null ? '-' : <span className={t.t20_final > 0 ? "text-rose-500" : "text-blue-500"}>{t.t20_final > 0 ? '+' : ''}{t.t20_final?.toFixed(2)}%</span>)}
+                                                </>
+                                            );
+                                        })()}
                                     </td>
                                     <td className="py-2 pr-4">
                                         {t.swarm_sentiment ? (

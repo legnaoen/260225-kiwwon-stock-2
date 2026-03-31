@@ -26,6 +26,7 @@ export class TelegramService {
     private dailyTopRisingJobs: cron.ScheduledTask[] = [];
     private weeklyTopRisingJobs: cron.ScheduledTask[] = [];
     private monthlyTopRisingJobs: cron.ScheduledTask[] = [];
+    private recentAlertIds: Set<string> = new Set();
 
     private constructor() {
         this.initializeBot();
@@ -774,6 +775,19 @@ export class TelegramService {
             if (!mcaSettings.telegramEnabled) return;
 
             if (!data || data.confidence === 0) return; // 실패 건 (confidence=0) 제외
+
+            // 🌟 중복 발송 방지 로직 (옵션 A 적용)
+            // 비동기로 작성된 로컬 군집 위원회의 댓글때문에 이벤트가 2번 트리거되는 현상 방어
+            const predId = data.id || '';
+            if (predId && this.recentAlertIds.has(predId)) return;
+            if (predId) {
+                this.recentAlertIds.add(predId);
+                // 메모리 누수 방지용 (최대 100개 유지)
+                if (this.recentAlertIds.size > 100) {
+                    const first = this.recentAlertIds.values().next().value;
+                    if (first) this.recentAlertIds.delete(first);
+                }
+            }
 
             // sources_json 파싱으로 Gemini / 로컬 Swarm 출처 구분
             let sourcesArr: string[] = [];

@@ -67,8 +67,19 @@ export class IssueManagementAgent {
             // 2. 장부 불러오기
             const activeIssues = this.ledger.getActiveIssues()
 
+            // 3-a. 네이버 어휘 사전 로드 (이슈 AI 정합 기준)
+            const db = DatabaseService.getInstance()
+            const vocabSectors = db.getNaverVocabulary('SECTOR');
+            const vocabThemes  = db.getNaverVocabulary('THEME');
+            const sectorListStr = vocabSectors.length > 0
+                ? vocabSectors.map(v => v.name).join(', ')
+                : '(아직 수집된 섹터 없음)';
+            const themeListStr = vocabThemes.length > 0
+                ? vocabThemes.map(v => v.name).join(', ')
+                : '(아직 수집된 테마 없음)';
+
             // 3. Prompt 준비
-            const today = DatabaseService.getInstance().getKstDate()
+            const today = db.getKstDate()
             const systemPrompt = `당신은 한국 시장의 메인 서사(장기 테마 및 매크로 리스크)를 관리하는 최고 이슈 분석 에이전트입니다.`
             const userPrompt = `오늘 날짜: ${today}
 
@@ -104,8 +115,8 @@ ${dataParts.join('\n\n---\n\n')}
       "status": "ESCALATING" | "FADING" | "RESOLVED" | "NEW",
       "impactDirection": "상승" | "하락" | "중립",
       "summary": "1~2문장의 핵심 상태 요약",
-      "goodSectors": [{"name": "업종명", "reason": "이유"}],
-      "badSectors": [{"name": "업종명", "reason": "이유"}],
+      "goodSectors": [{"name": "업종명 (아래 [네이버 추적 섹터 목록]에서 선택 권장)", "reason": "이유"}],
+      "badSectors": [{"name": "업종명 (아래 [네이버 추적 섹터 목록]에서 선택 권장)", "reason": "이유"}],
       "timelineDetails": {
         "summary": "타임라인 트리에 표시할 짧은 요약 (제목격)",
         "ai_analysis": "해당 사건 혹은 뉴스가 무슨 파급력을 야기할지에 대한 AI의 심도 깊은 서술",
@@ -114,7 +125,14 @@ ${dataParts.join('\n\n---\n\n')}
       }
     }
   ]
-}`
+}
+
+[🔒 네이버 증권 추적 섹터 목록 (goodSectors/badSectors 작명 시 이 목록에서 선택 권장 - 완벽 일치하지 않아도 되나 최대한 근사한 이름 사용)]
+${sectorListStr}
+
+[🔒 네이버 증권 추적 테마 목록 (참고용 - 이슈와 직결된 테마가 있으면 언급 가능)]
+${themeListStr}
+`
 
             console.log('[IssueAgent] Gemini 판단 요청 중 (큐 대기)...')
             const rawResponse = await AiExecutionQueue.getInstance().enqueue({
@@ -188,6 +206,39 @@ ${dataParts.join('\n\n---\n\n')}
                                 ai_analysis: act.timelineDetails.ai_analysis,
                                 market_reaction: act.timelineDetails.market_reaction
                             })
+                        }
+
+                        // ★ knowledge_edges에도 섹터 연결 저장 (BENEFITS/HURTS)
+                        // → 이슈AI 분석 섹터와 테마AI 데이터를 하나의 knowledge_edges로 통합
+                        try {
+                            for (const g of (act.goodSectors || [])) {
+                                if (!g.name) continue;
+                                this.ledger.upsertEdge({
+                                    source_type: 'ISSUE',
+                                    source_id:   act.issue_id,
+                                    target_type: 'SECTOR',
+                                    target_id:   g.name,
+                                    relation:    'BENEFITS',
+                                    confidence:  0.85,
+                                    logical_path: g.reason || null,
+                                    created_by:  'ISSUE_AI',
+                                });
+                            }
+                            for (const b of (act.badSectors || [])) {
+                                if (!b.name) continue;
+                                this.ledger.upsertEdge({
+                                    source_type: 'ISSUE',
+                                    source_id:   act.issue_id,
+                                    target_type: 'SECTOR',
+                                    target_id:   b.name,
+                                    relation:    'HURTS',
+                                    confidence:  0.85,
+                                    logical_path: b.reason || null,
+                                    created_by:  'ISSUE_AI',
+                                });
+                            }
+                        } catch (edgeErr: any) {
+                            console.warn(`[IssueAgent] knowledge_edges 저장 실패 (${act.issue_id}):`, edgeErr.message);
                         }
 
                         updatedIssueIds.push(act.issue_id)

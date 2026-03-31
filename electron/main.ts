@@ -591,6 +591,51 @@ ipcMain.handle('naverflow:verify-theme', async (_event, params) => {
     }
 })
 
+// ═══ Graph RAG: Knowledge Edge IPC ═══
+
+ipcMain.handle('graph:edges-from', async (_event, sourceType: string, sourceId: string, targetType?: string) => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        const db = IssueLedgerDB.getInstance()
+        const data = targetType
+            ? db.getEdgesFromTo(sourceType, sourceId, targetType)
+            : db.getEdgesFrom(sourceType, sourceId)
+        return { success: true, data }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('graph:edges-to', async (_event, targetType: string, targetId: string) => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        const data = IssueLedgerDB.getInstance().getEdgesTo(targetType, targetId)
+        return { success: true, data }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('graph:market-edges', async (_event) => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        const data = IssueLedgerDB.getInstance().getMarketEdges()
+        return { success: true, data }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('graph:upsert-edge', async (_event, edge: any) => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        IssueLedgerDB.getInstance().upsertEdge({ ...edge, created_by: edge.created_by || 'HUMAN' })
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
 // ═══ V2 Agent Swarm: Market Condition Agent IPC ═══
 
 ipcMain.handle('naverflow:get-theme-news', async (_event, themeName: string, keywords: string[]) => {
@@ -734,6 +779,17 @@ ipcMain.handle('agent:intraday:run', async (_event, slot: '09:30' | '11:00' | '1
         const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
         const result = await MarketConditionAgent.getInstance().runIntraday(slot)
         return { success: true, data: result }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:intradayswarm:run', async (_event, slot: string) => {
+    try {
+        console.log(`[IPC] 장중 시황 군집 분석 수동 실행 요청: ${slot}`)
+        const { IntradaySwarmAgent } = await import('./services/v2_agents/IntradaySwarmAgent')
+        await IntradaySwarmAgent.getInstance().runSwarm(slot)
+        return { success: true }
     } catch (error: any) {
         return { success: false, error: error.message }
     }

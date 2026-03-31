@@ -167,6 +167,26 @@ export class IssueLedgerDB {
             );
         `);
 
+        // ─── Graph RAG: 지식 연결 엣지 테이블 ───────────────────────────
+        // 시황 ↔ 이슈 ↔ 테마/섹터 ↔ 종목 간의 인과관계를 기록하는 단일 Edge 테이블
+        // 기존 테이블은 일절 수정하지 않으며, 이 테이블만 읽기/쓰기 함
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS knowledge_edges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_type TEXT NOT NULL,   -- 'ISSUE' | 'THEME' | 'SECTOR' | 'STOCK' | 'MARKET'
+                source_id   TEXT NOT NULL,   -- 예: 'ISSUE-2603-MEDEAST', '탈플라스틱'
+                target_type TEXT NOT NULL,   -- 'ISSUE' | 'THEME' | 'SECTOR' | 'STOCK' | 'MARKET'
+                target_id   TEXT NOT NULL,   -- 예: '탈플라스틱', 'KOSPI'
+                relation    TEXT NOT NULL,   -- 'DRIVES' | 'BENEFITS' | 'HURTS' | 'CORRELATES'
+                confidence  REAL DEFAULT 0.5,
+                logical_path TEXT,           -- "중동분쟁 → 나프타가격 → 대체재 부각"
+                created_by  TEXT NOT NULL,   -- 'THEME_AI' | 'ISSUE_AI' | 'HUMAN' | 'MARKET_AI'
+                created_at  TEXT NOT NULL,
+                expires_at  TEXT,            -- NULL이면 영구; 단기이슈는 자동 만료일 설정
+                UNIQUE(source_type, source_id, target_type, target_id, relation)
+            );
+        `);
+
         try {
             this.db.exec(`ALTER TABLE issue_briefings ADD COLUMN macro_tnx TEXT;`);
         } catch (e) { /* ignore */ }
@@ -408,4 +428,109 @@ export class IssueLedgerDB {
     public deleteSwarmSession(sessionId: string): void {
         this.db.prepare(`DELETE FROM swarm_sessions WHERE id = ?`).run(sessionId);
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  Graph RAG: Knowledge Edge CRUD
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Edge 삽입 또는 갱신 (confidence와 logical_path만 갱신)
+     */
+    public upsertEdge(edge: {
+        source_type: string, source_id: string,
+        target_type: string, target_id: string,
+        relation: string,
+        confidence?: number,
+        logical_path?: string,
+        created_by: string,
+        expires_at?: string
+    }): void {
+        this.db.prepare(`
+            INSERT INTO knowledge_edges
+                (source_type, source_id, target_type, target_id, relation, confidence, logical_path, created_by, created_at, expires_at)
+            VALUES
+                (@source_type, @source_id, @target_type, @target_id, @relation, @confidence, @logical_path, @created_by, datetime('now','localtime'), @expires_at)
+            ON CONFLICT(source_type, source_id, target_type, target_id, relation)
+            DO UPDATE SET
+                confidence   = MAX(confidence, @confidence),
+                logical_path = COALESCE(@logical_path, logical_path),
+                created_at   = datetime('now','localtime')
+        `).run({
+            source_type: edge.source_type,
+            source_id:   edge.source_id,
+            target_type: edge.target_type,
+            target_id:   edge.target_id,
+            relation:    edge.relation,
+            confidence:  edge.confidence ?? 0.5,
+            logical_path: edge.logical_path ?? null,
+            created_by:  edge.created_by,
+            expires_at:  edge.expires_at ?? null
+        });
+    }
+
+    /**
+     * 특정 source의 모든 outgoing edges 조회
+     * 예: getEdgesFrom('ISSUE', 'ISSUE-2603-MEDEAST') → 연결된 테마/섹터/MARKET 전부
+     */
+    public getEdgesFrom(sourceType: string, sourceId: string): any[] {
+        return this.db.prepare(`
+            SELECT * FROM knowledge_edges
+            WHERE source_type = ? AND source_id = ?
+              AND (expires_at IS NULL OR expires_at > datetime('now','localtime'))
+            ORDER BY confidence DESC
+        `).all(sourceType, sourceId);
+    }
+
+    /**
+     * 특정 target을 향하는 모든 incoming edges 조회
+     * 예: getEdgesTo('THEME', '탈플라스틱') → 이 테마를 일으킨 이슈 전부
+     */
+    public getEdgesTo(targetType: string, targetId: string): any[] {
+        return this.db.prepare(`
+            SELECT * FROM knowledge_edges
+            WHERE target_type = ? AND target_id = ?
+              AND (expires_at IS NULL OR expires_at > datetime('now','localtime'))
+            ORDER BY confidence DESC
+        `).all(targetType, targetId);
+    }
+
+    /**
+     * 특정 source에서 특정 target_type으로 가는 edges만 조회
+     * 예: 이슈에서 연결된 THEME edges만
+     */
+    public getEdgesFromTo(sourceType: string, sourceId: string, targetType: string): any[] {
+        return this.db.prepare(`
+            SELECT * FROM knowledge_edges
+            WHERE source_type = ? AND source_id = ? AND target_type = ?
+              AND (expires_at IS NULL OR expires_at > datetime('now','localtime'))
+            ORDER BY confidence DESC
+        `).all(sourceType, sourceId, targetType);
+    }
+
+    /**
+     * MARKET을 대상으로 하는 모든 이슈 edge 조회 (시황 AI용)
+     * BENEFITS: 시장을 끌어올리는 이슈 / HURTS: 끌어내리는 이슈
+     */
+    public getMarketEdges(): any[] {
+        return this.db.prepare(`
+            SELECT ke.*, i.name as issue_name, i.severity, i.status
+            FROM knowledge_edges ke
+            LEFT JOIN issues i ON ke.source_id = i.id
+            WHERE ke.target_type = 'MARKET'
+              AND (ke.expires_at IS NULL OR ke.expires_at > datetime('now','localtime'))
+            ORDER BY ke.confidence DESC
+        `).all();
+    }
+
+    /**
+     * 만료된 edge 정리 (주 1회 호출)
+     */
+    public purgeExpiredEdges(): number {
+        const result = this.db.prepare(`
+            DELETE FROM knowledge_edges
+            WHERE expires_at IS NOT NULL AND expires_at <= datetime('now','localtime')
+        `).run();
+        return result.changes;
+    }
 }
+

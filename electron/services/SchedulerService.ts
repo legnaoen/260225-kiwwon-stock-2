@@ -75,15 +75,40 @@ export class SchedulerService {
                 await tracker.evaluateIntraday()  // \uc7a5\uc911 \uc608\uce21 \uc885\uac00 \ub300\ube44 \ud3c9\uac00
             }, { timezone: 'Asia/Seoul' })
 
-            // \uc7a5\uc911 \uc778\ud2b8\ub77c\ub370\uc774 \uc608\uce21 (09:30 / 11:00 / 13:00)
-            const intradayJobA = cron.schedule('30 9 * * 1-5', async () => {
-                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
-                await MarketConditionAgent.getInstance().runIntraday('09:30')
-            }, { timezone: 'Asia/Seoul' })
+            // 장중 인트라데이 예측 (9시 45분부터 12시 45분까지 1시간 간격)
+            const intradayJobs: cron.ScheduledTask[] = []
+            const intradaySlots = ['09:45', '10:45', '11:45', '12:45']
+            for (const slot of intradaySlots) {
+                const [hr, min] = slot.split(':')
+                const job = cron.schedule(`${parseInt(min, 10)} ${parseInt(hr, 10)} * * 1-5`, async () => {
+                    const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
+                    await MarketConditionAgent.getInstance().runIntraday(slot)
+                }, { timezone: 'Asia/Seoul' })
+                intradayJobs.push(job)
+            }
 
-            const intradayJobC = cron.schedule('0 13 * * 1-5', async () => {
-                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
-                await MarketConditionAgent.getInstance().runIntraday('13:00')
+            // 장중 5분봉 CCI 모니터링 및 이벤트 트리거 (09:10 ~ 14:00 사이, 매 5분마다)
+            const intradayCciJob = cron.schedule('*/5 9-14 * * 1-5', async () => {
+                const now = new Date()
+                const timeInt = now.getHours() * 100 + now.getMinutes()
+                if (timeInt < 910 || timeInt > 1400) return
+
+                try {
+                    const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
+                    const { TechnicalAnalyzer } = await import('./v2_agents/TechnicalAnalyzer')
+                    const { KiwoomService } = await import('./KiwoomService')
+                    const analyzer = new TechnicalAnalyzer(KiwoomService.getInstance())
+                    const result = await analyzer.checkCCITrigger()
+
+                    if (result.isTriggered) {
+                        const eventSlotStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} (CCI)`
+                        console.log(`[SchedulerService] ⚡ CCI 이벤트 감지: ${result.status} -> AI 긴급 시황 분석 트리거`);
+                        // MarketConditionAgent.runIntraday 15분 쿨다운으로 과도한 분석 방지
+                        await MarketConditionAgent.getInstance().runIntraday(eventSlotStr)
+                    }
+                } catch (err: any) {
+                    console.error('[SchedulerService] CCI 이벤트 체크 에러:', err.message)
+                }
             }, { timezone: 'Asia/Seoul' })
 
             // 장중 무제한 로컬 스웜 A/B 테스트 (09:45 ~ 13:45 간 30분 단위, 총 9회)
@@ -122,7 +147,7 @@ export class SchedulerService {
                 await MarketReviewAgent.getInstance().runDailyReview()
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(itaJob, mcaJobA, mcaJobB, mcaTrackerJob, intradayJobA, intradayJobC, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, ...swarmJobs)
+            this.scheduledJobs.push(itaJob, mcaJobA, mcaJobB, mcaTrackerJob, ...intradayJobs, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, ...swarmJobs)
             console.log(`[SchedulerService] V2 AI schedules initialized (ITA: 08:30, MCA: 08:50, Swarms, Retros)`)
         }
 

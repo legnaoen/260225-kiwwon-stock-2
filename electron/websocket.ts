@@ -200,18 +200,16 @@ export class KiwoomWebSocketManager {
                                 PriceStore.getInstance().setPrice(cleanCode, priceNum)
 
                                 // Emit to internal systems for AI trading logic (VWAP calculation, etc.)
-                                if (d.type === '0B') {
-                                    eventBus.emit(SystemEvent.PRICE_UPDATE, {
-                                        code: cleanCode,
-                                        price: priceNum,
-                                        volume: Math.abs(parseInt(d.values["15"] || '0')), // 단위체결량 (순간 체결량)
-                                        cumVolume: Math.abs(parseInt(d.values["13"] || '0')), // 누적거래량
-                                        cumAmount: Math.abs(parseInt(d.values["14"] || '0')), // 누적거래대금
-                                        open: Math.abs(parseInt(d.values["16"] || '0')),   // 시가
-                                        high: Math.abs(parseInt(d.values["17"] || '0')),   // 고가
-                                        low: Math.abs(parseInt(d.values["18"] || '0'))     // 저가
-                                    });
-                                }
+                                eventBus.emit(SystemEvent.PRICE_UPDATE, {
+                                    code: cleanCode,
+                                    price: priceNum,
+                                    volume: Math.abs(parseInt(d.values["15"] || '0')), // 단위체결량 (순간 체결량)
+                                    cumVolume: Math.abs(parseInt(d.values["13"] || '0')), // 누적거래량
+                                    cumAmount: Math.abs(parseInt(d.values["14"] || '0')), // 누적거래대금
+                                    open: Math.abs(parseInt(d.values["16"] || '0')),   // 시가
+                                    high: Math.abs(parseInt(d.values["17"] || '0')),   // 고가
+                                    low: Math.abs(parseInt(d.values["18"] || '0'))     // 저가
+                                });
                             }
 
                             this.mainWindow!.webContents.send('kiwoom:real-time-data', mappedData)

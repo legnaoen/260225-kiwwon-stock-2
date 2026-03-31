@@ -249,6 +249,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verifyThemeIntelligence: (params: any) => ipcRenderer.invoke('naverflow:verify-theme', params),
     getThemeRelatedNews: (themeName: string, keywords: string[]) => ipcRenderer.invoke('naverflow:get-theme-news', themeName, keywords),
     searchLiveNews: (keyword: string) => ipcRenderer.invoke('naverflow:search-live-news', keyword),
+    // Graph RAG: Knowledge Edges
+    getKnowledgeEdgesFrom: (sourceType: string, sourceId: string, targetType?: string) => ipcRenderer.invoke('graph:edges-from', sourceType, sourceId, targetType),
+    getKnowledgeEdgesTo: (targetType: string, targetId: string) => ipcRenderer.invoke('graph:edges-to', targetType, targetId),
+    getMarketKnowledgeEdges: () => ipcRenderer.invoke('graph:market-edges'),
+    upsertKnowledgeEdge: (edge: any) => ipcRenderer.invoke('graph:upsert-edge', edge),
 
     // V2 Agent Swarm: Market Condition Agent
     getMarketConditionSettings: () => ipcRenderer.invoke('agent:market:settings:get'),
@@ -274,6 +279,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // \uc7a5\uc911 \uc778\ud2b8\ub77c\ub370\uc774 \uc608\uce21
     getIntradayPredictions: () => ipcRenderer.invoke('agent:intraday:predictions'),
     runIntradayPrediction: (slot: '09:30' | '11:00' | '13:00') => ipcRenderer.invoke('agent:intraday:run', slot),
+    runIntradaySwarmPrediction: (slot: string) => ipcRenderer.invoke('agent:intradayswarm:run', slot),
     runTracker: () => ipcRenderer.invoke('agent:tracker:run'),
 
     // V2 이슈 관리 (Macro/News) Agent

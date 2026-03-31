@@ -49,6 +49,12 @@ export class NaverFlowAggregator implements IBaseAggregator {
                     }));
 
                     this.dbService.upsertNaverMarketFlow(dbPayload);
+
+                    // ★ 누적 어휘 사전에도 저장 (삭제 없음 - 이슈 AI 정합 기준)
+                    this.dbService.upsertNaverVocabulary(
+                        top20.map(p => ({ name: p.name, type, date: dateStr }))
+                    );
+
                     allParsedItems.push(...top20);
 
                     for (const p of top20.slice(0, 10)) {

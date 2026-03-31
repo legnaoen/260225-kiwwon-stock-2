@@ -36,6 +36,7 @@ export class MarketConditionAgent {
     private pipeline: V2PipelineManager
     private ai: AiService
     private db: DatabaseService
+    private lastIntradayExecutionTime: number = 0
 
     private constructor() {
         this.pipeline = V2PipelineManager.getInstance()
@@ -62,7 +63,9 @@ export class MarketConditionAgent {
     public async getIntradayTechnicalDigest(): Promise<string> {
         try {
             const analyzer = new TechnicalAnalyzer(KiwoomService.getInstance());
-            return await analyzer.generateMarketTechnicalDigest();
+            const daily = await analyzer.generateDailyTechnicalDigest();
+            const intraday = await analyzer.generateIntradayTechnicalDigest();
+            return daily + "\n\n---\n\n" + intraday;
         } catch (e: any) {
             console.error('[MCA-Digest] 오류:', e);
             return `오류: ${e.message}`;
@@ -449,7 +452,14 @@ export class MarketConditionAgent {
      * - '(오늘 종가 방향)' 을 UP/HOLD/DOWN 으로 판단
      * - 실제 평가는 15:35 PerformanceTracker가 종가 데이터로 콜
      */
-    public async runIntraday(slot: '09:30' | '13:00') {
+    public async runIntraday(slot: string, force: boolean = false) {
+        const nowMs = Date.now()
+        if (!force && nowMs - this.lastIntradayExecutionTime < 15 * 60 * 1000) {
+            console.log(`[MCA-Intraday] 15분 쿨다운 적용 중. (timeSlot: ${slot}) 실행 스킵.`);
+            return;
+        }
+        this.lastIntradayExecutionTime = nowMs;
+
         const startTime = Date.now()
         const now = new Date()
         const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -478,7 +488,7 @@ export class MarketConditionAgent {
             try {
                 // (A) 기술적 다이제스트 생성 및 로컬 AI(CHART_ANALYST) 판독
                 const technicalDigest = await this.getIntradayTechnicalDigest();
-                const chartPrompt = `[실시간 수학적 전처리 차트 브리핑]\n${technicalDigest}\n\n당신은 위 다이제스트에서 20/60일선 지지여부와 분봉 추세를 직관적으로 읽고, 앞으로의 단기 주가 향방을 단 3문장 이내로 평가하는 기술적 분석 전담 AI입니다. 상승/하락 모멘텀에 대한 명확한 견해를 제시하세요.`;
+                const chartPrompt = `[실시간 다중 타임프레임 차트 브리핑]\n${technicalDigest}\n\n당신은 다이제스트에서 20/60일선 등의 거시적 위치(일봉)를 가볍게 체크하되, **초단기 장중 분봉 차트 흐름과 시가 돌파/지지 여부를 절대적으로 최우선(Highest Priority)순위로 삼아** 앞으로의 단기 주가 향방을 단 3문장 이내로 강하게 평가하는 기술적 분석 전담 AI입니다. 거시적 수급 지연 가능성을 대비해 오직 '현재의 가격 모멘텀'을 믿고 단호한 견해를 제시하세요.`;
                 
                 // (B) NewsDataHub 캐시에서 뉴스 읽기 (직접 API 호출 금지 — NewsDataHub 싱글톤 독점)
                 let newsHeadlinesText = "뉴스 없음 (캐시 미준비)";

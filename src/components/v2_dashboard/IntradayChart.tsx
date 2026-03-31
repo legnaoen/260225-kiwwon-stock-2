@@ -30,6 +30,18 @@ export default function IntradayChart({
                 textColor: textColor,
                 attributionLogo: false
             },
+            localization: {
+                timeFormatter: (time: number) => {
+                    const date = new Date(time * 1000);
+                    return date.toLocaleString('ko-KR', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                }
+            },
             grid: {
                 vertLines: { color: gridColor, style: 3 },
                 horzLines: { color: gridColor, style: 3 },

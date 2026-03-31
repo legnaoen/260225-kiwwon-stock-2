@@ -49,6 +49,11 @@ export class PerformanceTracker {
 
         // 실시간 장중 평가를 위한 WebSocket 갱신 리스너
         eventBus.on(SystemEvent.PRICE_UPDATE, (data: any) => this.handleRealtimePriceUpdate(data))
+
+        // 앱 시작 시, 전날 15:35에 앱이 꺼져 있어서 누락되었거나 값 교정이 필요한 과거 데이터를 즉각 보정합니다.
+        setTimeout(() => {
+            this.runDailyTracking().catch(e => console.error('Tracker Boot Sync Error:', e))
+        }, 10000)
     }
 
     public static getInstance(): PerformanceTracker {
@@ -135,25 +140,23 @@ export class PerformanceTracker {
             const updates: any = {}
 
             // ═══ Step 1: Entry Price backfill (핵심 수정) ═══
+            // 실시간 저장된 가승인 진입가를, 공식 API 차트의 시가/종가로 정확하게 교정(Overwrite)
             let entryPrice = (row as any).entry_price
-            if (!entryPrice || entryPrice <= 0) {
-                if (row.cycle === 'A') {
-                    // Cycle A(장전 08:50): 진입가 = 당일 시가
-                    entryPrice = todayCandle.open
-                } else {
-                    // Cycle B(마감 15:10): 진입가 = 당일 종가
-                    entryPrice = todayCandle.close
-                }
+            const correctEntryPrice = row.cycle === 'A' ? todayCandle.open : todayCandle.close;
+            
+            if (entryPrice !== correctEntryPrice) {
+                entryPrice = correctEntryPrice
                 updates.entry_price = entryPrice
-                console.log(`[MCA-Tracker] entry_price backfill: ${row.id} → cycle=${row.cycle}, price=${entryPrice}`)
+                console.log(`[MCA-Tracker] entry_price correction: ${row.id} → cycle=${row.cycle}, price=${entryPrice}`)
             }
-
+            
             if (!entryPrice || entryPrice <= 0) continue
 
             const isTodayCycleA = row.cycle === 'A' && todayIdx === 0;
 
             // ═══ Step 2: T+1 평가 ═══
-            if ((row as any).t1_final === null || (row as any).t1_final === undefined || isTodayCycleA) {
+            // t1_final이 아직 없거나, 당일 Cycle A거나, 우리가 방금 entry_price를 교정(Overwrite)했다면 다시 채점!
+            if ((row as any).t1_final === null || (row as any).t1_final === undefined || isTodayCycleA || updates.entry_price !== undefined) {
                 if (row.cycle === 'A') {
                     // Cycle A: 당일 시가 진입 → 당일 종가 청산
                     updates.t1_peak = ((todayCandle.high - entryPrice) / entryPrice) * 100
@@ -174,35 +177,47 @@ export class PerformanceTracker {
             }
 
             // ═══ Step 3 & 4: T+5, T+20 다이나믹 트래킹 ═══
-            const calcT = (targetDays: number) => {
-                if (todayIdx < targetDays) {
+            const calcTHorizon = (targetDays: number, targetPredict: string | null) => {
+                if (!targetPredict || !['LONG', 'SHORT'].includes(targetPredict)) return { peak: null, final: null };
+                
+                const myChart = targetPredict === 'LONG' ? chartK200 : chartInv;
+                const myIdx = myChart.findIndex(candle => candle.date === rowDateNorm);
+                
+                if (myIdx === -1) return { peak: null, final: null };
+                
+                const myTodayCandle = myChart[myIdx];
+                const myEntryPrice = row.cycle === 'A' ? myTodayCandle.open : myTodayCandle.close;
+                
+                if (!myEntryPrice || myEntryPrice <= 0) return { peak: null, final: null };
+                
+                if (myIdx < targetDays) {
                     // 진행 중 (아직 목표일 도달 안됨) -> 가장 최신(0) 캔들 종가로 현재까지의 수익률 계산
                     let maxHigh = 0
-                    for (let i = todayIdx - 1; i >= 0; i--) {
-                        if (chartData[i]?.high > maxHigh) maxHigh = chartData[i].high
+                    for (let i = myIdx - 1; i >= 0; i--) {
+                        if (myChart[i]?.high > maxHigh) maxHigh = myChart[i].high
                     }
-                    const peak = maxHigh > 0 ? ((maxHigh - entryPrice) / entryPrice) * 100 : null
-                    const final = ((chartData[0].close - entryPrice) / entryPrice) * 100
+                    const peak = maxHigh > 0 ? ((maxHigh - myEntryPrice) / myEntryPrice) * 100 : null
+                    const final = ((myChart[0].close - myEntryPrice) / myEntryPrice) * 100
                     return { peak, final }
                 } else {
-                    // 목표일 경과 안착 -> 목표일 인덱스(todayIdx - targetDays)의 확정 종가로 계산
+                    // 목표일 경과 안착 -> 목표일 인덱스(myIdx - targetDays)의 확정 종가로 계산
                     let maxHigh = 0
-                    for (let i = todayIdx - 1; i >= todayIdx - targetDays; i--) {
-                        if (chartData[i]?.high > maxHigh) maxHigh = chartData[i].high
+                    for (let i = myIdx - 1; i >= myIdx - targetDays; i--) {
+                        if (myChart[i]?.high > maxHigh) maxHigh = myChart[i].high
                     }
-                    const peak = maxHigh > 0 ? ((maxHigh - entryPrice) / entryPrice) * 100 : null
-                    const final = ((chartData[todayIdx - targetDays].close - entryPrice) / entryPrice) * 100
+                    const peak = maxHigh > 0 ? ((maxHigh - myEntryPrice) / myEntryPrice) * 100 : null
+                    const final = ((myChart[myIdx - targetDays].close - myEntryPrice) / myEntryPrice) * 100
                     return { peak, final }
                 }
             }
 
-            const t5 = calcT(5)
+            const t5 = calcTHorizon(5, (row as any).t5_predict)
             if ((row as any).t5_peak !== t5.peak || (row as any).t5_final !== t5.final) {
                 updates.t5_peak = t5.peak
                 updates.t5_final = t5.final
             }
 
-            const t20 = calcT(20)
+            const t20 = calcTHorizon(20, (row as any).t20_predict)
             if ((row as any).t20_peak !== t20.peak || (row as any).t20_final !== t20.final) {
                 updates.t20_peak = t20.peak
                 updates.t20_final = t20.final
@@ -301,10 +316,8 @@ export class PerformanceTracker {
 
     /**
      * WebSocket 실시간 메모리 데이터만 사용하여 장중/장전 수익률 즉시 갱신 (DB부하 최소화)
-     * - DB에는 아직 entry_price가 없는 항목에 대해 최초 1회 진입가만 기록함
-     * - 실시간 수익률 계산 및 UI 렌더링은 프론트엔드로 전적인 계산을 위임함.
      */
-    private evaluateIntradayRealtime() {
+    private async evaluateIntradayRealtime() {
         // 둘 다 실시간 데이터가 수집되지 않았으면 조기 반환
         if (!this.latestPrices['069500'] && !this.latestPrices['114800']) return
 
@@ -313,6 +326,19 @@ export class PerformanceTracker {
         const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
         let evaluated = 0
+
+        // 시가(Open) 결측치 보정 (WebSocket이 시가를 안 주면 일봉 API에서 1회 펌핑)
+        for (const code of ['069500', '114800']) {
+            if (this.latestPrices[code] && this.latestPrices[code].open <= 0) {
+                try {
+                    const chart = await this.kiwoom.getDailyChartData(code);
+                    if (chart && chart.length > 0) {
+                        const todayChart = chart.find(c => this.normalizeDate(c.date || c.stck_bsop_date || c.dt || '') === dateStr) || chart[0];
+                        this.latestPrices[code].open = Math.abs(Number(todayChart.open_pric || todayChart.opn_prc || todayChart.open || 0));
+                    }
+                } catch (e) { console.error('Failed to fill ETF Open price', e); }
+            }
+        }
 
         // 1. 장중 예측 (Intraday) 중 진입가가 없는 행에 진입가 최초 1회 등록
         const pendingIntraday = rawDb.prepare(
@@ -323,25 +349,34 @@ export class PerformanceTracker {
             const etfData = row.predict === 'UP' ? this.latestPrices['069500'] : row.predict === 'DOWN' ? this.latestPrices['114800'] : null
             if (!etfData || etfData.open <= 0) continue
 
-            // 최초 실시간 가격의 시가(open)를 진입가로 사용 (5분봉 등에서 정확히 추출되지 않았을 때 폴백)
             rawDb.prepare(`UPDATE intraday_predictions SET entry_price = ? WHERE id = ?`).run(etfData.open, row.id)
             evaluated++
         }
 
-        // 2. 일간 시황 예측 (Cycle A/B) 중 진입가가 없는 행에 진입가 최초 1회 등록
-        // Cycle A (장전): 아침 시가가 진입가 (etfData.open)
-        // Cycle B (마감): 어제 생성된 후 아직 진입가가 없는 경우 (추후 백엔드가 정확한 종가로 교정하지만 UI를 위해 채움)
         const pendingDaily = rawDb.prepare(
-            `SELECT id, predict, cycle FROM agent_predictions WHERE (entry_price IS NULL OR entry_price <= 0) AND predict IN ('LONG', 'SHORT')`
+            `SELECT id, date, predict, cycle, entry_price FROM agent_predictions WHERE (t1_final IS NULL OR entry_price IS NULL OR entry_price <= 0) AND predict IN ('LONG', 'SHORT')`
         ).all() as any[]
         
         for (const row of pendingDaily) {
             const etfData = row.predict === 'LONG' ? this.latestPrices['069500'] : row.predict === 'SHORT' ? this.latestPrices['114800'] : null
+            // 시가가 없으면 안전하게 통과 (0으로 나누기 방지)
             if (!etfData || etfData.open <= 0) continue
 
-            const entryPrice = row.cycle === 'A' ? etfData.open : etfData.price;
-            rawDb.prepare(`UPDATE agent_predictions SET entry_price = ? WHERE id = ?`).run(entryPrice, row.id)
-            evaluated++
+            let rowEntryPrice = row.entry_price
+
+            if (!rowEntryPrice || rowEntryPrice <= 0) {
+                rowEntryPrice = row.cycle === 'A' ? etfData.open : etfData.price;
+                rawDb.prepare(`UPDATE agent_predictions SET entry_price = ? WHERE id = ?`).run(rowEntryPrice, row.id)
+                evaluated++
+            }
+
+            // [마감(B) 예측 당일 아침 즉각 채점]
+            if (row.cycle === 'B' && rowEntryPrice > 0 && row.date < dateStr) {
+                const finalReturn = ((etfData.open - rowEntryPrice) / rowEntryPrice) * 100;
+                rawDb.prepare(`UPDATE agent_predictions SET t1_final = ?, t1_peak = ? WHERE id = ?`).run(finalReturn, finalReturn, row.id)
+                evaluated++
+                console.log(`[MCA-Tracker] Cycle B 익일 장전 즉각 평가 확정: ${row.id} return=${finalReturn.toFixed(2)}%`)
+            }
         }
 
         // 변경사항(최초 진입가 세팅)이 있었을 때만 UI 새로고침 이벤트 발송 (무한 DB/소켓 통신 방지)

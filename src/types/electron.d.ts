@@ -25,6 +25,12 @@ export interface IElectronAPI {
     onScheduleNotified: (callback: (...args: any[]) => void) => void
     notifyDisparitySlump: (data: { code: string, name: string, disparity: number, changeRate: number }) => void
 
+    // Market / Intraday Agents
+    getIntradayPredictions: () => Promise<{ success: boolean, data?: any, error?: string }>
+    runIntradayPrediction: (slot: '09:30' | '11:00' | '13:00') => Promise<{ success: boolean, data?: any, error?: string }>
+    runIntradaySwarmPrediction: (slot: string) => Promise<{ success: boolean, data?: any, error?: string }>
+    runTracker: () => Promise<{ success: boolean, error?: string }>
+
     // API Diagnostics
     getApiLogs: () => Promise<any[]>
     testMarketScanner: () => Promise<{ success: boolean, data?: any, error?: any }>
@@ -160,6 +166,11 @@ export interface IElectronAPI {
     verifyThemeIntelligence: (params: { date: string, type: 'SECTOR' | 'THEME', name: string, userOpinion: string, currentReason: string }) => Promise<{ success: boolean, data?: any, error?: string }>
     getThemeRelatedNews: (themeName: string, keywords: string[]) => Promise<{ success: boolean, data?: any[], error?: string }>
     searchLiveNews: (keyword: string) => Promise<{ success: boolean, data?: any[], error?: string }>
+    // Graph RAG: Knowledge Edges
+    getKnowledgeEdgesFrom: (sourceType: string, sourceId: string, targetType?: string) => Promise<{ success: boolean, data?: any[], error?: string }>
+    getKnowledgeEdgesTo: (targetType: string, targetId: string) => Promise<{ success: boolean, data?: any[], error?: string }>
+    getMarketKnowledgeEdges: () => Promise<{ success: boolean, data?: any[], error?: string }>
+    upsertKnowledgeEdge: (edge: any) => Promise<{ success: boolean, error?: string }>
 
     // V2 Agent Swarm: Market Condition Agent
     getMarketConditionSettings: () => Promise<{ success: boolean, data?: any, error?: string }>

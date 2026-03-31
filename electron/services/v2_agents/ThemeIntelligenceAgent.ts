@@ -149,7 +149,12 @@ export class ThemeIntelligenceAgent {
                 console.error('[ThemeIntelligence] 주도주 실시간 타겟 뉴스 확보 중 에러:', e);
             }
 
-            // 3. Gemini Prompt 조립
+            // 3. Gemini Prompt 조립 (이슈 목록 주입 → 할루시네이션 방지)
+            const activeIssues = IssueLedgerDB.getInstance().getActiveIssues();
+            const issueListForPrompt = activeIssues.length > 0
+                ? activeIssues.map(i => `  - ID: "${i.id}" | 이름: "${i.name}" | 심각도: ${i.severity} | 상태: ${i.status}`).join('\n')
+                : '  (현재 등록된 활성 이슈 없음)';
+
             const systemInstruction = `당신은 대한민국 주식 시장의 메가트렌드와 단기 테마의 수명(Lifespan)을 분석하는 최상위 퀀트(Quant) 및 시황 분석가입니다.`;
             
             const userPrompt = `
@@ -162,9 +167,15 @@ ${themeNames.join(', ')}
 [시장 컨텍스트 (뉴스 및 이슈 요약)]
 ${newsContext}
 
+[🔒 현재 시스템에 등록된 활성 거시 이슈 목록 (이 목록 외의 이슈 ID를 임의로 생성하지 마시오)]
+${issueListForPrompt}
+
 ---
 위 컨텍스트를 완벽하게 분석하여, 오늘 랭크된 총 ${marketFlow.length}개의 (섹터 + 테마) 항목 각각에 대해 상승한 핵심 호재 이유를 짧게 요약하고, 해당 모멘텀의 예상 수명(단기/중장기)을 판단하시오.
 알 수 없거나 뉴스가 부족한 경우, 자신의 범용 지식(가장 최근의 해당 테마 트렌드)을 동원하여 추론하시오.
+
+[중요 제약] linked_issue_id는 반드시 위 "현재 활성 이슈 목록"에 존재하는 ID만 사용하시오.
+매핑되는 이슈가 없으면 반드시 null로 설정하시오. 임의의 이슈 ID를 만들어내지 마시오.
 
 반드시 아래의 구조를 가진 순수 JSON 배열만 출력하시오. (Markdown 백틱 금지)
 
@@ -174,7 +185,9 @@ ${newsContext}
     "name": "항목 이름",
     "reason": "상승/주도 요인에 대한 1~2문장 요약",
     "lifespan_type": "단기 테마 (1주일 내외)" 혹은 "중기 트렌드 (1~3개월)" 혹은 "장기 메가트렌드" 혹은 "판단 불가" 중 하나 선택,
-    "lifespan_reasoning": "왜 이런 수명으로 판단했는지 근거 (예: 구조적 성장기반, 단순 정책 일회성 발언 등)"
+    "lifespan_reasoning": "왜 이런 수명으로 판단했는지 근거",
+    "linked_issue_id": "위 이슈 목록의 ID 중 하나 또는 null",
+    "linked_issue_path": "이슈→테마 연결 논리 경로 (예: '중동분쟁 → 나프타가격 → 대체재 부각') 또는 null"
   }
 ]
 `;
@@ -220,6 +233,44 @@ ${newsContext}
 
             this.db.upsertThemeIntelligence(mapDataForDb);
             console.log(`[ThemeIntelligence] 🤖 성공적으로 ${mapDataForDb.length}개의 테마/섹터 분석이 완료되어 DB에 캐싱되었습니다.`);
+
+            // 7 (추가). Knowledge Edge 기록: ISSUE → THEME/SECTOR 연결
+            const ledgerDb = IssueLedgerDB.getInstance();
+            const activeIssueIds = new Set(activeIssues.map(i => i.id));
+            let edgeCount = 0;
+            for (const item of parsedArray) {
+                const linkedId: string | null = item.linked_issue_id;
+                if (!linkedId || !activeIssueIds.has(linkedId)) continue; // 이슈 목록에 없는 ID는 무시 (할루시네이션 차단)
+
+                const normalizedType = item.type?.toUpperCase().includes('SECTOR') ? 'SECTOR' : 'THEME';
+                // 수명 기반 자동 만료일 설정
+                let expiresAt: string | undefined;
+                if (item.lifespan_type?.includes('단기')) {
+                    const expires = new Date();
+                    expires.setDate(expires.getDate() + 14);
+                    expiresAt = expires.toISOString().slice(0, 10);
+                }
+
+                try {
+                    ledgerDb.upsertEdge({
+                        source_type: 'ISSUE',
+                        source_id:   linkedId,
+                        target_type: normalizedType,
+                        target_id:   item.name,
+                        relation:    'DRIVES',
+                        confidence:  0.7,
+                        logical_path: item.linked_issue_path || null,
+                        created_by:  'THEME_AI',
+                        expires_at:  expiresAt
+                    });
+                    edgeCount++;
+                } catch (edgeErr: any) {
+                    console.warn(`[ThemeIntelligence] Edge 기록 실패 (${linkedId}→${item.name}):`, edgeErr.message);
+                }
+            }
+            if (edgeCount > 0) {
+                console.log(`[ThemeIntelligence] 🔗 Knowledge Graph: ${edgeCount}개 ISSUE→THEME/SECTOR 엣지 기록 완료`);
+            }
 
             // 7. 텔레그램 알림 전송 (Top 3 요약)
             try {

@@ -248,6 +248,13 @@ function AppContent() {
     }, [])
 
     const [activeTab, setActiveTab] = useState('dashboard')
+    const [navTarget, setNavTarget] = useState<{ tabId: string, entityId?: string } | null>(null);
+
+    // Graph RAG: 탭 간 Cross-Reference 네비게이션
+    const navigateTo = (tabId: string, entityId?: string) => {
+        setActiveTab(tabId);
+        if (entityId) setNavTarget({ tabId, entityId });
+    };
     const [isDarkMode, setIsDarkMode] = useState(() => {
         // Use system theme by default
         return window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -358,9 +365,9 @@ function AppContent() {
                         { activeTab === 'macro-dashboard' && <MacroDashboard />}
                         { activeTab === 'pm-tracker' && <PmTracker />}
                         { activeTab === 'pipeline-monitor' && <PipelineMonitorTab />}
-                        { activeTab === 'market-agent' && <MarketAgentTab />}
-                        { activeTab === 'issue-agent' && <IssueManagementTab />}
-                        { activeTab === 'theme-tracker' && <ThemeTrackerTab />}
+                        { activeTab === 'market-agent' && <MarketAgentTab onNavigate={navigateTo} />}
+                        { activeTab === 'issue-agent' && <IssueManagementTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'issue-agent' ? navTarget.entityId : undefined} />}
+                        { activeTab === 'theme-tracker' && <ThemeTrackerTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'theme-tracker' ? navTarget.entityId : undefined} />}
 
                         {(activeTab !== 'dashboard' && activeTab !== 'pipeline-monitor' && activeTab !== 'market-agent' && activeTab !== 'issue-agent' && activeTab !== 'theme-tracker' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'pm-tracker' && activeTab !== 'holdings' && activeTab !== 'rising-stocks' && activeTab !== 'settings' && activeTab !== 'narrative-insight') && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">

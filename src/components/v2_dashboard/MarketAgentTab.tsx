@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Brain, X, ShieldAlert, Sparkles, Clock, Target, ArrowUpRight, ArrowDownRight, Minus, Activity, ChevronRight, Search, Settings, Trash2 } from 'lucide-react'
+import { Brain, X, ShieldAlert, Sparkles, Clock, Target, ArrowUpRight, ArrowDownRight, Minus, Activity, ChevronRight, Search, Settings, Trash2, Link2 } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import ReactMarkdown from 'react-markdown'
@@ -145,7 +145,7 @@ function PerformanceChart({ redrawKey, history }: { redrawKey: number, history: 
 }
 
 // ══════════════════════════════════════════
-export default function MarketAgentTab() {
+export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: string, entityId?: string) => void } = {}) {
     const [selectedTrade, setSelectedTrade] = useState<any | null>(null)
     const [showKnowledgeBase, setShowKnowledgeBase] = useState(false)
     const [showSettings, setShowSettings] = useState(false)
@@ -263,6 +263,21 @@ export default function MarketAgentTab() {
     const [intradayData, setIntradayData] = useState<any[]>([])
     const [selectedIntraday, setSelectedIntraday] = useState<any | null>(null)
     const livePrices = useLivePriceStore(state => state.prices)
+    // Graph RAG: 시장에 영향을 주는 이슈 edges
+    const [marketEdges, setMarketEdges] = useState<any[]>([])
+
+    useEffect(() => {
+        const fetchMarketEdges = async () => {
+            try {
+                const api = window.electronAPI as any;
+                if (api.getMarketKnowledgeEdges) {
+                    const res = await api.getMarketKnowledgeEdges();
+                    if (res.success && res.data) setMarketEdges(res.data);
+                }
+            } catch (e) { /* silent fail */ }
+        };
+        fetchMarketEdges();
+    }, []);
 
     const calculatedStats = useMemo(() => {
         let total = 0;
@@ -342,21 +357,19 @@ export default function MarketAgentTab() {
         })
 
         let unsubRt: (() => void) | null = null;
-        if (decisionTab === 'intraday') {
-            window.electronAPI.wsRegister(['069500', '114800']).catch(e => console.error('WS:', e));
-            unsubRt = window.electronAPI.onRealTimeData((data) => {
-                // websocket.ts emits: { stk_cd, cur_prc, ... }
-                if (data && data.stk_cd && data.cur_prc) {
-                    const code = data.stk_cd.replace(/[^0-9]/g, '');
-                    const priceStr = String(data.cur_prc).replace(/[^0-9-]/g, '');
-                    const currentPrice = Math.abs(Number(priceStr));
-                    
-                    if (code && currentPrice > 0) {
-                        useLivePriceStore.getState().updatePrice(code, currentPrice);
-                    }
+        window.electronAPI.wsRegister(['069500', '114800']).catch(e => console.error('WS:', e));
+        unsubRt = window.electronAPI.onRealTimeData((data) => {
+            // websocket.ts emits: { stk_cd, cur_prc, ... }
+            if (data && data.stk_cd && data.cur_prc) {
+                const code = data.stk_cd.replace(/[^0-9]/g, '');
+                const priceStr = String(data.cur_prc).replace(/[^0-9-]/g, '');
+                const currentPrice = Math.abs(Number(priceStr));
+                
+                if (code && currentPrice > 0) {
+                    useLivePriceStore.getState().updatePrice(code, currentPrice);
                 }
-            });
-        }
+            }
+        });
 
         return () => {
             unsubComplete()
@@ -403,9 +416,25 @@ export default function MarketAgentTab() {
                         <button disabled={isRunning} onClick={handleRunCycleB} className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50">
                             Run B
                         </button>
-                        <button onClick={async () => { await window.electronAPI.runIntradayPrediction('09:30'); await new Promise(r => setTimeout(r, 300)); await fetchData() }} className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded text-xs font-bold transition-colors">
-                            ⚡
+                        <button onClick={async () => { await window.electronAPI.runIntradayPrediction('09:30'); await new Promise(r => setTimeout(r, 300)); await fetchData() }} className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded text-xs font-bold transition-colors" title="기존 09:30 장중 예측 실행">
+                            ⚡ 09:30
                         </button>
+                        
+                        {/* 수동 군집 테스트 버튼 */}
+                        <div className="flex items-center gap-1 ml-1 bg-emerald-500/10 border border-emerald-500/30 rounded px-1 py-0.5">
+                            <button onClick={async () => {
+                                const now = new Date();
+                                const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                                try {
+                                    await window.electronAPI.runIntradaySwarmPrediction(currentHHMM);
+                                    await fetchData();
+                                } catch (e: any) {
+                                    alert('오류 발생: ' + e.message);
+                                }
+                            }} className="px-2 py-0.5 text-emerald-500 hover:text-emerald-400 font-bold transition-colors flex items-center gap-1 whitespace-nowrap" title="장중 군집 예측 강제 실행 (현재 시간 기준으로 기록됨)">
+                                🤖 실시간 군집 테스트
+                            </button>
+                        </div>
                     </div>
                         <button onClick={() => setShowKnowledgeBase(true)} className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 rounded text-xs font-semibold transition-colors">
                             <Brain className="w-3.5 h-3.5" /> Knowledge
@@ -451,8 +480,8 @@ export default function MarketAgentTab() {
                 {/* Horizontal Drag Handle */}
                 <DragH onDrag={onDragH} />
 
-                {/* Right: Latest Report */}
-                <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                {/* Right: Latest Report + Market Edges */}
+                <div className="flex-1 min-w-0 flex flex-col overflow-hidden gap-2">
                     <div className="flex items-center gap-2 mb-1.5">
                         <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Latest Report</span>
                         <span className="text-xs text-muted-foreground opacity-50 ml-auto">{latest ? `${latest.date} · Cycle ${latest.cycle === 'A' ? '장전(A)' : '마감(B)'}` : 'No Data'}</span>
@@ -465,7 +494,6 @@ export default function MarketAgentTab() {
                                 {latest.position || latest.predict} {latest.predict !== 'HOLD' && '매수'}
                             </span>
                             <span className="text-xs text-muted-foreground ml-auto font-mono">신뢰도 {((latest.confidence || 0) * 100).toFixed(0)}%</span>
-                            {/* 단기/중장기 프로젝션 표시 */}
                             {(latest.t5_predict || latest.t1_target_return) && (
                                 <div className="w-full flex items-center gap-2 mt-1 mb-0.5 whitespace-nowrap overflow-x-auto">
                                     <span className="text-[10px] uppercase font-bold text-muted-foreground">T+1 목표</span>
@@ -497,6 +525,34 @@ export default function MarketAgentTab() {
                     ) : (
                         <div className="flex-1 flex items-center justify-center border border-border/40 rounded-lg text-sm text-muted-foreground bg-muted/20">
                             {isRunning ? 'AI 판단 중...' : '보고서가 없습니다.'}
+                        </div>
+                    )}
+
+                    {/* Graph RAG: 시장 영향 이슈 패널 */}
+                    {marketEdges.length > 0 && (
+                        <div className="border border-border/40 rounded-lg bg-muted/10 p-3">
+                            <div className="flex items-center gap-1.5 mb-2">
+                                <Link2 className="w-3.5 h-3.5 text-indigo-400" />
+                                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">시장 영향 요인 (Knowledge Graph)</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                                {marketEdges.map((edge: any, i: number) => (
+                                    <button
+                                        key={i}
+                                        onClick={() => onNavigate?.('issue-agent', edge.source_id)}
+                                        className={cn(
+                                            "flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-full border transition-all shadow-sm",
+                                            edge.relation === 'BENEFITS'
+                                                ? "bg-rose-500/5 border-rose-500/20 text-rose-500 hover:bg-rose-500/15"
+                                                : "bg-blue-500/5 border-blue-500/20 text-blue-500 hover:bg-blue-500/15"
+                                        )}
+                                        title={edge.logical_path || ''}
+                                    >
+                                        {edge.relation === 'BENEFITS' ? '↑' : '↓'}
+                                        {edge.issue_name || edge.source_id}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>
@@ -591,9 +647,15 @@ export default function MarketAgentTab() {
                                     <td className="py-2 pr-4 font-mono text-muted-foreground">{t.date}</td>
                                     <td className="py-2 pr-4 text-center text-xs font-medium">{t.cycle === 'A' ? '장전(A)' : '마감(B)'}</td>
                                     <td className="py-2 pr-4">
-                                        <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-bold", getPositionStyle(t.position || ''))}>
-                                            {getPredictIcon(t.predict)} {t.position || (t.predict === 'LONG' ? '상승' : t.predict === 'SHORT' ? '하락' : '대기')}
-                                        </span>
+                                        {(() => {
+                                            const vPredict = returnView === 'T+5' && t.t5_predict ? t.t5_predict : returnView === 'T+20' && t.t20_predict ? t.t20_predict : t.predict;
+                                            const vPosition = returnView === 'T+1' && t.position ? t.position : (vPredict === 'LONG' ? 'KODEX 200 (상승)' : vPredict === 'SHORT' ? 'KODEX 인버스 (하락)' : '관망 (HOLD)');
+                                            return (
+                                                <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-bold", getPositionStyle(vPosition))}>
+                                                    {getPredictIcon(vPredict)} {vPosition}
+                                                </span>
+                                            );
+                                        })()}
                                     </td>
                                     <td className="py-2 pr-4 font-mono text-right opacity-60">
                                         {returnView === 'T+1' && (t.t1_peak === null ? '-' : `${t.t1_peak > 0 ? '+' : ''}${t.t1_peak?.toFixed(1)}%`)}
@@ -794,8 +856,8 @@ export default function MarketAgentTab() {
                                 <div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">T+1 Peak</div><div className="font-mono">{selectedTrade.t1_peak === null ? '-' : `${Number(selectedTrade.t1_peak).toFixed(2)}%`}</div></div>
                                 <div className="w-px bg-border/40" />
                                 <div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">T+1 Final</div><div className="font-mono font-bold">{selectedTrade.t1_final === null ? 'Running' : `${Number(selectedTrade.t1_final).toFixed(2)}%`}</div></div>
-                                {selectedTrade.t5_final !== null && (<><div className="w-px bg-border/40" /><div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">T+5</div><div className="font-mono"><span className="opacity-50">{selectedTrade.t5_peak > 0 ? '+' : ''}{Number(selectedTrade.t5_peak).toFixed(2)}%</span> / <span className="font-bold">{selectedTrade.t5_final > 0 ? '+' : ''}{Number(selectedTrade.t5_final).toFixed(2)}%</span></div></div></>)}
-                                {selectedTrade.t20_final !== null && (<><div className="w-px bg-border/40" /><div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">T+20</div><div className="font-mono"><span className="opacity-50">{selectedTrade.t20_peak > 0 ? '+' : ''}{Number(selectedTrade.t20_peak).toFixed(2)}%</span> / <span className="font-bold">{selectedTrade.t20_final > 0 ? '+' : ''}{Number(selectedTrade.t20_final).toFixed(2)}%</span></div></div></>)}
+                                {selectedTrade.t5_final !== null && (<><div className="w-px bg-border/40" /><div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">T+5 {selectedTrade.t5_predict && <span className="opacity-70 text-[9px]">({selectedTrade.t5_predict})</span>}</div><div className="font-mono"><span className="opacity-50">{selectedTrade.t5_peak > 0 ? '+' : ''}{Number(selectedTrade.t5_peak).toFixed(2)}%</span> / <span className="font-bold">{selectedTrade.t5_final > 0 ? '+' : ''}{Number(selectedTrade.t5_final).toFixed(2)}%</span></div></div></>)}
+                                {selectedTrade.t20_final !== null && (<><div className="w-px bg-border/40" /><div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">T+20 {selectedTrade.t20_predict && <span className="opacity-70 text-[9px]">({selectedTrade.t20_predict})</span>}</div><div className="font-mono"><span className="opacity-50">{selectedTrade.t20_peak > 0 ? '+' : ''}{Number(selectedTrade.t20_peak).toFixed(2)}%</span> / <span className="font-bold">{selectedTrade.t20_final > 0 ? '+' : ''}{Number(selectedTrade.t20_final).toFixed(2)}%</span></div></div></>)}
                             </div>
 
                             {/* Quick Anchor Tabs */}
@@ -827,14 +889,15 @@ export default function MarketAgentTab() {
                                             const comments = JSON.parse(selectedTrade.comments_json);
                                             return comments.map((c: any, i: number) => (
                                                 <div key={i} className="flex gap-3 p-3 bg-muted/10 border border-border/40 rounded-xl group/comment">
-                                                    <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-background border border-border/50 text-base shadow-sm">
-                                                        {c.name.includes('모멘텀') ? '🐂' : c.name.includes('역발상') ? '🐻' : c.name.includes('데이 퀀트') ? '📊' : c.name.includes('기관 딜러') ? '🏦' : '🤖'}
+                                                    <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-background border border-border/50 text-base shadow-sm" title={c.id}>
+                                                        {c.id === 'SYSTEM_CONTEXT' ? '🖥️' : c.name.includes('모멘텀') ? '🐂' : c.name.includes('역발상') ? '🐻' : c.name.includes('데이 퀀트') ? '📊' : c.name.includes('기관 딜러') ? '🏦' : '🤖'}
                                                     </div>
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex justify-between items-start mb-1">
                                                             <div className="flex items-center gap-2 flex-wrap">
                                                                 <span className="text-xs font-bold text-foreground/80">{c.name}</span>
                                                                 <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold border", 
+                                                                    c.predict === 'INFO' ? "text-indigo-400 bg-indigo-500/10 border-indigo-500/20" :
                                                                     c.predict === 'UP' || c.predict === 'LONG' ? "text-rose-500 bg-rose-500/10 border-rose-500/20" :
                                                                     c.predict === 'DOWN' || c.predict === 'SHORT' ? "text-blue-500 bg-blue-500/10 border-blue-500/20" : "text-slate-400 bg-slate-500/10 border-slate-500/20"
                                                                 )}>
@@ -854,9 +917,15 @@ export default function MarketAgentTab() {
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        <div className="text-sm text-foreground/80 leading-relaxed bg-muted/40 p-3 rounded-lg rounded-tl-none border border-transparent group-hover/comment:border-border/40 transition-colors">
-                                                            {c.comment}
-                                                        </div>
+                                                        {c.id === 'SYSTEM_CONTEXT' ? (
+                                                            <pre className="text-[11px] font-mono text-indigo-400 bg-[#0d0d0d] p-3 rounded-lg border border-border/40 whitespace-pre-wrap overflow-x-auto mt-2 leading-relaxed">
+                                                                {c.comment}
+                                                            </pre>
+                                                        ) : (
+                                                            <div className="text-sm text-foreground/80 leading-relaxed bg-muted/40 p-3 rounded-lg rounded-tl-none border border-transparent group-hover/comment:border-border/40 transition-colors">
+                                                                {c.comment}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             ));
@@ -978,14 +1047,15 @@ export default function MarketAgentTab() {
                                             const comments = JSON.parse(selectedIntraday.comments_json);
                                             return comments.map((c: any, index: number) => (
                                                 <div key={index} className={cn("flex gap-3 py-4 px-2 group/comment hover:bg-muted/10 transition-colors", index > 0 && "border-t border-border/40")}>
-                                                    <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-background border border-border/50 text-base shadow-sm">
-                                                        {c.name.includes('모멘텀') ? '🐂' : c.name.includes('역발상') ? '🐻' : c.name.includes('데이 퀀트') ? '📊' : c.name.includes('기관 딜러') ? '🏦' : '🤖'}
+                                                    <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-background border border-border/50 text-base shadow-sm" title={c.id}>
+                                                        {c.id === 'SYSTEM_CONTEXT' ? '🖥️' : c.name.includes('모멘텀') ? '🐂' : c.name.includes('역발상') ? '🐻' : c.name.includes('데이 퀀트') ? '📊' : c.name.includes('기관 딜러') ? '🏦' : '🤖'}
                                                     </div>
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex justify-between items-start mb-1">
                                                             <div className="flex items-center gap-2 flex-wrap">
                                                                 <span className="text-xs font-bold text-foreground/80">{c.name}</span>
                                                                 <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-bold border", 
+                                                                    c.predict === 'INFO' ? "text-indigo-400 bg-indigo-500/10 border-indigo-500/20" :
                                                                     c.predict === 'UP' || c.predict === 'LONG' ? "text-rose-500 bg-rose-500/10 border-rose-500/20" :
                                                                     c.predict === 'DOWN' || c.predict === 'SHORT' ? "text-blue-500 bg-blue-500/10 border-blue-500/20" : "text-slate-400 bg-slate-500/10 border-slate-500/20"
                                                                 )}>
@@ -1005,9 +1075,15 @@ export default function MarketAgentTab() {
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        <div className="text-[13px] text-foreground/90 leading-relaxed mt-1.5 break-keep">
-                                                            {c.comment}
-                                                        </div>
+                                                        {c.id === 'SYSTEM_CONTEXT' ? (
+                                                            <pre className="text-[11px] font-mono text-indigo-400 bg-[#0d0d0d] p-3 rounded-lg border border-border/40 whitespace-pre-wrap overflow-x-auto mt-2 leading-relaxed">
+                                                                {c.comment}
+                                                            </pre>
+                                                        ) : (
+                                                            <div className="text-[13px] text-foreground/90 leading-relaxed mt-1.5 break-keep">
+                                                                {c.comment}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             ));

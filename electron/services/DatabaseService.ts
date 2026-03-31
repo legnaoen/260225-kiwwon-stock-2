@@ -468,6 +468,18 @@ export class DatabaseService {
             );
         `
 
+        // 누적 어휘 사전: 한번 등장한 네이버 업종/테마 이름을 영구 보존 (이슈 AI 정합 기준)
+        const createNaverVocabularyTable = `
+            CREATE TABLE IF NOT EXISTS naver_vocabulary (
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,            -- 'SECTOR' | 'THEME'
+                first_seen TEXT NOT NULL,      -- 최초 등장일 (YYYY-MM-DD)
+                last_seen TEXT NOT NULL,       -- 최근 등장일 (갱신)
+                times_appeared INTEGER DEFAULT 1,
+                PRIMARY KEY(name, type)
+            );
+        `
+
         // PL-NewsFlow: 네이버 증권 뉴스 수집 테이블
         const createNaverNewsFlowTable = `
             CREATE TABLE IF NOT EXISTS naver_news_flow (
@@ -515,6 +527,7 @@ export class DatabaseService {
         } catch (e: any) {
             // Ignore error if column already exists
         }
+        this.db.exec(createNaverVocabularyTable)
         this.db.exec(createNaverResearchFlowTable)
 
         this.db.exec(createDartCorpTable)
@@ -1784,6 +1797,28 @@ export class DatabaseService {
         });
         
         replaceMany(flows);
+    }
+
+    /** 네이버 어휘 사전: 파이프라인에서 수집한 업종/테마 이름을 누적 저장 (삭제 없음) */
+    public upsertNaverVocabulary(items: { name: string, type: string, date: string }[]) {
+        if (items.length === 0) return;
+        const stmt = this.db.prepare(`
+            INSERT INTO naver_vocabulary (name, type, first_seen, last_seen, times_appeared)
+            VALUES (@name, @type, @date, @date, 1)
+            ON CONFLICT(name, type) DO UPDATE SET
+                last_seen = @date,
+                times_appeared = times_appeared + 1
+        `);
+        const tx = this.db.transaction((rows: any[]) => { for (const r of rows) stmt.run(r); });
+        tx(items);
+    }
+
+    /** 이슈 AI 프롬프트 주입용: 전체 어휘 목록 반환 (type별 필터 가능) */
+    public getNaverVocabulary(type?: 'SECTOR' | 'THEME'): { name: string, type: string, last_seen: string }[] {
+        if (type) {
+            return this.db.prepare(`SELECT name, type, last_seen FROM naver_vocabulary WHERE type = ? ORDER BY times_appeared DESC`).all(type) as any[];
+        }
+        return this.db.prepare(`SELECT name, type, last_seen FROM naver_vocabulary ORDER BY type, times_appeared DESC`).all() as any[];
     }
 
     public getRecentNaverMarketFlows(type: string, limitDays: number = 5) {

@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
-import { RefreshCw, TrendingUp, Calendar, AlertCircle, X, ExternalLink, Sparkles } from 'lucide-react';
+import { RefreshCw, TrendingUp, Calendar, AlertCircle, X, ExternalLink, Sparkles, Link2 } from 'lucide-react';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-export const ThemeTrackerTab: React.FC = () => {
+export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?: string) => void; initialSelection?: string }> = ({ onNavigate, initialSelection }) => {
     const [viewType, setViewType] = useState<string>('BOTH'); // Just for internal consistency if needed, though completely removing it might be better. Let's remove the selector and load both.
     const [themeData, setThemeData] = useState<any>(null);
     const [sectorData, setSectorData] = useState<any>(null);
@@ -25,6 +25,9 @@ export const ThemeTrackerTab: React.FC = () => {
     const [relatedNews, setRelatedNews] = useState<any[]>([]);
     const [isNewsLoading, setIsNewsLoading] = useState(false);
 
+    // Graph RAG: Linked Issue Edges
+    const [linkedEdges, setLinkedEdges] = useState<any[]>([]);
+
     const [targetDate, setTargetDate] = useState<string>('');
     
     useEffect(() => {
@@ -36,6 +39,28 @@ export const ThemeTrackerTab: React.FC = () => {
         if (!targetDate) return;
         loadData();
     }, [targetDate]);
+
+    // 딥 네비게이션: 데이터 로드 완료 후 initialSelection에 해당하는 항목 자동 선택
+    useEffect(() => {
+        if (!initialSelection || (!themeData && !sectorData)) return;
+        const name = initialSelection.toLowerCase();
+        // 테마 목록에서 찾기
+        const allThemes: any[] = themeData?.series ?? [];
+        const allSectors: any[] = sectorData?.series ?? [];
+        const found =
+            allThemes.find((t: any) => t.name?.toLowerCase() === name) ||
+            allSectors.find((s: any) => s.name?.toLowerCase() === name) ||
+            allThemes.find((t: any) => t.name?.toLowerCase().includes(name)) ||
+            allSectors.find((s: any) => s.name?.toLowerCase().includes(name));
+        if (found) {
+            setSelectedItem(found);
+            // DOM 렌더링 후 스크롤
+            setTimeout(() => {
+                const el = document.getElementById(`theme-item-${found.name}`);
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+        }
+    }, [initialSelection, themeData, sectorData]);
 
     useEffect(() => {
         if (!selectedItem) {
@@ -62,6 +87,23 @@ export const ThemeTrackerTab: React.FC = () => {
         };
 
         fetchNews();
+    }, [selectedItem?.name]);
+
+    // Graph RAG: 이 테마/섹터와 연결된 이슈 edges 로드
+    useEffect(() => {
+        if (!selectedItem) { setLinkedEdges([]); return; }
+        const fetchEdges = async () => {
+            try {
+                const api = window.electronAPI as any;
+                if (api.getKnowledgeEdgesTo) {
+                    const type = selectedItem.type || 'THEME';
+                    const res = await api.getKnowledgeEdgesTo(type, selectedItem.name);
+                    if (res.success && res.data) setLinkedEdges(res.data);
+                    else setLinkedEdges([]);
+                }
+            } catch (e) { setLinkedEdges([]); }
+        };
+        fetchEdges();
     }, [selectedItem?.name]);
 
     const loadData = async () => {
@@ -343,6 +385,59 @@ export const ThemeTrackerTab: React.FC = () => {
                             </div>
                         )}
 
+                        {/* Graph RAG: 원인 이슈 연결 카드 */}
+                        {linkedEdges.length > 0 && (
+                            <div className="space-y-3 pt-4 border-t border-border/50">
+                                <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                                    <Link2 size={13} className="text-indigo-400" /> 연결된 거시 이슈
+                                </h3>
+                                <div className="flex flex-col gap-2">
+                                    {linkedEdges.map((edge: any, i: number) => {
+                                        // logical_path를 '→' 기준으로 분리해 체인 노드 배열로 만들기
+                                        const chainNodes: string[] = edge.logical_path
+                                            ? edge.logical_path.split(/→|->/).map((s: string) => s.trim()).filter(Boolean)
+                                            : [];
+                                        return (
+                                            <button
+                                                key={i}
+                                                onClick={() => onNavigate?.('issue-agent', edge.source_id)}
+                                                className="group w-full text-left flex flex-col gap-2 p-3 rounded-xl border border-indigo-500/25 bg-indigo-500/5 hover:bg-indigo-500/12 hover:border-indigo-500/40 transition-all shadow-sm"
+                                            >
+                                                {/* 상단: 이슈명 + 배지 */}
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                                                        <span className="text-[13px] font-bold text-indigo-500 dark:text-indigo-300 leading-tight">
+                                                            {edge.issue_name || edge.source_id}
+                                                        </span>
+                                                    </div>
+                                                    <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 bg-indigo-500/15 text-indigo-400 rounded-full border border-indigo-500/20 group-hover:bg-indigo-500/25 transition-colors">
+                                                        이슈 보기 →
+                                                    </span>
+                                                </div>
+
+                                                {/* 인과 체인 (전체 표시, 잘림 없음) */}
+                                                {chainNodes.length > 0 && (
+                                                    <div className="flex flex-wrap items-center gap-1.5 pl-4">
+                                                        {chainNodes.map((node, ni) => (
+                                                            <React.Fragment key={ni}>
+                                                                <span className="text-[11px] font-semibold text-foreground/80 bg-background/60 border border-border/50 px-2 py-0.5 rounded-md">
+                                                                    {node}
+                                                                </span>
+                                                                {ni < chainNodes.length - 1 && (
+                                                                    <span className="text-indigo-400/60 text-[11px] font-bold">→</span>
+                                                                )}
+                                                            </React.Fragment>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Copilot Verification Block */}
                         <div className="space-y-4 pt-4 border-t border-border/50">
                             <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
@@ -477,7 +572,8 @@ export const ThemeTrackerTab: React.FC = () => {
                             <tbody className="divide-y divide-border/40">
                                 {(data?.current || []).map((row: any) => (
                                     <tr 
-                                        key={row.name} 
+                                        key={row.name}
+                                        id={`theme-item-${row.name}`}
                                         onClick={() => {
                                             setSelectedItem({...row, type});
                                             setUserOpinion('');
@@ -485,7 +581,7 @@ export const ThemeTrackerTab: React.FC = () => {
                                         }}
                                         className={cn(
                                             "hover:bg-muted/20 cursor-pointer transition-colors group",
-                                            selectedItem?.name === row.name ? "bg-primary/5" : ""
+                                            selectedItem?.name === row.name ? "bg-primary/5 ring-1 ring-primary/20" : ""
                                         )}
                                     >
                                         <td className="py-2.5 px-3 text-center font-bold text-foreground text-xs">

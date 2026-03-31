@@ -78,7 +78,7 @@ function StatusBadge({ status, size = 'default' }: { status: string, size?: 'def
   return <span className={cn(cmn, "bg-slate-500/10 text-slate-400", isSm ? "px-1.5 py-0 text-[8px] border border-slate-500/20" : "gap-1 px-2 py-0.5 border border-slate-500/30 text-[10px]")}>{!isSm && <X className="w-3 h-3" />} RESOLVED</span>
 }
 
-export default function IssueManagementTab() {
+export default function IssueManagementTab({ onNavigate, initialSelection }: { onNavigate?: (tabId: string, entityId?: string) => void; initialSelection?: string } = {}) {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'TIMELINE' | 'SOURCES'>('OVERVIEW');
   const [issues, setIssues] = useState<any[]>(DUMMY_ISSUES);
   const [selectedIssue, setSelectedIssue] = useState<any>(DUMMY_ISSUES[0]);
@@ -88,6 +88,11 @@ export default function IssueManagementTab() {
   const [currentSwarmIndex, setCurrentSwarmIndex] = useState(0);
   const [briefing, setBriefing] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // Graph RAG: 이 이슈에 연결된 테마/섹터 edges
+  const [linkedThemeEdges, setLinkedThemeEdges] = useState<any[]>([]);
+  // 이슈 리스트 페이지네이션 (최초 10개, 더보기)
+  const PAGE_SIZE = 10;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   useEffect(() => {
     async function loadBriefing() {
@@ -136,6 +141,22 @@ export default function IssueManagementTab() {
     }
     loadData();
   }, [selectedIssue]);
+
+  // Graph RAG: 이슈 선택 시 연결된 테마/섹터 edges 로드
+  useEffect(() => {
+    if (!selectedIssue?.id) { setLinkedThemeEdges([]); return; }
+    const fetchEdges = async () => {
+      try {
+        const api = window.electronAPI as any;
+        if (api.getKnowledgeEdgesFrom) {
+          const res = await api.getKnowledgeEdgesFrom('ISSUE', selectedIssue.id);
+          if (res.success && res.data) setLinkedThemeEdges(res.data.filter((e: any) => e.target_type === 'THEME' || e.target_type === 'SECTOR'));
+          else setLinkedThemeEdges([]);
+        }
+      } catch (e) { setLinkedThemeEdges([]); }
+    };
+    fetchEdges();
+  }, [selectedIssue?.id]);
 
   const [vixHistory, setVixHistory] = useState<any[]>([]);
   const [krwHistory, setKrwHistory] = useState<any[]>([]);
@@ -189,6 +210,24 @@ export default function IssueManagementTab() {
   useEffect(() => {
     loadIssues();
   }, []);
+
+  // 딥 네비게이션: 이슈 목록 로드 후 initialSelection에 해당하는 이슈 자동 선택
+  useEffect(() => {
+    if (!initialSelection || issues.length === 0) return;
+    // ID 또는 이름으로 검색
+    const sel = initialSelection.toLowerCase();
+    const found =
+      issues.find((i: any) => i.id?.toLowerCase() === sel) ||
+      issues.find((i: any) => i.name?.toLowerCase().includes(sel));
+    if (found) {
+      setSelectedIssue(found);
+      setActiveTab('OVERVIEW');
+      setTimeout(() => {
+        const el = document.getElementById(`issue-item-${found.id}`);
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    }
+  }, [initialSelection, issues]);
 
   const handleRunAnalysis = async () => {
     if(!window.electronAPI?.runIssueAnalysis) return;
@@ -463,8 +502,18 @@ export default function IssueManagementTab() {
                 <span className="text-[10px] font-mono bg-background px-2 py-0.5 rounded border border-border/50 text-muted-foreground">{issues.length} Total</span>
               </div>
               <div className="p-4 overflow-y-auto space-y-3">
-                {issues.map(issue => (
-                  <div key={issue.id} onClick={() => { setSelectedIssue(issue); setActiveTab('TIMELINE'); }} className="group p-4 bg-background border border-border/40 hover:border-indigo-500/40 rounded-lg cursor-pointer transition-all duration-200 shadow-sm hover:shadow-md flex flex-col gap-2.5">
+                {issues.slice(0, visibleCount).map(issue => (
+                  <div
+                    key={issue.id}
+                    id={`issue-item-${issue.id}`}
+                    onClick={() => { setSelectedIssue(issue); setActiveTab('TIMELINE'); }}
+                    className={cn(
+                      "group p-4 bg-background border hover:border-indigo-500/40 rounded-lg cursor-pointer transition-all duration-200 shadow-sm hover:shadow-md flex flex-col gap-2.5",
+                      selectedIssue?.id === issue.id
+                        ? "border-indigo-500/50 ring-1 ring-indigo-500/20 bg-indigo-500/3"
+                        : "border-border/40"
+                    )}
+                  >
                     {/* Header: Title & Badge */}
                     <div className="flex items-start justify-between w-full">
                       <span className="text-base font-bold text-foreground group-hover:text-indigo-600 dark:text-indigo-400 transition-colors w-full">{issue.name}</span>
@@ -515,6 +564,24 @@ export default function IssueManagementTab() {
                     </div>
                   </div>
                 ))}
+
+                {/* 더 보기 버튼 */}
+                {visibleCount < issues.length && (
+                  <button
+                    onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+                    className="w-full py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-dashed border-border/50 hover:border-border rounded-lg transition-colors bg-muted/5 hover:bg-muted/20"
+                  >
+                    ↓ 더 보기 ({issues.length - visibleCount}개 남음)
+                  </button>
+                )}
+                {visibleCount >= issues.length && issues.length > PAGE_SIZE && (
+                  <button
+                    onClick={() => setVisibleCount(PAGE_SIZE)}
+                    className="w-full py-2 text-[11px] font-medium text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                  >
+                    ↑ 접기
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -676,40 +743,114 @@ export default function IssueManagementTab() {
                 </p>
               </div>
 
-              {/* Sectors Grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-                {/* Good Sectors Mapping */}
-                {selectedIssue?.goodSectors?.map((sec: any, idx: number) => {
-                  const items = sec.name.split('/');
-                  return items.map((n: string, i: number) => (
-                    <div key={`good-${idx}-${i}`} className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl flex flex-col shadow-sm gap-2">
-                      <div className="w-fit flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
-                        <TrendingUp className="w-3 h-3" />
-                        <span>{n}</span>
-                      </div>
-                      <p className="text-[12.5px] font-medium text-foreground/80 leading-snug mt-1">
-                        {sec.reason}
-                      </p>
-                    </div>
-                  ));
-                })}
+              {/* ── 통합 Knowledge Panel: 연관 섹터 + 연관 테마 ── */}
+              {((selectedIssue?.goodSectors?.length > 0 || selectedIssue?.badSectors?.length > 0) || linkedThemeEdges.filter((e: any) => e.target_type === 'THEME').length > 0) && (() => {
+                // 테마 AI가 매핑한 THEME 타입 edges만 분리
+                const themeEdges = linkedThemeEdges.filter((e: any) => e.target_type === 'THEME' || (!e.target_type?.includes('SECTOR') && e.created_by === 'THEME_AI'));
+                const themeBenefits = themeEdges.filter((e: any) => e.relation === 'BENEFITS' || e.relation === 'DRIVES');
+                const themeHurts    = themeEdges.filter((e: any) => e.relation === 'HURTS');
 
-                {/* Bad Sectors Mapping */}
-                {selectedIssue?.badSectors?.map((sec: any, idx: number) => {
-                  const items = sec.name.split('/');
-                  return items.map((n: string, i: number) => (
-                    <div key={`bad-${idx}-${i}`} className="p-4 bg-rose-500/5 border border-rose-500/20 rounded-xl flex flex-col shadow-sm gap-2">
-                      <div className="w-fit flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-500/10 text-rose-500 border border-rose-500/20 text-[11px] font-bold">
-                        <TrendingDown className="w-3 h-3" />
-                        <span>{n}</span>
+                // ── 통합 카드 렌더러 (섹터/테마 동일 스타일) ──
+                const renderMosaicCard = (
+                  name: string,
+                  description: string,   // sector.reason 또는 chain 인라인 텍스트
+                  isBenefit: boolean,
+                  onClick: () => void,
+                ) => {
+                  const bgCls    = isBenefit ? 'bg-emerald-500/5 border-emerald-500/20 hover:bg-emerald-500/10 hover:border-emerald-500/35' : 'bg-rose-500/5 border-rose-500/20 hover:bg-rose-500/10 hover:border-rose-500/35';
+                  const badgeCls = isBenefit ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-500 border-rose-500/20';
+                  const Icon     = isBenefit ? TrendingUp : TrendingDown;
+                  return (
+                    <button
+                      onClick={onClick}
+                      className={cn(
+                        'group p-4 border rounded-xl flex flex-col gap-2 text-left transition-all shadow-sm',
+                        'min-h-[120px] hover:shadow-md hover:scale-[1.01]',
+                        bgCls
+                      )}
+                    >
+                      <div className={cn('w-fit flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-bold', badgeCls)}>
+                        <Icon className="w-3 h-3" />
+                        <span>{name}</span>
                       </div>
-                      <p className="text-[12.5px] font-medium text-foreground/80 leading-snug mt-1">
-                        {sec.reason}
-                      </p>
-                    </div>
-                  ));
-                })}
-              </div>
+                      {description && (
+                        <p className="text-[12.5px] font-medium text-foreground/80 leading-snug mt-1">{description}</p>
+                      )}
+                    </button>
+                  );
+                };
+
+                return (
+                  <div className="mb-8 space-y-5">
+                    {/* 섹터 서브섹션 */}
+                    {(selectedIssue?.goodSectors?.length > 0 || selectedIssue?.badSectors?.length > 0) && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-3 border-b border-border/40 pb-2">
+                          <BarChart3 className="w-4 h-4 text-slate-400" />
+                          <span className="text-sm font-bold text-foreground">연관 섹터</span>
+                          <span className="text-[10px] text-muted-foreground ml-1">이슈 AI 직접 분석 · 클릭 시 테마 탭 이동</span>
+                          <span className="ml-auto text-[10px] text-muted-foreground font-mono bg-muted/40 px-1.5 py-0.5 rounded">
+                            수혜 {selectedIssue?.goodSectors?.length || 0} · 피해 {selectedIssue?.badSectors?.length || 0}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                          {selectedIssue?.goodSectors?.map((sec: any, idx: number) =>
+                            sec.name.split('/').map((n: string, i: number) =>
+                              <React.Fragment key={`good-${idx}-${i}`}>
+                                {renderMosaicCard(n, sec.reason, true, () => onNavigate?.('theme-tracker', n))}
+                              </React.Fragment>
+                            )
+                          )}
+                          {selectedIssue?.badSectors?.map((sec: any, idx: number) =>
+                            sec.name.split('/').map((n: string, i: number) =>
+                              <React.Fragment key={`bad-${idx}-${i}`}>
+                                {renderMosaicCard(n, sec.reason, false, () => onNavigate?.('theme-tracker', n))}
+                              </React.Fragment>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 테마 서브섹션 (테마AI 데이터, knowledge_edges) */}
+                    {themeEdges.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-3 border-b border-border/40 pb-2">
+                          <Link2 className="w-4 h-4 text-violet-400" />
+                          <span className="text-sm font-bold text-foreground">연관 테마</span>
+                          <span className="text-[10px] text-muted-foreground ml-1">테마 AI 데이터 매핑 · 클릭 시 테마 탭 이동</span>
+                          <span className="ml-auto text-[10px] text-muted-foreground font-mono bg-muted/40 px-1.5 py-0.5 rounded">
+                            수혜 {themeBenefits.length} · 피해 {themeHurts.length}
+
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                          {themeBenefits.map((edge: any, i: number) => {
+                            const desc = edge.logical_path
+                              ? edge.logical_path.split(/→|->/).map((s: string) => s.trim()).filter(Boolean).join(' → ')
+                              : '';
+                            return (
+                              <React.Fragment key={`tb-${i}`}>
+                                {renderMosaicCard(edge.target_id, desc, true, () => onNavigate?.('theme-tracker', edge.target_id))}
+                              </React.Fragment>
+                            );
+                          })}
+                          {themeHurts.map((edge: any, i: number) => {
+                            const desc = edge.logical_path
+                              ? edge.logical_path.split(/→|->/).map((s: string) => s.trim()).filter(Boolean).join(' → ')
+                              : '';
+                            return (
+                              <React.Fragment key={`th-${i}`}>
+                                {renderMosaicCard(edge.target_id, desc, false, () => onNavigate?.('theme-tracker', edge.target_id))}
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Swarm AI Simulation Section */}
               <div className="mb-8">

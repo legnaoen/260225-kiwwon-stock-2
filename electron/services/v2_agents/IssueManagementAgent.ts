@@ -80,7 +80,17 @@ export class IssueManagementAgent {
 
             // 3. Prompt 준비
             const today = db.getKstDate()
-            const systemPrompt = `당신은 한국 시장의 메인 서사(장기 테마 및 매크로 리스크)를 관리하는 최고 이슈 분석 에이전트입니다.`
+            const systemPrompt = `당신은 한국 시장의 메인 서사(장기 테마 및 매크로 리스크)를 관리하는 최고 이슈 분석 에이전트입니다.
+
+[🚨 이슈 명명 절대 규칙 (가치 중립 적용)]
+- 이슈의 제목(name)은 '쇼크', '폭락', '공포', '기대', '우려', '가속화' 등의 감정적/방향성 단어를 철저히 배제합니다.
+- 반드시 위키백과 표제어처럼 100% 가치 중립적이고 건조하게 명명해야 합니다. (예: "미-이란 중동 전쟁 폭발" ➔ "중동 지정학적 갈등 동향")
+- **강제 지시:** 현재 장부에 있는 기존 이슈 제목 중 감정적인 단어가 하나라도 포함되어 있다면, 이번 업데이트를 통해 무조건 가치 중립적인 명칭으로 전면 개칭(Rename)하여 출력하십시오! 기존 명칭을 절대 답습하지 마십시오.
+
+[👑 마스터 시황 AI 피드백 수용 의무]
+- 제공된 기존 이슈 데이터 중 'master_veto'가 true이거나 'master_comment'에 마스터 AI의 지적사항이 적혀 있다면, 당신의 이전 분석이 거부(Veto)당한 것입니다.
+- 개별 이슈 업데이트 시 해당 이슈의 'impactDirection'(상승/하락)과 'current_stance'(스탠스/의견)를 마스터의 코멘트에 완벽히 부합하도록 반성하고 전면 수정하십시오.
+- **전체 시황 종합 브리핑(summary_markdown) 작성 시에도**, 마스터가 남긴 VETO나 코멘트 기조를 최우선 가이드라인으로 삼아 팩트체크된 거시적 관점에서 전체 시장의 방향성을 조망하십시오.`
             const userPrompt = `오늘 날짜: ${today}
 
 [현재 추적 중인 이슈 장부 (Active Issues)]
@@ -100,7 +110,7 @@ ${dataParts.join('\n\n---\n\n')}
 {
   "briefing": {
     "risk_score": 68,
-    "summary_markdown": "<p>...현재 시장 요약 2~3줄 HTML/Markdown...</p>",
+    "summary_markdown": "<p>...현재 시장 요약 2~3줄 HTML/Markdown (반드시 마스터 AI가 이전 이슈들에 내렸던 VETO/코멘트 기조를 종합하여 시장 방향성을 서술할 것)...</p>",
     "macro_vix": "+2.4% (18.5)",
     "macro_krw": "+5.0원 (1340.5)",
     "macro_tnx": "+0.03%p (4.320%)",
@@ -110,10 +120,13 @@ ${dataParts.join('\n\n---\n\n')}
     {
       "action": "CREATE" | "UPDATE" | "RESOLVE",
       "issue_id": "기존 이슈 ID (CREATE인 경우 새로운 고유 ID 생성, 예: 2603-05)",
-      "name": "이슈 명칭",
+      "name": "위키백과식 가치 중립적 이슈 명칭 (예: 글로벌 AI 반도체 수요 논란)",
+      "current_stance": "마이크론 실적 호조로 초기 피크아웃 우려는 과도했다는 인식 확산 중 (현재 국면/투자 심리를 요약하는 1줄 의견)",
       "severity": "위험도/파급력 (예: AA, B, C 등)",
       "status": "ESCALATING" | "FADING" | "RESOLVED" | "NEW",
       "impactDirection": "상승" | "하락" | "중립",
+      "market_bias": -5부터 +5 사이의 정수 (해당 이슈가 전체 시장에 미치는 하방/상방 압력 강도),
+      "dominant_regime": "예: 지정학 리스크, 통화정책 등",
       "summary": "1~2문장의 핵심 상태 요약",
       "goodSectors": [{"name": "업종명 (아래 [네이버 추적 섹터 목록]에서 선택 권장)", "reason": "이유"}],
       "badSectors": [{"name": "업종명 (아래 [네이버 추적 섹터 목록]에서 선택 권장)", "reason": "이유"}],
@@ -188,7 +201,10 @@ ${themeListStr}
                             severity: act.severity || 'C',
                             status: act.status || 'NEW',
                             impactDirection: act.impactDirection || '중립',
+                            market_bias: act.market_bias || 0,
+                            dominant_regime: act.dominant_regime || '기타',
                             summary: act.summary || '',
+                            current_stance: act.current_stance || null,
                             created_date,
                             updated_date: today,
                             goodSectors: act.goodSectors || [],

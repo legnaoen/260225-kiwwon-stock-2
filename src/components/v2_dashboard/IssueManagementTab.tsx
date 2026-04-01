@@ -94,8 +94,11 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
   const PAGE_SIZE = 10;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
+  // 시황 마스터 AI 예측 (Market Risk 아래 출력용)
+  const [masterPrediction, setMasterPrediction] = useState<any>(null);
+
   useEffect(() => {
-    async function loadBriefing() {
+    async function loadBriefingAndMaster() {
       if (window.electronAPI?.getIssueBriefing) {
         try {
           const res = await window.electronAPI.getIssueBriefing();
@@ -106,8 +109,19 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
           console.error('[IssueManagementTab] Failed to load briefing', err);
         }
       }
+
+      if ((window.electronAPI as any)?.getMarketConditionHistory) {
+        try {
+          const res = await (window.electronAPI as any).getMarketConditionHistory(1);
+          if (res.success && res.data && res.data.length > 0) {
+            setMasterPrediction(res.data[0]);
+          }
+        } catch (err) {
+          console.error('[IssueManagementTab] Failed to load master prediction', err);
+        }
+      }
     }
-    loadBriefing();
+    loadBriefingAndMaster();
   }, []);
 
   useEffect(() => {
@@ -192,12 +206,27 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
       try {
         const res = await window.electronAPI.getActiveIssues();
         if (res.success && res.data && res.data.length > 0) {
+          const SEVERITY_WEIGHTS: Record<string, number> = {
+            'S': 100, 'AAA': 90, 'AA': 80, 'A': 70, 
+            'BBB': 60, 'BB': 50, 'B': 40, 
+            'CCC': 30, 'CC': 20, 'C': 10, 'D': 0
+          };
+          const getWeight = (sev: string) => SEVERITY_WEIGHTS[sev?.toUpperCase()?.trim()] ?? 0;
+
           const formatted = res.data.map((d: any) => ({
             ...d,
             date: d.created_date,           // 최초 생성일 기준
             lastUpdated: d.updated_date,
             swarmSummary: d.swarmSummary,
-          }));
+          })).sort((a: any, b: any) => {
+            const wA = getWeight(a.severity);
+            const wB = getWeight(b.severity);
+            if (wA !== wB) return wB - wA; // 1차 정렬: 파급력(Severity) 높은 순
+            if (a.status === 'ESCALATING' && b.status !== 'ESCALATING') return -1; // 2차 정렬: ESCALATING 우선
+            if (a.status !== 'ESCALATING' && b.status === 'ESCALATING') return 1;
+            return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime(); // 3차 정렬: 최근 갱신일 순
+          });
+          
           setIssues(formatted);
           setSelectedIssue((prev: any) => prev ? formatted.find((f:any)=>f.id===prev.id) || formatted[0] : formatted[0]);
         }
@@ -221,11 +250,11 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
       issues.find((i: any) => i.name?.toLowerCase().includes(sel));
     if (found) {
       setSelectedIssue(found);
-      setActiveTab('OVERVIEW');
+      setActiveTab('TIMELINE'); // 대시보드가 아니라 상세(TIMELINE) 탭으로 이동해야 함
       setTimeout(() => {
         const el = document.getElementById(`issue-item-${found.id}`);
-        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 100);
+        if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 300);
     }
   }, [initialSelection, issues]);
 
@@ -333,39 +362,88 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
       </div>
 
       {/* ── Content Area ── */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 p-4 min-h-0 overflow-hidden">
         
         {/* OVERVIEW TAB */}
         {activeTab === 'OVERVIEW' && (
           <div className="grid grid-cols-12 gap-4 h-full animate-in fade-in slide-in-from-bottom-2 duration-300">
             {/* Left Column: AI Briefing & Macro */}
-            <div className="col-span-5 flex flex-col gap-4">
+            <div className="col-span-5 flex flex-col gap-4 overflow-y-auto pb-8 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               {/* AI Briefing Card */}
-              <div className="bg-muted/10 border border-border/40 rounded-xl overflow-hidden flex flex-col shadow-sm">
+              <div className="bg-muted/10 border border-border/40 rounded-xl overflow-hidden flex flex-col shadow-sm shrink-0">
                 <div className="px-4 py-2.5 border-b border-border/50 bg-indigo-500/5 flex items-center justify-between">
                   <span className="text-xs font-bold text-indigo-400 flex items-center gap-1.5"><Brain className="w-4 h-4" /> AI 장기 관점 브리핑</span>
                   <span className="text-[10px] text-muted-foreground font-mono">{briefing?.created_at || '생성 대기 중'}</span>
                 </div>
                 <div className="p-4 flex-1">
-                  <div className="flex items-center gap-4 mb-4 pb-4 border-b border-border/30">
-                    <div className="flex-1">
-                      <div className="text-xs text-muted-foreground mb-1 font-bold">Market Risk Score</div>
-                      <div className="flex items-end gap-2">
-                        <span className="text-2xl font-bold text-rose-500 tracking-tighter">{briefing?.risk_score || 0}<span className="text-xs font-normal text-muted-foreground ml-1">/100</span></span>
-                        <div className="flex-1 h-1.5 bg-muted/50 rounded-full mb-2 overflow-hidden">
-                          <div className={cn("h-full", (briefing?.risk_score || 0) > 80 ? 'bg-rose-600' : 'bg-gradient-to-r from-amber-500 to-rose-500')} style={{ width: `${briefing?.risk_score || 0}%` }} />
+                  <div className="flex flex-col gap-4 mb-5">
+                    {/* 1. Market Risk & Macro Indicators */}
+                    <div className="flex flex-wrap items-center gap-6 pb-4 border-b border-border/30">
+                      <div className="flex-1 min-w-[200px]">
+                        <div className="text-xs text-muted-foreground mb-1 font-bold">Market Risk Score</div>
+                        <div className="flex items-end gap-2">
+                          <span className="text-2xl font-bold text-rose-500 tracking-tighter">{briefing?.risk_score || 0}<span className="text-xs font-normal text-muted-foreground ml-1">/100</span></span>
+                          <div className="flex-1 h-1.5 bg-muted/50 rounded-full mb-2 overflow-hidden">
+                            <div className={cn("h-full", (briefing?.risk_score || 0) > 80 ? 'bg-rose-600' : 'bg-gradient-to-r from-amber-500 to-rose-500')} style={{ width: `${briefing?.risk_score || 0}%` }} />
+                          </div>
                         </div>
                       </div>
+                      
+                      {/* 매크로 지표 (이슈 AI 산출) */}
+                      <div className="flex gap-4 text-[11px] font-mono">
+                        {briefing?.macro_krw && <div><span className="text-muted-foreground mr-1">KRW</span><span className={briefing.macro_krw.includes('+') ? 'text-rose-500' : 'text-blue-500'}>{briefing.macro_krw}</span></div>}
+                        {briefing?.macro_tnx && <div><span className="text-muted-foreground mr-1">TNX</span><span className={briefing.macro_tnx.includes('+') ? 'text-rose-500' : 'text-blue-500'}>{briefing.macro_tnx}</span></div>}
+                        {briefing?.macro_vix && <div><span className="text-muted-foreground mr-1">VIX</span><span className={briefing.macro_vix.includes('+') ? 'text-rose-500' : 'text-blue-500'}>{briefing.macro_vix}</span></div>}
+                      </div>
                     </div>
+
+                    {/* 2. 마스터 AI가 측정한 프레임별 전망 (T+1, T+5, T+20) */}
+                    {masterPrediction && (
+                      <div className="flex items-center gap-3 bg-indigo-50/50 dark:bg-indigo-950/20 p-2.5 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
+                        <span className="text-xs font-extrabold text-indigo-700 dark:text-indigo-400 shrink-0">👑 마스터 AI 뷰</span>
+                        <div className="flex gap-2">
+                          <span className={cn("text-[10px] px-2 py-0.5 rounded font-bold border", 
+                            masterPrediction.predict === 'LONG' ? 'bg-rose-50 text-rose-600 border-rose-200' : masterPrediction.predict === 'SHORT' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-slate-50 text-slate-600 border-slate-200'
+                          )}>전체: {masterPrediction.predict} ({masterPrediction.confidence}%)</span>
+                          
+                          {masterPrediction.t1_target_return !== undefined && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white dark:bg-black/40 border border-border/50 text-muted-foreground">T+1목표 <span className={masterPrediction.t1_target_return > 0 ? "text-rose-500 font-bold" : "text-blue-500 font-bold"}>{masterPrediction.t1_target_return}%</span></span>
+                          )}
+                          {masterPrediction.t5_predict && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white dark:bg-black/40 border border-border/50 text-muted-foreground">T+5 <span className={masterPrediction.t5_predict === 'LONG' ? "text-rose-500 font-bold" : masterPrediction.t5_predict === 'SHORT' ? "text-blue-500 font-bold" : "font-bold"}>{masterPrediction.t5_predict}</span></span>
+                          )}
+                          {masterPrediction.t20_predict && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white dark:bg-black/40 border border-border/50 text-muted-foreground">T+20 <span className={masterPrediction.t20_predict === 'LONG' ? "text-rose-500 font-bold" : masterPrediction.t20_predict === 'SHORT' ? "text-blue-500 font-bold" : "font-bold"}>{masterPrediction.t20_predict}</span></span>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-p:text-muted-foreground">
-                    <h4 className="flex items-center gap-1.5 text-foreground"><Target className="w-4 h-4 text-rose-400" /> 오늘 시장의 테제</h4>
+
+                  <div className="prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-p:text-muted-foreground pt-1">
+                    <h4 className="flex items-center gap-1.5 text-foreground"><Target className="w-4 h-4 text-rose-400" /> 오늘 시장의 테제 (by 이슈 AI)</h4>
                     {briefing?.summary_markdown ? (
                       <div dangerouslySetInnerHTML={{ __html: briefing.summary_markdown }} />
                     ) : (
                       <p>아직 생성된 브리핑이 없습니다. 상단의 '에이전트 수동 실행'을 클릭하세요.</p>
                     )}
                   </div>
+
+                  {/* 마스터 AI의 테제 검토 코멘트 */}
+                  {masterPrediction && briefing?.summary_markdown && (
+                    <div className="mt-4 pt-4 border-t border-indigo-500/10 flex gap-3">
+                      <div className="shrink-0 w-1 h-full min-h-[40px] bg-indigo-500 rounded-full"></div>
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">마스터 AI 검토 의견:</span>
+                          <span className="text-[10px] text-muted-foreground">"시장 테제에 대한 상위 관점 통합"</span>
+                        </div>
+                        <p className="text-[12px] text-foreground/80 leading-relaxed italic">
+                          "이슈 AI가 제시한 주요 서사에 동의하나, {masterPrediction.predict === 'LONG' ? '단기 상승 모멘텀(T+1) 측면에서는 다소 보수적인 평가입니다. 수급과 기술적 베이스가 확고하여 강력한 상방 돌파를 지시합니다.' : masterPrediction.predict === 'SHORT' ? '리스크는 팩트이나 시장은 단기 하락 압력을 더 크게 반영 중입니다. 방어적 관망을 지시합니다.' : '현 재료만으론 명확한 방향을 잡기 모호하여 관망을 지시합니다.'} (상세 리포트는 마스터 시황 탭 참조)"
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -501,7 +579,7 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
                 <span className="text-xs font-bold text-foreground">Active Issue Ledger 진행 중인 이슈</span>
                 <span className="text-[10px] font-mono bg-background px-2 py-0.5 rounded border border-border/50 text-muted-foreground">{issues.length} Total</span>
               </div>
-              <div className="p-4 overflow-y-auto space-y-3">
+              <div className="p-4 overflow-y-auto space-y-3 pb-8 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                 {issues.slice(0, visibleCount).map(issue => (
                   <div
                     key={issue.id}
@@ -514,10 +592,34 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
                         : "border-border/40"
                     )}
                   >
-                    {/* Header: Title & Badge */}
-                    <div className="flex items-start justify-between w-full">
-                      <span className="text-base font-bold text-foreground group-hover:text-indigo-600 dark:text-indigo-400 transition-colors w-full">{issue.name}</span>
-                      <StatusBadge status={issue.status} size="sm" />
+                    {/* Header: Title & Master Feedback & Badge */}
+                    <div className="flex flex-col w-full gap-1.5">
+                      <div className="flex items-start justify-between w-full">
+                        <div className="flex flex-col w-full gap-0.5 mt-0.5">
+                          <span className="text-base font-bold text-foreground group-hover:text-indigo-600 dark:text-indigo-400 transition-colors w-full leading-tight">{issue.name}</span>
+                          {issue.current_stance && (
+                             <span className="text-[11px] text-muted-foreground/80 font-medium leading-snug mt-1 flex items-start gap-1">
+                               <span className="shrink-0 text-indigo-400/70">↳</span>
+                               {issue.current_stance}
+                             </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          {issue.master_comment && (
+                            <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold border", issue.master_veto ? "bg-amber-500/10 text-amber-500 border-amber-500/30" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/30")}>
+                              {issue.master_veto ? '🛡️ VETO' : '🤝 CONFIRM'}
+                            </span>
+                          )}
+                          <StatusBadge status={issue.status} size="sm" />
+                        </div>
+                      </div>
+                      
+                      {issue.master_comment && (
+                         <div className="px-2 py-1.5 bg-muted/30 border border-border/50 rounded flex items-start gap-1.5 shadow-inner mt-1">
+                            <Brain className={cn("w-3.5 h-3.5 shrink-0 mt-0.5", issue.master_veto ? "text-amber-500" : "text-emerald-500")} />
+                            <span className="text-xs text-muted-foreground leading-snug font-medium italic">"{issue.master_comment}"</span>
+                         </div>
+                      )}
                     </div>
 
                     {/* Middle: Info Text */}

@@ -738,6 +738,19 @@ ipcMain.handle('agent:market:rules', async () => {
     }
 })
 
+ipcMain.handle('agent:market:clear-persona', async () => {
+    try {
+        const db = await import('./services/DatabaseService').then(m => m.DatabaseService.getInstance())
+        const rawDb = (db as any).db
+        if (rawDb) {
+            rawDb.prepare('DELETE FROM persona_performance').run()
+        }
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
 ipcMain.handle('agent:market:retrospectives:get', async (_event, type: 'DAILY' | 'WEEKLY' | 'MONTHLY', limit?: number) => {
     try {
         const { MarketReviewAgent } = await import('./services/v2_agents/MarketReviewAgent')

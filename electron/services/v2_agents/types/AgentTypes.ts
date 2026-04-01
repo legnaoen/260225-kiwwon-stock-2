@@ -1,7 +1,7 @@
 // V2 Agent Swarm — 공용 타입 정의
 import { AgentRetrospective } from '../MarketReviewAgent'
 
-export type AgentCycle = 'A' | 'B'
+export type AgentCycle = 'A' | 'B' | 'P'
 export type PredictDirection = 'LONG' | 'SHORT' | 'HOLD'
 
 export interface AgentPrediction {
@@ -44,6 +44,7 @@ export interface DataContext {
     monthlyReview?: AgentRetrospective
     todayCycleA?: AgentPrediction
     trackerBriefingBlock?: string
+    quantBriefing?: string
 }
 
 export interface ParsedDecision {
@@ -59,6 +60,7 @@ export interface ParsedDecision {
     t5_target_return?: number
     t20_predict?: PredictDirection
     t20_target_return?: number
+    issue_feedbacks?: { issue_id: string; is_veto: boolean; comment: string }[]
 }
 
 export interface PipelineSlot {

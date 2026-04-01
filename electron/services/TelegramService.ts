@@ -733,7 +733,7 @@ export class TelegramService {
             const isShort = data.predict === 'SHORT';
             const direction = isLong ? '상승' : isShort ? '하락' : '대기';
             const icon = isLong ? '🚀' : isShort ? '📉' : '⚖️';
-            const cycleText = data.cycle === 'A' ? 'Morning (08:50)' : 'Closing (15:10)';
+            const cycleText = data.cycle === 'A' ? 'Morning (08:50)' : data.cycle === 'P' ? 'Pivot 검증 (09:30)' : 'Closing (15:10)';
             
             // 텔레그램 가독성 및 마크다운 에러 방지를 위한 텍스트 전처리
             let formattedRationale = data.rationale || '';
@@ -770,7 +770,7 @@ export class TelegramService {
 
         // [V2] 장중 예측 알림 (MCA Gemini 09:30/13:00 + 로컬 Swarm 09:45~13:45, 총 11슬롯)
         // IntradaySwarm.runSwarm() / MCA.runIntraday() 양쪽 모두 동일 이벤트를 발행하므로 단일 리스너로 처리
-        eventBus.on('INTRADAY_PREDICTION_UPDATED' as any, (data: any) => {
+        eventBus.on('INTRADAY_PREDICTION_UPDATED' as any, async (data: any) => {
             const mcaSettings = store.get('market_agent_settings', { telegramEnabled: true }) as any;
             if (!mcaSettings.telegramEnabled) return;
 
@@ -806,7 +806,54 @@ export class TelegramService {
             msg += `출처: ${sourceLabel}\n`;
             msg += `방향: ${predict} | 신뢰도: ${data.confidence}%\n`;
             msg += `포지션: ${data.position || '-'}\n\n`;
-            msg += `📝 ${rationale}`;
+            msg += `📝 ${rationale}\n`;
+
+            // 군집 AI일 때만: 오늘 이전 예측들의 현재 수익률 추가
+            if (isSwarm) {
+                try {
+                    const { PriceStore } = await import('./PriceStore');
+                    const kstDate = DatabaseService.getInstance().getKstDate();
+                    const rawDb = (DatabaseService.getInstance() as any).db;
+                    const pastPreds = rawDb.prepare(`
+                        SELECT time_slot, predict, entry_price 
+                        FROM intraday_predictions 
+                        WHERE date = ? AND predict IN ('UP', 'DOWN', 'LONG', 'SHORT') AND entry_price > 0 AND id != ?
+                        ORDER BY time_slot ASC
+                    `).all(kstDate, data.id);
+
+                    if (pastPreds && pastPreds.length > 0) {
+                        let yieldLines = '';
+                        let totalYield = 0;
+                        let validCount = 0;
+                        
+                        for (const p of pastPreds) {
+                            const isUp = p.predict === 'UP' || p.predict === 'LONG';
+                            const code = isUp ? '069500' : '114800'; // 코덱스200 vs 코덱스인버스
+                            const currentPrice = PriceStore.getInstance().getPrice(code) || 0;
+                            
+                            if (currentPrice > 0 && p.entry_price > 0) {
+                                const yieldPct = ((currentPrice - p.entry_price) / p.entry_price) * 100;
+                                totalYield += yieldPct;
+                                validCount++;
+                                const sign = yieldPct >= 0 ? '+' : '';
+                                const emoji = yieldPct > 0 ? '🔴' : (yieldPct < 0 ? '🔵' : '⚫');
+                                yieldLines += `${emoji} ${p.time_slot} (${p.predict}): ${sign}${yieldPct.toFixed(2)}%\n`;
+                            }
+                        }
+                        
+                        // 하나라도 계산되었다면 메시지에 추가
+                        if (validCount > 0) {
+                            msg += `\n🎯 [오늘 누적 타점 성과]\n`;
+                            msg += yieldLines;
+                            const avgYield = totalYield / validCount;
+                            const avgSign = avgYield >= 0 ? '+' : '';
+                            msg += `📊 누적 평균 수익률: ${avgSign}${avgYield.toFixed(2)}%\n`;
+                        }
+                    }
+                } catch (err: any) {
+                    console.error('[TelegramService] 과거 타점 수익률 조회 실패:', err.message);
+                }
+            }
 
             this.sendMessage(msg).catch(e => console.error('[TelegramService] Intraday Alert Error:', e));
         });

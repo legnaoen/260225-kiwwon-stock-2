@@ -1,5 +1,7 @@
 import { KiwoomService } from '../KiwoomService'
+import Store from 'electron-store';
 
+const store = new Store();
 export class TechnicalAnalyzer {
     private kiwoom: KiwoomService
 
@@ -248,23 +250,36 @@ export class TechnicalAnalyzer {
                     return meanDeviation === 0 ? 0 : (currentTP - smaTP) / (0.015 * meanDeviation);
                 };
 
-                const currentCCI = calcCCI(intradayData.length - 1);
-                const prevCCI = calcCCI(intradayData.length - 2);
+                // 스토어에서 사용자 설정 불러오기
+                const mcaSettings = store.get('market_agent_settings', {}) as any;
+                const P = mcaSettings.cciPeriod || 20;
+                let cciAnalysis = "동기화 부족으로 계산 실패";
+
+                const currentCCI = calcCCI(intradayData.length - 1, P);
+                const prevCCI = calcCCI(intradayData.length - 2, P);
 
                 if (currentCCI !== null && prevCCI !== null) {
                     let cciStatus = "";
-                    // 사용자 맞춤형 파라미터 적용: 과매수 +80, 과매도 -120
-                    const OVERBOUGHT = 80;
-                    const OVERSOLD = -120;
+                    const USE_OVERBOUGHT = mcaSettings.cciOverboughtEnabled !== false;
+                    const OVERBOUGHT = mcaSettings.cciOverboughtLimit || 80;
+                    const USE_OVERSOLD = mcaSettings.cciOversoldEnabled !== false;
+                    const OVERSOLD = mcaSettings.cciOversoldLimit || -120;
 
-                    if (currentCCI > OVERBOUGHT) cciStatus = prevCCI <= OVERBOUGHT ? "과매수 돌파(상승 극대화)" : "과매수 유지(고점 부담)";
-                    else if (currentCCI < OVERSOLD) cciStatus = prevCCI >= OVERSOLD ? "과매도 돌파(투매 진입)" : "과매도 유지(바닥권 다지기)";
-                    else {
-                        if (prevCCI <= OVERSOLD) cciStatus = "⭐ 과매도선(-120) 위로 이탈 (강력한 단기 매수/반등 시그널 ⭐)";
-                        else if (prevCCI >= OVERBOUGHT) cciStatus = "💥 과매수선(+80) 아래로 이탈 (단기 차익실현/매도 시그널 💥)";
-                        else cciStatus = currentCCI > 0 ? "상승 모멘텀 (0 기준선 위)" : "하락 모멘텀 (0 기준선 아래)";
+                    if (USE_OVERBOUGHT && currentCCI > OVERBOUGHT) cciStatus = prevCCI <= OVERBOUGHT ? "과매수 돌파(상승 극대화)" : "과매수 유지(고점 부담)";
+                    else if (USE_OVERSOLD && currentCCI < OVERSOLD) cciStatus = prevCCI >= OVERSOLD ? "과매도 돌파(투매 진입)" : "과매도 유지(바닥권 다지기)";
+                    else if (USE_OVERSOLD && currentCCI >= OVERSOLD && prevCCI < OVERSOLD) cciStatus = `⭐ 과매도선(${OVERSOLD}) 위로 이탈 (강력한 단기 매수/반등 시그널 ⭐)`;
+                    else if (USE_OVERBOUGHT && currentCCI <= OVERBOUGHT && prevCCI > OVERBOUGHT) cciStatus = `💥 과매수선(+${OVERBOUGHT}) 아래로 이탈 (단기 차익실현/매도 시그널 💥)`;
+                    else cciStatus = currentCCI > 0 ? "상승 모멘텀 (0 기준선 위)" : "하락 모멘텀 (0 기준선 아래)";
+                    
+                    const limitsTxt = [];
+                    if (USE_OVERBOUGHT) limitsTxt.push(`+${OVERBOUGHT}`);
+                    if (USE_OVERSOLD) limitsTxt.push(`${OVERSOLD}`);
+                    
+                    if (limitsTxt.length > 0) {
+                        cciAnalysis = `CCI(${P}) = ${currentCCI.toFixed(1)} | 기준(${limitsTxt.join('/')}) 시그널: ${cciStatus}`;
+                    } else {
+                        cciAnalysis = `CCI(${P}) = ${currentCCI.toFixed(1)} | 기준(활성화 안됨) 시그널: ${cciStatus}`;
                     }
-                    cciAnalysis = `CCI(20) = ${currentCCI.toFixed(1)} | 기준(+80/-120) 시그널: ${cciStatus}`;
                 }
             }
 
@@ -283,7 +298,7 @@ export class TechnicalAnalyzer {
 
 [🚨 AI 추론 절대 규칙 🚨]
 * 이 정보들은 진짜 차트의 수식을 백엔드가 대신 읽고 번역해준 "절대적 팩트"입니다.
-* 만약 [5번] CCI 지표에서 '⭐과매도선(-120) 위로 이탈⭐' 시그널이 발생했고, 60분간 횡보하며 바닥 다지기가 확인된다면 일봉이 하락장이라도 당당하게 스윙/리바운드 타점(UP)으로 예측하십시오!
+* 만약 [5번] CCI 지표에서 '⭐과매도선 위로 이탈⭐' 등 매수 시그널이 발생했고, 60분간 횡보하며 바닥 다지기가 확인된다면 일봉이 하락장이라도 당당하게 스윙/리바운드 타점(UP)으로 예측하십시오!
 * 반대로 강한 지지가 없고 매도 시그널이 발생했다면 어떠한 작은 꼬리 반등에 속지 말고 DOWN을 외치십시오.
 * 장황한 문장을 배제하고 팩트만 글머리 기호(•)로 짧고 간결하게 출력하세요.
 `.trim();
@@ -301,13 +316,9 @@ export class TechnicalAnalyzer {
      */
     public async checkCCITrigger(): Promise<{ isTriggered: boolean, status: string }> {
         try {
-            const res = await this.kiwoom.getChartData({ stk_cd: '122630' });
-            const d = res?.data || res;
-            let intradayData = d?.stk_dt_pole_chart_qry || d?.output2 || d?.Body || d?.list || [];
-            if (!Array.isArray(intradayData)) intradayData = [];
-            intradayData = intradayData.reverse();
-
-            if (intradayData.length < 21) return { isTriggered: false, status: '' };
+            // 장중 5분봉 기준이므로 KODEX 200 (069500) 5분봉 최근 며칠 치를 가져옵니다.
+            const intradayData = await this.kiwoom.getOhlcv5m('069500', 3);
+            if (!intradayData || intradayData.length < 21) return { isTriggered: false, status: '' };
 
             const getTP = (candle: any) => {
                 const h = Math.abs(Number(String(candle.high).replace(/[^0-9\-\.]/g, '')));
@@ -325,24 +336,37 @@ export class TechnicalAnalyzer {
                 return meanDeviation === 0 ? 0 : (currentTP - smaTP) / (0.015 * meanDeviation);
             };
 
-            const currentCCI = calcCCI(intradayData.length - 1);
-            const prevCCI = calcCCI(intradayData.length - 2);
+            // 스토어에서 사용자 설정 불러오기
+            const mcaSettings = store.get('market_agent_settings', {}) as any;
+            const P = mcaSettings.cciPeriod || 20;
+            const USE_OVERBOUGHT = mcaSettings.cciOverboughtEnabled !== false;
+            const OVERBOUGHT = mcaSettings.cciOverboughtLimit || 80;
+            const USE_OVERSOLD = mcaSettings.cciOversoldEnabled !== false;
+            const OVERSOLD = mcaSettings.cciOversoldLimit || -120;
+
+            // 기간이 바뀌었을 경우 동적으로 P 갱신 가능 (여기선 calcCCI 함수 안에서 조절해야하므로 위에서부터 바꾸자)
+            const currentCCI = calcCCI(intradayData.length - 1, P);
+            const prevCCI = calcCCI(intradayData.length - 2, P);
 
             if (currentCCI === null || prevCCI === null) return { isTriggered: false, status: '' };
 
-            const OVERBOUGHT = 80;
-            const OVERSOLD = -120;
+            const formatSt = (eventName: string, limit: number, current: number) => 
+                `${eventName} (기준:${limit > 0 ? '+' : ''}${limit}, 현재:${current > 0 ? '+' : ''}${current.toFixed(1)})`;
 
-            if (currentCCI > OVERBOUGHT && prevCCI <= OVERBOUGHT) {
-                return { isTriggered: true, status: '과매수 진입' };
-            } else if (currentCCI < OVERSOLD && prevCCI >= OVERSOLD) {
-                return { isTriggered: true, status: '과매도 진입' };
-            } else if (currentCCI <= OVERBOUGHT && prevCCI > OVERBOUGHT) {
-                return { isTriggered: true, status: '과매수선 아래로 이탈(단기 차익실현)' };
-            } else if (currentCCI >= OVERSOLD && prevCCI < OVERSOLD) {
-                return { isTriggered: true, status: '과매도선 위로 이탈(강한 반등)' };
+            // 설정 여부에 따라 검사 진행 (둘 다 꺼져있으면 무조건 false 반환)
+            if (!USE_OVERBOUGHT && !USE_OVERSOLD) return { isTriggered: false, status: '' };
+
+            if (USE_OVERBOUGHT && currentCCI > OVERBOUGHT && prevCCI <= OVERBOUGHT) {
+                return { isTriggered: true, status: formatSt('과매수 진입', OVERBOUGHT, currentCCI), cciValue: currentCCI };
+            } else if (USE_OVERSOLD && currentCCI < OVERSOLD && prevCCI >= OVERSOLD) {
+                return { isTriggered: true, status: formatSt('과매도 진입', OVERSOLD, currentCCI), cciValue: currentCCI };
+            } else if (USE_OVERBOUGHT && currentCCI <= OVERBOUGHT && prevCCI > OVERBOUGHT) {
+                return { isTriggered: true, status: formatSt('과매수선 아래로 이탈(단기 차익실현)', OVERBOUGHT, currentCCI), cciValue: currentCCI };
+            } else if (USE_OVERSOLD && currentCCI >= OVERSOLD && prevCCI < OVERSOLD) {
+                return { isTriggered: true, status: formatSt('과매도선 위로 이탈(단기 반등)', OVERSOLD, currentCCI), cciValue: currentCCI };
             }
             return { isTriggered: false, status: '' };
+
         } catch (err) {
             console.error('[TechnicalAnalyzer] checkCCITrigger error:', err);
             return { isTriggered: false, status: '' };

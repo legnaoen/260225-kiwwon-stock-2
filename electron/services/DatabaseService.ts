@@ -480,6 +480,20 @@ export class DatabaseService {
             );
         `
 
+        // PL-NaverFlow: 마켓 주도주 하이브리드 인덱스 추적용 테이블
+        const createThemePriceIndexTable = `
+            CREATE TABLE IF NOT EXISTS theme_price_index (
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                price_index REAL NOT NULL,
+                daily_return REAL NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(date, type, name)
+            );
+        `
+
+
         // PL-NewsFlow: 네이버 증권 뉴스 수집 테이블
         const createNaverNewsFlowTable = `
             CREATE TABLE IF NOT EXISTS naver_news_flow (
@@ -521,6 +535,7 @@ export class DatabaseService {
             // Ignore error if column already exists
         }
         this.db.exec(createThemeIntelligenceTable)
+        this.db.exec(createThemePriceIndexTable)
         this.db.exec(createNaverNewsFlowTable)
         try {
             this.db.exec('ALTER TABLE naver_news_flow ADD COLUMN body_snippet TEXT;');
@@ -1879,6 +1894,13 @@ export class DatabaseService {
             // Fetch leading stocks from DB
             const alphaStocks = getAlphaStocks.all(item.name, latestDate) as {stock_name: string, stock_code: string}[];
 
+            // Fetch price index history
+            const priceIndexHistory = this.db.prepare(`
+                SELECT date, price_index, daily_return FROM theme_price_index
+                WHERE type = ? AND name = ?
+                ORDER BY date ASC LIMIT ?
+            `).all(type, item.name, limitDays) as { date: string, price_index: number, daily_return: number }[];
+
             return {
                 ...item,
                 changeStr: change,
@@ -1886,7 +1908,8 @@ export class DatabaseService {
                 reason: aiData ? aiData.reason : null,
                 lifespan_type: aiData ? aiData.lifespan_type : null,
                 lifespan_reasoning: aiData ? aiData.lifespan_reasoning : null,
-                top_stocks: alphaStocks // added top stocks!
+                top_stocks: alphaStocks,
+                price_index_history: priceIndexHistory
             };
         });
 
@@ -1912,6 +1935,19 @@ export class DatabaseService {
             trendData,
             historyData // pass raw history just in case detail view needs it
         };
+    }
+
+    public upsertThemePriceIndex(items: { date: string, type: string, name: string, price_index: number, daily_return: number }[]) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO theme_price_index (date, type, name, price_index, daily_return)
+            VALUES (@date, @type, @name, @price_index, @daily_return)
+        `);
+        const transaction = this.db.transaction((data) => {
+            for (const item of data) {
+                stmt.run(item);
+            }
+        });
+        transaction(items);
     }
 
     public upsertThemeIntelligence(data: { date: string, type: string, name: string, reason: string, lifespan_type: string, lifespan_reasoning: string }[]) {

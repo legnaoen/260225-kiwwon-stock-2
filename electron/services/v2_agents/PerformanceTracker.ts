@@ -125,7 +125,7 @@ export class PerformanceTracker {
         let updatedCount = 0
 
         for (const row of pendingRows) {
-            const chartData = row.predict === 'LONG' ? chartK200 : chartInv
+            const chartData = (row.predict === 'LONG' || row.predict === 'UP') ? chartK200 : (row.predict === 'SHORT' || row.predict === 'DOWN') ? chartInv : chartK200;
             
             // row.date가 배열상 몇 번째 인덱스인지 찾음 (chartData는 내림차순 = [0]이 최신)
             const rowDateNorm = this.normalizeDate(row.date)
@@ -142,26 +142,36 @@ export class PerformanceTracker {
             // ═══ Step 1: Entry Price backfill (핵심 수정) ═══
             // 실시간 저장된 가승인 진입가를, 공식 API 차트의 시가/종가로 정확하게 교정(Overwrite)
             let entryPrice = (row as any).entry_price
-            const correctEntryPrice = row.cycle === 'A' ? todayCandle.open : todayCandle.close;
             
-            if (entryPrice !== correctEntryPrice) {
-                entryPrice = correctEntryPrice
-                updates.entry_price = entryPrice
-                console.log(`[MCA-Tracker] entry_price correction: ${row.id} → cycle=${row.cycle}, price=${entryPrice}`)
+            if (row.cycle !== 'P') {
+                const correctEntryPrice = row.cycle === 'A' ? todayCandle.open : todayCandle.close;
+                
+                if (entryPrice !== correctEntryPrice) {
+                    entryPrice = correctEntryPrice
+                    updates.entry_price = entryPrice
+                    console.log(`[MCA-Tracker] entry_price correction: ${row.id} → cycle=${row.cycle}, price=${entryPrice}`)
+                }
+            } else {
+                // Cycle P (장중)의 경우 저장된 당일 타임스탬프 당시의 예측 진입가격(entry_price)를 불변으로 유지
+                if (!entryPrice || entryPrice <= 0) {
+                     // 단, 예측 당시 가격 정보가 수집되지 않아(소켓 갱신 등) 비어있다면 아쉬운대로 당일 시가로 보정
+                     entryPrice = todayCandle.open;
+                     updates.entry_price = entryPrice;
+                }
             }
-            
+
             if (!entryPrice || entryPrice <= 0) continue
 
-            const isTodayCycleA = row.cycle === 'A' && todayIdx === 0;
+            const isTodayCycleA = (row.cycle === 'A' || row.cycle === 'P') && todayIdx === 0;
 
             // ═══ Step 2: T+1 평가 ═══
             // t1_final이 아직 없거나, 당일 Cycle A거나, 우리가 방금 entry_price를 교정(Overwrite)했다면 다시 채점!
             if ((row as any).t1_final === null || (row as any).t1_final === undefined || isTodayCycleA || updates.entry_price !== undefined) {
-                if (row.cycle === 'A') {
-                    // Cycle A: 당일 시가 진입 → 당일 종가 청산
+                if (row.cycle === 'A' || row.cycle === 'P') {
+                    // Cycle A / Cycle P: 당일 시가(또는 장중 실시간 진입가) 진입 → 당일 종가 청산
                     updates.t1_peak = ((todayCandle.high - entryPrice) / entryPrice) * 100
                     updates.t1_final = ((todayCandle.close - entryPrice) / entryPrice) * 100
-                    console.log(`[MCA-Tracker] T+1 Cycle A: entry(open)=${entryPrice}, close=${todayCandle.close}, return=${updates.t1_final?.toFixed(2)}%`)
+                    console.log(`[MCA-Tracker] T+1 Cycle ${row.cycle}: entry=${entryPrice}, close=${todayCandle.close}, return=${updates.t1_final?.toFixed(2)}%`)
                 } else if (row.cycle === 'B') {
                     // Cycle B: 당일 종가 진입 → 익일 시가 청산
                     // 내림차순이므로 todayIdx - 1이 다음 영업일
@@ -178,9 +188,9 @@ export class PerformanceTracker {
 
             // ═══ Step 3 & 4: T+5, T+20 다이나믹 트래킹 ═══
             const calcTHorizon = (targetDays: number, targetPredict: string | null) => {
-                if (!targetPredict || !['LONG', 'SHORT'].includes(targetPredict)) return { peak: null, final: null };
+                if (!targetPredict || !['LONG', 'SHORT', 'UP', 'DOWN'].includes(targetPredict)) return { peak: null, final: null };
                 
-                const myChart = targetPredict === 'LONG' ? chartK200 : chartInv;
+                const myChart = (targetPredict === 'LONG' || targetPredict === 'UP') ? chartK200 : chartInv;
                 const myIdx = myChart.findIndex(candle => candle.date === rowDateNorm);
                 
                 if (myIdx === -1) return { peak: null, final: null };
@@ -354,11 +364,11 @@ export class PerformanceTracker {
         }
 
         const pendingDaily = rawDb.prepare(
-            `SELECT id, date, predict, cycle, entry_price FROM agent_predictions WHERE (t1_final IS NULL OR entry_price IS NULL OR entry_price <= 0) AND predict IN ('LONG', 'SHORT')`
+            `SELECT id, date, predict, cycle, entry_price FROM agent_predictions WHERE (t1_final IS NULL OR entry_price IS NULL OR entry_price <= 0) AND predict IN ('LONG', 'SHORT', 'UP', 'DOWN')`
         ).all() as any[]
         
         for (const row of pendingDaily) {
-            const etfData = row.predict === 'LONG' ? this.latestPrices['069500'] : row.predict === 'SHORT' ? this.latestPrices['114800'] : null
+            const etfData = (row.predict === 'LONG' || row.predict === 'UP') ? this.latestPrices['069500'] : (row.predict === 'SHORT' || row.predict === 'DOWN') ? this.latestPrices['114800'] : null
             // 시가가 없으면 안전하게 통과 (0으로 나누기 방지)
             if (!etfData || etfData.open <= 0) continue
 
@@ -419,47 +429,68 @@ export class PerformanceTracker {
             return
         }
 
-        // KODEX 200, KODEX 인버스 차트 (장전·마감 예측과 동일 상품)
-        const chartK200 = await this.fetchParsedChart('069500')
-        const chartInv = await this.fetchParsedChart('114800')
+        // KODEX 200, KODEX 인버스 당일 5분봉 차트 (시간별 고점 탐색용)
+        const { KiwoomService } = await import('./KiwoomService')
+        const chartK200_5m = await KiwoomService.getInstance().getOhlcv5m('069500', 1)
+        const chartInv_5m = await KiwoomService.getInstance().getOhlcv5m('114800', 1)
 
-        const todayK200 = chartK200.find(c => c.date === dateStr) || chartK200[0]
-        const todayInv = chartInv.find(c => c.date === dateStr) || chartInv[0]
+        // 일봉 데이터 (종가 확인용)
+        const chartK200Daily = await this.fetchParsedChart('069500')
+        const chartInvDaily = await this.fetchParsedChart('114800')
 
-        if (!todayK200 || !todayInv) {
+        const todayK200Info = chartK200Daily.find(c => c.date === dateStr) || chartK200Daily[0]
+        const todayInvInfo = chartInvDaily.find(c => c.date === dateStr) || chartInvDaily[0]
+
+        if (!todayK200Info || !todayInvInfo) {
             console.error('[MCA-Tracker] 장중 평가: 오늘 ETF 데이터 없음')
             return
         }
 
-        console.log(`[MCA-Tracker] 장중 평가 ETF - K200: O=${todayK200.open} C=${todayK200.close} | INV: O=${todayInv.open} C=${todayInv.close}`)
+        console.log(`[MCA-Tracker] 장중 평가 ETF - K200: C=${todayK200Info.close} | INV: C=${todayInvInfo.close}`)
 
         let evaluated = 0
         for (const row of pending) {
-            // UP → KODEX 200, DOWN → KODEX 인버스
             const position = row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : null
-            const etfCandle = row.predict === 'UP' ? todayK200 : row.predict === 'DOWN' ? todayInv : null
+            const etfCandle5m = row.predict === 'UP' ? chartK200_5m : row.predict === 'DOWN' ? chartInv_5m : []
+            const todayEtfDaily = row.predict === 'UP' ? todayK200Info : row.predict === 'DOWN' ? todayInvInfo : null
 
-            if (!position || !etfCandle || etfCandle.open <= 0) {
+            if (!position || !todayEtfDaily || row.predict === 'HOLD') {
                 // HOLD 예측이거나 데이터 없음
                 rawDb.prepare(`UPDATE intraday_predictions SET position = 'HOLD', result = 'HOLD', close_kospi = ? WHERE id = ?`)
-                    .run(todayK200.close, row.id)
+                    .run(todayK200Info.close, row.id)
                 evaluated++
                 continue
             }
 
-            const entryPrice = etfCandle.open   // 당일 시가
-            const closePrice = etfCandle.close   // 당일 종가
+            // 진입가 보호: 만약 기존에 5분봉 등에서 정확하게 담긴 entry_price가 있다면 절대 당일 시가로 덮어쓰지 않음
+            const entryPrice = (row.entry_price > 0) ? row.entry_price : todayEtfDaily.open
+            const closePrice = todayEtfDaily.close
             const returnPct = ((closePrice - entryPrice) / entryPrice) * 100
 
-            // 적중 판정: 수익률 > 0이면 HIT
-            const THRESHOLD = 0.0 // ETF 기준이므로 방향만 맞으면 OK
+            // 진입 시점을 찾아 기간 내 고점(maxHigh) 계산
+            let maxHigh = entryPrice;
+            if (row.time_slot && etfCandle5m.length > 0) {
+                // time_slot format is typically 'HH:MM' or 'HH:MM (CCI)'
+                const hmMatch = row.time_slot.match(/(\d{2}):(\d{2})/)
+                if (hmMatch) {
+                    const entryTimeEpoch = new Date(today.getFullYear(), today.getMonth(), today.getDate(), parseInt(hmMatch[1]), parseInt(hmMatch[2]), 0).getTime() / 1000
+                    const afterEntryCandles = etfCandle5m.filter(c => c.time >= entryTimeEpoch)
+                    if (afterEntryCandles.length > 0) {
+                        maxHigh = Math.max(...afterEntryCandles.map(c => c.high))
+                    }
+                }
+            }
+            const maxReturnPct = ((maxHigh - entryPrice) / entryPrice) * 100
+
+            // 적중 판정 (가혹한 실전 기준): 종가 기준 +0.5% 초과 OR 기간 내 고점 +1.0% 돌파 시 적중
+            const CLOSE_HIT = 0.5
+            const HIGH_HIT = 1.0
+            
             let result: string
-            if (returnPct > THRESHOLD) {
+            if (returnPct >= CLOSE_HIT || maxReturnPct >= HIGH_HIT) {
                 result = 'HIT'
-            } else if (returnPct < -THRESHOLD) {
-                result = 'MISS'
             } else {
-                result = 'HOLD'
+                result = 'MISS' // 종가도 안 오르고 익절 타점도 안 줬으면 무조건 실패
             }
 
             rawDb.prepare(`
@@ -467,9 +498,9 @@ export class PerformanceTracker {
                 SET position = ?, entry_price = ?, close_price = ?, return_pct = ?, 
                     close_kospi = ?, result = ?
                 WHERE id = ?
-            `).run(position, entryPrice, closePrice, returnPct, todayK200.close, result, row.id)
+            `).run(position, entryPrice, closePrice, returnPct, todayK200Info.close, result, row.id)
 
-            console.log(`[MCA-Tracker] 장중 ${row.time_slot}: ${position} entry=${entryPrice} close=${closePrice} return=${returnPct.toFixed(2)}% → ${result}`)
+            console.log(`[MCA-Tracker] 장중 ${row.time_slot}: ${position} entry=${entryPrice} close=${closePrice} (고점:$${maxHigh}) | 리턴=${returnPct.toFixed(2)}% 고점리턴=${maxReturnPct.toFixed(2)}% → ${result}`)
             evaluated++
 
             // 페르소나 개별 성적 기록
@@ -536,46 +567,72 @@ export class PerformanceTracker {
      * Phase 3: 페르소나별 적중률 (입김/Weight) 추출
      * 최근 N개의 예측 기록을 기반으로 각자 승률을 계산하여 가중치 맵 반환 (기본값 1.0)
      */
-    public getPersonaWeights(): Record<string, { winRate: number, weight: number, hits: number, total: number }> {
+    public getPersonaWeights(): Record<string, { winRate: number, recent10Rate: number, weight: number, hits: number, total: number, todayRate: number | null }> {
         const rawDb = (this.db as any).db;
-        const weights: Record<string, { winRate: number, weight: number, hits: number, total: number }> = {};
+        const weights: Record<string, { winRate: number, recent10Rate: number, weight: number, hits: number, total: number, todayRate: number | null }> = {};
         
         try {
-            // 최근 30일(또는 30건)만 평가
+            // 오늘 날짜(KST 기준)
+            const kstDate = new Intl.DateTimeFormat('fr-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); // YYYY-MM-DD
+
+            // 최근 30일 이력 가져오기 (가장 최근 순으로 정렬)
             const records = rawDb.prepare(`
-                SELECT persona_id, is_hit, predict
+                SELECT persona_id, is_hit, predict, date
                 FROM persona_performance
                 WHERE date >= date('now', 'localtime', '-30 days')
                 AND predict != 'HOLD'
+                ORDER BY created_at DESC
             `).all() as any[];
 
-            const stats: Record<string, { hits: number, total: number }> = {};
+            // 페르소나별 분리
+            const personaRecords: Record<string, any[]> = {};
             for (const r of records) {
-                if (!stats[r.persona_id]) stats[r.persona_id] = { hits: 0, total: 0 };
-                stats[r.persona_id].total++;
-                if (r.is_hit === 1) stats[r.persona_id].hits++;
+                if (!personaRecords[r.persona_id]) personaRecords[r.persona_id] = [];
+                personaRecords[r.persona_id].push(r);
             }
 
-            for (const personaId in stats) {
-                const total = stats[personaId].total;
-                const hits = stats[personaId].hits;
+            for (const personaId in personaRecords) {
+                const myRecords = personaRecords[personaId];
+                const total = myRecords.length;
+                const hits = myRecords.filter(r => r.is_hit === 1).length;
                 const winRate = total > 0 ? (hits / total) * 100 : 50;
                 
-                // 가중치(Weight) 공식: 50%를 1.0으로 기준.
-                // 70%면 1.4배의 입김 (또는 특정 배수 공식 적용 가능)
+                // 최근 10회 승률 (records가 이미 DESC 정렬됨)
+                const recent10 = myRecords.slice(0, 10);
+                const recent10Hits = recent10.filter(r => r.is_hit === 1).length;
+                const recent10Total = recent10.length;
+                const recent10Rate = recent10Total > 0 ? (recent10Hits / recent10Total) * 100 : 50;
+
+                // 가중치(Weight) 공식: 전체 승률 30% + 최근 10회 승률 70%
+                const combinedScore = (winRate * 0.3) + (recent10Rate * 0.7);
                 let weight = 1.0;
-                if (total >= 5) { // 최소 5건 이상이어야 신뢰도 부여
-                    weight = Math.max(0.5, winRate / 50.0);
+
+                if (total >= 5) {
+                    weight = Math.max(0.0, combinedScore / 50.0);
+                    // 도태 시스템: combinedScore가 30 미만이면 발언권 박탈
+                    if (combinedScore < 30) weight = 0.0;
+                }
+                
+                // 오늘 승률 구하기
+                const todayRecords = myRecords.filter(r => r.date === kstDate);
+                let todayRate: number | null = null;
+                if (todayRecords.length > 0) {
+                    const todayHits = todayRecords.filter(r => r.is_hit === 1).length;
+                    todayRate = Math.round((todayHits / todayRecords.length) * 100);
                 }
                 
                 weights[personaId] = {
                     winRate: Math.round(winRate),
+                    recent10Rate: Math.round(recent10Rate),
                     weight: Number(weight.toFixed(2)),
                     hits,
-                    total
+                    total,
+                    todayRate
                 };
             }
-        } catch(e) {}
+        } catch(e) {
+            console.error('[PerformanceTracker] 페르소나 가중치 계산 오류:', e);
+        }
 
         return weights;
     }

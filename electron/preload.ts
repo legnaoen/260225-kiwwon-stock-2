@@ -264,6 +264,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMarketConditionLatest: () => ipcRenderer.invoke('agent:market:latest'),
     getMarketConditionStats: () => ipcRenderer.invoke('agent:market:stats'),
     getMarketConditionRules: () => ipcRenderer.invoke('agent:market:rules'),
+    clearPersonaPerformance: () => ipcRenderer.invoke('agent:market:clear-persona'),
     getMarketRetrospectives: (type: 'DAILY' | 'WEEKLY' | 'MONTHLY', limit?: number) => ipcRenderer.invoke('agent:market:retrospectives:get', type, limit),
     runMarketRetrospective: (type: 'DAILY' | 'WEEKLY' | 'MONTHLY') => ipcRenderer.invoke('agent:market:retrospectives:run', type),
     onMarketConditionComplete: (callback: (data: any) => void) => {

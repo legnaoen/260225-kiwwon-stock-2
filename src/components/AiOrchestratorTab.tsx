@@ -9,7 +9,7 @@ const AI_AGENTS = [
         gemini: true, trigger: 'CRON' as const,
         schedules: [
             { time: '08:50', label: 'Cycle A — 장전 분석', description: '글로벌 매크로, 뉴스, 수급 종합 판단' },
-            { time: '09:30', label: 'Intraday 하이브리드 #1', description: '개장 직후 수급/모멘텀 분석 종합' },
+            { time: '09:30', label: '베이지안 검증 (Pivot)', description: '개장 30분 실시간 수급 검증 및 장전 포지션 비상 궤도 수정' },
             { time: '13:00', label: 'Intraday 하이브리드 #2', description: '오후장 추세 반전 감지 결론 도출' },
             { time: '15:10', label: 'Cycle B — 장마감', description: '종가 기준 최종 판단 및 기록' },
         ],

@@ -152,7 +152,23 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
     const [showDigestModal, setShowDigestModal] = useState(false)
     const [digestContent, setDigestContent] = useState('')
     const [isDigestLoading, setIsDigestLoading] = useState(false)
+    
+    // Settings States
     const [telegramEnabled, setTelegramEnabled] = useState(true)
+    const [cciPeriod, setCciPeriod] = useState(20)
+    const [cciOverboughtEnabled, setCciOverboughtEnabled] = useState(true)
+    const [cciOverboughtLimit, setCciOverboughtLimit] = useState(80)
+    const [cciOversoldEnabled, setCciOversoldEnabled] = useState(true)
+    const [cciOversoldLimit, setCciOversoldLimit] = useState(-120)
+
+    const saveAgentSettings = async (updates: any) => {
+        await window.electronAPI.saveMarketConditionSettings({
+            telegramEnabled, cciPeriod, 
+            cciOverboughtEnabled, cciOverboughtLimit,
+            cciOversoldEnabled, cciOversoldLimit,
+            ...updates
+        })
+    }
 
     const handleFetchDigest = async () => {
         setIsDigestLoading(true)
@@ -175,6 +191,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
     const [autoWeeklyReview, setAutoWeeklyReview] = useState(true)
     const [autoMonthlyReview, setAutoMonthlyReview] = useState(true)
     const [returnView, setReturnView] = useState<'T+1' | 'T+5' | 'T+20'>('T+1')
+    const [topViewMode, setTopViewMode] = useState<'chart' | 'report'>('chart')
 
     const topRef = useRef<HTMLDivElement>(null)
 
@@ -336,6 +353,11 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                 setTelegramEnabled(setRes.data.telegramEnabled !== false)
                 setAutoWeeklyReview(setRes.data.autoWeeklyReview !== false)
                 setAutoMonthlyReview(setRes.data.autoMonthlyReview !== false)
+                if (setRes.data.cciPeriod !== undefined) setCciPeriod(setRes.data.cciPeriod)
+                if (setRes.data.cciOverboughtEnabled !== undefined) setCciOverboughtEnabled(setRes.data.cciOverboughtEnabled)
+                if (setRes.data.cciOverboughtLimit !== undefined) setCciOverboughtLimit(setRes.data.cciOverboughtLimit)
+                if (setRes.data.cciOversoldEnabled !== undefined) setCciOversoldEnabled(setRes.data.cciOversoldEnabled)
+                if (setRes.data.cciOversoldLimit !== undefined) setCciOversoldLimit(setRes.data.cciOversoldLimit)
             }
         } catch(e) { console.error('Failed to fetch MCA data', e) }
 
@@ -403,10 +425,22 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
         <div className="flex flex-col h-full bg-background overflow-hidden">
             {/* ── Header Row ── */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
-                <div className="flex items-center gap-2">
-                    <Sparkles className="text-indigo-400 w-4 h-4" />
-                    <span className="text-sm font-bold tracking-tight">Market AI</span>
-                    <span className="text-xs text-muted-foreground ml-1">KOSPI Directional Agent</span>
+                <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-2">
+                        <Sparkles className="text-indigo-400 w-4 h-4" />
+                        <span className="text-sm font-bold tracking-tight">Market AI</span>
+                        <span className="hidden xl:inline text-xs text-muted-foreground ml-1">KOSPI Directional Agent</span>
+                    </div>
+
+                    {/* Top Panel Tab Switcher */}
+                    <div className="flex items-center bg-muted/30 p-0.5 rounded-lg border border-border/50">
+                        <button onClick={() => setTopViewMode('chart')} className={cn("px-3 py-1 text-xs font-bold transition-all rounded-md flex items-center gap-1.5", topViewMode === 'chart' ? "bg-background text-foreground shadow-sm ring-1 ring-border/50" : "text-muted-foreground hover:text-foreground")} title="KODEX 200 일봉 및 5분봉 실시간 대조">
+                            📈 일봉·분봉
+                        </button>
+                        <button onClick={() => setTopViewMode('report')} className={cn("px-3 py-1 text-xs font-bold transition-all rounded-md flex items-center gap-1.5", topViewMode === 'report' ? "bg-background text-foreground shadow-sm ring-1 ring-border/50" : "text-muted-foreground hover:text-foreground")} title="AI 누적 성과 및 최신 리포트 보기">
+                            📝 성과·리포트
+                        </button>
+                    </div>
                 </div>
                 <div className="flex items-center gap-3 text-xs">
                     <div className="flex items-center gap-1">
@@ -447,115 +481,132 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
 
             {/* ── Top: Chart + Report (horizontally draggable) ── */}
             <div ref={topRef} className="flex px-4 pt-3" style={{ height: layout.topH }}>
-                {/* Left: Chart */}
-                <div className="flex flex-col min-w-0 overflow-hidden border border-border/20 rounded-lg bg-muted/5 p-1.5" style={{ width: `${layout.chartPct * 100}%` }}>
-                    <div className="flex items-center gap-4 mb-2">
-                        {decisionTab === 'classic' ? (
-                            <>
+                {topViewMode === 'chart' ? (
+                    <>
+                        {/* 1. KODEX 200 일봉 */}
+                        <div className="flex flex-col min-w-0 flex-1 overflow-hidden border border-border/20 rounded-lg bg-muted/5 p-1.5">
+                            <div className="flex items-center mb-2 px-1">
+                                <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider">KODEX 200 일봉 (Daily)</span>
+                            </div>
+                            <div className="flex-1 min-h-0 bg-background rounded border border-border/40 overflow-hidden">
+                                <IntradayChart ticker="069500" timeframe="D" />
+                            </div>
+                        </div>
+
+                        {/* 구분용 DragH 재활용하지 않고 고정 여백 처리 (플렉스로 5:5 배분) */}
+                        <div className="w-2 shrink-0"></div>
+
+                        {/* 2. KODEX 200 5분봉 */}
+                        <div className="flex flex-col min-w-0 flex-1 overflow-hidden border border-border/20 rounded-lg bg-muted/5 p-1.5">
+                            <div className="flex items-center mb-2 px-1">
+                                <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider">KODEX 200 5분봉 (5M)</span>
+                                <div className="flex items-center gap-3 text-xs ml-auto pr-1">
+                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-rose-500" /><span className="text-muted-foreground text-[10px]">LONG</span></div>
+                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-blue-500" /><span className="text-muted-foreground text-[10px]">SHORT</span></div>
+                                </div>
+                            </div>
+                            <div className="flex-1 min-h-0 bg-background rounded border border-border/40 overflow-hidden">
+                                <IntradayChart ticker="069500" intradayData={intradayData} timeframe="5m" />
+                            </div>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        {/* Left: Chart */}
+                        <div className="flex flex-col min-w-0 overflow-hidden border border-border/20 rounded-lg bg-muted/5 p-1.5" style={{ width: `${layout.chartPct * 100}%` }}>
+                            <div className="flex items-center gap-4 mb-2">
                                 <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider ml-1">Cumulative Performance (30D)</span>
                                 <div className="flex items-center gap-3 text-xs ml-auto pr-1">
                                     <div className="flex items-center gap-1.5"><div className="w-5 h-0 border-t-[1.5px] border-dashed border-slate-400/50" /><span className="text-muted-foreground">KOSPI</span></div>
                                     <div className="flex items-center gap-1.5"><div className="w-5 h-[2px] bg-indigo-500 rounded" /><span className="text-indigo-400 font-bold">Agent</span></div>
                                 </div>
-                            </>
-                        ) : (
-                            <>
-                                <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider ml-1 flex items-center gap-1.5"><Activity className="w-3.5 h-3.5"/> Intraday Momentum 5m (KODEX)</span>
-                                <div className="flex items-center gap-3 text-xs ml-auto pr-1">
-                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-rose-500" /><span className="text-muted-foreground text-[10px]">LONG</span></div>
-                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-blue-500" /><span className="text-muted-foreground text-[10px]">SHORT</span></div>
+                            </div>
+                            <div className="flex-1 min-h-0 bg-background rounded border border-border/40 overflow-hidden">
+                                <PerformanceChart redrawKey={chartRedraw} history={history} />
+                            </div>
+                        </div>
+
+                        {/* Horizontal Drag Handle */}
+                        <DragH onDrag={onDragH} />
+
+                        {/* Right: Latest Report + Market Edges */}
+                        <div className="flex-1 min-w-0 flex flex-col overflow-hidden gap-2">
+                            <div className="flex items-center gap-2 mb-1.5">
+                                <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Latest Report</span>
+                                <span className="text-xs text-muted-foreground opacity-50 ml-auto">{latest ? `${latest.date} · Cycle ${latest.cycle === 'A' ? '장전(A)' : latest.cycle === 'P' ? '장중(P)' : '마감(B)'}` : 'No Data'}</span>
+                            </div>
+                            {latest ? (
+                            <div className="flex-1 min-h-0 overflow-y-auto p-3 bg-muted/20 border border-border/40 rounded-lg text-sm leading-relaxed space-y-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={cn("px-1.5 py-0.5 rounded border text-xs font-bold", getPositionStyle(latest.position || ''))}>
+                                        {getPredictIcon(latest.predict === 'LONG' ? '상승' : latest.predict === 'SHORT' ? '하락' : '대기')}
+                                        {latest.position || latest.predict} {latest.predict !== 'HOLD' && '매수'}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground ml-auto font-mono">신뢰도 {((latest.confidence || 0) * 100).toFixed(0)}%</span>
+                                    {(latest.t5_predict || latest.t1_target_return) && (
+                                        <div className="w-full flex items-center gap-2 mt-1 mb-0.5 whitespace-nowrap overflow-x-auto">
+                                            <span className="text-[10px] uppercase font-bold text-muted-foreground">T+1 목표</span>
+                                            <span className={cn("text-[11px] font-bold", latest.predict === 'LONG' ? 'text-rose-500' : latest.predict === 'SHORT' ? 'text-blue-500' : 'text-slate-400')}>{latest.t1_target_return ? `${latest.t1_target_return>0?'+':''}${latest.t1_target_return}%` : '-'}</span>
+                                            <div className="w-px h-3 bg-border/50 mx-0.5" />
+                                            <span className="text-[10px] uppercase font-bold text-muted-foreground">T+5 목표</span>
+                                            <span className={cn("text-[11px] font-bold", latest.t5_predict === 'LONG' ? 'text-rose-500' : latest.t5_predict === 'SHORT' ? 'text-blue-500' : 'text-slate-400')}>{latest.t5_target_return ? `${latest.t5_target_return>0?'+':''}${latest.t5_target_return}%` : '-'}</span>
+                                            <div className="w-px h-3 bg-border/50 mx-0.5" />
+                                            <span className="text-[10px] uppercase font-bold text-muted-foreground">T+20 목표</span>
+                                            <span className={cn("text-[11px] font-bold", latest.t20_predict === 'LONG' ? 'text-rose-500' : latest.t20_predict === 'SHORT' ? 'text-blue-500' : 'text-slate-400')}>{latest.t20_target_return ? `${latest.t20_target_return>0?'+':''}${latest.t20_target_return}%` : '-'}</span>
+                                        </div>
+                                    )}
                                 </div>
-                            </>
-                        )}
-                    </div>
-                    <div className="flex-1 min-h-0 bg-background rounded border border-border/40 overflow-hidden">
-                        {decisionTab === 'classic' ? (
-                            <PerformanceChart redrawKey={chartRedraw} history={history} />
-                        ) : (
-                            <IntradayChart ticker="122630" intradayData={intradayData} />
-                        )}
-                    </div>
-                </div>
+                                <div className="border-b border-border/30" />
+                                <div className="text-sm text-foreground/90 leading-relaxed max-w-none prose prose-sm dark:prose-invert">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{latest.rationale}</ReactMarkdown>
+                                </div>
+                                <div className="flex flex-wrap gap-1 pt-1">
+                                    {latest.indicators_json && (() => {
+                                        try {
+                                            const inds = JSON.parse(latest.indicators_json);
+                                            return inds.map((ind: string, i: number) => (
+                                                <span key={i} className="px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded text-xs text-indigo-400">{ind}</span>
+                                            ));
+                                        } catch { return null; }
+                                    })()}
+                                </div>
+                            </div>
+                            ) : (
+                                <div className="flex-1 flex items-center justify-center border border-border/40 rounded-lg text-sm text-muted-foreground bg-muted/20">
+                                    {isRunning ? 'AI 판단 중...' : '보고서가 없습니다.'}
+                                </div>
+                            )}
 
-                {/* Horizontal Drag Handle */}
-                <DragH onDrag={onDragH} />
-
-                {/* Right: Latest Report + Market Edges */}
-                <div className="flex-1 min-w-0 flex flex-col overflow-hidden gap-2">
-                    <div className="flex items-center gap-2 mb-1.5">
-                        <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Latest Report</span>
-                        <span className="text-xs text-muted-foreground opacity-50 ml-auto">{latest ? `${latest.date} · Cycle ${latest.cycle === 'A' ? '장전(A)' : '마감(B)'}` : 'No Data'}</span>
-                    </div>
-                    {latest ? (
-                    <div className="flex-1 min-h-0 overflow-y-auto p-3 bg-muted/20 border border-border/40 rounded-lg text-sm leading-relaxed space-y-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <span className={cn("px-1.5 py-0.5 rounded border text-xs font-bold", getPositionStyle(latest.position || ''))}>
-                                {getPredictIcon(latest.predict === 'LONG' ? '상승' : latest.predict === 'SHORT' ? '하락' : '대기')}
-                                {latest.position || latest.predict} {latest.predict !== 'HOLD' && '매수'}
-                            </span>
-                            <span className="text-xs text-muted-foreground ml-auto font-mono">신뢰도 {((latest.confidence || 0) * 100).toFixed(0)}%</span>
-                            {(latest.t5_predict || latest.t1_target_return) && (
-                                <div className="w-full flex items-center gap-2 mt-1 mb-0.5 whitespace-nowrap overflow-x-auto">
-                                    <span className="text-[10px] uppercase font-bold text-muted-foreground">T+1 목표</span>
-                                    <span className={cn("text-[11px] font-bold", latest.predict === 'LONG' ? 'text-rose-500' : latest.predict === 'SHORT' ? 'text-blue-500' : 'text-slate-400')}>{latest.t1_target_return ? `${latest.t1_target_return>0?'+':''}${latest.t1_target_return}%` : '-'}</span>
-                                    <div className="w-px h-3 bg-border/50 mx-0.5" />
-                                    <span className="text-[10px] uppercase font-bold text-muted-foreground">T+5 목표</span>
-                                    <span className={cn("text-[11px] font-bold", latest.t5_predict === 'LONG' ? 'text-rose-500' : latest.t5_predict === 'SHORT' ? 'text-blue-500' : 'text-slate-400')}>{latest.t5_target_return ? `${latest.t5_target_return>0?'+':''}${latest.t5_target_return}%` : '-'}</span>
-                                    <div className="w-px h-3 bg-border/50 mx-0.5" />
-                                    <span className="text-[10px] uppercase font-bold text-muted-foreground">T+20 목표</span>
-                                    <span className={cn("text-[11px] font-bold", latest.t20_predict === 'LONG' ? 'text-rose-500' : latest.t20_predict === 'SHORT' ? 'text-blue-500' : 'text-slate-400')}>{latest.t20_target_return ? `${latest.t20_target_return>0?'+':''}${latest.t20_target_return}%` : '-'}</span>
+                            {/* Graph RAG: 시장 영향 이슈 패널 */}
+                            {marketEdges.length > 0 && (
+                                <div className="border border-border/40 rounded-lg bg-muted/10 p-3">
+                                    <div className="flex items-center gap-1.5 mb-2">
+                                        <Link2 className="w-3.5 h-3.5 text-indigo-400" />
+                                        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">시장 영향 요인 (Knowledge Graph)</span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {marketEdges.map((edge: any, i: number) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => onNavigate?.('issue-agent', edge.source_id)}
+                                                className={cn(
+                                                    "flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-full border transition-all shadow-sm",
+                                                    edge.relation === 'BENEFITS'
+                                                        ? "bg-rose-500/5 border-rose-500/20 text-rose-500 hover:bg-rose-500/15"
+                                                        : "bg-blue-500/5 border-blue-500/20 text-blue-500 hover:bg-blue-500/15"
+                                                )}
+                                                title={edge.logical_path || ''}
+                                            >
+                                                {edge.relation === 'BENEFITS' ? '↑' : '↓'}
+                                                {edge.issue_name || edge.source_id}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                         </div>
-                        <div className="border-b border-border/30" />
-                        <div className="text-sm text-foreground/90 leading-relaxed max-w-none prose prose-sm dark:prose-invert">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{latest.rationale}</ReactMarkdown>
-                        </div>
-                        <div className="flex flex-wrap gap-1 pt-1">
-                            {latest.indicators_json && (() => {
-                                try {
-                                    const inds = JSON.parse(latest.indicators_json);
-                                    return inds.map((ind: string, i: number) => (
-                                        <span key={i} className="px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded text-xs text-indigo-400">{ind}</span>
-                                    ));
-                                } catch { return null; }
-                            })()}
-                        </div>
-                    </div>
-                    ) : (
-                        <div className="flex-1 flex items-center justify-center border border-border/40 rounded-lg text-sm text-muted-foreground bg-muted/20">
-                            {isRunning ? 'AI 판단 중...' : '보고서가 없습니다.'}
-                        </div>
-                    )}
-
-                    {/* Graph RAG: 시장 영향 이슈 패널 */}
-                    {marketEdges.length > 0 && (
-                        <div className="border border-border/40 rounded-lg bg-muted/10 p-3">
-                            <div className="flex items-center gap-1.5 mb-2">
-                                <Link2 className="w-3.5 h-3.5 text-indigo-400" />
-                                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">시장 영향 요인 (Knowledge Graph)</span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                                {marketEdges.map((edge: any, i: number) => (
-                                    <button
-                                        key={i}
-                                        onClick={() => onNavigate?.('issue-agent', edge.source_id)}
-                                        className={cn(
-                                            "flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-full border transition-all shadow-sm",
-                                            edge.relation === 'BENEFITS'
-                                                ? "bg-rose-500/5 border-rose-500/20 text-rose-500 hover:bg-rose-500/15"
-                                                : "bg-blue-500/5 border-blue-500/20 text-blue-500 hover:bg-blue-500/15"
-                                        )}
-                                        title={edge.logical_path || ''}
-                                    >
-                                        {edge.relation === 'BENEFITS' ? '↑' : '↓'}
-                                        {edge.issue_name || edge.source_id}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
+                    </>
+                )}
             </div>
 
             {/* Vertical Drag Handle (top ↔ table) */}
@@ -645,7 +696,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             {history.map((t) => (
                                 <tr key={t.id} onClick={() => setSelectedTrade(t)} className="border-b border-border/20 hover:bg-accent/30 cursor-pointer transition-colors group">
                                     <td className="py-2 pr-4 font-mono text-muted-foreground">{t.date}</td>
-                                    <td className="py-2 pr-4 text-center text-xs font-medium">{t.cycle === 'A' ? '장전(A)' : '마감(B)'}</td>
+                                    <td className="py-2 pr-4 text-center text-xs font-medium">{t.cycle === 'A' ? '장전(A)' : t.cycle === 'P' ? '장중(P)' : '마감(B)'}</td>
                                     <td className="py-2 pr-4">
                                         {(() => {
                                             const vPredict = returnView === 'T+5' && t.t5_predict ? t.t5_predict : returnView === 'T+20' && t.t20_predict ? t.t20_predict : t.predict;
@@ -1259,11 +1310,76 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                     e.preventDefault()
                                     const next = !telegramEnabled
                                     setTelegramEnabled(next)
-                                    await window.electronAPI.saveMarketConditionSettings({ telegramEnabled: next })
+                                    await saveAgentSettings({ telegramEnabled: next })
                                 }}>
                                     <span className={cn("pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out", telegramEnabled ? 'translate-x-4' : 'translate-x-0')} />
                                 </div>
                             </label>
+
+                            <div className="border-t border-border/40 my-2" />
+
+                            {/* CCI Settings */}
+                            <div className="space-y-3">
+                                <span className="text-sm font-bold flex items-center gap-2 mb-1">
+                                    <Activity className="w-4 h-4 text-indigo-400" /> 장중 시그널 (CCI) 변수
+                                </span>
+                                
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-muted-foreground text-xs">기간 (Period)</span>
+                                    <input type="number" value={cciPeriod} onChange={(e) => {
+                                        const v = Number(e.target.value); setCciPeriod(v); saveAgentSettings({ cciPeriod: v })
+                                    }} className="w-16 h-7 text-xs bg-muted/20 border border-border/40 rounded text-center focus:outline-none focus:border-indigo-500" />
+                                </div>
+
+                                <div className="flex items-center justify-between text-sm p-2 bg-muted/10 border border-border/30 rounded-lg">
+                                    <label className="flex items-center gap-2 cursor-pointer flex-1">
+                                        <input type="checkbox" checked={cciOverboughtEnabled} onChange={(e) => {
+                                            const v = e.target.checked; setCciOverboughtEnabled(v); saveAgentSettings({ cciOverboughtEnabled: v })
+                                        }} className="w-3.5 h-3.5 rounded border-border text-indigo-500 bg-background/50 accent-indigo-500" />
+                                        <span className="text-xs text-foreground/80">과매수 트리거 (매도)</span>
+                                    </label>
+                                    <input type="number" disabled={!cciOverboughtEnabled} value={cciOverboughtLimit} onChange={(e) => {
+                                        const v = Number(e.target.value); setCciOverboughtLimit(v); saveAgentSettings({ cciOverboughtLimit: v })
+                                    }} className="w-16 h-7 text-xs bg-muted/20 border border-border/40 rounded text-center focus:outline-none focus:border-indigo-500 disabled:opacity-30" />
+                                </div>
+
+                                <div className="flex items-center justify-between text-sm p-2 bg-muted/10 border border-border/30 rounded-lg">
+                                    <label className="flex items-center gap-2 cursor-pointer flex-1">
+                                        <input type="checkbox" checked={cciOversoldEnabled} onChange={(e) => {
+                                            const v = e.target.checked; setCciOversoldEnabled(v); saveAgentSettings({ cciOversoldEnabled: v })
+                                        }} className="w-3.5 h-3.5 rounded border-border text-indigo-500 bg-background/50 accent-indigo-500" />
+                                        <span className="text-xs text-foreground/80">과매도 트리거 (매수)</span>
+                                    </label>
+                                    <input type="number" disabled={!cciOversoldEnabled} value={cciOversoldLimit} onChange={(e) => {
+                                        const v = Number(e.target.value); setCciOversoldLimit(v); saveAgentSettings({ cciOversoldLimit: v })
+                                    }} className="w-16 h-7 text-xs bg-muted/20 border border-border/40 rounded text-center focus:outline-none focus:border-indigo-500 disabled:opacity-30" />
+                                </div>
+                            </div>
+                            
+                            <div className="border-t border-border/40 my-2" />
+                            <div className="space-y-3">
+                                <span className="text-sm font-bold flex items-center gap-2 mb-1 text-rose-500">
+                                    <Activity className="w-4 h-4" /> 군집 AI 성과 초기화
+                                </span>
+                                <div className="text-xs text-muted-foreground mb-2">
+                                    모든 페르소나의 누적/장중 승률 기록을 완전히 초기화합니다. (가중치 리셋)
+                                </div>
+                                <button
+                                    onClick={async () => {
+                                        if (window.confirm("정말로 모든 군집 AI의 승률 데이터를 초기화할까요?")) {
+                                            const res = await window.electronAPI.clearPersonaPerformance();
+                                            if (res.success) {
+                                                alert("초기화가 완료되었습니다.\n다음 평가 시 처음부터 다시 집계됩니다.");
+                                            } else {
+                                                alert("초기화 실패: " + res.error);
+                                            }
+                                        }
+                                    }}
+                                    className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-bold border border-rose-500/30 rounded-lg transition-colors text-sm"
+                                >
+                                    기록 파기 및 리셋
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

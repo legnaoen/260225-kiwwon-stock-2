@@ -25,8 +25,9 @@ import { TechnicalAnalyzer } from './TechnicalAnalyzer'
 // 새 파이프라인 추가 시 여기에 한 줄만 추가하면 자동 통합
 // ※ PL-NewsFlow, PL-NewsKeyword는 NewsDataHub 캐시로 대체됨 (API 절약)
 const PIPELINE_REGISTRY: PipelineSlot[] = [
-    { id: 'PL-Macro',       label: '글로벌 매크로',      required: true,  cycles: ['A', 'B'] },
-    { id: 'PL-LocalFlow',   label: '국내 수급',          required: true,  cycles: ['A', 'B'] },
+    { id: 'PL-Macro',       label: '글로벌 매크로',      required: true,  cycles: ['A', 'P', 'B'] },
+    { id: 'PL-LocalFlow',   label: '국내 수급',          required: true,  cycles: ['A', 'P', 'B'] },
+    { id: 'PL-InvestorFlow',label: '주체별 수급(외인/기관)', required: true,  cycles: ['A', 'P', 'B'] },
     // 미구현 파이프라인은 주석 처리. 구현 후 주석 해제만 하면 됨:
     // { id: 'PL-NXT',      label: 'NXT 프리마켓 수급', required: false, cycles: ['A'] },
 ]
@@ -96,7 +97,36 @@ export class MarketConditionAgent {
                 throw new Error('모든 파이프라인 수집 실패. 판단 불가.')
             }
 
-            // 2. 프롬프트 조립
+            // 2. 시장지표 AI (Quant/Tech Analyst) 호출 -> 정량 데이터 전처리 (MoE 아키텍처 완성)
+            let quantBriefingStr = '데이터 전처리 실패';
+            try {
+                // 🚀 핵심 수정: 퀀트 참모에게는 철저하게 뉴스(NEWS_HUB)를 숨기고 오직 수치 지표(Macro, Flow 등)만 넘김
+                const quantData = context.available.filter(a => a.id !== 'NEWS_HUB');
+                const quantPrompt = `[거시 경제 및 기술적 수급 데이터 모음]\n${quantData.map(a => `[${a.id}]\n${a.markdown}`).join('\n\n---\n\n')}\n\n당신은 뉴스나 공포심리에 전혀 동요하지 않고 오직 위에 제공된 '수치/수급/기술지표'만 분해하는 '시장지표 AI (Senior Quant Analyst)'입니다. 
+제공된 데이터를 파싱하여 반드시 아래의 구조화된 마크다운 포맷으로 심층 분석 보고서를 작성하세요.
+
+### 1. 매크로(거시) 팩터 동향
+- 환율, 국채 금리, VIX, 글로벌 선물 등 외부 매크로 환경이 KOSPI에 미치는 영향을 서술하세요 (단목 2~3줄).
+### 2. 수급(주체별) 팩터 진단
+- 외국인/기관의 현물 및 선물 매수/매도 포지션 비율과 추세를 근거로 현재 시장의 찐바닥/고점 여부를 논증하세요 (단목 2~3줄).
+### 3. 기술적 위치 및 퀀트 스코어
+- 📈 기술적 지지/저항 국면: (요약)
+- 🧮 퀀트 스코어: (-5 ~ +5 사이의 소수점 첫째자리 값. 강한 매수 우위일수록 +, 강한 매도 우위일수록 -)
+- 🎯 단기 포지션 제안: LONG / SHORT / HOLD`;
+                quantBriefingStr = await AiExecutionQueue.getInstance().enqueue({
+                    agentId: 'ANALYST_QUANT',
+                    agentName: '시장지표 AI',
+                    triggerType: 'CRON',
+                    targetType: 'local',
+                    prompt: quantPrompt,
+                    systemInstruction: "당신은 숫자에만 집착하는 감정없는 퀀트 애널리스트입니다."
+                });
+            } catch(e: any) {
+                console.warn('[MCA] 시장지표 AI 전처리 실패:', e.message);
+            }
+            context.quantBriefing = quantBriefingStr;
+
+            // 3. 프롬프트 조립 (Master AI)
             const systemPrompt = buildSystemPrompt(context)
             const userPrompt = buildUserPrompt(context)
 
@@ -118,6 +148,26 @@ export class MarketConditionAgent {
             // 4. 결과 파싱
             const decision = this.parseResponse(rawResponse)
 
+            // 🚀 핵심 수정: Cycle P (장중)의 경우 현재가(실시간 진입가)를 확실하게 기록
+            let entryPrice = 0;
+            const targetCode = decision.predict === 'LONG' ? '069500' : decision.predict === 'SHORT' ? '114800' : null;
+            if (cycle === 'P' && targetCode) {
+                try {
+                    const { KiwoomService } = await import('./KiwoomService');
+                    const { PriceStore } = await import('./PriceStore');
+                    
+                    // 5분봉 마지막 캔들의 종가를 진입가로 세팅
+                    const candles = await KiwoomService.getInstance().getOhlcv5m(targetCode, 1);
+                    if (candles && candles.length > 0) {
+                        entryPrice = candles[candles.length - 1].close;
+                    } else {
+                        entryPrice = PriceStore.getInstance().getPrice(targetCode) || 0;
+                    }
+                } catch(e) {
+                    console.error('[MCA] P 사이클 진입가 조회 실패:', e);
+                }
+            }
+
             // 5. DB 저장
             const prediction: AgentPrediction = {
                 id: predId,
@@ -137,10 +187,32 @@ export class MarketConditionAgent {
                 t5_predict: decision.t5_predict,
                 t5_target_return: decision.t5_target_return,
                 t20_predict: decision.t20_predict,
-                t20_target_return: decision.t20_target_return
+                t20_target_return: decision.t20_target_return,
+                entry_price: entryPrice > 0 ? entryPrice : undefined
             }
 
             this.savePrediction(prediction)
+
+            // 🚀 역방향 주입 (Harnessing): 마스터의 이슈 평가를 현장 트래커 장부(IssueLedgerDB)에 즉각 반영
+            if (decision.issue_feedbacks && decision.issue_feedbacks.length > 0) {
+                try {
+                    const { IssueLedgerDB } = await import('./IssueLedgerDB');
+                    const ledger = IssueLedgerDB.getInstance();
+                    const activeIssues = ledger.getActiveIssues();
+                    
+                    for (const fb of decision.issue_feedbacks) {
+                        if (!fb.issue_id) continue;
+                        // 매칭 정확도를 위해 부분 일치 허용
+                        const targetIssue = activeIssues.find(i => i.name === fb.issue_id || i.name.includes(fb.issue_id) || fb.issue_id.includes(i.name));
+                        if (targetIssue) {
+                            ledger.updateMasterFeedback(targetIssue.id, fb.is_veto === true, fb.comment || '');
+                            console.log(`[MCA] 💉 이슈 장부 하네스(주입) 완료: [${targetIssue.name}] -> VETO: ${fb.is_veto}`);
+                        }
+                    }
+                } catch(e) {
+                    console.error('[MCA] 💉 이슈 장부에 마스터 VETO 주입 실패:', e);
+                }
+            }
 
             // Cycle B이고 morning_feedback(오답노트)이 있으면 오늘 아침 Cycle A에 업데이트(피기배킹 전략)
             if (cycle === 'B' && decision.morning_feedback && context.todayCycleA) {
@@ -257,7 +329,7 @@ export class MarketConditionAgent {
 
         // Cycle B (오후): 오늘 작성된 Cycle A(아침) 예측을 불러와서 일간 오답노트 작성 유도
         let todayCycleA;
-        if (cycle === 'B') {
+        if (cycle === 'B' || cycle === 'P') {
             const dateStr = this.db.getKstDate()
             const aId = `mca_${dateStr.replace(/-/g, '')}_A`
             todayCycleA = recentHistory.find(h => h.id === aId)
@@ -267,11 +339,23 @@ export class MarketConditionAgent {
         let trackerBriefingBlock = undefined;
         try {
             const { IssueLedgerDB } = await import('./IssueLedgerDB');
-            const activeIssues = IssueLedgerDB.getInstance().getActiveIssues();
+            let activeIssues = IssueLedgerDB.getInstance().getActiveIssues();
+
+            // 🔥 수동 실행 또는 스케줄 지연 등으로 인해 이슈 장부가 비어있다면, 강제로 트래커 선행 가동
+            if ((!activeIssues || activeIssues.length === 0) && (cycle === 'A' || cycle === 'P')) {
+                console.log('[MCA] 활성화된 로컬 이슈 장부가 비어있습니다. IssueManagementAgent 선행 분석을 긴급 가동합니다...');
+                const { IssueManagementAgent } = await import('./IssueManagementAgent');
+                await IssueManagementAgent.getInstance().runDailyAnalysis();
+                activeIssues = IssueLedgerDB.getInstance().getActiveIssues(); // 구동 완료 후 재조회
+            }
+
             if (activeIssues && activeIssues.length > 0) {
+                const latestBriefing = IssueLedgerDB.getInstance().getLatestBriefing();
+                const briefingText = latestBriefing ? `\n\n[현장 참모진(이슈 AI)의 오늘자 시황 종합 브리핑 전문]\n${latestBriefing.summary_markdown}` : '';
+
                 trackerBriefingBlock = activeIssues.map(i => 
-                    `- [${i.name}] (위험 지정: ${i.severity}, 진행: ${i.status})\n  * 현장 트래커 통보: ${i.summary}\n  * 현장 군집 투표 결과: ${i.swarmSummary || '투표 없음'}`
-                ).join('\n\n');
+                    `- [${i.name}] (위험 지정: ${i.severity}, 진행: ${i.status}, 이슈 방향성 판독: ${i.impactDirection})\n  * 현장 트래커 통보: ${i.summary}\n  * 오늘자 시장 국면/투자 스탠스: "${i.current_stance || '특이사항 없음'}"\n  * 현장 군집 투표 결과: ${i.swarmSummary || '투표 없음'}`
+                ).join('\n\n') + briefingText;
             }
         } catch(e) { 
             console.error('[MCA] 현장 트래커(이슈 장부) 브리핑 로드 실패:', e); 
@@ -331,6 +415,7 @@ export class MarketConditionAgent {
                 t5_target_return: parsed.t5?.target_return ? Number(parsed.t5.target_return) : undefined,
                 t20_predict: parsed.t20?.direction && ['LONG', 'SHORT', 'HOLD'].includes(parsed.t20.direction) ? parsed.t20.direction : undefined,
                 t20_target_return: parsed.t20?.target_return ? Number(parsed.t20.target_return) : undefined,
+                issue_feedbacks: Array.isArray(parsed.issue_feedbacks) ? parsed.issue_feedbacks : [],
             }
         } catch (e) {
             console.error('[MCA] JSON parse error:', e)
@@ -351,8 +436,8 @@ export class MarketConditionAgent {
         const rawDb = (this.db as any).db
         const stmt = rawDb.prepare(`
             INSERT OR REPLACE INTO agent_predictions 
-            (id, date, cycle, predict, position, confidence, rationale, sources_json, indicators_json, pipelines_used, execution_time_ms, created_at, raw_context, t1_target_return, t5_predict, t5_target_return, t20_predict, t20_target_return)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, date, cycle, predict, position, confidence, rationale, sources_json, indicators_json, pipelines_used, execution_time_ms, created_at, raw_context, t1_target_return, t5_predict, t5_target_return, t20_predict, t20_target_return, entry_price)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         stmt.run(
             p.id, p.date, p.cycle, p.predict, p.position, p.confidence,
@@ -367,9 +452,10 @@ export class MarketConditionAgent {
             p.t5_predict ?? null,
             p.t5_target_return ?? null,
             p.t20_predict ?? null,
-            p.t20_target_return ?? null
+            p.t20_target_return ?? null,
+            p.entry_price ?? null
         )
-        console.log(`[MCA] 예측 저장 완료: ${p.id}`)
+        console.log(`[MCA] 예측 저장 완료: ${p.id} (entryPrice=${p.entry_price || 'N/A'})`)
     }
 
     public getActiveRules(): string[] {
@@ -452,7 +538,7 @@ export class MarketConditionAgent {
      * - '(오늘 종가 방향)' 을 UP/HOLD/DOWN 으로 판단
      * - 실제 평가는 15:35 PerformanceTracker가 종가 데이터로 콜
      */
-    public async runIntraday(slot: string, force: boolean = false) {
+    public async runIntraday(slot: string, force: boolean = false, cciContext?: { status?: string, cciValue?: number }) {
         const nowMs = Date.now()
         if (!force && nowMs - this.lastIntradayExecutionTime < 15 * 60 * 1000) {
             console.log(`[MCA-Intraday] 15분 쿨다운 적용 중. (timeSlot: ${slot}) 실행 스킵.`);
@@ -484,11 +570,12 @@ export class MarketConditionAgent {
             // 1.5 전담 AI (Front-line Analyst) 병렬 호출 - Chart & News
             let chartAnalystOpinion = "차트 데이터 요약 실패";
             let newsAnalystOpinion = "뉴스 스크랩 실패";
+            let globalTechnicalDigest = "차트 데이터 확보 실패";
 
             try {
                 // (A) 기술적 다이제스트 생성 및 로컬 AI(CHART_ANALYST) 판독
-                const technicalDigest = await this.getIntradayTechnicalDigest();
-                const chartPrompt = `[실시간 다중 타임프레임 차트 브리핑]\n${technicalDigest}\n\n당신은 다이제스트에서 20/60일선 등의 거시적 위치(일봉)를 가볍게 체크하되, **초단기 장중 분봉 차트 흐름과 시가 돌파/지지 여부를 절대적으로 최우선(Highest Priority)순위로 삼아** 앞으로의 단기 주가 향방을 단 3문장 이내로 강하게 평가하는 기술적 분석 전담 AI입니다. 거시적 수급 지연 가능성을 대비해 오직 '현재의 가격 모멘텀'을 믿고 단호한 견해를 제시하세요.`;
+                globalTechnicalDigest = await this.getIntradayTechnicalDigest();
+                const chartPrompt = `[실시간 다중 타임프레임 차트 브리핑]\n${globalTechnicalDigest}\n\n당신은 다이제스트에서 20/60일선 등의 거시적 위치(일봉)를 가볍게 체크하되, **초단기 장중 분봉 차트 흐름과 시가 돌파/지지 여부를 절대적으로 최우선(Highest Priority)순위로 삼아** 앞으로의 단기 주가 향방을 단 3문장 이내로 강하게 평가하는 기술적 분석 전담 AI입니다. 거시적 수급 지연 가능성을 대비해 오직 '현재의 가격 모멘텀'을 믿고 단호한 견해를 제시하세요.`;
                 
                 // (B) NewsDataHub 캐시에서 뉴스 읽기 (직접 API 호출 금지 — NewsDataHub 싱글톤 독점)
                 let newsHeadlinesText = "뉴스 없음 (캐시 미준비)";
@@ -529,9 +616,11 @@ export class MarketConditionAgent {
                 console.error("[MCA-Intraday] 전담 AI 분석 실패:", e.message);
             }
 
-            // 2. 시간대별 특성 주입 (Time-Context)
+            // 2. 시간대별 특성(또는 트리거 특징) 주입 (Time/Event-Context)
             let timeContext = '';
-            if (slot === '09:30') {
+            if (cciContext?.status) {
+                timeContext = `※ 긴급 이벤트 감지: 현재 5분봉 기술적 지표상 [${cciContext.status}] 상태입니다. 이를 오늘 장중 단기 모멘텀의 핵심 트리거로 삼아, 수급과 종합하여 가장 우선적으로 판단에 반영하시오.`;
+            } else if (slot === '09:30') {
                 timeContext = "시가 갭(Gap) 발생 이후 외국인/기관의 초기 포지셔닝 방향과 아침 변동성(Volatility) 추세를 분석하여 오늘 장 전체의 방향을 예측하라.";
             } else if (slot === '13:00') {
                 timeContext = "오후장 진입 시점의 외국인 선물 매매 누적 동향, 프로그램 매매 추이, 그리고 추세 반전(Reversal) 가능성을 엄격히 판별하여 최종 종가가 상승마감일지 하락마감일지 예측하라.";
@@ -582,7 +671,12 @@ ${timeContext}
             const confidence = Math.min(100, Math.max(0, Number(parsed.confidence) || 50))
             
             // UI에 보여질 종합 Rationale 텍스트 조립 (여기에 전문 요약을 넣는 대신 댓글로 뺌)
-            const assembledRationale = `[추세] ${parsed.trend_status || ''}\n[트리거] ${parsed.key_trigger || ''}\n[결론] ${parsed.rationale || ''}`;
+            let assembledRationale = `[추세] ${parsed.trend_status || ''}\n[트리거] ${parsed.key_trigger || ''}\n[결론] ${parsed.rationale || ''}`;
+
+            // CCI 트리거 조건과 수치를 최상단에 주입
+            if (cciContext?.status) {
+                assembledRationale = `🚨 **트리거 감지: ${cciContext.status}**\n\n` + assembledRationale;
+            }
 
             // (C) 전담 AI 브리핑을 "댓글" 처럼 표시하기 위한 초기 댓글 (Pre-comments)
             const initialComments = [
@@ -636,7 +730,7 @@ ${timeContext}
             console.log(`[MCA-Intraday] ${slot} 완료: ${predict} (${confidence}%) | ${Date.now() - startTime}ms`)
 
             // 5. 비동기 군집 댓글 (Asynchronous Swarm Commentary) 트리거 - 백그라운드 구동
-            IntradaySwarmAgent.getInstance().runSwarmCommentary(predId, predict, assembledRationale).catch(e => {
+            IntradaySwarmAgent.getInstance().runSwarmCommentary(predId, predict, assembledRationale, 'intraday_predictions', globalTechnicalDigest).catch(e => {
                 console.error('[MCA-Intraday] 댓글 작성기 비동기 호출 에러:', e.message);
             });
 

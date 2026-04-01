@@ -64,10 +64,18 @@ export class IssueTrackerAgent {
   "summary": "상태 변화에 대한 1~2줄 브리핑 요약",
   "status": "ACTIVE" | "ESCALATING" | "FADING" | "RESOLVED",
   "severity": "S" | "A" | "B" | "C",
-  "needsSwarm": true 혹은 false
+  "needsSwarm": true 혹은 false,
+  "market_bias": -5부터 +5 사이의 정수,
+  "dominant_regime": "예: 지정학 리스크, 통화정책, 국채금리, 테마 순환 등"
 }
 
-* needsSwarm이 true가 되는 조건: 사태가 심각해져 ESCALATING으로 변하거나, 시장의 증시 방향성(상승/하락)을 재평가받아야 할 만큼 중대한 충격파가 탐지되었을 때.`;
+* needsSwarm이 true가 되는 조건: 사태가 심각해져 ESCALATING으로 변하거나, 시장의 증시 방향성(상승/하락)을 재평가받아야 할 만큼 중대한 충격파가 탐지되었을 때.
+* market_bias: 해당 이슈가 글로벌 시장 또는 KODEX200 단기 방향성에 미치는 압력의 강도. 
+  - 극단적 하락 패닉: -5
+  - 중간 수준의 하방 압력: -3
+  - 중립/관망: 0
+  - 뚜렷한 상방 호재: +3
+  - 극단적 시장 환호/랠리: +5
 
         const userPrompt = `[추적 대상 이슈 컨텍스트]
 이슈명: ${issue.name}
@@ -102,6 +110,8 @@ export class IssueTrackerAgent {
             // 이슈 원장 업데이트
             issue.status = result.status;
             issue.severity = result.severity;
+            issue.market_bias = result.market_bias !== undefined ? result.market_bias : 0;
+            issue.dominant_regime = result.dominant_regime || '기타';
             issue.updated_date = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD 형식 유지
 
             db.upsertIssue(issue);

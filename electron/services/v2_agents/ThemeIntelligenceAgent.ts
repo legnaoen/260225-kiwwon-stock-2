@@ -149,13 +149,77 @@ export class ThemeIntelligenceAgent {
                 console.error('[ThemeIntelligence] 주도주 실시간 타겟 뉴스 확보 중 에러:', e);
             }
 
+            // 2.7. 시황 AI 최신 거시 투심 주입
+            let marketConditionContext = "[현재 시장 거시 환경 (시황 AI 군집 투심)]\n";
+            try {
+                const latestPred = rawDb.prepare(`
+                    SELECT time_slot, predict, confidence, swarm_sentiment, rationale
+                    FROM intraday_predictions
+                    WHERE date = ?
+                    ORDER BY created_at DESC LIMIT 1
+                `).get(dateStr) as any;
+                
+                if (latestPred) {
+                    marketConditionContext += `- 최신 장중 군집 투심: ${latestPred.swarm_sentiment || latestPred.predict} (신뢰도 ${latestPred.confidence}%)\n`;
+                    const rat = (latestPred.rationale || '').substring(0, 150).replace(/\n/g, ' ');
+                    marketConditionContext += `- 시황 요약: ${rat}...\n`;
+                } else {
+                    marketConditionContext += "- 당일 시황 AI 판단 기록 없음.\n";
+                }
+            } catch (e: any) {
+                console.error('[ThemeIntelligence] 시황 투심 확보 에러:', e.message);
+            }
+
+            // 2.8. 과거 7일간의 테마/섹터 랭킹 및 생애주기 분석 이력 주입
+            let themeHistoryContext = "[최근 7일간의 주도 테마/섹터 이력 (생애주기 판별용)]\n";
+            try {
+                if (targets.length > 0) {
+                    const placeholders = targets.map(() => '?').join(',');
+                    
+                    const historyFlow = rawDb.prepare(`
+                        SELECT date, type, name, rank_num
+                        FROM naver_market_flow
+                        WHERE date < ? AND date >= date(?, '-7 days')
+                          AND name IN (${placeholders})
+                        ORDER BY date ASC, rank_num ASC
+                    `).all(dateStr, dateStr, ...targets) as any[];
+
+                    const historyIntel = rawDb.prepare(`
+                        SELECT date, name, lifespan_type, reason
+                        FROM theme_intelligence
+                        WHERE date < ? AND date >= date(?, '-7 days')
+                          AND name IN (${placeholders})
+                        ORDER BY date DESC
+                    `).all(dateStr, dateStr, ...targets) as any[];
+
+                    for (const tName of targets) {
+                        const myFlows = historyFlow.filter((f: any) => f.name === tName);
+                        const myIntels = historyIntel.filter((f: any) => f.name === tName);
+                        
+                        if (myFlows.length > 0 || myIntels.length > 0) {
+                            themeHistoryContext += `[${tName}]\n`;
+                            if (myFlows.length > 0) {
+                                const rankProgression = myFlows.map((f: any) => `${f.date}(${f.rank_num}위)`).join(' -> ');
+                                themeHistoryContext += `- 랭킹 변화: ${rankProgression} -> [오늘]\n`;
+                            }
+                            if (myIntels.length > 0) {
+                                const lastIntel = myIntels[0]; // 가장 최근 기록
+                                themeHistoryContext += `- 직전 분석 (${lastIntel.date}): [${lastIntel.lifespan_type}] ${lastIntel.reason}\n`;
+                            }
+                        }
+                    }
+                }
+            } catch (e: any) {
+                console.error('[ThemeIntelligence] 과거 이력 확보 에러:', e.message);
+            }
+
             // 3. Gemini Prompt 조립 (이슈 목록 주입 → 할루시네이션 방지)
             const activeIssues = IssueLedgerDB.getInstance().getActiveIssues();
             const issueListForPrompt = activeIssues.length > 0
-                ? activeIssues.map(i => `  - ID: "${i.id}" | 이름: "${i.name}" | 심각도: ${i.severity} | 상태: ${i.status}`).join('\n')
-                : '  (현재 등록된 활성 이슈 없음)';
+                ? activeIssues.map((i: any) => `  - ID: "${i.id}" | 이름: "${i.name}" | 심각도: ${i.severity} | 상태: ${i.status}`).join('\n')
+                : '  (현재 등록된 활성 거시 이슈 없음)';
 
-            const systemInstruction = `당신은 대한민국 주식 시장의 메가트렌드와 단기 테마의 수명(Lifespan)을 분석하는 최상위 퀀트(Quant) 및 시황 분석가입니다.`;
+            const systemInstruction = `당신은 대한민국 주식 시장의 메가트렌드와 테마의 생애주기(Lifecycle)를 분석하는 최상위 퀀트(Quant) 및 시황 전략가입니다. 단순히 뉴스만 보고 해석하지 않으며, 현재 코스피의 거시적 투심(롱/숏 장세)과 해당 테마의 과거 며칠간 랭킹 변화(발생→성장→눌림목→피크아웃→설거지) 이력을 복합적으로 추론합니다.`;
             
             const userPrompt = `
 [오늘 상위 랭크된 주도 섹터 목록 (Top 10)]
@@ -164,18 +228,27 @@ ${sectorNames.join(', ')}
 [오늘 상위 랭크된 주도 테마 목록 (Top 10)]
 ${themeNames.join(', ')}
 
-[시장 컨텍스트 (뉴스 및 이슈 요약)]
+${marketConditionContext}
+
+[시장 컨텍스트 (실시간 뉴스 및 이슈 요약)]
 ${newsContext}
 
-[🔒 현재 시스템에 등록된 활성 거시 이슈 목록 (이 목록 외의 이슈 ID를 임의로 생성하지 마시오)]
+${themeHistoryContext}
+
+[🔒 현재 시스템에 등록된 활성 거시 이슈 목록 (아래 목록 외의 이슈 ID를 임의로 생성하지 마시오)]
 ${issueListForPrompt}
 
 ---
-위 컨텍스트를 완벽하게 분석하여, 오늘 랭크된 총 ${marketFlow.length}개의 (섹터 + 테마) 항목 각각에 대해 상승한 핵심 호재 이유를 짧게 요약하고, 해당 모멘텀의 예상 수명(단기/중장기)을 판단하시오.
-알 수 없거나 뉴스가 부족한 경우, 자신의 범용 지식(가장 최근의 해당 테마 트렌드)을 동원하여 추론하시오.
+위 컨텍스트를 완벽하게 분석하여, 오늘 랭크된 총 ${marketFlow.length}개의 (섹터 + 테마) 항목 각각에 대해 상승한 핵심 호재 이유를 짧게 요약하고, 해당 모멘텀의 예상 수명 및 현재 생애주기(Lifecycle)를 판단하시오.
 
-[중요 제약] linked_issue_id는 반드시 위 "현재 활성 이슈 목록"에 존재하는 ID만 사용하시오.
-매핑되는 이슈가 없으면 반드시 null로 설정하시오. 임의의 이슈 ID를 만들어내지 마시오.
+[분석 지침]
+1. 거시 지수(KOSPI) 투심이 꺾였을 때 뜨는 테마는 단발성 해지 테마일 확률이 높습니다. 반면 상승장에서는 메가트렌드로 갈 확률이 높습니다.
+2. 과거 이력에서 순위가 지속 상승 중이면 '성장', 순위 밖으로 나갔다 며칠 만에 재등장했다면 '눌림목', 이미 몇일 연속 1~2위를 석권하며 뉴스가 쏟아지면 '피크아웃/설거지' 등의 생애주기를 명시하십시오.
+
+[중요 제약]
+- linked_issue_id는 반드시 위 "활성 거시 이슈 목록"에 존재하는 ID만 사용해야 합니다. 
+- 만약 상위 3위 이내의 대장 테마임에도 매핑되는 기존 이슈가 없다면, 이것은 시황 AI가 놓친 신규 메타입니다. 이 경우 빈 칸으로 두지 말고, "ISSUE-NEW-임의의영문명" 형식으로 ID를 새로 생성하여 적으십시오. (시스템이 이를 파싱해 신규 이슈로 자동 등록할 것입니다).
+- 기존 하위 테마인데 매핑할 원인이 없다면 원래대로 null로 설정하십시오.
 
 반드시 아래의 구조를 가진 순수 JSON 배열만 출력하시오. (Markdown 백틱 금지)
 
@@ -184,10 +257,10 @@ ${issueListForPrompt}
     "type": "THEME 혹은 SECTOR",
     "name": "항목 이름",
     "reason": "상승/주도 요인에 대한 1~2문장 요약",
-    "lifespan_type": "단기 테마 (1주일 내외)" 혹은 "중기 트렌드 (1~3개월)" 혹은 "장기 메가트렌드" 혹은 "판단 불가" 중 하나 선택,
-    "lifespan_reasoning": "왜 이런 수명으로 판단했는지 근거",
-    "linked_issue_id": "위 이슈 목록의 ID 중 하나 또는 null",
-    "linked_issue_path": "이슈→테마 연결 논리 경로 (예: '중동분쟁 → 나프타가격 → 대체재 부각') 또는 null"
+    "lifespan_type": "1일 반짝 테마 (설거지)" 혹은 "단기 테마 (눌림목/성장)" 혹은 "중기 트렌드" 등 수명과 생애주기를 명시,
+    "lifespan_reasoning": "왜 이런 수명/생애주기로 판단했는지 (이력 및 거시 투심 근거 포함)",
+    "linked_issue_id": "위 이슈 목록의 ID 중 하나 또는 신규 이슈 ID 또는 null",
+    "linked_issue_path": "이슈→테마 연결 논리 경로 또는 null"
   }
 ]
 `;
@@ -240,9 +313,42 @@ ${issueListForPrompt}
             let edgeCount = 0;
             for (const item of parsedArray) {
                 const linkedId: string | null = item.linked_issue_id;
-                if (!linkedId || !activeIssueIds.has(linkedId)) continue; // 이슈 목록에 없는 ID는 무시 (할루시네이션 차단)
+                if (!linkedId) continue;
 
+                let actualIssueId = linkedId;
                 const normalizedType = item.type?.toUpperCase().includes('SECTOR') ? 'SECTOR' : 'THEME';
+
+                // 이슈 목록에 없는 ID인데, ISSUE-NEW- 접두어가 있다면 신규 DRAFT 이슈 생성
+                if (!activeIssueIds.has(linkedId)) {
+                    if (linkedId.startsWith('ISSUE-NEW-')) {
+                        actualIssueId = `ISSUE-${dateStr.replace(/-/g, '')}-THM-${Math.floor(Math.random() * 10000)}`;
+                        try {
+                            ledgerDb.upsertIssue({
+                                id: actualIssueId,
+                                name: `[테마AI 발굴] ${item.name} 상승 재료`,
+                                summary: item.reason,
+                                tags: ['THEME_AI_DISCOVERY', normalizedType, item.name],
+                                date_created: this.db.getKstDate(),
+                                date_updated: this.db.getKstDate(),
+                                status: 'DRAFT', // 검증 전 DRAFT 상태
+                                impact_level: 'LOW',
+                                confidence: 50,
+                                source_context: `테마 ${item.name}의 강력한 수급에 기반한 AI 역추산 이슈.\n연결 논리: ${item.linked_issue_path || '알 수 없음'}`,
+                                system_recommendation: `예상 수명: ${item.lifespan_type}`,
+                                related_stocks_json: JSON.stringify([])
+                            });
+                            activeIssueIds.add(actualIssueId);
+                            console.log(`[ThemeIntelligence] 💡 신규 이슈(DRAFT)가 발굴되었습니다: ${actualIssueId}`);
+                        } catch(e: any) { 
+                            console.error('[ThemeIntelligence] 신규 이슈 자동 생성 실패:', e.message); 
+                            continue; 
+                        }
+                    } else {
+                        // 할루시네이션 차단 (이슈 장부에 없고 ISSUE-NEW-도 아닌 임시 ID)
+                        continue; 
+                    }
+                }
+
                 // 수명 기반 자동 만료일 설정
                 let expiresAt: string | undefined;
                 if (item.lifespan_type?.includes('단기')) {
@@ -254,7 +360,7 @@ ${issueListForPrompt}
                 try {
                     ledgerDb.upsertEdge({
                         source_type: 'ISSUE',
-                        source_id:   linkedId,
+                        source_id:   actualIssueId,
                         target_type: normalizedType,
                         target_id:   item.name,
                         relation:    'DRIVES',
@@ -265,7 +371,7 @@ ${issueListForPrompt}
                     });
                     edgeCount++;
                 } catch (edgeErr: any) {
-                    console.warn(`[ThemeIntelligence] Edge 기록 실패 (${linkedId}→${item.name}):`, edgeErr.message);
+                    console.warn(`[ThemeIntelligence] Edge 기록 실패 (${actualIssueId}→${item.name}):`, edgeErr.message);
                 }
             }
             if (edgeCount > 0) {
@@ -278,24 +384,22 @@ ${issueListForPrompt}
                 const tgSvc = TelegramService.getInstance();
                 
                 let tgMsg = `🤖 *[테마 AI 브리핑 완료]* (${dateStr})\n\n`;
-                tgMsg += `🔥 오늘의 주도 테마 및 섹터 분석 수명이 판별되었습니다.\n`;
-                tgMsg += `👉 대시보드 [테마/섹터 트래커] 탭에서 상세 브리핑을 확인하세요.\n\n`;
 
                 const themes = parsedArray.filter((i: any) => i.type.toUpperCase() === 'THEME');
                 const sectors = parsedArray.filter((i: any) => i.type.toUpperCase() === 'SECTOR');
 
                 if (themes.length > 0) {
-                    tgMsg += `\n*[🔥 상위 주도 테마 TOP 3]*\n`;
+                    tgMsg += `*[🔥 상위 주도 테마 TOP 3]*\n\n`;
                     tgMsg += themes.slice(0, 3).map((t: any, idx: number) => 
-                        `${idx + 1}. *${t.name}* (${t.lifespan_type.includes('불가') ? '❓' : t.lifespan_type.includes('단기') ? '⚡ 단기' : '🚀 장기'})\n  - ${t.reason.replace(/[*_`]/g, '')}`
-                    ).join('\n') + '\n';
+                        `${idx + 1}. *${t.name}* [${t.lifespan_type}]\n  - ${t.reason.replace(/[*_`]/g, '')}`
+                    ).join('\n\n') + '\n\n\n';
                 }
 
                 if (sectors.length > 0) {
-                    tgMsg += `\n*[📈 상위 주도 섹터 TOP 3]*\n`;
+                    tgMsg += `*[📈 상위 주도 섹터 TOP 3]*\n\n`;
                     tgMsg += sectors.slice(0, 3).map((s: any, idx: number) => 
-                        `${idx + 1}. *${s.name}* (${s.lifespan_type.includes('불가') ? '❓' : s.lifespan_type.includes('단기') ? '⚡ 단기' : '🚀 장기'})\n  - ${s.reason.replace(/[*_`]/g, '')}`
-                    ).join('\n') + '\n';
+                        `${idx + 1}. *${s.name}* [${s.lifespan_type}]\n  - ${s.reason.replace(/[*_`]/g, '')}`
+                    ).join('\n\n') + '\n';
                 }
 
                 tgSvc.sendMessage(tgMsg).catch(err => console.error('[ThemeIntelligence] 텔레그램 발송 실패', err));

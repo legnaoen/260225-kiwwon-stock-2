@@ -3,6 +3,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { RefreshCw, TrendingUp, Calendar, AlertCircle, X, ExternalLink, Sparkles, Link2 } from 'lucide-react';
+import { StockDetailModal } from '../common/StockDetailModal';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -14,6 +15,7 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
     const [sectorData, setSectorData] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [selectedItem, setSelectedItem] = useState<any>(null);
+    const [selectedStock, setSelectedStock] = useState<{stockCode: string, stockName: string, relatedTheme?: { type: string, name: string }, relatedIssues?: any[]} | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     
     // Copilot Verify States
@@ -27,6 +29,13 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
 
     // Graph RAG: Linked Issue Edges
     const [linkedEdges, setLinkedEdges] = useState<any[]>([]);
+    
+    // 수동 이슈 연결 상태
+    const [showLinkForm, setShowLinkForm] = useState(false);
+    const [activeIssues, setActiveIssues] = useState<any[]>([]);
+    const [selectedIssueId, setSelectedIssueId] = useState('');
+    const [manualLogicalPath, setManualLogicalPath] = useState('');
+    const [isLinking, setIsLinking] = useState(false);
 
     const [targetDate, setTargetDate] = useState<string>('');
     
@@ -44,21 +53,30 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
     useEffect(() => {
         if (!initialSelection || (!themeData && !sectorData)) return;
         const name = initialSelection.toLowerCase();
-        // 테마 목록에서 찾기
-        const allThemes: any[] = themeData?.series ?? [];
-        const allSectors: any[] = sectorData?.series ?? [];
-        const found =
-            allThemes.find((t: any) => t.name?.toLowerCase() === name) ||
-            allSectors.find((s: any) => s.name?.toLowerCase() === name) ||
-            allThemes.find((t: any) => t.name?.toLowerCase().includes(name)) ||
-            allSectors.find((s: any) => s.name?.toLowerCase().includes(name));
+        
+        const allThemes: any[] = themeData?.current ?? [];
+        const allSectors: any[] = sectorData?.current ?? [];
+        
+        let found = null;
+        let foundType = '';
+
+        const exactTheme = allThemes.find((t: any) => t.name?.toLowerCase() === name);
+        const exactSector = allSectors.find((s: any) => s.name?.toLowerCase() === name);
+        const includesTheme = allThemes.find((t: any) => t.name?.toLowerCase().includes(name));
+        const includesSector = allSectors.find((s: any) => s.name?.toLowerCase().includes(name));
+
+        if (exactTheme) { found = exactTheme; foundType = 'THEME'; }
+        else if (exactSector) { found = exactSector; foundType = 'SECTOR'; }
+        else if (includesTheme) { found = includesTheme; foundType = 'THEME'; }
+        else if (includesSector) { found = includesSector; foundType = 'SECTOR'; }
+
         if (found) {
-            setSelectedItem(found);
+            setSelectedItem({ ...found, type: foundType });
             // DOM 렌더링 후 스크롤
             setTimeout(() => {
                 const el = document.getElementById(`theme-item-${found.name}`);
-                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 100);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 300);
         }
     }, [initialSelection, themeData, sectorData]);
 
@@ -144,6 +162,66 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
             console.error(e);
         } finally {
             setIsAnalyzing(false);
+        }
+    };
+
+    const handleAddLinkClick = async () => {
+        if (!showLinkForm) {
+            try {
+                const api = window.electronAPI as any;
+                if (api.getActiveIssues) {
+                    const res = await api.getActiveIssues();
+                    if (res.success && res.data) {
+                        const active = res.data.filter((i: any) => i.status !== 'RESOLVED');
+                        setActiveIssues(active);
+                        if (active.length > 0) setSelectedIssueId(active[0].id);
+                    }
+                }
+            } catch (e) { console.error(e); }
+        }
+        setShowLinkForm(!showLinkForm);
+    };
+
+    const handleSaveLink = async () => {
+        if (!selectedItem || !selectedIssueId) return;
+        setIsLinking(true);
+        try {
+            const api = window.electronAPI as any;
+            if (api.upsertKnowledgeEdge) {
+                const selectedIssue = activeIssues.find(i => i.id === selectedIssueId);
+                const issueName = selectedIssue ? selectedIssue.name : selectedIssueId;
+                
+                // 기본 인과체인 구성 (미입력시)
+                const finalLogicalPath = manualLogicalPath.trim() 
+                    ? manualLogicalPath 
+                    : `${issueName} -> ${selectedItem.name} 수혜`;
+
+                const edge = {
+                    source_type: 'ISSUE',
+                    source_id: selectedIssueId,
+                    target_type: selectedItem.type || 'THEME',
+                    target_id: selectedItem.name,
+                    logical_path: finalLogicalPath,
+                    weight: 1.0,
+                    source_name: issueName
+                };
+                
+                const res = await api.upsertKnowledgeEdge(edge);
+                if (res.success) {
+                    setManualLogicalPath('');
+                    setShowLinkForm(false);
+                    // edge 다시 불러오기
+                    const edgesRes = await api.getKnowledgeEdgesTo(selectedItem.type, selectedItem.name);
+                    if (edgesRes.success && edgesRes.data) setLinkedEdges(edgesRes.data);
+                } else {
+                    alert('연결 저장 실패: ' + res.error);
+                }
+            }
+        } catch (e) {
+            console.error(e);
+            alert('연결 중 오류 발생');
+        } finally {
+            setIsLinking(false);
         }
     };
 
@@ -301,24 +379,104 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                        <div className="space-y-2">
-                            <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
-                                <TrendingUp size={14} /> 모멘텀 궤적 (순위)
-                            </h3>
-                            <div className="h-[200px] w-full border rounded-lg p-2 bg-background flex items-center justify-center shadow-sm">
-                                {itemHistory.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <LineChart data={itemHistory} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.3} />
-                                        <XAxis dataKey="date" tick={{fontSize: 9}} tickFormatter={v=>v.substring(5)} />
-                                        <YAxis reversed domain={[1, 'dataMax']} tick={{fontSize: 9}} width={30} allowDecimals={false} />
-                                        <Tooltip contentStyle={{fontSize: '11px'}} />
-                                        <Line type="monotone" dataKey="rank_num" stroke="#8b5cf6" strokeWidth={2} dot={{r: 3}} activeDot={{r: 5}}/>
-                                        </LineChart>
-                                    </ResponsiveContainer>
-                                ) : (
-                                    <span className="text-xs text-muted-foreground">차트 이력이 부족합니다.</span>
-                                )}
+                        {/* 듀얼 차트 영역 */}
+                        <div className="space-y-4">
+                            {/* 1. 모멘텀 궤적 (순위) */}
+                            <div className="space-y-2">
+                                <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                                    <TrendingUp size={14} className="text-purple-500" /> 모멘텀 궤적 (순위)
+                                </h3>
+                                <div className="h-[140px] w-full border rounded-lg p-2 bg-background flex items-center justify-center shadow-sm">
+                                    {itemHistory.length > 0 ? (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <LineChart data={itemHistory} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.3} />
+                                                <XAxis dataKey="date" tick={{fontSize: 9}} tickFormatter={v=>v.substring(5)} />
+                                                <YAxis reversed domain={[1, 'dataMax']} tick={{fontSize: 9}} width={30} allowDecimals={false} />
+                                                <Tooltip contentStyle={{fontSize: '11px'}} labelStyle={{color:'var(--muted-foreground)'}} />
+                                                <Line type="monotone" dataKey="rank_num" stroke="#8b5cf6" strokeWidth={2} dot={{r: 3}} activeDot={{r: 5}}/>
+                                            </LineChart>
+                                        </ResponsiveContainer>
+                                    ) : (
+                                        <span className="text-xs text-muted-foreground">차트 이력이 부족합니다.</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* 2. 주도주 Price 흐름 (하이브리드 인덱스) */}
+                            <div className="space-y-2">
+                                <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                                    <TrendingUp size={14} className="text-emerald-500" /> 주도주 Price 흐름 (누적 인덱스)
+                                </h3>
+                                <div className="h-[140px] w-full border rounded-lg p-2 bg-background flex items-center justify-center shadow-sm relative">
+                                    {(() => {
+                                        const baseHistory = selectedItem.price_index_history || [];
+                                        
+                                        // 1. 당일 Live 인덱스 계산 (dataSource.date 기준으로 판단)
+                                        let liveIndex = null;
+                                        if (selectedItem.top_stocks && selectedItem.top_stocks.length > 0 && dataSource?.date) {
+                                            const todayAvgChangeRate = selectedItem.top_stocks.reduce((acc: number, s: any) => acc + (s.change_rate || 0), 0) / selectedItem.top_stocks.length;
+                                            const lastData = baseHistory.length > 0 ? baseHistory[baseHistory.length - 1] : { price_index: 100.0, date: '' };
+                                            
+                                            if (lastData.date !== dataSource.date) {
+                                                liveIndex = parseFloat((lastData.price_index * (1 + todayAvgChangeRate / 100)).toFixed(2));
+                                            }
+                                        }
+
+                                        // 2. 상단 모멘텀 차트의 기간(itemHistory)에 맞추어 스케일링
+                                        const alignedIndexHistory = itemHistory.map((histOption: any) => {
+                                            const histDate = histOption.date;
+                                            const matchedDB = baseHistory.find((b: any) => b.date === histDate);
+
+                                            // 오늘(Target Date)인 경우 Live 계산치 오버라이드 (혹은 DB값 사용)
+                                            if (histDate === dataSource?.date) {
+                                                if (liveIndex !== null) {
+                                                    return { date: histDate, price_index: liveIndex, isLive: true };
+                                                }
+                                            }
+                                            
+                                            // DB에 있던 날짜
+                                            if (matchedDB) {
+                                                return { date: histDate, price_index: matchedDB.price_index, isLive: false };
+                                            }
+
+                                            // 비어있는 날짜 배열 맞춤 (null)
+                                            return { date: histDate, price_index: null, isLive: false };
+                                        });
+
+                                        return alignedIndexHistory.length > 0 ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <LineChart data={alignedIndexHistory} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.3} />
+                                                    <XAxis dataKey="date" tick={{fontSize: 9}} tickFormatter={v => v.substring(5)} />
+                                                    <YAxis domain={['dataMin - 1', 'dataMax + 1']} tick={{fontSize: 9}} width={35} tickFormatter={v => v ? v.toFixed(0) : ''} />
+                                                    <Tooltip 
+                                                        contentStyle={{fontSize: '11px', backgroundColor: 'var(--card)', borderColor: 'var(--border)'}} 
+                                                        formatter={(val: number) => [val?.toFixed(2), 'Index']}
+                                                        labelFormatter={(label) => `일자: ${label}`}
+                                                    />
+                                                    <Line 
+                                                        type="monotone" 
+                                                        dataKey="price_index" 
+                                                        stroke="#10b981" 
+                                                        strokeWidth={2} 
+                                                        connectNulls={true}
+                                                        dot={(props: any) => {
+                                                            const { cx, cy, payload } = props;
+                                                            if (payload.price_index === null) return <React.Fragment key={`dot-${cx}`} />;
+                                                            return payload.isLive
+                                                              ? <circle key={`dot-${cx}`} cx={cx} cy={cy} r={4} fill="#10b981" stroke="var(--background)" strokeWidth={2} className="animate-pulse shadow-glow" /> 
+                                                              : <circle key={`dot-${cx}`} cx={cx} cy={cy} r={2.5} fill="#10b981" />;
+                                                        }}
+                                                        activeDot={{r: 5}} 
+                                                    />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <span className="text-xs text-muted-foreground">인덱스 데이터가 아직 구축되지 않았습니다.</span>
+                                        );
+                                    })()}
+                                </div>
                             </div>
                         </div>
 
@@ -327,21 +485,27 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                                 <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
                                     <Sparkles size={14} className="text-primary" /> 데이터 파이프라인 주도주
                                 </h3>
-                                <div className="bg-muted/30 border rounded-lg p-3 grid grid-cols-2 gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                     {selectedItem.top_stocks.map((stock: any, idx: number) => (
-                                        <div key={stock.stock_code} className="flex items-center gap-2 text-[12px] bg-background border px-2.5 py-1.5 rounded-md shadow-sm">
-                                            <span className="font-mono text-[9px] text-muted-foreground px-1 py-0.5 bg-muted rounded">
-                                                {stock.stock_code}
-                                            </span>
-                                            <span className="font-bold text-foreground truncate flex-1">
+                                        <button 
+                                            key={stock.stock_code} 
+                                            className="group flex items-center gap-1.5 text-[12px] bg-muted/40 hover:bg-muted/80 text-foreground px-3 py-1.5 rounded-full border border-border/50 transition-colors cursor-pointer"
+                                            onClick={() => setSelectedStock({ 
+                                                stockCode: stock.stock_code, 
+                                                stockName: stock.stock_name,
+                                                relatedTheme: { type: selectedItem.type || 'THEME', name: selectedItem.name },
+                                                relatedIssues: linkedEdges || []
+                                            })}
+                                        >
+                                            <span className="font-bold">
                                                 {stock.stock_name}
                                             </span>
                                             {stock.change_rate != null && (
-                                                <span className={cn("text-[10px] font-bold font-mono text-right", stock.change_rate > 0 ? "text-red-500" : stock.change_rate < 0 ? "text-blue-500" : "text-muted-foreground")}>
+                                                <span className={cn("text-[10px] font-bold font-mono tracking-tighter", stock.change_rate > 0 ? "text-red-500" : stock.change_rate < 0 ? "text-blue-500" : "text-muted-foreground")}>
                                                     {stock.change_rate > 0 ? '+' : ''}{stock.change_rate}%
                                                 </span>
                                             )}
-                                        </div>
+                                        </button>
                                     ))}
                                 </div>
                             </div>
@@ -386,11 +550,56 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                         )}
 
                         {/* Graph RAG: 원인 이슈 연결 카드 */}
-                        {linkedEdges.length > 0 && (
-                            <div className="space-y-3 pt-4 border-t border-border/50">
+                        <div className="space-y-3 pt-4 border-t border-border/50">
+                            <div className="flex items-center justify-between">
                                 <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
                                     <Link2 size={13} className="text-indigo-400" /> 연결된 거시 이슈
                                 </h3>
+                                <button onClick={handleAddLinkClick} className="flex items-center gap-1 text-[10px] font-semibold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 px-2 py-1 rounded transition-colors border border-indigo-500/20">
+                                    {showLinkForm ? '닫기' : '+ 연결 추가'}
+                                </button>
+                            </div>
+
+                            {/* 직접 연결 폼 */}
+                            {showLinkForm && (
+                                <div className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[11px] font-bold text-foreground">활성 이슈 선택</label>
+                                        <select 
+                                            value={selectedIssueId}
+                                            onChange={(e) => setSelectedIssueId(e.target.value)}
+                                            className="w-full text-[12px] bg-background border border-border/50 rounded p-1.5 focus:border-indigo-500 outline-none"
+                                        >
+                                            {activeIssues.length === 0 && <option value="">(진행 중인 이슈 없음)</option>}
+                                            {activeIssues.map(issue => (
+                                                <option key={issue.id} value={issue.id}>{issue.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="flex items-center justify-between text-[11px] font-bold text-foreground">
+                                            <span>인과 체인 (선택)</span>
+                                            <span className="text-[9px] text-muted-foreground font-normal">미입력시 자동 생성</span>
+                                        </label>
+                                        <input 
+                                            type="text"
+                                            value={manualLogicalPath}
+                                            onChange={(e) => setManualLogicalPath(e.target.value)}
+                                            placeholder={`예: 이슈명 -> ${selectedItem.name} 수혜`}
+                                            className="w-full text-[12px] bg-background border border-border/50 rounded p-1.5 focus:border-indigo-500 outline-none placeholder:text-muted-foreground/50"
+                                        />
+                                    </div>
+                                    <button
+                                        onClick={handleSaveLink}
+                                        disabled={isLinking || !selectedIssueId}
+                                        className="w-full py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-bold rounded transition-colors disabled:opacity-50"
+                                    >
+                                        {isLinking ? '연결 중...' : '확인'}
+                                    </button>
+                                </div>
+                            )}
+
+                            {linkedEdges.length > 0 ? (
                                 <div className="flex flex-col gap-2">
                                     {linkedEdges.map((edge: any, i: number) => {
                                         // logical_path를 '→' 기준으로 분리해 체인 노드 배열로 만들기
@@ -435,8 +644,15 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                                         );
                                     })}
                                 </div>
-                            </div>
-                        )}
+                            ) : (
+                                !showLinkForm && (
+                                    <div className="text-[11.5px] text-muted-foreground italic px-3 py-4 bg-muted/20 rounded-lg border border-dashed border-border/60 text-center">
+                                        현재 연관된 거시 이슈가 없습니다.<br/>
+                                        <span className="text-[10.5px]">우측 상단의 '+ 연결 추가' 버튼을 눌러보세요.</span>
+                                    </div>
+                                )
+                            )}
+                        </div>
 
                         {/* Copilot Verification Block */}
                         <div className="space-y-4 pt-4 border-t border-border/50">
@@ -719,6 +935,16 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
             </div>
 
             {renderDetailPanel()}
+
+            {selectedStock && (
+                <StockDetailModal 
+                    stockCode={selectedStock.stockCode} 
+                    stockName={selectedStock.stockName} 
+                    relatedTheme={selectedStock.relatedTheme}
+                    relatedIssues={selectedStock.relatedIssues}
+                    onClose={() => setSelectedStock(null)} 
+                />
+            )}
         </div>
     );
 };

@@ -49,16 +49,21 @@ export class SchedulerService {
         // ═══ [Step 2] V2 Agent Swarm Schedules ═══
         const settings = store.get('ai_schedule_settings') as any || { enabled: true }
         if (settings.enabled) {
-            // [신규] Tracker: 08:30 (밤사이 발생한 뉴스 읽고, 이슈 장부 개별 요약)
-            const itaJob = cron.schedule('30 08 * * 1-5', async () => {
-                const { IssueTrackerAgent } = await import('./v2_agents/IssueTrackerAgent')
-                await IssueTrackerAgent.getInstance().runMorningAnalysis()
+            // [정상화] 기존 트래커 제거 및 진짜 이슈 통합 AI(IssueManagementAgent)를 08:30에 정규 배치
+            const imaJob = cron.schedule('30 08 * * 1-5', async () => {
+                const { IssueManagementAgent } = await import('./v2_agents/IssueManagementAgent')
+                await IssueManagementAgent.getInstance().runDailyAnalysis()
             }, { timezone: 'Asia/Seoul' })
 
             // Cycle A: 08:50 (장전 시장 파악 - 제미나이가 트래커들의 의견을 종합)
             const mcaJobA = cron.schedule('50 08 * * 1-5', async () => {
                 const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
                 await MarketConditionAgent.getInstance().runPrediction('A')
+            }, { timezone: 'Asia/Seoul' })
+            // Cycle P (Pivot 검증): 09:30 (개장 직후 30분 수급 실데이터로 08:50 예측과 교차 비판 및 스위칭)
+            const mcaJobP = cron.schedule('30 09 * * 1-5', async () => {
+                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
+                await MarketConditionAgent.getInstance().runPrediction('P')
             }, { timezone: 'Asia/Seoul' })
 
             // Cycle B: 15:10 (장마감 전 시장 파악)
@@ -75,18 +80,6 @@ export class SchedulerService {
                 await tracker.evaluateIntraday()  // \uc7a5\uc911 \uc608\uce21 \uc885\uac00 \ub300\ube44 \ud3c9\uac00
             }, { timezone: 'Asia/Seoul' })
 
-            // 장중 인트라데이 예측 (9시 45분부터 12시 45분까지 1시간 간격)
-            const intradayJobs: cron.ScheduledTask[] = []
-            const intradaySlots = ['09:45', '10:45', '11:45', '12:45']
-            for (const slot of intradaySlots) {
-                const [hr, min] = slot.split(':')
-                const job = cron.schedule(`${parseInt(min, 10)} ${parseInt(hr, 10)} * * 1-5`, async () => {
-                    const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
-                    await MarketConditionAgent.getInstance().runIntraday(slot)
-                }, { timezone: 'Asia/Seoul' })
-                intradayJobs.push(job)
-            }
-
             // 장중 5분봉 CCI 모니터링 및 이벤트 트리거 (09:10 ~ 14:00 사이, 매 5분마다)
             const intradayCciJob = cron.schedule('*/5 9-14 * * 1-5', async () => {
                 const now = new Date()
@@ -94,6 +87,36 @@ export class SchedulerService {
                 if (timeInt < 910 || timeInt > 1400) return
 
                 try {
+                    // 최근 10분 내 군집 AI 또는 기타 예측이 있었는지 통합 체크
+                    const { DatabaseService } = await import('./DatabaseService')
+                    const rawDb = (DatabaseService.getInstance() as any).db;
+                    
+                    // 1. 최근 10분 내 메인 AI(CCI 기반) 실행 이력 스캔
+                    const recentCciRun = rawDb.prepare(`
+                        SELECT id, created_at FROM intraday_predictions 
+                        WHERE id LIKE '%CCI%'
+                          AND created_at >= datetime('now', 'localtime', '-10 minutes')
+                        ORDER BY created_at DESC LIMIT 1
+                    `).get();
+
+                    if (recentCciRun) {
+                        console.log(`[SchedulerService] 🕒 최근 10분 내 CCI 기반 예측 이력 존재(${recentCciRun.id}). 실행 스킵.`);
+                        return;
+                    }
+
+                    // 2. 최근 10분 내 군집 AI(스케줄러 기반) 실행 이력 스캔 (경합/충돌 방지)
+                    const recentSwarmRun = rawDb.prepare(`
+                        SELECT id, created_at FROM intraday_predictions 
+                        WHERE id NOT LIKE '%CCI%'
+                          AND created_at >= datetime('now', 'localtime', '-10 minutes')
+                        ORDER BY created_at DESC LIMIT 1
+                    `).get();
+
+                    if (recentSwarmRun) {
+                        console.log(`[SchedulerService] 🕒 최근 10분 내 군집 AI 분석 이력 존재(${recentSwarmRun.id}). 빈번한 실행 방지를 위해 CCI 구동 스킵.`);
+                        return;
+                    }
+
                     const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
                     const { TechnicalAnalyzer } = await import('./v2_agents/TechnicalAnalyzer')
                     const { KiwoomService } = await import('./KiwoomService')
@@ -103,8 +126,8 @@ export class SchedulerService {
                     if (result.isTriggered) {
                         const eventSlotStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} (CCI)`
                         console.log(`[SchedulerService] ⚡ CCI 이벤트 감지: ${result.status} -> AI 긴급 시황 분석 트리거`);
-                        // MarketConditionAgent.runIntraday 15분 쿨다운으로 과도한 분석 방지
-                        await MarketConditionAgent.getInstance().runIntraday(eventSlotStr)
+                        // MarketConditionAgent.runIntraday 15분 내부 쿨다운 무시(force=true)하고 DB 기준 10분 쿨다운 적용
+                        await MarketConditionAgent.getInstance().runIntraday(eventSlotStr, true, result)
                     }
                 } catch (err: any) {
                     console.error('[SchedulerService] CCI 이벤트 체크 에러:', err.message)
@@ -147,8 +170,8 @@ export class SchedulerService {
                 await MarketReviewAgent.getInstance().runDailyReview()
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(itaJob, mcaJobA, mcaJobB, mcaTrackerJob, ...intradayJobs, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, ...swarmJobs)
-            console.log(`[SchedulerService] V2 AI schedules initialized (ITA: 08:30, MCA: 08:50, Swarms, Retros)`)
+            this.scheduledJobs.push(imaJob, mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, ...swarmJobs)
+            console.log(`[SchedulerService] V2 AI schedules initialized (IMA: 08:30, MCA: 08:50, CCI, Swarms, Retros)`)
         }
 
         // ═══ [Step 3] NaverFlow 크론 등록 ═══

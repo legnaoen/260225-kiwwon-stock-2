@@ -124,6 +124,9 @@ export class NaverFlowAggregator implements IBaseAggregator {
                                     if (tagPayloads.length > 0) {
                                         this.dbService.upsertStockThemeTags(tagPayloads);
                                         lines.push(`    *(💡 DB에 ${tagPayloads.length}개 주도주 태그 자동 등록 완료)*`);
+
+                                        // Step 2: 하이브리드 Price Index 구축 및 업데이트
+                                        await this.buildThemePriceIndex(dateStr, type, topItem.name, tagPayloads, lines);
                                     }
                                 } else {
                                     lines.push(`- **[${topItem.name}]** 조건 상회 주도주 발견 안 됨 (${stocks.length}개 종목 중)`);
@@ -187,5 +190,133 @@ export class NaverFlowAggregator implements IBaseAggregator {
         }
 
         return results;
+    }
+
+    /**
+     * 주도주들의 과거 영업일 주가 데이터를 수집하여 Theme Price Index 생성
+     */
+    private async buildThemePriceIndex(dateStr: string, type: string, themeName: string, alphaStocks: {stock_code: string, change_rate: number}[], lines: string[]) {
+        try {
+            // 과거 Index 데이터가 있는지 확인 (최근 1개만)
+            const existingHistory = this.dbService.db.prepare(`
+                SELECT * FROM theme_price_index WHERE type = ? AND name = ? ORDER BY date DESC LIMIT 1
+            `).get(type, themeName) as any;
+
+            if (existingHistory && existingHistory.date === dateStr) {
+                // 이미 오늘자가 있다면 스킵
+                return;
+            }
+
+            // 오늘 당일의 평균 등락률
+            const todayAvgChangeRate = alphaStocks.reduce((sum, s) => sum + s.change_rate, 0) / alphaStocks.length;
+
+            if (existingHistory) {
+                // 기존 데이터가 있다면 새로 전체를 긁지 않고 오늘치(당일수익률)만 전일 Index에 반영(롤오버)
+                const newIndex = existingHistory.price_index * (1 + todayAvgChangeRate / 100);
+                
+                this.dbService.upsertThemePriceIndex([{
+                    date: dateStr,
+                    type,
+                    name: themeName,
+                    price_index: parseFloat(newIndex.toFixed(2)),
+                    daily_return: parseFloat(todayAvgChangeRate.toFixed(2))
+                }]);
+                
+                lines.push(`    *(📈 Price Index 롤오버 누적 완료: **${newIndex.toFixed(2)}**)*`);
+            } else {
+                // 최초 생성하는 테마라면 주도주들의 과거 15거래일치 등락률 평균을 Base 100부터 구축
+                // 네이버 일봉 API 연동 (파이프라인 백그라운드이므로 키움 TPS 제한 회피용으로 최적)
+                
+                const changesByDate: Record<string, number[]> = {};
+                let fetchSuccess = false;
+                
+                for (const stock of alphaStocks) {
+                    try {
+                        const chartUrl = `https://m.stock.naver.com/api/stock/${stock.stock_code}/chart/day?count=15`;
+                        const res = await axios.get(this.proxyJsonUrl, { params: { url: chartUrl }, timeout: 10000 });
+                        
+                        let chartData = res.data;
+                        if (chartData && !Array.isArray(chartData)) {
+                             // 방어적 파싱: 내부 필드 대응
+                             if (Array.isArray(chartData.result)) chartData = chartData.result;
+                             else if (Array.isArray(chartData.chartData)) chartData = chartData.chartData;
+                             else if (Array.isArray(chartData.prices)) chartData = chartData.prices;
+                        }
+
+                        if (Array.isArray(chartData)) {
+                            fetchSuccess = true;
+                            for (const day of chartData) {
+                                // yyyymmdd -> yyyy-mm-dd
+                                const rawDate = day.localDate || day.date;
+                                if (!rawDate) continue;
+                                
+                                let formattedDate = rawDate;
+                                if (rawDate.length === 8 && !rawDate.includes('-')) {
+                                    formattedDate = `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}`;
+                                }
+                                
+                                const ratioRaw = day.fluctuationsRatio || day.changeRate || '0';
+                                const ratio = parseFloat(ratioRaw);
+                                
+                                if (!changesByDate[formattedDate]) changesByDate[formattedDate] = [];
+                                changesByDate[formattedDate].push(ratio);
+                            }
+                        }
+                    } catch (e: any) {
+                         // 하나 실패해도 나머지 종목들 평균으로 대체 가능
+                         console.warn(`[NaverFlowAggregator] Chart fetch failed for ${stock.stock_code}: ${e.message}`);
+                    }
+                }
+
+                if (fetchSuccess) {
+                    const sortedDates = Object.keys(changesByDate).sort(); // 오름차순
+                    let currentIndex = 100.0;
+                    const indexPayload = [];
+                    
+                    for (let i = 0; i < sortedDates.length; i++) {
+                        const d = sortedDates[i];
+                        const dailyRates = changesByDate[d];
+                        // 해당일 주도주들 수익률 평균
+                        const avgDailyReturn = dailyRates.reduce((a, b) => a + b, 0) / dailyRates.length;
+                        
+                        if (i === 0) {
+                            indexPayload.push({ date: d, type, name: themeName, price_index: 100.0, daily_return: avgDailyReturn });
+                        } else {
+                            currentIndex = currentIndex * (1 + avgDailyReturn / 100);
+                            indexPayload.push({ 
+                                date: d, 
+                                type, 
+                                name: themeName, 
+                                price_index: parseFloat(currentIndex.toFixed(2)), 
+                                daily_return: parseFloat(avgDailyReturn.toFixed(2)) 
+                            });
+                        }
+                    }
+                    
+                    if (indexPayload.length > 0) {
+                        // 오늘자 데이터가 과거 데이터 응답(어제 기준)에 없다면 오늘치 당장 이어붙이기
+                        const lastProcessedDate = sortedDates[sortedDates.length - 1];
+                        if (lastProcessedDate < dateStr) {
+                            currentIndex = currentIndex * (1 + todayAvgChangeRate / 100);
+                            indexPayload.push({
+                                date: dateStr,
+                                type,
+                                name: themeName,
+                                price_index: parseFloat(currentIndex.toFixed(2)),
+                                daily_return: parseFloat(todayAvgChangeRate.toFixed(2))
+                            });
+                        }
+                        
+                        this.dbService.upsertThemePriceIndex(indexPayload);
+                        lines.push(`    *(✨ 신규 Price Index Base 100부터 15일치 소급 구축 ➔ **${currentIndex.toFixed(2)}**)*`);
+                    }
+                } else {
+                    lines.push(`    *(⚠️ Price Index 구축 실패: 시계열 데이터 누락)*`);
+                }
+            }
+        } catch (e: any) {
+            console.error(`[NaverFlowAggregator] buildThemePriceIndex failed for ${themeName}:`, e.message);
+            lines.push(`    *(⚠️ Price Index 에러: ${e.message})*`);
+        }
     }
 }

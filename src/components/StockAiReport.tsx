@@ -9,9 +9,10 @@ interface StockAiReportProps {
     symbol: string
     name: string
     refreshTrigger?: number
+    hideTitle?: boolean
 }
 
-export function StockAiReport({ symbol, name, refreshTrigger }: StockAiReportProps) {
+export function StockAiReport({ symbol, name, refreshTrigger, hideTitle }: StockAiReportProps) {
     const [reports, setReports] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [tagInput, setTagInput] = useState('')
@@ -79,7 +80,7 @@ export function StockAiReport({ symbol, name, refreshTrigger }: StockAiReportPro
             {/* 상단 섹션: 종목명 및 태그 */}
             <div className="relative">
                 <div className="flex flex-wrap items-center gap-4 mb-2">
-                    <h3 className="text-3xl font-black tracking-tighter text-foreground">{name}</h3>
+                    {!hideTitle && <h3 className="text-3xl font-black tracking-tighter text-foreground">{name}</h3>}
                     <div className="flex-1 min-w-[200px]">
                         <TagPanel
                             stockTags={stockTags}

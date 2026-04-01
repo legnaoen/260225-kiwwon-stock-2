@@ -54,6 +54,11 @@ export interface IssueRecord {
     summary: string;
     created_date: string;
     updated_date: string;
+    market_bias?: number;
+    dominant_regime?: string;
+    master_veto?: boolean;
+    master_comment?: string;
+    current_stance?: string;
     goodSectors: IssueGoodSector[];
     badSectors: IssueBadSector[];
     timeline?: IssueTimelineNode[];
@@ -194,6 +199,27 @@ export class IssueLedgerDB {
             this.db.exec(`ALTER TABLE issue_briefings ADD COLUMN macro_oil TEXT;`);
         } catch (e) { /* ignore */ }
 
+        // Step 1: 시황 AI 사이드카 메타데이터 필드 추가
+        try {
+            this.db.exec(`ALTER TABLE issues ADD COLUMN market_bias INTEGER DEFAULT 0;`);
+        } catch (e) { /* ignore */ }
+        try {
+            this.db.exec(`ALTER TABLE issues ADD COLUMN dominant_regime TEXT DEFAULT '기타';`);
+        } catch (e) { /* ignore */ }
+        
+        // 역방향 주입(Harnessing)을 위한 마스터 시황 AI 판정 기록 필드
+        try {
+            this.db.exec(`ALTER TABLE issues ADD COLUMN master_veto INTEGER DEFAULT 0;`);
+        } catch (e) { /* ignore */ }
+        try {
+            this.db.exec(`ALTER TABLE issues ADD COLUMN master_comment TEXT DEFAULT NULL;`);
+        } catch (e) { /* ignore */ }
+
+        // 오늘자 국면/분위기를 나타내는 한 줄 의견 필드 (가치 중립 제목과 분리)
+        try {
+            this.db.exec(`ALTER TABLE issues ADD COLUMN current_stance TEXT DEFAULT NULL;`);
+        } catch (e) { /* ignore */ }
+
         // Need to enable Foreign Keys for SQLite
         this.db.pragma('foreign_keys = ON');
     }
@@ -254,6 +280,11 @@ export class IssueLedgerDB {
                 summary: row.summary,
                 created_date: row.created_date,
                 updated_date: row.updated_date,
+                market_bias: row.market_bias,
+                dominant_regime: row.dominant_regime,
+                master_veto: row.master_veto === 1,
+                master_comment: row.master_comment,
+                current_stance: row.current_stance,
                 goodSectors: sectors.filter(s => s.type === 'GOOD').map(s => ({ name: s.sector_name, reason: s.reason })),
                 badSectors: sectors.filter(s => s.type === 'BAD').map(s => ({ name: s.sector_name, reason: s.reason })),
                 swarmSummary: swarmSummary
@@ -276,6 +307,22 @@ export class IssueLedgerDB {
             INSERT OR REPLACE INTO issue_briefings (date, risk_score, summary_markdown, macro_vix, macro_krw, macro_tnx, macro_oil, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
         `).run(date, riskScore, summaryMarkdown, macroVix, macroKrw, macroTnx, macroOil);
+    }
+
+    /**
+     * Get the most recent daily briefing
+     */
+    public getLatestBriefing(): any | null {
+        try {
+            const row = this.db.prepare(`
+                SELECT * FROM issue_briefings 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            `).get();
+            return row || null;
+        } catch (e) {
+            return null;
+        }
     }
 
     /**
@@ -326,17 +373,17 @@ export class IssueLedgerDB {
             if (existing) {
                 this.db.prepare(`
                     UPDATE issues 
-                    SET name = ?, severity = ?, status = ?, impact_direction = ?, summary = ?, updated_date = ?
+                    SET name = ?, severity = ?, status = ?, impact_direction = ?, summary = ?, updated_date = ?, market_bias = ?, dominant_regime = ?, current_stance = ?, master_veto = 0, master_comment = NULL
                     WHERE id = ?
                 `).run(
-                    issue.name, issue.severity, issue.status, issue.impactDirection, issue.summary, issue.updated_date, issue.id
+                    issue.name, issue.severity, issue.status, issue.impactDirection, issue.summary, issue.updated_date, issue.market_bias || 0, issue.dominant_regime || '기타', issue.current_stance || null, issue.id
                 );
             } else {
                 this.db.prepare(`
-                    INSERT INTO issues (id, name, severity, status, impact_direction, summary, created_date, updated_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO issues (id, name, severity, status, impact_direction, summary, created_date, updated_date, market_bias, dominant_regime, current_stance, master_veto, master_comment)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
                 `).run(
-                    issue.id, issue.name, issue.severity, issue.status, issue.impactDirection, issue.summary, issue.created_date, issue.updated_date
+                    issue.id, issue.name, issue.severity, issue.status, issue.impactDirection, issue.summary, issue.created_date, issue.updated_date, issue.market_bias || 0, issue.dominant_regime || '기타', issue.current_stance || null
                 );
             }
 
@@ -356,6 +403,17 @@ export class IssueLedgerDB {
         });
 
         updateTransaction();
+    }
+
+    /**
+     * Update master AI's feedback (harnessing)
+     */
+    public updateMasterFeedback(issueId: string, isVeto: boolean, comment: string): void {
+        this.db.prepare(`
+            UPDATE issues
+            SET master_veto = ?, master_comment = ?, updated_date = datetime('now', 'localtime')
+            WHERE id = ?
+        `).run(isVeto ? 1 : 0, comment, issueId);
     }
 
     /**

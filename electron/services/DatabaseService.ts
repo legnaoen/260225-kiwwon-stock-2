@@ -692,11 +692,50 @@ export class DatabaseService {
         `
         this.db.exec(createPersonaPerformanceTable)
 
+        const createAiRunLogsTable = `
+            CREATE TABLE IF NOT EXISTS ai_run_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+        `
+        this.db.exec(createAiRunLogsTable)
+
         // 기존 테이블에 새 컬럼 추가 (ALTER TABLE은 이미 존재하면 무시)
         const intradayAlterColumns = ['position', 'entry_price', 'close_price', 'return_pct', 'sources_json', 'comments_json', 'swarm_sentiment']
         for (const col of intradayAlterColumns) {
             try { this.db.exec(`ALTER TABLE intraday_predictions ADD COLUMN ${col} ${['sources_json', 'position', 'comments_json', 'swarm_sentiment'].includes(col) ? 'TEXT' : 'REAL'}`) } catch {}
         }
+
+        // Phase 2.5: AI Analysts Sourcing Pool
+        const createAiAnalystPicksTable = `
+            CREATE TABLE IF NOT EXISTS ai_analyst_picks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                agent_type TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                confidence INTEGER DEFAULT 50,
+                lifespan_days INTEGER DEFAULT 5,
+                created_at TEXT NOT NULL,
+                UNIQUE(date, agent_type, stock_code)
+            );
+        `
+        this.db.exec(createAiAnalystPicksTable)
+
+        const createAiDailyRawLogsTable = `
+            CREATE TABLE IF NOT EXISTS ai_daily_raw_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                agent_type TEXT NOT NULL,
+                raw_text TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(date, agent_type)
+            );
+        `
+        this.db.exec(createAiDailyRawLogsTable)
 
         // Phase 2: Portfolio State Machine
         const createMaiisPortfolioTable = `
@@ -729,12 +768,17 @@ export class DatabaseService {
         `
         this.db.exec(createMaiisPortfolioTable)
 
+        // Phase 2.5 Tracker: maiis_portfolio columns for Manager AI
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN analysts_json TEXT") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN lifespan_days INTEGER DEFAULT 20") } catch (e) { }
+
         // Phase 2 Tracker: maiis_portfolio columns for NAV engine
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN closed_date TEXT") } catch (e) { }
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN closed_price REAL DEFAULT 0") } catch (e) { }
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN closed_profit_rate REAL DEFAULT 0") } catch (e) { }
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN actual_entry_price REAL DEFAULT 0") } catch (e) { }
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN entry_shares INTEGER DEFAULT 0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN raw_context TEXT") } catch (e) { }
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN invested_amount REAL DEFAULT 0") } catch (e) { }
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN entry_pending INTEGER DEFAULT 0") } catch (e) { }
 
@@ -766,6 +810,29 @@ export class DatabaseService {
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN high_price REAL DEFAULT 0") } catch (e) { }
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN extension_used INTEGER DEFAULT 0") } catch (e) { }
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN deadline_date TEXT") } catch (e) { }
+
+        // Phase 2.5 Tracker: AI Analyst recommendations
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS ai_analyst_picks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                agent_type TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                reason TEXT,
+                confidence INTEGER DEFAULT 50,
+                lifespan_days INTEGER DEFAULT 5,
+                created_at TEXT NOT NULL,
+                UNIQUE(date, agent_type, stock_code)
+            );
+        `)
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_ai_analyst_picks_date ON ai_analyst_picks(date)")
+        
+        // Phase 4: Retrospective & Performance Tracking for Analyst Picks
+        try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN entry_price REAL DEFAULT 0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN target_profit_rate REAL DEFAULT 5.0") } catch (e) { }
+        try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN max_profit_rate REAL") } catch (e) { }
+        try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN evaluation_status TEXT DEFAULT 'PENDING'") } catch (e) { }
 
         // Ensure macro_indicators_json exists in world state
         try {
@@ -1231,7 +1298,43 @@ export class DatabaseService {
     }
 
     public getStockAnalysis(stockCode: string) {
-        return this.db.prepare('SELECT * FROM daily_rising_stocks WHERE stock_code = ? ORDER BY date DESC, timing DESC').all(stockCode) as any[]
+        const risingStocks = this.db.prepare(`
+            SELECT 
+                date, 
+                '수급 급등주 AI' as agent_type, 
+                ai_score as score, 
+                reason, 
+                chart_insight, 
+                past_reference,
+                date || ' ' || timing as sort_time
+            FROM daily_rising_stocks 
+            WHERE stock_code = ?
+        `).all(stockCode) as any[];
+
+        const analystPicks = this.db.prepare(`
+            SELECT 
+                date, 
+                agent_type, 
+                confidence as score, 
+                reason, 
+                null as chart_insight, 
+                null as past_reference,
+                created_at as sort_time
+            FROM ai_analyst_picks 
+            WHERE stock_code = ?
+        `).all(stockCode) as any[];
+
+        const combined = [...risingStocks, ...analystPicks.map(p => ({
+            ...p,
+            agent_type: p.agent_type === 'THEME' ? '테마 AI' : 
+                        p.agent_type === 'REPORT' ? '리포트 AI' : 
+                        p.agent_type === 'MOMENTUM' ? '수급 AI (모멘텀)' : p.agent_type
+        }))];
+
+        // 최신순 정렬
+        combined.sort((a, b) => b.sort_time.localeCompare(a.sort_time));
+
+        return combined;
     }
 
     public getDailyReportHistory(limit = 100) {
@@ -1438,6 +1541,24 @@ export class DatabaseService {
         return stmt.run(date.toISOString())
     }
 
+    public upsertNaverResearchFlow(data: any[]): number {
+        try {
+            const stmt = this.db.prepare(`
+                INSERT OR REPLACE INTO naver_research_flow (
+                    date, rank, industry_name, report_title, analyst, broker, content_snippet, url, collected_at
+                ) VALUES (@date, @rank, @industry_name, @report_title, @analyst, @broker, @content_snippet, @url, @collected_at)
+            `);
+            const insertMany = this.db.transaction((items: any[]) => {
+                for (const item of items) stmt.run(item);
+            });
+            insertMany(data);
+            return data.length;
+        } catch (e) {
+            console.error('[DatabaseService] upsertNaverResearchFlow Error:', e);
+            throw e;
+        }
+    }
+
     // === MAIIS Inventory Methods ===
     public getMaiisInventory() {
         try {
@@ -1481,6 +1602,111 @@ export class DatabaseService {
 
     public close() {
         this.db.close()
+    }
+
+    // === Phase 2.5: Portfolio Manager & Analysts Methods ===
+    public saveAiAnalystPicks(picks: any[]) {
+        try {
+            const stmt = this.db.prepare(`
+                INSERT INTO ai_analyst_picks (
+                    date, agent_type, stock_code, stock_name, reason, confidence, lifespan_days, created_at, entry_price, target_profit_rate, evaluation_status
+                ) VALUES (
+                    @date, @agent_type, @stock_code, @stock_name, @reason, @confidence, @lifespan_days, @created_at, @entry_price, @target_profit_rate, @evaluation_status
+                )
+                ON CONFLICT(date, agent_type, stock_code) DO UPDATE SET
+                    reason = excluded.reason,
+                    confidence = excluded.confidence,
+                    lifespan_days = excluded.lifespan_days,
+                    entry_price = COALESCE(NULLIF(excluded.entry_price, 0), ai_analyst_picks.entry_price),
+                    created_at = excluded.created_at
+            `);
+            const insertMany = this.db.transaction((items: any[]) => {
+                for (const item of items) {
+                    stmt.run({
+                        ...item,
+                        entry_price: item.entry_price || 0,
+                        target_profit_rate: item.target_profit_rate || 5.0,
+                        evaluation_status: item.evaluation_status || 'PENDING'
+                    });
+                }
+            });
+            insertMany(picks);
+            return picks.length;
+        } catch (e) {
+            console.error('[DatabaseService] saveAiAnalystPicks Error:', e);
+            throw e;
+        }
+    }
+
+    public getAiAnalystPicksByDate(date: string) {
+        return this.db.prepare('SELECT * FROM ai_analyst_picks WHERE date = ?').all(date);
+    }
+
+    public getLatestAiAnalystPicks() {
+        const row = this.db.prepare('SELECT MAX(date) as max_date FROM ai_analyst_picks').get() as any;
+        if (!row || !row.max_date) return [];
+        return this.getAiAnalystPicksByDate(row.max_date);
+    }
+
+    public saveAiDailyRawLog(date: string, agent_type: string, raw_text: string) {
+        try {
+            const stmt = this.db.prepare(`
+                INSERT OR REPLACE INTO ai_daily_raw_logs (date, agent_type, raw_text, created_at)
+                VALUES (@date, @agent_type, @raw_text, @created_at)
+            `);
+            stmt.run({ date, agent_type, raw_text, created_at: this.getKstTimestamp() });
+        } catch (e) {
+            console.error('[DatabaseService] saveAiDailyRawLog Error:', e);
+        }
+    }
+
+    public getAiDailyRawLog(date: string, agent_type: string) {
+        return this.db.prepare('SELECT raw_text FROM ai_daily_raw_logs WHERE date = ? AND agent_type = ?').get(date, agent_type) as { raw_text: string } | undefined;
+    }
+
+    public upsertPortfolioWatchlist(item: any) {
+        const stmt = this.db.prepare(`
+            INSERT INTO maiis_portfolio (
+                stock_code, stock_name, status, strategy, conviction_score, theme, 
+                entry_date, last_signal, last_signal_reason, analysts_json, lifespan_days,
+                last_reviewed_at, created_at, updated_at, raw_context, current_price, entry_price
+            ) VALUES (
+                @stock_code, @stock_name, @status, @strategy, @conviction_score, @theme,
+                @entry_date, @last_signal, @last_signal_reason, @analysts_json, @lifespan_days,
+                @last_reviewed_at, @created_at, @updated_at, @raw_context, @current_price, @entry_price
+            )
+            ON CONFLICT(stock_code) DO UPDATE SET
+                status = excluded.status,
+                conviction_score = excluded.conviction_score,
+                theme = excluded.theme,
+                last_signal = excluded.last_signal,
+                last_signal_reason = excluded.last_signal_reason,
+                analysts_json = excluded.analysts_json,
+                lifespan_days = excluded.lifespan_days,
+                last_reviewed_at = excluded.last_reviewed_at,
+                updated_at = excluded.updated_at,
+                raw_context = excluded.raw_context,
+                current_price = excluded.current_price
+        `);
+        stmt.run({
+            ...item,
+            analysts_json: typeof item.analysts_json === 'string' ? item.analysts_json : JSON.stringify(item.analysts_json || []),
+            created_at: item.created_at || this.getKstTimestamp(),
+            updated_at: this.getKstTimestamp(),
+            last_reviewed_at: this.getKstTimestamp(),
+            raw_context: item.raw_context || null,
+            current_price: item.current_price || 0,
+            entry_price: item.entry_price || 0
+        });
+    }
+
+    public getActivePortfolio() {
+        return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status != 'DROPPED' ORDER BY conviction_score DESC").all();
+    }
+
+    public getPortfolioStocksCount() {
+        const row = this.db.prepare("SELECT COUNT(*) as cnt FROM maiis_portfolio WHERE status != 'DROPPED'").get() as any;
+        return row ? row.cnt : 0;
     }
 
     // === Market News Consensus Methods ===
@@ -1544,6 +1770,30 @@ export class DatabaseService {
     }
 
     // === MAIIS Pipeline Core Methods ===
+    public saveAiRunLog(message: string) {
+        try {
+            this.db.prepare("INSERT INTO ai_run_logs (date, message, created_at) VALUES (date('now', 'localtime'), ?, DATETIME('now', 'localtime'))").run(message);
+        } catch (e) {
+            console.error('[DB] Failed to save ai_run_log:', e);
+        }
+    }
+
+    public getAiRunLogs(): string[] {
+        try {
+            const rows = this.db.prepare("SELECT message FROM ai_run_logs WHERE date >= date('now', 'localtime', '-1 days') ORDER BY id ASC").all() as any[];
+            return rows.map(r => r.message);
+        } catch (e) {
+            console.error('[DB] Failed to get ai_run_logs:', e);
+            return [];
+        }
+    }
+
+    public clearAiRunLogs() {
+        try {
+            this.db.prepare('DELETE FROM ai_run_logs').run();
+        } catch (e) {}
+    }
+
     public saveMaiisDomainInsight(data: { date: string, domain_type: string, raw_input_text: string, used_prompt: string, generated_json: string }) {
         const sql = `
             INSERT INTO maiis_domain_insights (date, domain_type, raw_input_text, used_prompt, generated_json, created_at)
@@ -1690,15 +1940,19 @@ export class DatabaseService {
         `).run(status, status, reason || '', now, stockCode);
     }
 
+
+
+    // ──────────────────────────────────────────────
+    // Phase 2.5: AI Analyst Picks CRUD
+    // ──────────────────────────────────────────────
+
+
+
     // ──────────────────────────────────────────────
     // Phase 2 Tracker: NAV & Daily Snapshot CRUD
     // ──────────────────────────────────────────────
 
-    public getActivePortfolio() {
-        return this.db.prepare(
-            "SELECT * FROM maiis_portfolio WHERE status NOT IN ('CLOSED') ORDER BY conviction_score DESC"
-        ).all() as any[];
-    }
+
 
     public getClosedPortfolio() {
         return this.db.prepare(

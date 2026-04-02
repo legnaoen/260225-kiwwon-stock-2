@@ -1,4 +1,5 @@
 import { YahooFinanceService } from '../../YahooFinanceService';
+import { KiwoomService } from '../../KiwoomService';
 
 interface MacroRawData {
     _timestamp?: string;
@@ -7,6 +8,7 @@ interface MacroRawData {
 
 export class MacroCollector {
     private yahooService = YahooFinanceService.getInstance();
+    private kiwoomService = KiwoomService.getInstance();
     
     // 13종의 종합 매크로 지표 목록 (레거시 대시보드 스펙)
     private readonly TARGETS = [
@@ -46,8 +48,46 @@ export class MacroCollector {
         
         await Promise.all(
             this.TARGETS.map(async (target) => {
-                const data = await this.yahooService.getMacroIndicator(target.symbol);
-                rawData[target.symbol] = data;
+                if (target.symbol === '^KS11' || target.symbol === '^KQ11') {
+                    try {
+                        // KOSPI는 KODEX 200(069500), KOSDAQ은 KODEX 코스닥150(229200) 추종
+                        const code = target.symbol === '^KS11' ? '069500' : '229200';
+                        const candles = await this.kiwoomService.getOhlcvDaily(code, 260); // 약 1년치
+
+                        if (candles && candles.length > 5) {
+                            const quotes = candles.map(c => ({
+                                date: new Date(c.time * 1000).toISOString(),
+                                close: c.close
+                            }));
+
+                            // 최신순 정렬
+                            const sortedQuotes = quotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+                            // 장전(09:00 이전) 이면 오늘치 캐시/목업 봉 생성된 것을 제거하여 완벽한 '전일 종가' 사용
+                            const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' });
+                            const todayDate = formatter.format(new Date());
+                            const latestDateKST = formatter.format(new Date(sortedQuotes[0].date));
+                            
+                            const nowHour = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" })).getHours();
+                            if (latestDateKST === todayDate && nowHour < 9) {
+                                sortedQuotes.shift();
+                            }
+
+                            rawData[target.symbol] = {
+                                meta: { symbol: target.symbol },
+                                quotes: sortedQuotes
+                            };
+                        } else {
+                            rawData[target.symbol] = await this.yahooService.getMacroIndicator(target.symbol);
+                        }
+                    } catch (e: any) {
+                        console.error(`[MacroCollector] Kiwoom fallback failed for ${target.symbol}:`, e.message);
+                        rawData[target.symbol] = await this.yahooService.getMacroIndicator(target.symbol);
+                    }
+                } else {
+                    const data = await this.yahooService.getMacroIndicator(target.symbol);
+                    rawData[target.symbol] = data;
+                }
             })
         );
         

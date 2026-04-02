@@ -153,8 +153,8 @@ export class MarketConditionAgent {
             const targetCode = decision.predict === 'LONG' ? '069500' : decision.predict === 'SHORT' ? '114800' : null;
             if (cycle === 'P' && targetCode) {
                 try {
-                    const { KiwoomService } = await import('./KiwoomService');
-                    const { PriceStore } = await import('./PriceStore');
+                    const { KiwoomService } = await import('../KiwoomService');
+                    const { PriceStore } = await import('../PriceStore');
                     
                     // 5분봉 마지막 캔들의 종가를 진입가로 세팅
                     const candles = await KiwoomService.getInstance().getOhlcv5m(targetCode, 1);

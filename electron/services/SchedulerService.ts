@@ -31,6 +31,22 @@ export class SchedulerService {
     }
 
     /**
+     * 일회성 지연 실행 스케줄러 (장애 발생 시 Fallback 용도)
+     */
+    public scheduleOnceFallback(taskName: string, delayMs: number, taskFn: () => Promise<void>) {
+        console.log(`[SchedulerService] 🕒 임시 크론 예약됨: [${taskName}] ${Math.round(delayMs / 1000 / 60)}분 뒤 실행`);
+        setTimeout(async () => {
+            console.log(`[SchedulerService] 🔄 임시 크론 재실행: [${taskName}]`);
+            try {
+                await taskFn();
+            } catch (e: any) {
+                console.error(`[SchedulerService] ❌ 임시 크론 최종 실패: [${taskName}] ${e.message}`);
+                this.telegram.sendMessage(`🚨 [AI 복구 실패] 임시 재시도(${taskName})가 실행되었으나 재차 실패했습니다.\n에러: ${e.message}`);
+            }
+        }, delayMs);
+    }
+
+    /**
      * 자동화 스케줄 초기화 (저장된 설정 기반)
      */
     public async initSchedules() {
@@ -104,16 +120,16 @@ export class SchedulerService {
                         return;
                     }
 
-                    // 2. 최근 10분 내 군집 AI(스케줄러 기반) 실행 이력 스캔 (경합/충돌 방지)
+                    // 2. 최근 1분 내 군집 AI(스케줄러 기반) 실행 이력 스캔 (경합/충돌 방지)
                     const recentSwarmRun = rawDb.prepare(`
                         SELECT id, created_at FROM intraday_predictions 
                         WHERE id NOT LIKE '%CCI%'
-                          AND created_at >= datetime('now', 'localtime', '-10 minutes')
+                          AND created_at >= datetime('now', 'localtime', '-1 minute')
                         ORDER BY created_at DESC LIMIT 1
                     `).get();
 
                     if (recentSwarmRun) {
-                        console.log(`[SchedulerService] 🕒 최근 10분 내 군집 AI 분석 이력 존재(${recentSwarmRun.id}). 빈번한 실행 방지를 위해 CCI 구동 스킵.`);
+                        console.log(`[SchedulerService] 🕒 최근 1분 내 군집 AI 분석 이력 존재(${recentSwarmRun.id}). 빈번한 실행 방지를 위해 CCI 구동 스킵.`);
                         return;
                     }
 
@@ -170,8 +186,56 @@ export class SchedulerService {
                 await MarketReviewAgent.getInstance().runDailyReview()
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(imaJob, mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, ...swarmJobs)
+            // ─── 종목 AI 파이프라인 (3단계, 5분 간격) ───────────────────────
+            // [Step 1] 09:35 수급 AI: NaverFlow(09:26) 데이터 확보 후 급등/거래대금 교차 분석
+            const momentumJob = cron.schedule('35 09 * * 1-5', async () => {
+                console.log('[Scheduler] 📈 수급 AI (MomentumAnalyst) 자동 실행 시작...')
+                try {
+                    const { MomentumAnalystAgent } = await import('./v2_agents/MomentumAnalystAgent')
+                    await MomentumAnalystAgent.getInstance().runAnalysis()
+                } catch (e: any) {
+                    console.error('[Scheduler] 수급 AI 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            // [Step 2] 09:40 리포트 AI: 증권사 리포트 기반 펀더멘탈 우량주 발굴
+            const fundamentalJob = cron.schedule('40 09 * * 1-5', async () => {
+                console.log('[Scheduler] 📄 리포트 AI (FundamentalAnalyst) 자동 실행 시작...')
+                try {
+                    const { FundamentalAnalystAgent } = await import('./v2_agents/FundamentalAnalystAgent')
+                    await FundamentalAnalystAgent.getInstance().runAnalysis()
+                } catch (e: any) {
+                    console.error('[Scheduler] 리포트 AI 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            // [Step 3] 09:45 포트폴리오 매니저: 수급+리포트+테마 교차검증 → 최종 종목 풀 확정
+            // ⚠️ 장중 스웜(Local AI)과 동시 실행되나 백엔드가 달라 충돌 없음
+            const portfolioManagerJob = cron.schedule('45 09 * * 1-5', async () => {
+                console.log('[Scheduler] 🧑‍💼 포트폴리오 매니저 자동 실행 시작...')
+                try {
+                    const { PortfolioManagerAgent } = await import('./v2_agents/PortfolioManagerAgent')
+                    await PortfolioManagerAgent.getInstance().runDailyReview()
+                } catch (e: any) {
+                    console.error('[Scheduler] 포트폴리오 매니저 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            // [Step 4] 15:45 장마감 채점: 종가 기준 수익률·수명 심사 (PerformanceTracker 직후)
+            const portfolioJudgeJob = cron.schedule('45 15 * * 1-5', async () => {
+                console.log('[Scheduler] ⚖️ 포트폴리오 장마감 채점 자동 실행 시작...')
+                try {
+                    const { PortfolioJudgeScheduler } = await import('./v2_pipeline/PortfolioJudgeScheduler')
+                    await PortfolioJudgeScheduler.getInstance().runDailyJudgement()
+                } catch (e: any) {
+                    console.error('[Scheduler] 장마감 채점 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            this.scheduledJobs.push(imaJob, mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, portfolioManagerJob, portfolioJudgeJob, ...swarmJobs)
             console.log(`[SchedulerService] V2 AI schedules initialized (IMA: 08:30, MCA: 08:50, CCI, Swarms, Retros)`)
+            console.log(`[SchedulerService] 📊 종목 AI 파이프라인 등록 완료 (수급: 09:35, 리포트: 09:40, 매니저: 09:45, 채점: 15:45)`)
+
         }
 
         // ═══ [Step 3] NaverFlow 크론 등록 ═══

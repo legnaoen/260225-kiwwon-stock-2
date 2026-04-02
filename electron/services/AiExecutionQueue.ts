@@ -156,27 +156,49 @@ export class AiExecutionQueue {
             console.log(`[AiQueue][☁️Gemini] ▶️ 실행: ${job.agentName} | 남은 대기: ${this.geminiQueue.length - 1}건`)
             this.emitQueueUpdate()
 
-            try {
-                const result = await this.ai.askGemini(
-                    job.prompt,
-                    job.systemInstruction,
-                    job.customKey,
-                    job.customModel,
-                )
-                
-                job.status = 'SUCCESS'
-                job.result = result
-                job.finishedAt = Date.now()
-                job.durationMs = job.finishedAt - job.startedAt
+            let attempts = 0;
+            const maxAttempts = 3;
+            let success = false;
 
-                console.log(`[AiQueue][☁️Gemini] ✅ 완료: ${job.agentName} (${job.durationMs}ms)`)
-            } catch (error: any) {
-                job.status = 'FAILED'
-                job.error = error.message
-                job.finishedAt = Date.now()
-                job.durationMs = job.finishedAt - (job.startedAt || job.queuedAt)
+            while (attempts < maxAttempts && !success) {
+                attempts++;
+                try {
+                    const result = await this.ai.askGemini(
+                        job.prompt,
+                        job.systemInstruction,
+                        job.customKey,
+                        job.customModel,
+                    )
+                    
+                    job.status = 'SUCCESS'
+                    job.result = result
+                    job.finishedAt = Date.now()
+                    job.durationMs = job.finishedAt - job.startedAt
+                    success = true;
 
-                console.error(`[AiQueue][☁️Gemini] ❌ 실패: ${job.agentName} — ${error.message}`)
+                    if (attempts > 1) {
+                        console.log(`[AiQueue][☁️Gemini] ⚠️ ${attempts}회 재시도 끝에 성공: ${job.agentName} (${job.durationMs}ms)`)
+                    } else {
+                        console.log(`[AiQueue][☁️Gemini] ✅ 완료: ${job.agentName} (${job.durationMs}ms)`)
+                    }
+                } catch (error: any) {
+                    const errMsg = error.message.toLowerCase();
+                    const isOverloaded = errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('rate-limit') || errMsg.includes('rate limits');
+                    
+                    if (isOverloaded && attempts < maxAttempts) {
+                        const waitMs = attempts === 1 ? 10000 : 30000; // 1차 10초 대기, 2차 30초 대기
+                        console.warn(`[AiQueue][☁️Gemini] ⚠️ 일시적 과부하/트래픽 감지 (${attempts}/${maxAttempts}). ${waitMs/1000}초 후 재시도... : ${job.agentName}`);
+                        await new Promise(resolve => setTimeout(resolve, waitMs));
+                    } else {
+                        job.status = 'FAILED'
+                        job.error = error.message
+                        job.finishedAt = Date.now()
+                        job.durationMs = job.finishedAt - (job.startedAt || job.queuedAt)
+
+                        console.error(`[AiQueue][☁️Gemini] ❌ 실패: ${job.agentName} — ${error.message}`)
+                        break;
+                    }
+                }
             }
 
             this.recordLog(job)

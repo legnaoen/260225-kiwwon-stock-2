@@ -75,7 +75,7 @@ export class IssueTrackerAgent {
   - 중간 수준의 하방 압력: -3
   - 중립/관망: 0
   - 뚜렷한 상방 호재: +3
-  - 극단적 시장 환호/랠리: +5
+  - 극단적 시장 환호/랠리: +5\n`;
 
         const userPrompt = `[추적 대상 이슈 컨텍스트]
 이슈명: ${issue.name}

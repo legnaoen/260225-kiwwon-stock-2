@@ -292,12 +292,7 @@ export class IssueLedgerDB {
         });
     }
 
-    /**
-     * Get the latest daily briefing summary
-     */
-    public getLatestBriefing(): any {
-        return this.db.prepare(`SELECT * FROM issue_briefings ORDER BY date DESC LIMIT 1`).get();
-    }
+
 
     /**
      * Save the daily briefing summary

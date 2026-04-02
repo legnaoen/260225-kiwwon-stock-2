@@ -1,0 +1,241 @@
+electron/main.ts(498,58): error TS2339: Property 'runPreMarketAnalysis' does not exist on type 'SchedulerService'.
+electron/main.ts(499,58): error TS2339: Property 'runPendingExecution' does not exist on type 'SchedulerService'.
+electron/main.ts(500,58): error TS2339: Property 'runMorningPipeline' does not exist on type 'SchedulerService'.
+electron/main.ts(501,58): error TS2339: Property 'runIntradayReview' does not exist on type 'SchedulerService'.
+electron/main.ts(502,58): error TS2339: Property 'runEveningPipeline' does not exist on type 'SchedulerService'.
+electron/main.ts(503,58): error TS2339: Property 'runClosingReview' does not exist on type 'SchedulerService'.
+electron/main.ts(1048,31): error TS2339: Property 'CHART_RENDER_COMPLETE' does not exist on type 'typeof SystemEvent'.
+electron/main.ts(1427,12): error TS2304: Cannot find name 'MarketScannerService'.
+electron/main.ts(1937,18): error TS2783: 'success' is specified more than once, so this usage will be overwritten.
+electron/preload.ts(328,5): error TS1117: An object literal cannot have multiple properties with the same name.
+electron/preload.ts(329,5): error TS1117: An object literal cannot have multiple properties with the same name.
+electron/services/DatabaseService.ts(1543,12): error TS2393: Duplicate function implementation.
+electron/services/DatabaseService.ts(1561,12): error TS2393: Duplicate function implementation.
+electron/services/DatabaseService.ts(1565,12): error TS2393: Duplicate function implementation.
+electron/services/DatabaseService.ts(1596,12): error TS2393: Duplicate function implementation.
+electron/services/DatabaseService.ts(1812,12): error TS2393: Duplicate function implementation.
+electron/services/DatabaseService.ts(1843,12): error TS2393: Duplicate function implementation.
+electron/services/DatabaseService.ts(1864,12): error TS2393: Duplicate function implementation.
+electron/services/DatabaseService.ts(1874,12): error TS2393: Duplicate function implementation.
+electron/services/LocalAiService.ts(88,28): error TS18047: 'response.body' is possibly 'null'.
+electron/services/MaiisRankingAggregator.ts(57,44): error TS18046: 'i' is of type 'unknown'.
+electron/services/MaiisRankingAggregator.ts(58,41): error TS18046: 'i' is of type 'unknown'.
+electron/services/MaiisRankingAggregator.ts(82,32): error TS2339: Property 'generated_json' does not exist on type '{}'.
+electron/services/MaiisRankingAggregator.ts(83,44): error TS2339: Property 'generated_json' does not exist on type '{}'.
+electron/services/MaiisRankingAggregator.ts(90,26): error TS2339: Property 'generated_json' does not exist on type '{}'.
+electron/services/MaiisRankingAggregator.ts(91,41): error TS2339: Property 'generated_json' does not exist on type '{}'.
+electron/services/MaiisRankingAggregator.ts(166,36): error TS18046: 'insight' is of type 'unknown'.
+electron/services/MarketNewsService.ts(149,31): error TS2339: Property 'summary_json' does not exist on type '{}'.
+electron/services/MasterAiService.ts(174,42): error TS18046: 'r' is of type 'unknown'.
+electron/services/MasterAiService.ts(175,30): error TS2339: Property 'generated_json' does not exist on type '{}'.
+electron/services/MasterAiService.ts(176,44): error TS2339: Property 'generated_json' does not exist on type '{}'.
+electron/services/PortfolioReviewEngine.ts(49,32): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(50,32): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(51,30): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(56,37): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(56,64): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(70,38): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(72,25): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(72,66): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(82,25): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(82,69): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(96,60): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(124,35): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(124,54): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(124,81): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(125,38): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(143,21): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(160,39): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(175,22): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(178,51): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(247,34): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(248,31): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(252,37): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(306,68): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(312,44): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(312,71): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(318,106): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(321,43): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(325,49): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(331,63): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(331,83): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(357,68): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(360,41): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(361,39): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(379,91): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(381,54): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(381,73): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(391,69): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(404,133): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(406,54): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(406,73): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(420,62): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(421,71): error TS18046: 'item' is of type 'unknown'.
+electron/services/PortfolioReviewEngine.ts(425,70): error TS18046: 'item' is of type 'unknown'.
+electron/services/SchedulerService.ts(402,17): error TS2304: Cannot find name 'startTime'.
+electron/services/StockMasterService.ts(67,30): error TS7006: Parameter 's' implicitly has an 'any' type.
+electron/services/StockMasterService.ts(68,31): error TS7006: Parameter 's' implicitly has an 'any' type.
+electron/services/StockMasterService.ts(91,43): error TS2345: Argument of type '{ stock_code: any; stock_name: any; market_type: any; corp_code: string | null; updated_at: string; }[]' is not assignable to parameter of type '{ stock_code: string; stock_name: string; market_type: string; corp_code?: string | undefined; updated_at: string; }[]'.
+  Type '{ stock_code: any; stock_name: any; market_type: any; corp_code: string | null; updated_at: string; }' is not assignable to type '{ stock_code: string; stock_name: string; market_type: string; corp_code?: string | undefined; updated_at: string; }'.
+    Types of property 'corp_code' are incompatible.
+      Type 'string | null' is not assignable to type 'string | undefined'.
+        Type 'null' is not assignable to type 'string | undefined'.
+electron/services/v2_agents/CoPilotAgent.ts(250,53): error TS2551: Property 'aggregatedMarkdown' does not exist on type 'V2PipelineResult'. Did you mean 'aggregated_markdown'?
+electron/services/v2_agents/FundamentalAnalystAgent.ts(82,17): error TS2353: Object literal may only specify known properties, and 'taskType' does not exist in type '{ agentId: string; agentName: string; triggerType: "MANUAL" | "CRON" | "CHAT"; targetType?: "local" | "gemini" | undefined; prompt: string; systemInstruction?: string | undefined; customMessages?: any[] | undefined; customModel?: string | undefined; customKey?: string | undefined; }'.
+electron/services/v2_agents/IntradaySwarmAgent.ts(103,56): error TS2448: Block-scoped variable 'KiwoomService' used before its declaration.
+electron/services/v2_agents/IntradaySwarmAgent.ts(103,56): error TS2454: Variable 'KiwoomService' is used before being assigned.
+electron/services/v2_agents/IntradaySwarmAgent.ts(131,19): error TS2451: Cannot redeclare block-scoped variable 'rawDb'.
+electron/services/v2_agents/IntradaySwarmAgent.ts(330,19): error TS2451: Cannot redeclare block-scoped variable 'rawDb'.
+electron/services/v2_agents/IssueLedgerDB.ts(298,12): error TS2393: Duplicate function implementation.
+electron/services/v2_agents/IssueLedgerDB.ts(315,12): error TS2393: Duplicate function implementation.
+electron/services/v2_agents/IssueTrackerAgent.ts(44,35): error TS2339: Property 'AGENT_KICKOFF' does not exist on type 'typeof SystemEvent'.
+electron/services/v2_agents/MarketConditionAgent.ts(156,60): error TS2307: Cannot find module './KiwoomService' or its corresponding type declarations.
+electron/services/v2_agents/MarketConditionAgent.ts(157,57): error TS2307: Cannot find module './PriceStore' or its corresponding type declarations.
+electron/services/v2_agents/MarketConditionAgent.ts(357,218): error TS2339: Property 'swarmSummary' does not exist on type 'IssueRecord'.
+electron/services/v2_agents/MarketConditionAgent.ts(565,114): error TS2551: Property 'aggregatedMarkdown' does not exist on type 'V2PipelineResult'. Did you mean 'aggregated_markdown'?
+electron/services/v2_agents/MarketConditionAgent.ts(566,105): error TS2551: Property 'aggregatedMarkdown' does not exist on type 'V2PipelineResult'. Did you mean 'aggregated_markdown'?
+electron/services/v2_agents/MomentumAnalystAgent.ts(3,27): error TS2307: Cannot find module '../Formatter' or its corresponding type declarations.
+electron/services/v2_agents/MomentumAnalystAgent.ts(84,17): error TS2353: Object literal may only specify known properties, and 'taskType' does not exist in type '{ agentId: string; agentName: string; triggerType: "MANUAL" | "CRON" | "CHAT"; targetType?: "local" | "gemini" | undefined; prompt: string; systemInstruction?: string | undefined; customMessages?: any[] | undefined; customModel?: string | undefined; customKey?: string | undefined; }'.
+electron/services/v2_agents/PerformanceTracker.ts(128,58): error TS2367: This comparison appears to be unintentional because the types '"HOLD" | "SHORT"' and '"UP"' have no overlap.
+electron/services/v2_agents/PerformanceTracker.ts(128,122): error TS2367: This comparison appears to be unintentional because the types '"HOLD"' and '"DOWN"' have no overlap.
+electron/services/v2_agents/PerformanceTracker.ts(433,48): error TS2307: Cannot find module './KiwoomService' or its corresponding type declarations.
+electron/services/v2_agents/PerformanceTracker.ts(477,66): error TS7006: Parameter 'c' implicitly has an 'any' type.
+electron/services/v2_agents/PerformanceTracker.ts(479,69): error TS7006: Parameter 'c' implicitly has an 'any' type.
+electron/services/v2_agents/PortfolioManagerAgent.ts(96,17): error TS2353: Object literal may only specify known properties, and 'taskType' does not exist in type '{ agentId: string; agentName: string; triggerType: "MANUAL" | "CRON" | "CHAT"; targetType?: "local" | "gemini" | undefined; prompt: string; systemInstruction?: string | undefined; customMessages?: any[] | undefined; customModel?: string | undefined; customKey?: string | undefined; }'.
+electron/services/v2_agents/TechnicalAnalyzer.ts(360,97): error TS2353: Object literal may only specify known properties, and 'cciValue' does not exist in type '{ isTriggered: boolean; status: string; }'.
+electron/services/v2_agents/TechnicalAnalyzer.ts(362,95): error TS2353: Object literal may only specify known properties, and 'cciValue' does not exist in type '{ isTriggered: boolean; status: string; }'.
+electron/services/v2_agents/TechnicalAnalyzer.ts(364,111): error TS2353: Object literal may only specify known properties, and 'cciValue' does not exist in type '{ isTriggered: boolean; status: string; }'.
+electron/services/v2_agents/TechnicalAnalyzer.ts(366,106): error TS2353: Object literal may only specify known properties, and 'cciValue' does not exist in type '{ isTriggered: boolean; status: string; }'.
+electron/services/v2_agents/ThemeIntelligenceAgent.ts(330,33): error TS2353: Object literal may only specify known properties, and 'tags' does not exist in type 'IssueRecord'.
+electron/services/v2_agents/ThemeIntelligenceAgent.ts(510,21): error TS2353: Object literal may only specify known properties, and 'tags' does not exist in type 'IssueRecord'.
+electron/services/v2_pipeline/aggregators/FinanceInfoAggregator.ts(3,14): error TS2420: Class 'FinanceInfoAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'FinanceInfoAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/aggregators/InvestorFlowAggregator.ts(3,14): error TS2420: Class 'InvestorFlowAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'InvestorFlowAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/aggregators/LocalFlowAggregator.ts(3,14): error TS2420: Class 'LocalFlowAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'LocalFlowAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/aggregators/MacroAggregator.ts(9,14): error TS2420: Class 'MacroAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'MacroAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/aggregators/NaverFlowAggregator.ts(13,14): error TS2420: Class 'NaverFlowAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'NaverFlowAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/aggregators/NaverFlowAggregator.ts(201,52): error TS2341: Property 'db' is private and only accessible within class 'DatabaseService'.
+electron/services/v2_pipeline/aggregators/NewsFlowAggregator.ts(11,14): error TS2420: Class 'NewsFlowAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'NewsFlowAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/aggregators/NewsKeywordAggregator.ts(3,14): error TS2420: Class 'NewsKeywordAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'NewsKeywordAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/aggregators/ResearchAggregator.ts(4,14): error TS2420: Class 'ResearchAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'ResearchAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/aggregators/RisingStockAggregator.ts(3,14): error TS2420: Class 'RisingStockAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'RisingStockAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/aggregators/YoutubeContextAggregator.ts(3,14): error TS2420: Class 'YoutubeContextAggregator' incorrectly implements interface 'IBaseAggregator'.
+  Property 'executeAggregation' is missing in type 'YoutubeContextAggregator' but required in type 'IBaseAggregator'.
+electron/services/v2_pipeline/collectors/FinanceInfoCollector.ts(1,10): error TS2305: Module '"../types/PipelineTypes"' has no exported member 'IBaseCollector'.
+electron/services/v2_pipeline/collectors/FinanceInfoCollector.ts(29,44): error TS2339: Property 'stock_code' does not exist on type '{}'.
+electron/services/v2_pipeline/collectors/FinanceInfoCollector.ts(30,44): error TS2339: Property 'stock_name' does not exist on type '{}'.
+electron/services/v2_pipeline/collectors/LocalFlowCollector.ts(1,10): error TS2305: Module '"../types/PipelineTypes"' has no exported member 'IBaseCollector'.
+electron/services/v2_pipeline/collectors/NaverFlowCollector.ts(1,10): error TS2305: Module '"../types/PipelineTypes"' has no exported member 'IBaseCollector'.
+electron/services/v2_pipeline/collectors/NaverSearchCollector.ts(1,10): error TS2305: Module '"../types/PipelineTypes"' has no exported member 'IBaseCollector'.
+electron/services/v2_pipeline/collectors/NewsFlowCollector.ts(1,10): error TS2305: Module '"../types/PipelineTypes"' has no exported member 'IBaseCollector'.
+electron/services/v2_pipeline/collectors/NewsKeywordCollector.ts(1,10): error TS2305: Module '"../types/PipelineTypes"' has no exported member 'IBaseCollector'.
+electron/services/v2_pipeline/collectors/ResearchCollector.ts(2,10): error TS2305: Module '"../types/PipelineTypes"' has no exported member 'IBaseCollector'.
+electron/services/v2_pipeline/collectors/RisingStockCollector.ts(1,10): error TS2305: Module '"../types/PipelineTypes"' has no exported member 'IBaseCollector'.
+electron/services/v2_pipeline/collectors/YoutubeContextCollector.ts(1,10): error TS2305: Module '"../types/PipelineTypes"' has no exported member 'IBaseCollector'.
+electron/services/v2_pipeline/PortfolioJudgeScheduler.ts(3,27): error TS2307: Cannot find module '../Formatter' or its corresponding type declarations.
+electron/services/v2_pipeline/V2PipelineManager.ts(161,17): error TS2353: Object literal may only specify known properties, and 'id' does not exist in type 'V2PipelineResult'.
+electron/services/v2_pipeline/V2PipelineManager.ts(173,17): error TS2353: Object literal may only specify known properties, and 'id' does not exist in type 'V2PipelineResult'.
+electron/services/VirtualPortfolioEngine.ts(167,28): error TS18046: 'item' is of type 'unknown'.
+electron/services/VirtualPortfolioEngine.ts(168,32): error TS18046: 'item' is of type 'unknown'.
+electron/services/VirtualPortfolioEngine.ts(168,59): error TS18046: 'item' is of type 'unknown'.
+electron/services/VirtualPortfolioEngine.ts(172,52): error TS18046: 'item' is of type 'unknown'.
+electron/services/VirtualPortfolioEngine.ts(172,72): error TS18046: 'item' is of type 'unknown'.
+electron/services/VirtualPortfolioEngine.ts(182,98): error TS18046: 'item' is of type 'unknown'.
+electron/services/VirtualPortfolioEngine.ts(185,23): error TS18046: 'item' is of type 'unknown'.
+electron/services/VirtualPortfolioEngine.ts(186,23): error TS18046: 'item' is of type 'unknown'.
+src/App.tsx(242,33): error TS2339: Property 'onSystemError' does not exist on type 'IElectronAPI'.
+src/App.tsx(243,52): error TS2339: Property 'onSystemError' does not exist on type 'IElectronAPI'.
+src/App.tsx(243,67): error TS7006: Parameter 'error' implicitly has an 'any' type.
+src/components/AiOrchestratorTab.tsx(232,84): error TS2322: Type 'readonly [] | readonly [{ readonly time: "08:50"; readonly label: "Cycle A — 장전 분석"; readonly description: "글로벌 매크로, 뉴스, 수급 종합 판단"; }, { readonly time: "09:30"; readonly label: "베이지안 검증 (Pivot)"; readonly description: "개장 30분 실시간 수급 검증 및 장전 포지션 비상 궤도 수정"; }, { ...; }, { ...; }] | ... 4 more ... | readonly [...]' is not assignable to type '{ readonly time: "08:50"; readonly label: "Cycle A — 장전 분석"; readonly description: "글로벌 매크로, 뉴스, 수급 종합 판단"; } | { readonly time: "09:30"; readonly label: "베이지안 검증 (Pivot)"; readonly description: "개장 30분 실시간 수급 검증 및 장전 포지션 비상 궤도 수정"; } | { ...; } | { ...; } | readonly ({ ...; } | ... 2 more ... | { ...; })[]'.
+  Type 'readonly [{ readonly time: "09:45"; readonly label: "스웜 A/B 테스트 (1회차)"; readonly description: "로컬 군집 4인 개별투표 및 합의"; }, { readonly time: "10:15"; readonly label: "스웜 A/B 테스트 (2회차)"; readonly description: "로컬 군집 4인 개별투표 및 합의"; }, ... 6 more ..., { ...; }]' is not assignable to type '{ readonly time: "08:50"; readonly label: "Cycle A — 장전 분석"; readonly description: "글로벌 매크로, 뉴스, 수급 종합 판단"; } | { readonly time: "09:30"; readonly label: "베이지안 검증 (Pivot)"; readonly description: "개장 30분 실시간 수급 검증 및 장전 포지션 비상 궤도 수정"; } | { ...; } | { ...; } | readonly ({ ...; } | ... 2 more ... | { ...; })[]'.
+    Type 'readonly [{ readonly time: "09:45"; readonly label: "스웜 A/B 테스트 (1회차)"; readonly description: "로컬 군집 4인 개별투표 및 합의"; }, { readonly time: "10:15"; readonly label: "스웜 A/B 테스트 (2회차)"; readonly description: "로컬 군집 4인 개별투표 및 합의"; }, ... 6 more ..., { ...; }]' is not assignable to type 'readonly ({ readonly time: "08:50"; readonly label: "Cycle A — 장전 분석"; readonly description: "글로벌 매크로, 뉴스, 수급 종합 판단"; } | { readonly time: "09:30"; readonly label: "베이지안 검증 (Pivot)"; readonly description: "개장 30분 실시간 수급 검증 및 장전 포지션 비상 궤도 수정"; } | { ...; } | { ...; })[]'.
+      Type '{ readonly time: "09:45"; readonly label: "스웜 A/B 테스트 (1회차)"; readonly description: "로컬 군집 4인 개별투표 및 합의"; } | { readonly time: "10:15"; readonly label: "스웜 A/B 테스트 (2회차)"; readonly description: "로컬 군집 4인 개별투표 및 합의"; } | ... 6 more ... | { ...; }' is not assignable to type '{ readonly time: "08:50"; readonly label: "Cycle A — 장전 분석"; readonly description: "글로벌 매크로, 뉴스, 수급 종합 판단"; } | { readonly time: "09:30"; readonly label: "베이지안 검증 (Pivot)"; readonly description: "개장 30분 실시간 수급 검증 및 장전 포지션 비상 궤도 수정"; } | { ...; } | { ...; }'.
+        Type '{ readonly time: "09:45"; readonly label: "스웜 A/B 테스트 (1회차)"; readonly description: "로컬 군집 4인 개별투표 및 합의"; }' is not assignable to type '{ readonly time: "08:50"; readonly label: "Cycle A — 장전 분석"; readonly description: "글로벌 매크로, 뉴스, 수급 종합 판단"; } | { readonly time: "09:30"; readonly label: "베이지안 검증 (Pivot)"; readonly description: "개장 30분 실시간 수급 검증 및 장전 포지션 비상 궤도 수정"; } | { ...; } | { ...; }'.
+          Type '{ readonly time: "09:45"; readonly label: "스웜 A/B 테스트 (1회차)"; readonly description: "로컬 군집 4인 개별투표 및 합의"; }' is not assignable to type '{ readonly time: "15:10"; readonly label: "Cycle B — 장마감"; readonly description: "종가 기준 최종 판단 및 기록"; }'.
+            Types of property 'time' are incompatible.
+              Type '"09:45"' is not assignable to type '"15:10"'.
+src/components/ApiDiagnosticsTab.tsx(95,52): error TS2339: Property 'resetCircuitBreaker' does not exist on type 'IElectronAPI'.
+src/components/ApiDiagnosticsTab.tsx(96,58): error TS2339: Property 'resetCircuitBreaker' does not exist on type 'IElectronAPI'.
+src/components/MacroDashboard.tsx(74,50): error TS2339: Property 'getYahooMacros' does not exist on type 'IElectronAPI'.
+src/components/MaiisAgentTester.tsx(85,70): error TS2322: Type '"NEWS" | "YOUTUBE" | "MASTER"' is not assignable to type '"NEWS" | "YOUTUBE"'.
+  Type '"MASTER"' is not assignable to type '"NEWS" | "YOUTUBE"'.
+src/components/MaiisAgentTester.tsx(142,56): error TS2339: Property 'data' does not exist on type '{ success: boolean; error?: string | undefined; }'.
+src/components/MaiisCommandCenter.tsx(177,52): error TS2551: Property 'getAiScheduleSettings' does not exist on type 'IElectronAPI'. Did you mean 'getScheduleSettings'?
+src/components/MaiisCommandCenter.tsx(178,52): error TS2339: Property 'getReviewSchedule' does not exist on type 'IElectronAPI'.
+src/components/MaiisCommandCenter.tsx(183,19): error TS7034: Variable 'schedules' implicitly has type 'any[]' in some locations where its type cannot be determined.
+src/components/MaiisCommandCenter.tsx(210,32): error TS7005: Variable 'schedules' implicitly has an 'any[]' type.
+src/components/MaiisCommandCenter.tsx(361,21): error TS7034: Variable 'phases' implicitly has type 'any[]' in some locations where its type cannot be determined.
+src/components/MaiisCommandCenter.tsx(387,29): error TS7005: Variable 'phases' implicitly has an 'any[]' type.
+src/components/MaiisCommandCenter.tsx(705,50): error TS2339: Property 'runPortfolioReview' does not exist on type 'IElectronAPI'.
+src/components/MaiisCommandCenter.tsx(817,106): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/components/MaiisCommandCenter.tsx(827,105): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/components/MaiisCommandCenter.tsx(909,170): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/components/MaiisCommandCenter.tsx(909,176): error TS7006: Parameter 'i' implicitly has an 'any' type.
+src/components/NewsHubSettingsTab.tsx(436,98): error TS2322: Type '{ size: number; className: string; title: string; }' is not assignable to type 'IntrinsicAttributes & LucideProps'.
+  Property 'title' does not exist on type 'IntrinsicAttributes & LucideProps'.
+src/components/PmTracker.tsx(384,36): error TS2339: Property 'getPortfolioTracker' does not exist on type 'IElectronAPI'.
+src/components/PmTracker.tsx(385,36): error TS2339: Property 'getStrategyProfiles' does not exist on type 'IElectronAPI'.
+src/components/PmTracker.tsx(386,36): error TS2339: Property 'getReviewSchedule' does not exist on type 'IElectronAPI'.
+src/components/PmTracker.tsx(401,38): error TS2339: Property 'saveStrategyProfiles' does not exist on type 'IElectronAPI'.
+src/components/PmTracker.tsx(402,38): error TS2339: Property 'saveReviewSchedule' does not exist on type 'IElectronAPI'.
+src/components/PmTracker.tsx(410,46): error TS2339: Property 'resetStrategyProfiles' does not exist on type 'IElectronAPI'.
+src/components/RisingStocksReport.tsx(156,37): error TS2551: Property 'getAiScheduleSettings' does not exist on type 'IElectronAPI'. Did you mean 'getScheduleSettings'?
+src/components/RisingStocksReport.tsx(157,54): error TS2551: Property 'getAiScheduleSettings' does not exist on type 'IElectronAPI'. Did you mean 'getScheduleSettings'?
+src/components/RisingStocksReport.tsx(167,33): error TS2551: Property 'saveAiScheduleSettings' does not exist on type 'IElectronAPI'. Did you mean 'saveScheduleSettings'?
+src/components/RisingStocksReport.tsx(168,50): error TS2551: Property 'saveAiScheduleSettings' does not exist on type 'IElectronAPI'. Did you mean 'saveScheduleSettings'?
+src/components/RisingStocksReport.tsx(272,78): error TS2345: Argument of type '{ date: string; timing: "MORNING" | "EVENING"; }' is not assignable to parameter of type 'string'.
+src/components/RisingStocksReport.tsx(311,27): error TS2339: Property 'success' does not exist on type 'string[]'.
+src/components/RisingStocksReport.tsx(311,44): error TS2339: Property 'data' does not exist on type 'string[]'.
+src/components/RisingStocksReport.tsx(311,58): error TS2339: Property 'data' does not exist on type 'string[]'.
+src/components/RisingStocksReport.tsx(312,47): error TS2339: Property 'data' does not exist on type 'string[]'.
+src/components/RisingStocksReport.tsx(401,77): error TS2345: Argument of type '{ date: string; timing: string; }' is not assignable to parameter of type 'string'.
+src/components/RisingStocksReport.tsx(402,78): error TS2345: Argument of type '{ date: string; timing: string; }' is not assignable to parameter of type 'string'.
+src/components/RisingStocksReport.tsx(442,86): error TS2345: Argument of type '{ date: string; timing: string; }' is not assignable to parameter of type 'string'.
+src/components/RisingStocksReport.tsx(443,87): error TS2345: Argument of type '{ date: string; timing: string; }' is not assignable to parameter of type 'string'.
+src/components/RisingStocksReport.tsx(543,25): error TS2339: Property 'success' does not exist on type 'string[]'.
+src/components/RisingStocksReport.tsx(543,40): error TS2339: Property 'data' does not exist on type 'string[]'.
+src/components/RisingStocksReport.tsx(543,52): error TS2339: Property 'data' does not exist on type 'string[]'.
+src/components/RisingStocksReport.tsx(544,45): error TS2339: Property 'data' does not exist on type 'string[]'.
+src/components/RisingStocksReport.tsx(576,17): error TS2353: Object literal may only specify known properties, and 'timing' does not exist in type '{ code: string; name: string; changeRate: number; tradingValue?: number | undefined; source?: string | undefined; }'.
+src/components/RisingStocksReport.tsx(598,69): error TS2345: Argument of type '{ date: string; timing: "MORNING" | "EVENING"; }' is not assignable to parameter of type 'string'.
+src/components/RisingStocksReport.tsx(615,68): error TS2554: Expected 0 arguments, but got 1.
+src/components/v2_dashboard/IntradayChart.tsx(63,13): error TS2353: Object literal may only specify known properties, and 'watermark' does not exist in type 'DeepPartial<TimeChartOptions>'.
+src/components/v2_dashboard/IntradayChart.tsx(141,51): error TS2339: Property 'setMarkers' does not exist on type 'ISeriesApi<"Candlestick", Time, CandlestickData<Time> | WhitespaceData<Time>, CandlestickSeriesOptions, DeepPartial<...>>'.
+src/components/v2_dashboard/IssueManagementTab.tsx(142,31): error TS2339: Property 'getIssueSwarm' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/IssueManagementTab.tsx(144,48): error TS2339: Property 'getIssueSwarm' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/IssueManagementTab.tsx(182,31): error TS2339: Property 'getYahooMacros' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/IssueManagementTab.tsx(185,48): error TS2339: Property 'getYahooMacros' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/IssueManagementTab.tsx(297,28): error TS2339: Property 'deleteSwarmSession' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/IssueManagementTab.tsx(298,32): error TS2339: Property 'deleteSwarmSession' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/IssueManagementTab.tsx(299,44): error TS2339: Property 'getIssueSwarm' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/IssueManagementTab.tsx(966,47): error TS2339: Property 'runIssueSwarm' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/IssueManagementTab.tsx(969,62): error TS2339: Property 'runIssueSwarm' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/MarketAgentTab.tsx(68,61): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/components/v2_dashboard/MarketAgentTab.tsx(200,50): error TS2339: Property 'getMarketRetrospectives' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/MarketAgentTab.tsx(218,38): error TS2551: Property 'runMarketRetrospective' does not exist on type 'IElectronAPI'. Did you mean 'runAiRetrospective'?
+src/components/v2_dashboard/PortfolioManagerTab.tsx(149,51): error TS2339: Property 'getActivePortfolio' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/PortfolioManagerTab.tsx(174,77): error TS2339: Property 'runMomentumAnalyst' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/PortfolioManagerTab.tsx(175,77): error TS2339: Property 'runFundamentalAnalyst' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/PortfolioManagerTab.tsx(176,77): error TS2339: Property 'runPortfolioManager' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/PortfolioManagerTab.tsx(177,77): error TS2339: Property 'runPortfolioJudge' does not exist on type 'IElectronAPI'.
+src/components/v2_dashboard/ThemeTrackerTab.tsx(333,25): error TS2322: Type '(val: number) => [string, "순위"]' is not assignable to type 'Formatter<number, "순위"> & ((value: number, name: "순위", item: Payload<number, "순위">, index: number, payload: Payload<number, "순위">[]) => ReactNode | [...])'.
+  Type '(val: number) => [string, "순위"]' is not assignable to type 'Formatter<number, "순위">'.
+    Types of parameters 'val' and 'value' are incompatible.
+      Type 'number | undefined' is not assignable to type 'number'.
+        Type 'undefined' is not assignable to type 'number'.
+src/components/v2_dashboard/ThemeTrackerTab.tsx(455,57): error TS2322: Type '(val: number) => [string, "Index"]' is not assignable to type 'Formatter<number, "Index"> & ((value: number, name: "Index", item: Payload<number, "Index">, index: number, payload: Payload<number, "Index">[]) => ReactNode | [...])'.
+  Type '(val: number) => [string, "Index"]' is not assignable to type 'Formatter<number, "Index">'.
+    Types of parameters 'val' and 'value' are incompatible.
+      Type 'number | undefined' is not assignable to type 'number'.
+        Type 'undefined' is not assignable to type 'number'.
+src/components/Watchlist.tsx(413,48): error TS2339: Property 'resetCircuitBreaker' does not exist on type 'IElectronAPI'.
+src/components/Watchlist.tsx(414,54): error TS2339: Property 'resetCircuitBreaker' does not exist on type 'IElectronAPI'.
+

@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     send: (channel: string, ...args: any[]) => {
         ipcRenderer.send(channel, ...args)
     },
+    invoke: (channel: string, ...args: any[]) => {
+        return ipcRenderer.invoke(channel, ...args)
+    },
     sendChartRenderComplete: (code: string) => ipcRenderer.send('chart-render-complete', code),
     // Window controls
     minimize: () => ipcRenderer.send('window-controls:minimize'),
@@ -322,6 +325,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     getNaverFlowSettings: () => ipcRenderer.invoke('naverflow:get-settings'),
     saveNaverFlowSettings: (settings: any) => ipcRenderer.invoke('naverflow:save-settings', settings),
-    getThemeTrackerData: (type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => ipcRenderer.invoke('naverflow:get-tracker-data', type, date, limitDays, topN),
-    analyzeThemes: (date: string) => ipcRenderer.invoke('naverflow:analyze-themes', date),
+
+    // Phase 2.5: AI Analysts & Portfolio Manager
+    runMomentumAnalyst: () => ipcRenderer.invoke('ai-analyst:run-momentum'),
+    runFundamentalAnalyst: () => ipcRenderer.invoke('ai-analyst:run-fundamental'),
+    runPortfolioManager: () => ipcRenderer.invoke('ai-analyst:run-portfolio-manager'),
+    runPortfolioJudge: () => ipcRenderer.invoke('ai-analyst:run-daily-judge'),
+    getActivePortfolio: () => ipcRenderer.invoke('ai-analyst:get-portfolio-active'),
+    getAiPicks: () => ipcRenderer.invoke('ai-analyst:get-picks'),
+    clearPortfolio: () => ipcRenderer.invoke('ai-analyst:clear-portfolio'),
+    clearAiPicks: () => ipcRenderer.invoke('ai-analyst:clear-picks'),
+    // [TEST] 종목 차트 다이제스트 테스트
+    testChartDigest: (code: string, name: string) => ipcRenderer.invoke('ai-analyst:test-chart-digest', code, name),
+    // 서브 AI 오답노트 작성 (수동)
+    runRetrospectiveManual: () => ipcRenderer.invoke('ai-analyst:run-retrospective'),
+
+    // AI 수동실행 로그
+    saveAiRunLog: (message: string) => ipcRenderer.invoke('ai-run-logs:save', message),
+    getAiRunLogs: () => ipcRenderer.invoke('ai-run-logs:get'),
+    clearAiRunLogs: () => ipcRenderer.invoke('ai-run-logs:clear'),
+    
+    // AI 데일리 원본 전문 (Raw Log)
+    getAiDailyRawLog: (date: string, agentType: string) => ipcRenderer.invoke('ai-daily-raw-logs:get', date, agentType),
 })
+

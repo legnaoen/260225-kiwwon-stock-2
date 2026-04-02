@@ -59,21 +59,22 @@ export class ThemeIntelligenceAgent {
                 console.error('[ThemeIntelligence] 뉴스 데이터 허브 로드 실패', e);
             }
 
-            // 2.5 [핵심 고도화] Top 5 테마, Top 3 섹터의 주도주 실시간 타겟 검색 (직접 크롤링 & DB 연동)
+            // 2.5 [핵심 고도화] 테마 파급력(Mega-ness) 등급별 주도주 동적 검색 및 프롬프트 주입
             const top5Themes = marketFlow.filter(m => m.type === 'THEME' && m.rank_num <= 5).map(m => m.name);
             const top3Sectors = marketFlow.filter(m => m.type === 'SECTOR' && m.rank_num <= 3).map(m => m.name);
             const targets = [...top5Themes, ...top3Sectors];
             
             let targetedNewsContext = "\n\n[🔥 최상위 주도 테마/섹터 심층 실시간 뉴스]\n";
+            let thematicStockPoolContext = "\n[📊 테마별 파급력 등급(S/A/B) 및 대장주 풀]\n";
+            
             try {
                 const { NaverSearchCollector } = await import('../v2_pipeline/collectors/NaverSearchCollector');
                 const collector = new NaverSearchCollector();
                 
                 const stmtGetStocks = rawDb.prepare(`
-                    SELECT stock_name FROM stock_theme_tags 
-                    WHERE tag_name = ? 
+                    SELECT stock_code, stock_name, change_rate FROM stock_theme_tags 
+                    WHERE tag_name = ? AND change_rate >= 5.0
                     ORDER BY change_rate DESC 
-                    LIMIT 2
                 `);
 
                 const stmtInsertNews = rawDb.prepare(`
@@ -85,64 +86,71 @@ export class ThemeIntelligenceAgent {
 
                 const insertNewsTx = rawDb.transaction((items: any[]) => {
                     for (const item of items) {
-                        try { stmtInsertNews.run(item); } catch (e) { /* 중복이나 키에러 무시 */ }
+                        try { stmtInsertNews.run(item); } catch (e) { /* 중복 무시 */ }
                     }
                 });
 
                 const now = new Date();
                 const timeBucket = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-                
                 let dbRowsToInsert: any[] = [];
 
                 for (const targetName of targets) {
                     const stocks = stmtGetStocks.all(targetName) as any[];
                     if (!stocks || stocks.length === 0) continue;
                     
-                    // 높은 정확도를 위해 1위 주도주 이름으로 단독 검색
-                    const keyword = stocks[0].stock_name; 
-                    
-                    try {
-                        const rawSearch = await collector.collect({ keyword: keyword });
-                        const articles = rawSearch?.articles || [];
-                        if (articles.length > 0) {
-                            targetedNewsContext += `\n[${targetName} 주도주: ${keyword} 관련 최신 팩트]\n`;
-                            
-                            for (const a of articles.slice(0, 3)) { 
-                                const title = (a.title || '').replace(/<[^>]+>/g, '');
-                                const snippet = (a.description || '').replace(/<[^>]+>/g, '');
-                                targetedNewsContext += `- ${title} (${snippet.substring(0, 70)}...)\n`;
-                                
-                                let source = 'NaverSearchAPI';
-                                try { source = a.originallink ? new URL(a.originallink).hostname.replace('www.', '') : 'Naver'; } catch(e){}
-                                
-                                const hash = Math.abs((Math.imul(31, 0) + title.charCodeAt(0)) | 0).toString(16) + (a.pubDate || Date.now());
+                    const limitUps = stocks.filter(s => s.change_rate >= 29.5).length;
+                    const surges = stocks.filter(s => s.change_rate >= 10.0).length;
 
-                                dbRowsToInsert.push({
-                                    date: dateStr,
-                                    category: 'THEME_TARGET',
-                                    title: title,
-                                    body_snippet: snippet,
-                                    source: source,
-                                    article_id: hash,
-                                    url: a.originallink || a.link || '',
-                                    collected_at: now.toISOString(),
-                                    time_bucket: timeBucket,
-                                    article_hash: hash,
-                                    search_keyword: keyword
-                                });
-                            }
-                        }
-                    } catch (err: any) {
-                        console.error(`[ThemeIntelligence] 타겟 뉴스 검색 실패 (${keyword}):`, err.message);
-                    }
+                    let pickCount = 1;
+                    let grade = 'B등급(일반 테마)';
                     
-                    // API Call Limit Delay
-                    await new Promise(resolve => setTimeout(resolve, 200));
+                    if (limitUps >= 2 || surges >= 5) {
+                        pickCount = 4;
+                        grade = 'S등급(메가 확산)';
+                    } else if (limitUps >= 1 || surges >= 3) {
+                        pickCount = Math.min(3, stocks.length);
+                        grade = 'A등급(강세 주도)';
+                    } else {
+                        pickCount = Math.min(1, stocks.length);
+                    }
+
+                    const leadingStocks = stocks.slice(0, pickCount);
+                    thematicStockPoolContext += `- [${targetName}] ${grade} | 주도주 후보: ${leadingStocks.map(s => `${s.stock_name}(${s.stock_code}, +${Number(s.change_rate).toFixed(1)}%)`).join(', ')}\n`;
+                    targetedNewsContext += `\n[${targetName} 주도주 최신 팩트 - ${grade}]\n`;
+
+                    for (const st of leadingStocks) {
+                        const keyword = st.stock_name; 
+                        try {
+                            const rawSearch = await collector.collect({ keyword: keyword });
+                            const articles = rawSearch?.articles || [];
+                            if (articles.length > 0) {
+                                for (const a of articles.slice(0, 2)) { 
+                                    const title = (a.title || '').replace(/<[^>]+>/g, '');
+                                    const snippet = (a.description || '').replace(/<[^>]+>/g, '');
+                                    targetedNewsContext += `- (${keyword}) ${title} (${snippet.substring(0, 60)}...)\n`;
+                                    
+                                    let source = 'Naver';
+                                    try { source = a.originallink ? new URL(a.originallink).hostname.replace('www.', '') : 'Naver'; } catch(e){}
+                                    const hash = Math.abs((Math.imul(31, 0) + title.charCodeAt(0)) | 0).toString(16) + (a.pubDate || Date.now());
+
+                                    dbRowsToInsert.push({
+                                        date: dateStr, category: 'THEME_TARGET', title, body_snippet: snippet,
+                                        source, article_id: hash, url: a.originallink || a.link || '',
+                                        collected_at: now.toISOString(), time_bucket: timeBucket,
+                                        article_hash: hash, search_keyword: keyword
+                                    });
+                                }
+                            }
+                        } catch (err: any) {
+                            console.error(`[ThemeIntelligence] 타겟 뉴스 검색 실패 (${keyword}):`, err.message);
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
                 }
 
                 if (dbRowsToInsert.length > 0) {
                     insertNewsTx(dbRowsToInsert);
-                    console.log(`[ThemeIntelligence] 🎯 주도주 타겟 검색 완료: 뉴스 ${dbRowsToInsert.length}건 DB 저장 및 프롬프트 주입`);
+                    console.log(`[ThemeIntelligence] 🎯 주도주 타겟 검색 완료: 뉴스 ${dbRowsToInsert.length}건 DB 저장`);
                     newsContext += targetedNewsContext;
                 }
             } catch (e) {
@@ -227,7 +235,7 @@ ${sectorNames.join(', ')}
 
 [오늘 상위 랭크된 주도 테마 목록 (Top 10)]
 ${themeNames.join(', ')}
-
+${thematicStockPoolContext}
 ${marketConditionContext}
 
 [시장 컨텍스트 (실시간 뉴스 및 이슈 요약)]
@@ -244,25 +252,37 @@ ${issueListForPrompt}
 [분석 지침]
 1. 거시 지수(KOSPI) 투심이 꺾였을 때 뜨는 테마는 단발성 해지 테마일 확률이 높습니다. 반면 상승장에서는 메가트렌드로 갈 확률이 높습니다.
 2. 과거 이력에서 순위가 지속 상승 중이면 '성장', 순위 밖으로 나갔다 며칠 만에 재등장했다면 '눌림목', 이미 몇일 연속 1~2위를 석권하며 뉴스가 쏟아지면 '피크아웃/설거지' 등의 생애주기를 명시하십시오.
+3. 각 테마/섹터의 등급(S/A/B) 및 주도주 풀을 바탕으로 상승 시너지가 확실한 경우, 대장/부대장 주식들을 직접 '관심종목 풀'로 추천하십시오. 추천할 종목은 1개 테마당 가급적 1~2개 이내로 하여 신중하게 'stock_picks' 배열에 담으십시오. 확신도(confidence)는 60~100 사이로 매기십시오.
 
 [중요 제약]
 - linked_issue_id는 반드시 위 "활성 거시 이슈 목록"에 존재하는 ID만 사용해야 합니다. 
 - 만약 상위 3위 이내의 대장 테마임에도 매핑되는 기존 이슈가 없다면, 이것은 시황 AI가 놓친 신규 메타입니다. 이 경우 빈 칸으로 두지 말고, "ISSUE-NEW-임의의영문명" 형식으로 ID를 새로 생성하여 적으십시오. (시스템이 이를 파싱해 신규 이슈로 자동 등록할 것입니다).
 - 기존 하위 테마인데 매핑할 원인이 없다면 원래대로 null로 설정하십시오.
 
-반드시 아래의 구조를 가진 순수 JSON 배열만 출력하시오. (Markdown 백틱 금지)
+반드시 아래의 구조를 가진 순수 JSON 객체(Object)만 출력하시오. (Markdown 백틱 금지)
 
-[
-  {
-    "type": "THEME 혹은 SECTOR",
-    "name": "항목 이름",
-    "reason": "상승/주도 요인에 대한 1~2문장 요약",
-    "lifespan_type": "1일 반짝 테마 (설거지)" 혹은 "단기 테마 (눌림목/성장)" 혹은 "중기 트렌드" 등 수명과 생애주기를 명시,
-    "lifespan_reasoning": "왜 이런 수명/생애주기로 판단했는지 (이력 및 거시 투심 근거 포함)",
-    "linked_issue_id": "위 이슈 목록의 ID 중 하나 또는 신규 이슈 ID 또는 null",
-    "linked_issue_path": "이슈→테마 연결 논리 경로 또는 null"
-  }
-]
+{
+  "theme_evaluations": [
+    {
+      "type": "THEME 혹은 SECTOR",
+      "name": "항목 이름",
+      "reason": "상승/주도 요인에 대한 1~2문장 요약",
+      "lifespan_type": "1일 반짝 테마 (설거지)" 혹은 "단기 테마 (눌림목/성장)" 혹은 "중기 트렌드" 등 수명과 생애주기를 명시,
+      "lifespan_reasoning": "왜 이런 수명/생애주기로 판단했는지 (이력 및 거시 투심 근거 포함)",
+      "linked_issue_id": "위 이슈 목록의 ID 중 하나 또는 신규 이슈 ID 또는 null",
+      "linked_issue_path": "이슈→테마 연결 논리 경로 또는 null"
+    }
+  ],
+  "stock_picks": [
+    {
+      "stock_code": "000000",
+      "stock_name": "종목이름",
+      "confidence": 85,
+      "reason": "S등급 테마의 대장주로서 수급이 집중됨. (구체적 매수 요약)",
+      "lifespan_days": 10
+    }
+  ]
+}
 `;
 
             // 4. Gemini 실행 큐 등재
@@ -274,15 +294,20 @@ ${issueListForPrompt}
                 systemInstruction: systemInstruction,
             });
 
+            // 원본 전문 DB 저장 추가
+            this.db.saveAiDailyRawLog(dateStr, 'THEME_INTELLIGENCE', rawResponse);
+
             // 5. JSON 파싱
-            const jsonMatch = rawResponse.match(/\[\s*\{[\s\S]*\}\s*\]/);
+            const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
-                throw new Error("JSON 배열 파싱에 실패했습니다. (응답 포맷 오류)");
+                throw new Error("JSON 객체 파싱에 실패했습니다. (응답 포맷 오류)");
             }
 
-            const parsedArray = JSON.parse(jsonMatch[0]);
+            const parsedObj = JSON.parse(jsonMatch[0]);
+            const parsedArray = parsedObj.theme_evaluations || [];
+            const stockPicksArray = parsedObj.stock_picks || [];
 
-            // 6. DB에 기록 (Upsert)
+            // 6. DB에 기록 (Upsert Themes)
             const mapDataForDb = parsedArray.map((item: any) => {
                 let normalizedType = 'THEME';
                 if (item.type) {
@@ -305,7 +330,24 @@ ${issueListForPrompt}
             });
 
             this.db.upsertThemeIntelligence(mapDataForDb);
-            console.log(`[ThemeIntelligence] 🤖 성공적으로 ${mapDataForDb.length}개의 테마/섹터 분석이 완료되어 DB에 캐싱되었습니다.`);
+            
+            // 6.5. 관심종목 직접 추천 (저장)
+            if (stockPicksArray.length > 0) {
+                const picksToSave = stockPicksArray.map((p: any) => ({
+                    date: dateStr,
+                    agent_type: 'THEME',
+                    stock_code: p.stock_code,
+                    stock_name: p.stock_name,
+                    reason: p.reason,
+                    confidence: p.confidence || 75,
+                    lifespan_days: p.lifespan_days || 10,
+                    created_at: this.db.getKstTimestamp()
+                }));
+                const savedCount = this.db.saveAiAnalystPicks(picksToSave);
+                console.log(`[ThemeIntelligence] ✨ ${savedCount}개의 주도 대장주가 '관심종목' 풀에 직접 추천되었습니다.`);
+            }
+
+            console.log(`[ThemeIntelligence] 🤖 성공적으로 ${mapDataForDb.length}개의 테마/섹터 생애주기 분석결과가 캐싱되었습니다.`);
 
             // 7 (추가). Knowledge Edge 기록: ISSUE → THEME/SECTOR 연결
             const ledgerDb = IssueLedgerDB.getInstance();
@@ -399,7 +441,14 @@ ${issueListForPrompt}
                     tgMsg += `*[📈 상위 주도 섹터 TOP 3]*\n\n`;
                     tgMsg += sectors.slice(0, 3).map((s: any, idx: number) => 
                         `${idx + 1}. *${s.name}* [${s.lifespan_type}]\n  - ${s.reason.replace(/[*_`]/g, '')}`
-                    ).join('\n\n') + '\n';
+                    ).join('\n\n') + '\n\n';
+                }
+
+                if (stockPicksArray && stockPicksArray.length > 0) {
+                    tgMsg += `*[🎯 테마 AI 관심종목 추천]*\n\n`;
+                    tgMsg += stockPicksArray.map((p: any) => 
+                        `- *${p.stock_name}* (${p.confidence}점)\n  : ${p.reason.replace(/[*_`]/g, '')}`
+                    ).join('\n\n') + '\n\n';
                 }
 
                 tgSvc.sendMessage(tgMsg).catch(err => console.error('[ThemeIntelligence] 텔레그램 발송 실패', err));
@@ -411,6 +460,36 @@ ${issueListForPrompt}
 
         } catch (error: any) {
             console.error(`[ThemeIntelligence] 💥 분석 중 오류 발생:`, error.message);
+
+            // Resilience Plan 2 & 3: 에러 알림 및 임시 크론 예약
+            const errMsg = error.message ? error.message.toLowerCase() : '';
+            if (errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('rate-limit') || errMsg.includes('rate limits')) {
+                console.warn(`[ThemeIntelligence] API 과부하 감지. 5분 뒤 임시 크론으로 재시도를 예약합니다.`);
+                try {
+                    const { SchedulerService } = await import('../SchedulerService');
+                    const { eventBus } = await import('../../utils/EventBus');
+                    const { TelegramService } = await import('../TelegramService');
+                    
+                    eventBus.emit('system:error' as any, {
+                        message: `[테마/섹터 AI] ⚠️ 구글 API 트래픽 과부하로 분석 지연. 5분 뒤 백그라운드 재시도.`,
+                        code: 'AI_OVERLOAD',
+                        time: new Date().toLocaleTimeString('ko-KR')
+                    });
+
+                    TelegramService.getInstance().sendMessage(`🚨 [테마 AI 대기] 구글 API 과부하로(503) 생애주기 분석이 지연되었습니다. 5분 뒤 자동으로 1회 재실행합니다.`);
+
+                    SchedulerService.getInstance().scheduleOnceFallback(
+                        '테마 AI 지연 재시도 (Batch)', 
+                        5 * 60 * 1000, 
+                        async () => {
+                            await ThemeIntelligenceAgent.getInstance().runBatchAnalysis(targetDate);
+                        }
+                    );
+                } catch (schedErr) {
+                    console.error('[ThemeIntelligence] 재시도 스케줄링 실패:', schedErr);
+                }
+            }
+
             throw error;
         }
     }

@@ -1,0 +1,55 @@
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+[32m✓[39m 2474 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[22m[32mindex.html                 [39m[1m[2m    0.48 kB[22m[1m[22m[2m │ gzip:   0.31 kB[22m
+[2mdist/[22m[35massets/index-GqaVOAQr.css  [39m[1m[2m  112.17 kB[22m[1m[22m[2m │ gzip:  17.43 kB[22m
+[2mdist/[22m[36massets/index-DBl7VOoH.js   [39m[1m[33m1,460.07 kB[39m[22m[2m │ gzip: 412.88 kB[22m
+[32m✓ built in 7.49s[39m
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+[32m✓[39m 326 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist-electron/[22m[36mmain.js                              [39m[1m[2m  0.16 kB[22m[1m[22m[2m │ gzip:   0.11 kB[22m
+[2mdist-electron/[22m[36mNaverSearchAggregator-1YFNaCep.js    [39m[1m[2m  0.57 kB[22m[1m[22m[2m │ gzip:   0.67 kB[22m
+[2mdist-electron/[22m[36mNaverSearchCollector-KgOP-OW4.js     [39m[1m[2m  0.84 kB[22m[1m[22m[2m │ gzip:   0.63 kB[22m
+[2mdist-electron/[22m[36mStrategyProfileService--3X9HWcb.js   [39m[1m[2m  1.95 kB[22m[1m[22m[2m │ gzip:   0.84 kB[22m
+[2mdist-electron/[22m[36mPortfolioJudgeScheduler-acGpGGTK.js  [39m[1m[2m  2.31 kB[22m[1m[22m[2m │ gzip:   1.37 kB[22m
+[2mdist-electron/[22m[36mMaiisMacroService-DzZfZHAi.js        [39m[1m[2m  2.40 kB[22m[1m[22m[2m │ gzip:   1.58 kB[22m
+[2mdist-electron/[22m[36mFundamentalAnalystAgent-CmGxrguZ.js  [39m[1m[2m  2.84 kB[22m[1m[22m[2m │ gzip:   2.24 kB[22m
+[2mdist-electron/[22m[36mMomentumAnalystAgent-BOD-8U-C.js     [39m[1m[2m  3.12 kB[22m[1m[22m[2m │ gzip:   2.16 kB[22m
+[2mdist-electron/[22m[36mPortfolioManagerAgent-CAlXh3eA.js    [39m[1m[2m  3.42 kB[22m[1m[22m[2m │ gzip:   2.33 kB[22m
+[2mdist-electron/[22m[36mVirtualPortfolioEngine-BksaEjXN.js   [39m[1m[2m  3.86 kB[22m[1m[22m[2m │ gzip:   1.71 kB[22m
+[2mdist-electron/[22m[36mSwarmSimulationAgent-CKcQGrjw.js     [39m[1m[2m  4.11 kB[22m[1m[22m[2m │ gzip:   3.08 kB[22m
+[2mdist-electron/[22m[36mMarketNewsService-DN9S3fZ9.js        [39m[1m[2m  4.45 kB[22m[1m[22m[2m │ gzip:   3.00 kB[22m
+[2mdist-electron/[22m[36myoutube-transcript.esm-DJEi5SC2.js   [39m[1m[2m  4.59 kB[22m[1m[22m[2m │ gzip:   2.02 kB[22m
+[2mdist-electron/[22m[36mPipelineLogger-Co5LtxlQ.js           [39m[1m[2m  4.82 kB[22m[1m[22m[2m │ gzip:   1.79 kB[22m
+[2mdist-electron/[22m[36mMasterAiService-DPTq9JSk.js          [39m[1m[2m  4.87 kB[22m[1m[22m[2m │ gzip:   3.43 kB[22m
+[2mdist-electron/[22m[36mMaiisRankingAggregator-C9D0oWbN.js   [39m[1m[2m  5.12 kB[22m[1m[22m[2m │ gzip:   2.25 kB[22m
+[2mdist-electron/[22m[36mAiExecutionQueue-6T38GSzH.js         [39m[1m[2m  7.46 kB[22m[1m[22m[2m │ gzip:   3.18 kB[22m
+[2mdist-electron/[22m[36mIssueManagementAgent-An-BsfTr.js     [39m[1m[2m  7.50 kB[22m[1m[22m[2m │ gzip:   4.80 kB[22m
+[2mdist-electron/[22m[36mMarketReviewAgent-CHY-O0SG.js        [39m[1m[2m  7.90 kB[22m[1m[22m[2m │ gzip:   4.14 kB[22m
+[2mdist-electron/[22m[36mCoPilotAgent-DgQC3eN8.js             [39m[1m[2m  7.93 kB[22m[1m[22m[2m │ gzip:   5.11 kB[22m
+[2mdist-electron/[22m[36mMaiisDashboardService-Cbt6Ivpl.js    [39m[1m[2m  8.01 kB[22m[1m[22m[2m │ gzip:   3.22 kB[22m
+[2mdist-electron/[22m[36mPortfolioReviewEngine-Ds4BX1om.js    [39m[1m[2m  8.63 kB[22m[1m[22m[2m │ gzip:   3.08 kB[22m
+[2mdist-electron/[22m[36mTechnicalAnalyzer-Cwr7nKbN.js        [39m[1m[2m  8.97 kB[22m[1m[22m[2m │ gzip:   5.13 kB[22m
+[2mdist-electron/[22m[36mPortfolioManagerService-BBfki30f.js  [39m[1m[2m  9.67 kB[22m[1m[22m[2m │ gzip:   4.56 kB[22m
+[2mdist-electron/[22m[36mNewsDataHub-CeOpmptt.js              [39m[1m[2m  9.73 kB[22m[1m[22m[2m │ gzip:   4.45 kB[22m
+[2mdist-electron/[22m[36mMaiisDomainService-DID8Yvk4.js       [39m[1m[2m  9.76 kB[22m[1m[22m[2m │ gzip:   5.71 kB[22m
+[2mdist-electron/[22m[36mPerformanceTracker-CUJbI4fP.js       [39m[1m[2m 11.94 kB[22m[1m[22m[2m │ gzip:   4.75 kB[22m
+[2mdist-electron/[22m[36mThemeIntelligenceAgent-DLFxH064.js   [39m[1m[2m 12.70 kB[22m[1m[22m[2m │ gzip:   6.73 kB[22m
+[2mdist-electron/[22m[36mIntradaySwarmAgent-CrI-67lF.js       [39m[1m[2m 13.27 kB[22m[1m[22m[2m │ gzip:   8.21 kB[22m
+[2mdist-electron/[22m[36mIssueLedgerDB-DDNjQwql.js            [39m[1m[2m 14.02 kB[22m[1m[22m[2m │ gzip:   3.68 kB[22m
+[2mdist-electron/[22m[36mMarketConditionAgent-BqOdjR4D.js     [39m[1m[2m 25.29 kB[22m[1m[22m[2m │ gzip:  13.02 kB[22m
+[2mdist-electron/[22m[36mV2PipelineManager-xp9BfjCv.js        [39m[1m[2m 37.27 kB[22m[1m[22m[2m │ gzip:  14.42 kB[22m
+[2mdist-electron/[22m[36mmain-vvtOcynA.js                     [39m[1m[33m569.94 kB[39m[22m[2m │ gzip: 170.83 kB[22m
+[32m✓ built in 1.25s[39m
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+[32m✓[39m 1 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist-electron/[22m[36mpreload.js  [39m[1m[2m16.42 kB[22m[1m[22m[2m │ gzip: 3.47 kB[22m
+[32m✓ built in 11ms[39m

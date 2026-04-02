@@ -372,4 +372,195 @@ export class TechnicalAnalyzer {
             return { isTriggered: false, status: '' };
         }
     }
+    /**
+     * 개별 종목의 일봉 차트 요약 텍스트를 생성합니다.
+     * Portfolio Manager AI에 종목별 현재 가격 위치(저점/고점 대비, 이평 대비)를 제공하기 위한 용도.
+     * 
+     * @param code   키움 6자리 종목 코드
+     * @param name   종목명 (로그/출력용)
+     * @param days   수집 봉 수 (기본 200봉 → MA200까지 계산 가능)
+     */
+    public async generateStockDigest(code: string, name: string, days: number = 200): Promise<string> {
+        try {
+            const dailyData = await this.kiwoom.getOhlcvDaily(code, days);
+            if (!dailyData || dailyData.length < 20) {
+                return `[${name}(${code})] 차트 데이터 부족 (${dailyData?.length ?? 0}봉)`;
+            }
+
+            // 현재가 (가장 최근 봉 = 배열 마지막)
+            const latest = dailyData[dailyData.length - 1];
+            const currentPrice = Math.abs(Number(String(latest.close).replace(/[^0-9\-\.]/g, '')));
+            if (!currentPrice || currentPrice <= 0) return `[${name}(${code})] 현재가 파싱 실패`;
+
+            // 이동평균 계산 (역순: dailyData는 오름차순이므로 끝에서부터 N개)
+            const closes = dailyData.map((c: any) =>
+                Math.abs(Number(String(c.close).replace(/[^0-9\-\.]/g, '')))
+            ).filter((v: number) => v > 0);
+
+            const calcMA = (n: number): number | null => {
+                if (closes.length < n) return null;
+                const slice = closes.slice(closes.length - n); // 최근 N개
+                return slice.reduce((a: number, b: number) => a + b, 0) / n;
+            };
+
+            const ma20  = calcMA(20);
+            const ma60  = calcMA(60);
+            const ma120 = calcMA(120);
+            const ma200 = calcMA(200);
+
+            const disparity = (ma: number | null): string => {
+                if (!ma) return 'N/A (데이터 부족)';
+                const d = ((currentPrice - ma) / ma) * 100;
+                return `${d >= 0 ? '+' : ''}${d.toFixed(1)}%`;
+            };
+
+            // 60일 고가/저가 (최근 60봉)
+            const recent60 = dailyData.slice(Math.max(0, dailyData.length - 60));
+            const high60 = Math.max(...recent60.map((c: any) =>
+                Math.abs(Number(String(c.high).replace(/[^0-9\-\.]/g, '')))
+            ).filter((v: number) => v > 0));
+            const low60 = Math.min(...recent60.map((c: any) =>
+                Math.abs(Number(String(c.low).replace(/[^0-9\-\.]/g, '')))
+            ).filter((v: number) => v > 0));
+
+            const fromHigh60 = high60 > 0 ? ((currentPrice - high60) / high60 * 100).toFixed(1) : 'N/A';
+            const fromLow60  = low60  > 0 ? ((currentPrice - low60)  / low60  * 100).toFixed(1) : 'N/A';
+
+            // 이평 배열 판단 (정배열 / 역배열 / 혼합)
+            let maAlignment = '판단 불가';
+            if (ma20 && ma60 && ma120) {
+                if (ma20 > ma60 && ma60 > ma120) {
+                    maAlignment = '정배열 (MA20>MA60>MA120) — 상승 추세';
+                } else if (ma20 < ma60 && ma60 < ma120) {
+                    maAlignment = '역배열 (MA20<MA60<MA120) — 하락 추세';
+                } else if (currentPrice > ma20 && currentPrice > ma60) {
+                    maAlignment = '단기·중기 이평 위 (혼합 배열)';
+                } else if (currentPrice < ma20 && currentPrice < ma60) {
+                    maAlignment = '단기·중기 이평 아래 (혼합 약세)';
+                } else {
+                    maAlignment = '혼합 배열 (추세 전환 탐색 중)';
+                }
+            }
+
+            // ── 추가 지표 1: 단기 모멘텀 (5일/20일 수익률) ─────────────────────────
+            // ※ 오늘 봉은 장중 미완성이므로 closes[-2](어제 종가) 기준으로 계산
+            const ret = (n: number): string => {
+                const baseIdx = closes.length - 2; // 어제(완성된 마지막 봉)
+                const pastIdx = closes.length - 2 - n;
+                if (pastIdx < 0 || baseIdx < 0) return 'N/A';
+                const basePrice = closes[baseIdx];
+                const pastPrice = closes[pastIdx];
+                if (!basePrice || !pastPrice) return 'N/A';
+                const r = ((basePrice - pastPrice) / pastPrice) * 100;
+                return `${r >= 0 ? '+' : ''}${r.toFixed(1)}%`;
+            };
+            const ret5  = ret(5);
+            const ret20 = ret(20);
+
+            // ── 추가 지표 2: 60일 내 최대 조정폭 (고점 → 저점 낙폭) ───────────────
+            // 60일 고점이 먼저 나오고 그 이후 저점이 나오는 패턴 감지 (진짜 조정)
+            let maxDrawdown60 = 'N/A';
+            if (recent60.length >= 5) {
+                let peakIdx = 0;
+                let peakVal = 0;
+                let troughVal = Infinity;
+                let bestDrawdown = 0;
+
+                for (let i = 0; i < recent60.length; i++) {
+                    const h = Math.abs(Number(String(recent60[i].high).replace(/[^0-9\-\.]/g, '')));
+                    if (h > peakVal) {
+                        peakVal = h;
+                        peakIdx = i;
+                        troughVal = Infinity; // 새 고점 기준 리셋
+                    }
+                    if (i > peakIdx) {
+                        const l = Math.abs(Number(String(recent60[i].low).replace(/[^0-9\-\.]/g, '')));
+                        if (l < troughVal) troughVal = l;
+                        const dd = ((troughVal - peakVal) / peakVal) * 100;
+                        if (dd < bestDrawdown) bestDrawdown = dd;
+                    }
+                }
+                maxDrawdown60 = bestDrawdown < 0
+                    ? `${bestDrawdown.toFixed(1)}% (고점 ${Math.round(peakVal).toLocaleString()}원 → 저점 ${troughVal !== Infinity ? Math.round(troughVal).toLocaleString() : '?'}원)`
+                    : '조정 없음';
+            }
+
+            // ── 추가 지표 3: MA20 크로스 이력 (최근 5일 전 위치 vs 현재) ─────────
+            let ma20CrossStatus = '판단 불가';
+            if (ma20 && closes.length >= 26) {
+                // 5일 전 MA20 계산
+                const slicePast = closes.slice(closes.length - 25, closes.length - 5); // 20개
+                const ma20Past = slicePast.reduce((a: number, b: number) => a + b, 0) / 20;
+                const pricePast = closes[closes.length - 6]; // 5일 전 주가
+
+                const wasAbove = pricePast > ma20Past;   // 5일 전 MA20 위
+                const isAbove  = currentPrice > ma20;    // 현재 MA20 위
+
+                if (!wasAbove && isAbove) {
+                    ma20CrossStatus = '⭐ MA20 하향이탈 후 재돌파 (골든크로스) — 반등 초입 신호';
+                } else if (wasAbove && !isAbove) {
+                    ma20CrossStatus = '⚠️ MA20 상향돌파 후 데드크로스 — 단기 추세 약화';
+                } else if (isAbove) {
+                    ma20CrossStatus = 'MA20 위 유지 — 단기 상승 추세 지속';
+                } else {
+                    ma20CrossStatus = 'MA20 아래 유지 — 단기 하락 추세 지속';
+                }
+            }
+
+            // ── 추가 지표 4: 거래량 분석 (완성된 봉만 사용 — 오늘 미완성 봉 제외) ─
+            let volumeStatus = 'N/A';
+            const volumes = dailyData.map((c: any) =>
+                Math.abs(Number(String(c.volume).replace(/[^0-9]/g, '')))
+            );
+            // 오늘(마지막 봉) 제외: 장 초반 실행 시 미완성 거래량으로 오판 방지
+            const completedVols = volumes.slice(0, volumes.length - 1).filter((v: number) => v > 0);
+
+            if (completedVols.length >= 20) {
+                // 20일 평균 거래량 기준선 (오늘 제외)
+                const vol20Avg = completedVols.slice(completedVols.length - 20)
+                    .reduce((a: number, b: number) => a + b, 0) / 20;
+
+                // 최근 3 완성 거래일 평균 (어제~3일전)
+                const recentVols = completedVols.slice(completedVols.length - 3);
+                const recentAvg  = recentVols.reduce((a: number, b: number) => a + b, 0) / recentVols.length;
+
+                if (vol20Avg > 0) {
+                    const ratio    = recentAvg / vol20Avg;
+                    const ratioStr = `${ratio.toFixed(1)}배`;
+
+                    if (ratio >= 2.5) {
+                        volumeStatus = `🔥 거래량 폭증 (20일 평균 대비 ${ratioStr}) — 강력한 상승 동반 확인`;
+                    } else if (ratio >= 1.5) {
+                        volumeStatus = `📈 거래량 증가 (20일 평균 대비 ${ratioStr}) — 수급 증가 추세`;
+                    } else if (ratio >= 0.8) {
+                        volumeStatus = `➖ 보통 거래량 (20일 평균 대비 ${ratioStr}) — 뚜렷한 수급 신호 없음`;
+                    } else {
+                        volumeStatus = `⚠️ 거래량 감소 (20일 평균 대비 ${ratioStr}) — 거래 위축 주의`;
+                    }
+
+                    if (ma20CrossStatus.includes('골든크로스') && ratio >= 1.5) {
+                        volumeStatus += ' ← ⭐ 이평 돌파 + 거래량 동반 = 반등 신뢰도 高';
+                    }
+                }
+            }
+
+            return [
+                `[${name}(${code}) 일봉 기술적 요약 (${dailyData.length}봉 기준)]`,
+                `· 현재가: ${currentPrice.toLocaleString()}원`,
+                `· 단기 모멘텀: 5일 ${ret5} / 20일 ${ret20}`,
+                `· 60일 최고 대비: ${fromHigh60}% | 60일 최저 대비: +${fromLow60}%`,
+                `· 60일 최대 조정폭: ${maxDrawdown60}`,
+                `· MA20 크로스: ${ma20CrossStatus}`,
+                `· 거래량 동향: ${volumeStatus}`,
+                `· MA20:  ${ma20  ? Math.round(ma20).toLocaleString()  : 'N/A'} (이격 ${disparity(ma20)})`,
+                `· MA60:  ${ma60  ? Math.round(ma60).toLocaleString()  : 'N/A'} (이격 ${disparity(ma60)})`,
+                `· MA120: ${ma120 ? Math.round(ma120).toLocaleString() : 'N/A'} (이격 ${disparity(ma120)})`,
+                `· MA200: ${ma200 ? Math.round(ma200).toLocaleString() : '데이터 부족'} (이격 ${disparity(ma200)})`,
+                `· 이평 배열: ${maAlignment}`,
+            ].join('\n');
+
+        } catch (e: any) {
+            return `[${name}(${code})] 차트 분석 실패: ${e.message}`;
+        }
+    }
 }

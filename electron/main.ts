@@ -442,6 +442,129 @@ ipcMain.handle('maiis:run-portfolio-review', async () => {
     }
 })
 
+// ======================
+// Phase 2.5: AI Analysts & Portfolio Manager Test Hooks
+// ======================
+ipcMain.handle('ai-analyst:run-momentum', async () => {
+    try {
+        const { MomentumAnalystAgent } = await import('./services/v2_agents/MomentumAnalystAgent');
+        return await MomentumAnalystAgent.getInstance().runAnalysis();
+    } catch (e: any) {
+        return { error: e.message };
+    }
+});
+
+ipcMain.handle('ai-analyst:run-fundamental', async () => {
+    try {
+        const { FundamentalAnalystAgent } = await import('./services/v2_agents/FundamentalAnalystAgent');
+        return await FundamentalAnalystAgent.getInstance().runAnalysis();
+    } catch (e: any) {
+        return { error: e.message };
+    }
+});
+
+ipcMain.handle('ai-analyst:run-portfolio-manager', async () => {
+    try {
+        const { PortfolioManagerAgent } = await import('./services/v2_agents/PortfolioManagerAgent');
+        return await PortfolioManagerAgent.getInstance().runDailyReview();
+    } catch (e: any) {
+        return { error: e.message };
+    }
+});
+
+ipcMain.handle('ai-analyst:run-daily-judge', async () => {
+    try {
+        const { PortfolioJudgeScheduler } = await import('./services/v2_pipeline/PortfolioJudgeScheduler');
+        await PortfolioJudgeScheduler.getInstance().runDailyJudgement();
+        return { success: true };
+    } catch (e: any) {
+        return { error: e.message };
+    }
+});
+
+ipcMain.handle('ai-analyst:get-portfolio-active', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getActivePortfolio();
+    } catch (e: any) {
+        return { error: e.message };
+    }
+});
+
+ipcMain.handle('ai-analyst:get-picks', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getLatestAiAnalystPicks();
+    } catch (e: any) {
+        return { error: e.message };
+    }
+});
+
+// 포트폴리오 초기화 (maiis_portfolio 전체 삭제)
+ipcMain.handle('ai-analyst:clear-portfolio', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        const info = db.prepare('DELETE FROM maiis_portfolio').run();
+        console.log(`[Main] maiis_portfolio cleared: ${info.changes}건 삭제`);
+        return { success: true, deleted: info.changes };
+    } catch (e: any) {
+        console.error('[Main] clear-portfolio 오류:', e);
+        return { error: e.message };
+    }
+});
+
+// 관심종목(AI 픽스) 초기화 (ai_analyst_picks 전체 삭제)
+ipcMain.handle('ai-analyst:clear-picks', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        const info = db.prepare('DELETE FROM ai_analyst_picks').run();
+        console.log(`[Main] ai_analyst_picks cleared: ${info.changes}건 삭제`);
+        return { success: true, deleted: info.changes };
+    } catch (e: any) {
+        console.error('[Main] clear-picks 오류:', e);
+        return { error: e.message };
+    }
+});
+
+// [TEST] 종목 차트 다이제스트 테스트 (기본: 삼성전자 005930)
+ipcMain.handle('ai-analyst:test-chart-digest', async (_event, code: string = '005930', name: string = '삼성전자') => {
+    try {
+        console.log(`[Main] 차트 다이제스트 테스트 시작: ${name}(${code})`);
+        const { TechnicalAnalyzer } = await import('./services/v2_agents/TechnicalAnalyzer');
+        const { KiwoomService } = await import('./services/KiwoomService');
+        const analyzer = new TechnicalAnalyzer(KiwoomService.getInstance());
+        const digest = await analyzer.generateStockDigest(code, name, 200);
+        console.log(`[Main] 차트 다이제스트 결과:\n${digest}`);
+        return { success: true, digest };
+    } catch (e: any) {
+        console.error('[Main] test-chart-digest 오류:', e);
+        return { error: e.message };
+    }
+});
+
+// 회고 및 자가학습 실행 (수동)
+ipcMain.handle('ai-analyst:run-retrospective', async () => {
+    try {
+        console.log(`[Main] 수동 성과 회고 및 오답노트 작성 시작`);
+        const { RetrospectiveAgent } = await import('./services/v2_agents/RetrospectiveAgent');
+        const { KiwoomService } = await import('./services/KiwoomService');
+        const agent = new RetrospectiveAgent(KiwoomService.getInstance());
+        
+        // 1단계: 채점
+        const count = await agent.evaluatePastPicks();
+        // 2단계: 피드백(오답노트) 생성
+        await agent.runRetrospectiveLogic();
+        
+        console.log(`[Main] 성과 회고 프로세스 일체 완료 (채점 건수: ${count})`);
+        return { success: true, count };
+    } catch (e: any) {
+        console.error('[Main] run-retrospective 오류:', e);
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('maiis:run-pipeline-manual', async (_event, pipelineId: string) => {
     try {
         console.log(`[Main] Manual pipeline trigger: ${pipelineId}`)
@@ -1906,5 +2029,45 @@ ipcMain.handle('news-hub:get-articles', async (_event, options?: { category?: st
         return NewsDataHub.getInstance().getCachedArticles(options)
     } catch (err: any) {
         return []
+    }
+})
+
+// ═══ AI 수동실행 로그 IPC Handlers ═══════════════════════════════════════════════
+ipcMain.handle('ai-run-logs:save', async (_event, message: string) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        DatabaseService.getInstance().saveAiRunLog(message)
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('ai-run-logs:get', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        return DatabaseService.getInstance().getAiRunLogs()
+    } catch (err: any) {
+        return []
+    }
+})
+
+ipcMain.handle('ai-run-logs:clear', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        DatabaseService.getInstance().clearAiRunLogs()
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('ai-daily-raw-logs:get', async (_event, date: string, agentType: string) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const log = DatabaseService.getInstance().getAiDailyRawLog(date, agentType)
+        return { success: true, data: log ? log.raw_text : null }
+    } catch (err: any) {
+        return { success: false, error: err.message }
     }
 })

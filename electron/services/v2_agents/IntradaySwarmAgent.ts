@@ -101,12 +101,9 @@ export class IntradaySwarmAgent {
             try {
                 const { TechnicalAnalyzer } = await import('./TechnicalAnalyzer');
                 const analyzer = new TechnicalAnalyzer(KiwoomService.getInstance());
-                
-                // 일봉(매크로) + 분봉(초단기 타점) 동시 확보
-                const [dailyDigest, intraDigest] = await Promise.all([
-                    analyzer.generateDailyTechnicalDigest(),
-                    analyzer.generateIntradayTechnicalDigest()
-                ]);
+                // 일봉(매크로) + 분봉(초단기 타점) 순차 확보 (Kiwoom API 동시 호출 제한 방지)
+                const dailyDigest = await analyzer.generateDailyTechnicalDigest();
+                const intraDigest = await analyzer.generateIntradayTechnicalDigest();
                 
                 chartDigest = `${dailyDigest}\n\n---\n\n${intraDigest}`;
             } catch (e: any) {
@@ -327,7 +324,6 @@ ${votes.map(v => {
             }
 
             const sourcesArr: string[] = ['SWARM_LOCAL'];
-            const rawDb = (this.db as any).db;
 
             rawDb.prepare(`
                 INSERT OR REPLACE INTO intraday_predictions 
@@ -454,13 +450,31 @@ ${technicalDigest}
             const rawDb = (this.db as any).db;
             try {
                 const existingRow = rawDb.prepare(`SELECT comments_json FROM ${tableName} WHERE id = ?`).get(predId);
+                let analystComments: any[] = [];
                 if (existingRow && existingRow.comments_json) {
                     const existingComments = JSON.parse(existingRow.comments_json);
-                    const analystComments = existingComments.filter((c: any) => c.predict === 'INFO' || c.id.startsWith('ANALYST_'));
-                    if (analystComments.length > 0) {
-                        // 전담 분석가 코멘트를 맨 위로 올리거나 합칩니다.
-                        finalCommentsToSave = [...analystComments, ...finalCommentsToSave];
+                    analystComments = existingComments.filter((c: any) => c.predict === 'INFO' || c.id.startsWith('ANALYST_'));
+                }
+                
+                // 만약 SYSTEM_CONTEXT가 원래 없었고 파라미터로 받은 technicalDigest가 있다면 제일 뒤에 삽입 (UI 하단 배치)
+                if (technicalDigest && technicalDigest.trim().length > 0) {
+                    const hasSysCtx = analystComments.some(c => c.id === 'SYSTEM_CONTEXT');
+                    if (!hasSysCtx) {
+                        finalCommentsToSave.push({
+                            id: 'SYSTEM_CONTEXT',
+                            name: '시스템 전처리 다이제스트 (입력 데이터)',
+                            predict: 'INFO',
+                            comment: `[🔥 실시간 일봉/5분봉 종합 차트 추세 🔥]\n${technicalDigest}`,
+                            weight: 0,
+                            winRate: null,
+                            recent10Rate: null
+                        });
                     }
+                }
+
+                if (analystComments.length > 0) {
+                    // 전담 분석가 코멘트를 맨 위로 올리거나 합칩니다.
+                    finalCommentsToSave = [...analystComments, ...finalCommentsToSave];
                 }
             } catch (e: any) {
                 console.error(`[IntradaySwarm-Comment] 기존 전처리 댓글 파싱 실패:`, e.message);

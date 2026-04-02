@@ -4,31 +4,38 @@ import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import TitleBar from './components/TitleBar'
 import Sidebar, { menuItems } from './components/Sidebar'
+// ─── V2 Active Components ────────────────────────────────────────────────────
 import Dashboard from './components/Dashboard'
 import Holdings from './components/Holdings'
-import Watchlist from './components/Watchlist'
 import Settings from './components/Settings'
-import AutoTrade from './components/AutoTrade'
-import CapturePage from './components/CapturePage'
-import Schedule from './components/Schedule'
 import MaiisCommandCenter from './components/MaiisCommandCenter'
-import AiTradeDashboard from './components/AiTrade/AiTradeDashboard'
-import RisingStocksReport from './components/RisingStocksReport'
-import NarrativeInsightTab from './components/NarrativeInsightTab'
 import MacroDashboard from './components/MacroDashboard'
-import PmTracker from './components/PmTracker'
 import PipelineMonitorTab from './components/v2_dashboard/PipelineMonitorTab'
 import MarketAgentTab from './components/v2_dashboard/MarketAgentTab'
 import IssueManagementTab from './components/v2_dashboard/IssueManagementTab'
 import { ThemeTrackerTab } from './components/v2_dashboard/ThemeTrackerTab'
+import { PortfolioManagerTab } from './components/v2_dashboard/PortfolioManagerTab'
+import { IncubatorLabTab } from './components/v2_dashboard/IncubatorLabTab'
 import CoPilotDrawer from './components/common/CoPilotDrawer'
+
+// ─── V2 Hooks & Stores ───────────────────────────────────────────────────────
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
 import { useGlobalSignalMonitor } from './hooks/useGlobalSignalMonitor'
-import { useNoteStore } from './store/useNoteStore'
-import { useScheduleStore } from './store/useScheduleStore'
 import { useMarketStore } from './store/useMarketStore'
 import { useAutoTradeStore } from './store/useAutoTradeStore'
 import { Clock, Play, Square } from 'lucide-react'
+
+// ─── V1 Legacy Components (보존: 재활용 가능성) ──────────────────────────────
+// import CapturePage from './components/CapturePage'          // 종목 캡처/공유 기능 (스크린샷 뷰어)
+// import AutoTrade from './components/AutoTrade'              // 조건검색 기반 자동매매 UI (키움 OCX 의존)
+// import Schedule from './components/Schedule'                // 일정/알림 스케줄러 UI
+// import RisingStocksReport from './components/RisingStocksReport' // 키움 급등주 스캐너 (수급AI에 통합 예정)
+// import PmTracker from './components/PmTracker'              // V1 포트폴리오 트래커 (PortfolioManagerTab으로 대체)
+// import NarrativeInsightTab from './components/NarrativeInsightTab' // 내러티브/뉴스 인사이트 (IncubatorLab으로 진화)
+// import AiTradeDashboard from './components/AiTrade/AiTradeDashboard' // V1 AI트레이드 대시보드
+// import Watchlist from './components/Watchlist'              // V1 관심종목 (PortfolioManagerTab WATCHLIST 상태로 대체)
+// import { useNoteStore } from './store/useNoteStore'         // 노트 스토어 (Schedule과 함께 사용)
+// import { useScheduleStore } from './store/useScheduleStore' // 스케줄 스토어
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
     constructor(props: { children: ReactNode }) {
@@ -346,30 +353,21 @@ function AppContent() {
                 {/* Main Content */}
                 <main className="flex-1 overflow-hidden bg-background flex flex-col">
                     <div className="w-full h-full flex flex-col min-h-0">
+                        {/* ── V2 Active Routes ── */}
                         {activeTab === 'dashboard' && <Dashboard />}
                         {activeTab === 'holdings' && <Holdings />}
-                        {/* [V1 Legacy] 추후 재활용 (UI 라우팅 중단)
-                        {activeTab === 'watchlist' && <Watchlist />}
-                        */}
-                        {activeTab === 'rising-stocks' && <RisingStocksReport />}
-                        {/* [V1 Legacy]
-                        {activeTab === 'auto-trade' && <AutoTrade />}
-                        {activeTab === 'schedule' && <Schedule />}
-                        */}
-                        { activeTab === 'settings' && <Settings />}
-                        {/* [V1 Legacy]
-                        { activeTab === 'ai-trade' && <AiTradeDashboard />}
-                        */}
-                        { activeTab === 'narrative-insight' && <NarrativeInsightTab />}
-                        { activeTab === 'maiis-command' && <MaiisCommandCenter />}
-                        { activeTab === 'macro-dashboard' && <MacroDashboard />}
-                        { activeTab === 'pm-tracker' && <PmTracker />}
-                        { activeTab === 'pipeline-monitor' && <PipelineMonitorTab />}
-                        { activeTab === 'market-agent' && <MarketAgentTab onNavigate={navigateTo} />}
-                        { activeTab === 'issue-agent' && <IssueManagementTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'issue-agent' ? navTarget.entityId : undefined} />}
-                        { activeTab === 'theme-tracker' && <ThemeTrackerTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'theme-tracker' ? navTarget.entityId : undefined} />}
+                        {activeTab === 'settings' && <Settings />}
+                        {activeTab === 'maiis-command' && <MaiisCommandCenter />}
+                        {activeTab === 'macro-dashboard' && <MacroDashboard />}
+                        {activeTab === 'pipeline-monitor' && <PipelineMonitorTab />}
+                        {activeTab === 'market-agent' && <MarketAgentTab onNavigate={navigateTo} />}
+                        {activeTab === 'issue-agent' && <IssueManagementTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'issue-agent' ? navTarget.entityId : undefined} />}
+                        {activeTab === 'theme-tracker' && <ThemeTrackerTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'theme-tracker' ? navTarget.entityId : undefined} />}
+                        {activeTab === 'incubator-lab' && <IncubatorLabTab />}
+                        {activeTab === 'portfolio-manager' && <PortfolioManagerTab />}
 
-                        {(activeTab !== 'dashboard' && activeTab !== 'pipeline-monitor' && activeTab !== 'market-agent' && activeTab !== 'issue-agent' && activeTab !== 'theme-tracker' && activeTab !== 'maiis-command' && activeTab !== 'macro-dashboard' && activeTab !== 'pm-tracker' && activeTab !== 'holdings' && activeTab !== 'rising-stocks' && activeTab !== 'settings' && activeTab !== 'narrative-insight') && (
+                        {/* 등록된 탭이 아닌 경우 폴백 화면 */}
+                        {(['dashboard','holdings','settings','maiis-command','macro-dashboard','pipeline-monitor','market-agent','issue-agent','theme-tracker','incubator-lab','portfolio-manager'].indexOf(activeTab) === -1) && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

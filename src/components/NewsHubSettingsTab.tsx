@@ -66,7 +66,31 @@ const DEFAULT_SETTINGS: NewsHubSettings = {
     jsonApiCategories: ['MAJOR', 'GLOBAL', 'STOCK_ANALYSIS', 'GLOBAL_MARKET'],
     ttlMinutes: 55,
     retentionDays: 30,
-    aiCronTimes: ['08:30', '08:50', '09:30', '13:00', '15:10'],
+    // ── AI 크론 참조 시각: 실제 SchedulerService 등록 기준 (뉴스허브 슬롯 충돌 감지용)
+    // 업데이트 시 SchedulerService.ts와 동기화 필수
+    aiCronTimes: [
+        '08:30', // 이슈관리 AI (IssueManagementAgent)
+        '08:50', // 시황 AI Cycle A - 장전 예측 (MarketConditionAgent)
+        '09:26', // NaverFlow 수집 + 테마 AI (ThemeIntelligenceAgent)
+        '09:30', // 시황 AI Cycle P - 개장 검증 (MarketConditionAgent)
+        '09:35', // 📈 수급 AI (MomentumAnalystAgent) ← 신규
+        '09:40', // 📄 리포트 AI (FundamentalAnalystAgent) ← 신규
+        '09:45', // 🧑‍💼 포트폴리오 매니저 (PortfolioManagerAgent) ← 신규 (스웜과 동시, 충돌 없음)
+        '10:15', // 장중 스웜 ② (IntradaySwarmAgent - Local AI)
+        '10:45', // 장중 스웜 ③
+        '11:15', // 장중 스웜 ④
+        '11:45', // 장중 스웜 ⑤
+        '12:15', // 장중 스웜 ⑥
+        '12:45', // 장중 스웜 ⑦
+        '13:15', // 장중 스웜 ⑧
+        '13:45', // 장중 스웜 ⑨
+        '15:00', // 장마감 전 피드백 (MarketReviewAgent)
+        '15:10', // 시황 AI Cycle B - 마감 예측 (MarketConditionAgent)
+        '15:35', // PerformanceTracker (수익률·장중 평가)
+        '15:35', // NaverFlow 마감 수집
+        '15:40', // 일간 회고 AI (MarketReviewAgent)
+        '15:45', // ⚖️ 포트폴리오 장마감 채점 (PortfolioJudgeScheduler) ← 신규
+    ],
 }
 
 const JSON_CATEGORY_LABELS: Record<string, string> = {

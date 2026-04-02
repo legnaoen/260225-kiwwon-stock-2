@@ -101,7 +101,7 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle }: Stock
             {/* 리포트 히스토리 목록 */}
             <div className="space-y-12">
                 {reports.length > 0 ? reports.map((rpt, idx) => {
-                    const scoreStyle = getScoreStyle(rpt.ai_score);
+                    const scoreStyle = getScoreStyle(rpt.ai_score ?? rpt.score ?? 50);
                     return (
                         <div key={idx} className="relative pl-8 border-l-2 border-border/40 hover:border-primary/30 transition-colors pb-2">
                             {/* 타임라인 포인트 아이콘 */}
@@ -111,14 +111,19 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle }: Stock
                             />
                             
                             {/* 리포트 헤더 */}
-                            <div className="flex items-center gap-4 mb-4">
+                            <div className="flex items-center gap-3 mb-4">
                                 <span className="text-sm font-black font-mono text-muted-foreground">{rpt.date}</span>
                                 <div 
-                                    className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-sm"
+                                    className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-sm shrink-0"
                                     style={{ backgroundColor: scoreStyle.color }}
                                 >
-                                    {scoreStyle.label} {rpt.ai_score}%
+                                    {scoreStyle.label} {rpt.ai_score ?? rpt.score ?? 50}%
                                 </div>
+                                {rpt.agent_type && (
+                                    <div className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-muted/60 text-muted-foreground border border-border/50 shrink-0">
+                                        📝 {rpt.agent_type}
+                                    </div>
+                                )}
                             </div>
 
                             {/* 리포트 본문 (분석 의견) */}

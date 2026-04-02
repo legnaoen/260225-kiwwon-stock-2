@@ -37,6 +37,11 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
     const [manualLogicalPath, setManualLogicalPath] = useState('');
     const [isLinking, setIsLinking] = useState(false);
 
+    // AI 원본(Raw) 로그 모달 상태
+    const [showRawLogModal, setShowRawLogModal] = useState(false);
+    const [rawLogContent, setRawLogContent] = useState<string>('');
+    const [isRawLogLoading, setIsRawLogLoading] = useState(false);
+
     const [targetDate, setTargetDate] = useState<string>('');
     
     useEffect(() => {
@@ -162,6 +167,29 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
             console.error(e);
         } finally {
             setIsAnalyzing(false);
+        }
+    };
+
+    const handleViewRawLog = async () => {
+        if (!targetDate) return;
+        setShowRawLogModal(true);
+        setIsRawLogLoading(true);
+        try {
+            const api = window.electronAPI as any;
+            if (api.getAiDailyRawLog) {
+                const res = await api.getAiDailyRawLog(targetDate, 'THEME_INTELLIGENCE');
+                if (res.success && res.data) {
+                    setRawLogContent(res.data);
+                } else {
+                    setRawLogContent('해당 날짜의 AI 분석 원본 데이터가 존재하지 않습니다.\n(이 기능이 업데이트된 이후의 분석 기록만 표시됩니다.)');
+                }
+            } else {
+                setRawLogContent('시스템 연결 오류: getAiDailyRawLog를 호출할 수 없습니다.');
+            }
+        } catch (e: any) {
+            setRawLogContent(`데이터를 불러오는 중 오류가 발생했습니다.\n${e.message}`);
+        } finally {
+            setIsRawLogLoading(false);
         }
     };
 
@@ -878,6 +906,14 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                     </div>
 
                     <div className="flex items-center gap-4">
+                        <button
+                            onClick={handleViewRawLog}
+                            className="flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-bold transition-colors shadow-sm bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20 hover:border-emerald-500/40"
+                            title="오늘 일자 기준 AI 분석 원본 데이터 보기"
+                        >
+                            <Sparkles size={13} />
+                            AI 데이터 전문
+                        </button>
                         <div className="flex items-center gap-2 px-3 py-1.5 bg-background border rounded-md text-xs">
                             <Calendar size={13} className="text-muted-foreground" />
                             <input 
@@ -944,6 +980,40 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                     relatedIssues={selectedStock.relatedIssues}
                     onClose={() => setSelectedStock(null)} 
                 />
+            )}
+
+            {/* AI 원본 로그 모달 */}
+            {showRawLogModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center">
+                    <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={() => setShowRawLogModal(false)} />
+                    <div className="relative w-full max-w-4xl h-[80vh] flex flex-col bg-card border border-border/50 rounded-xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-border/50 bg-muted/10 shrink-0">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="w-5 h-5 text-emerald-500" />
+                                <h2 className="text-lg font-bold text-foreground">AI 분석 원본 결과 (Raw Response)</h2>
+                                <span className="ml-2 px-2 py-0.5 text-xs font-mono bg-muted text-muted-foreground rounded">{targetDate}</span>
+                            </div>
+                            <button onClick={() => setShowRawLogModal(false)} className="p-1.5 hover:bg-muted rounded text-muted-foreground transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 overflow-auto p-5 bg-[#0d1117]">
+                            {isRawLogLoading ? (
+                                <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+                                    <RefreshCw className="w-6 h-6 animate-spin text-emerald-500" />
+                                    <span className="text-sm">원본 데이터를 불러오는 중...</span>
+                                </div>
+                            ) : (
+                                <pre className="text-[12px] font-mono leading-relaxed text-[#c9d1d9] whitespace-pre-wrap break-words">
+                                    {rawLogContent}
+                                </pre>
+                            )}
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

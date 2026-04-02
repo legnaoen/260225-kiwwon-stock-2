@@ -430,7 +430,7 @@ export class PerformanceTracker {
         }
 
         // KODEX 200, KODEX 인버스 당일 5분봉 차트 (시간별 고점 탐색용)
-        const { KiwoomService } = await import('./KiwoomService')
+        const { KiwoomService } = await import('../KiwoomService')
         const chartK200_5m = await KiwoomService.getInstance().getOhlcv5m('069500', 1)
         const chartInv_5m = await KiwoomService.getInstance().getOhlcv5m('114800', 1)
 

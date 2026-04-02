@@ -139,6 +139,13 @@ export class KiwoomService {
         return KiwoomService.instance;
     }
 
+    public isCircuitBroken(): boolean {
+        if (this.isCircuitHalted && (Date.now() - this.lastHaltTime < this.HALT_DURATION)) {
+            return true;
+        }
+        return false;
+    }
+
     public initWebSocket(win: BrowserWindow) {
         this.wsManager = new KiwoomWebSocketManager(win);
         this.conditionWsManager = new KiwoomConditionWebSocketManager(win);
@@ -215,7 +222,7 @@ export class KiwoomService {
             } catch (err: any) {
                 // 특정 에러 발생 시 회로 차단 발동 (절대 원칙 9.4)
                 if (err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED' || err.code === 'ECONNREFUSED' || err.response?.status === 429) {
-                    console.error(`[KiwoomService] Critical Error Detected (${err.code}). Activating Circuit Breaker for 5 mins.`);
+                    console.error(`[KiwoomService] Critical Error Detected (${err.code}). Activating Circuit Breaker for ${Math.round(this.HALT_DURATION / 60000)} mins.`);
                     this.isCircuitHalted = true;
                     this.lastHaltTime = Date.now();
                 }

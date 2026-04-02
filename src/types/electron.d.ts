@@ -20,6 +20,7 @@ export interface IElectronAPI {
     getWatchlistSymbols: () => Promise<string[]>
     getConnectionStatus: () => Promise<{ connected: boolean, mockConnected: boolean, realConnected: boolean }>
     analyzeStock: (stockCode: string) => Promise<{ success: boolean, data?: any, error?: string }>
+    resetCircuitBreaker: () => Promise<{ success: boolean }>
     sendTelegramMessage: (message: string) => Promise<{ success: boolean, error?: string }>
     onMarketStatus: (callback: (data: { code: string, time: string }) => void) => () => void
     onScheduleNotified: (callback: (...args: any[]) => void) => void
@@ -195,6 +196,14 @@ export interface IElectronAPI {
     // V2 Co-Pilot (HITL)
     sendCoPilotMessage: (message: string, mode?: 'auto' | 'short' | 'detail') => void
     onCoPilotReply: (callback: (data: {text: string, isDone: boolean}) => void) => () => void
+
+    // Phase 2.5: AI Analysts & Portfolio Manager
+    runMomentumAnalyst: () => Promise<{ success: boolean, data?: any, error?: string }>
+    runFundamentalAnalyst: () => Promise<{ success: boolean, data?: any, error?: string }>
+    runPortfolioManager: () => Promise<{ success: boolean, data?: any, error?: string }>
+    runPortfolioJudge: () => Promise<{ success: boolean, data?: any, error?: string }>
+    getActivePortfolio: () => Promise<any[]>
+    getAiPicks: () => Promise<any[]>
 }
 
 declare global {

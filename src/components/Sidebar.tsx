@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, ListOrdered, History, Settings, Bot, Calendar, Wallet, Brain, TrendingUp, BookOpen, Network, Globe, LineChart, Server, Sparkles, Activity } from 'lucide-react'
+import { LayoutDashboard, Settings, Wallet, Network, Globe, LineChart, Server, Sparkles, Brain, Activity, Telescope } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -11,7 +11,6 @@ export const menuItems = [
     { id: 'dashboard', name: '대시보드', icon: LayoutDashboard },
     { id: 'pipeline-monitor', name: '데이터 관제', icon: Server },
     { id: 'maiis-command', name: '종합 관제', icon: Network },
-    { id: 'pm-tracker', name: 'PM 트래커', icon: LineChart },
     { id: 'macro-dashboard', name: '글로벌 매크로', icon: Globe },
     { id: 'holdings', name: '보유종목', icon: Wallet },
     /* [V1 Legacy] 추후 재활용을 위해 UI 라우팅만 중단 (컴포넌트는 보존)
@@ -20,12 +19,12 @@ export const menuItems = [
     { id: 'market-agent', name: '시황 AI', icon: Sparkles },
     { id: 'issue-agent', name: '이슈 AI', icon: Brain },
     { id: 'theme-tracker', name: '테마 AI', icon: Activity },
-    { id: 'rising-stocks', name: '급등주', icon: TrendingUp },
-    { id: 'narrative-insight', name: '내러티브', icon: Brain },
-    /* [V1 Legacy]
-    { id: 'schedule', name: '일정', icon: Calendar },
-    { id: 'auto-trade', name: '자동매매', icon: Bot },
-    { id: 'ai-trade', name: 'AI Trade', icon: Brain },
+    { id: 'incubator-lab', name: '인큐베이터', icon: Telescope },
+    { id: 'portfolio-manager', name: '종목 AI', icon: Wallet },
+    /* [V1 Legacy - 제외]
+    { id: 'narrative-insight', name: '내러티브', icon: Brain }, // IncubatorLab으로 진화
+    { id: 'rising-stocks', name: '급등주', icon: TrendingUp },   // 수급AI에 통합 예정
+    { id: 'pm-tracker', name: 'PM 트래커', icon: LineChart },   // PortfolioManagerTab으로 대체
     */
     { id: 'settings', name: '설정', icon: Settings },
 ]

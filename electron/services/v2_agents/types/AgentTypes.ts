@@ -44,7 +44,8 @@ export interface DataContext {
     monthlyReview?: AgentRetrospective
     todayCycleA?: AgentPrediction
     trackerBriefingBlock?: string
-    quantBriefing?: string
+    sectorListStr?: string
+    themeListStr?: string
 }
 
 export interface ParsedDecision {
@@ -61,6 +62,35 @@ export interface ParsedDecision {
     t20_predict?: PredictDirection
     t20_target_return?: number
     issue_feedbacks?: { issue_id: string; is_veto: boolean; comment: string }[]
+    // 통합 이슈 관리 출력 (Cycle A 전용)
+    briefing?: {
+        risk_score: number
+        summary_markdown: string
+        macro_vix: string
+        macro_krw: string
+        macro_tnx: string
+        macro_oil: string
+    }
+    issue_actions?: {
+        action: 'CREATE' | 'UPDATE' | 'RESOLVE'
+        issue_id: string
+        name: string
+        current_stance?: string
+        severity: string
+        status: string
+        impactDirection: string
+        market_bias: number
+        dominant_regime: string
+        summary: string
+        goodSectors: { name: string; reason: string }[]
+        badSectors: { name: string; reason: string }[]
+        timelineDetails?: {
+            summary: string
+            ai_analysis?: string
+            market_reaction?: string
+            status_snapshot?: string
+        }
+    }[]
 }
 
 export interface PipelineSlot {

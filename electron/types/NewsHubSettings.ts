@@ -44,13 +44,14 @@ export const DEFAULT_NEWS_HUB_SETTINGS: NewsHubSettings = {
     enabled: true,
     operatingDays: ['1', '2', '3', '4', '5'],
     scheduleSlots: [
-        { time: '08:00', enabled: true,  label: '장전 (ITA·MCA 준비)' },
-        { time: '09:05', enabled: true,  label: '개장 직후' },
+        { time: '08:45', enabled: true,  label: '장전 MCA (A) 준비' },
+        { time: '09:25', enabled: true,  label: '개장 직후 MCA (P) 준비' },
         { time: '10:00', enabled: true,  label: '오전 중반' },
         { time: '11:00', enabled: true,  label: '오전 후반' },
         { time: '12:00', enabled: false, label: '점심 (비활성)' },
         { time: '13:05', enabled: true,  label: '오후 개장 직후' },
         { time: '14:00', enabled: true,  label: '오후 마감 전' },
+        { time: '15:05', enabled: true,  label: '장마감 전 MCA (B) 준비' }
     ],
     keywords: [
         { keyword: '코스피 코스닥 시황', enabled: true, maxResults: 10, source: 'open_api' },
@@ -63,7 +64,7 @@ export const DEFAULT_NEWS_HUB_SETTINGS: NewsHubSettings = {
     jsonApiCategories: ['MAJOR', 'GLOBAL', 'STOCK_ANALYSIS', 'GLOBAL_MARKET'],
     ttlMinutes: 55,
     retentionDays: 30,
-    aiCronTimes: ['08:30', '08:50', '09:30', '13:00', '15:10'],
+    aiCronTimes: ['08:50', '09:30', '15:10'],
 }
 
 /**

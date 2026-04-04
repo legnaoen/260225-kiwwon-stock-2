@@ -429,21 +429,7 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
                     )}
                   </div>
 
-                  {/* 마스터 AI의 테제 검토 코멘트 */}
-                  {masterPrediction && briefing?.summary_markdown && (
-                    <div className="mt-4 pt-4 border-t border-indigo-500/10 flex gap-3">
-                      <div className="shrink-0 w-1 h-full min-h-[40px] bg-indigo-500 rounded-full"></div>
-                      <div>
-                        <div className="flex items-center gap-1.5 mb-1.5">
-                          <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">마스터 AI 검토 의견:</span>
-                          <span className="text-[10px] text-muted-foreground">"시장 테제에 대한 상위 관점 통합"</span>
-                        </div>
-                        <p className="text-[12px] text-foreground/80 leading-relaxed italic">
-                          "이슈 AI가 제시한 주요 서사에 동의하나, {masterPrediction.predict === 'LONG' ? '단기 상승 모멘텀(T+1) 측면에서는 다소 보수적인 평가입니다. 수급과 기술적 베이스가 확고하여 강력한 상방 돌파를 지시합니다.' : masterPrediction.predict === 'SHORT' ? '리스크는 팩트이나 시장은 단기 하락 압력을 더 크게 반영 중입니다. 방어적 관망을 지시합니다.' : '현 재료만으론 명확한 방향을 잡기 모호하여 관망을 지시합니다.'} (상세 리포트는 마스터 시황 탭 참조)"
-                        </p>
-                      </div>
-                    </div>
-                  )}
+
                 </div>
               </div>
 

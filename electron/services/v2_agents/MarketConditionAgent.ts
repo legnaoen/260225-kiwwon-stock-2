@@ -97,35 +97,6 @@ export class MarketConditionAgent {
                 throw new Error('모든 파이프라인 수집 실패. 판단 불가.')
             }
 
-            // 2. 시장지표 AI (Quant/Tech Analyst) 호출 -> 정량 데이터 전처리 (MoE 아키텍처 완성)
-            let quantBriefingStr = '데이터 전처리 실패';
-            try {
-                // 🚀 핵심 수정: 퀀트 참모에게는 철저하게 뉴스(NEWS_HUB)를 숨기고 오직 수치 지표(Macro, Flow 등)만 넘김
-                const quantData = context.available.filter(a => a.id !== 'NEWS_HUB');
-                const quantPrompt = `[거시 경제 및 기술적 수급 데이터 모음]\n${quantData.map(a => `[${a.id}]\n${a.markdown}`).join('\n\n---\n\n')}\n\n당신은 뉴스나 공포심리에 전혀 동요하지 않고 오직 위에 제공된 '수치/수급/기술지표'만 분해하는 '시장지표 AI (Senior Quant Analyst)'입니다. 
-제공된 데이터를 파싱하여 반드시 아래의 구조화된 마크다운 포맷으로 심층 분석 보고서를 작성하세요.
-
-### 1. 매크로(거시) 팩터 동향
-- 환율, 국채 금리, VIX, 글로벌 선물 등 외부 매크로 환경이 KOSPI에 미치는 영향을 서술하세요 (단목 2~3줄).
-### 2. 수급(주체별) 팩터 진단
-- 외국인/기관의 현물 및 선물 매수/매도 포지션 비율과 추세를 근거로 현재 시장의 찐바닥/고점 여부를 논증하세요 (단목 2~3줄).
-### 3. 기술적 위치 및 퀀트 스코어
-- 📈 기술적 지지/저항 국면: (요약)
-- 🧮 퀀트 스코어: (-5 ~ +5 사이의 소수점 첫째자리 값. 강한 매수 우위일수록 +, 강한 매도 우위일수록 -)
-- 🎯 단기 포지션 제안: LONG / SHORT / HOLD`;
-                quantBriefingStr = await AiExecutionQueue.getInstance().enqueue({
-                    agentId: 'ANALYST_QUANT',
-                    agentName: '시장지표 AI',
-                    triggerType: 'CRON',
-                    targetType: 'local',
-                    prompt: quantPrompt,
-                    systemInstruction: "당신은 숫자에만 집착하는 감정없는 퀀트 애널리스트입니다."
-                });
-            } catch(e: any) {
-                console.warn('[MCA] 시장지표 AI 전처리 실패:', e.message);
-            }
-            context.quantBriefing = quantBriefingStr;
-
             // 3. 프롬프트 조립 (Master AI)
             const systemPrompt = buildSystemPrompt(context)
             const userPrompt = buildUserPrompt(context)
@@ -194,7 +165,7 @@ export class MarketConditionAgent {
             this.savePrediction(prediction)
 
             // 🚀 역방향 주입 (Harnessing): 마스터의 이슈 평가를 현장 트래커 장부(IssueLedgerDB)에 즉각 반영
-            if (decision.issue_feedbacks && decision.issue_feedbacks.length > 0) {
+            if (cycle !== 'A' && decision.issue_feedbacks && decision.issue_feedbacks.length > 0) {
                 try {
                     const { IssueLedgerDB } = await import('./IssueLedgerDB');
                     const ledger = IssueLedgerDB.getInstance();
@@ -211,6 +182,86 @@ export class MarketConditionAgent {
                     }
                 } catch(e) {
                     console.error('[MCA] 💉 이슈 장부에 마스터 VETO 주입 실패:', e);
+                }
+            }
+
+            // ═══ 통합 이슈 장부 업데이트 (Cycle A 전용) ═══
+            if (cycle === 'A' && (decision.briefing || decision.issue_actions)) {
+                try {
+                    const { IssueLedgerDB } = await import('./IssueLedgerDB');
+                    const ledger = IssueLedgerDB.getInstance();
+                    const today = this.db.getKstDate();
+
+                    // 브리핑 저장
+                    if (decision.briefing) {
+                        ledger.saveBriefing(
+                            today,
+                            decision.briefing.risk_score || 50,
+                            decision.briefing.summary_markdown || '',
+                            decision.briefing.macro_vix || '',
+                            decision.briefing.macro_krw || '',
+                            decision.briefing.macro_tnx || '',
+                            decision.briefing.macro_oil || ''
+                        );
+                        console.log('[MCA] 이슈 브리핑 저장 완료 (risk_score: ' + decision.briefing.risk_score + ')');
+                    }
+
+                    // 이슈 액션 처리 (CREATE/UPDATE/RESOLVE)
+                    if (decision.issue_actions && decision.issue_actions.length > 0) {
+                        const activeIssues = ledger.getActiveIssues();
+                        for (const act of decision.issue_actions) {
+                            try {
+                                if (act.action === 'CREATE' || act.action === 'UPDATE') {
+                                    const existing = activeIssues.find((i: any) => i.id === act.issue_id);
+                                    const created_date = existing ? existing.created_date : today;
+                                    ledger.upsertIssue({
+                                        id: act.issue_id,
+                                        name: act.name,
+                                        severity: act.severity || 'C',
+                                        status: act.status || 'NEW',
+                                        impactDirection: act.impactDirection || '중립',
+                                        market_bias: act.market_bias || 0,
+                                        dominant_regime: act.dominant_regime || '기타',
+                                        summary: act.summary || '',
+                                        current_stance: act.current_stance || null,
+                                        created_date,
+                                        updated_date: today,
+                                        goodSectors: act.goodSectors || [],
+                                        badSectors: act.badSectors || []
+                                    });
+                                    // 타임라인 기록
+                                    if (act.timelineDetails) {
+                                        ledger.addTimelineNode(act.issue_id, {
+                                            snapshot_date: today,
+                                            status_snapshot: act.timelineDetails.status_snapshot || act.status,
+                                            severity: act.severity,
+                                            summary: act.timelineDetails.summary || act.summary,
+                                            ai_analysis: act.timelineDetails.ai_analysis,
+                                            market_reaction: act.timelineDetails.market_reaction
+                                        });
+                                    }
+                                    // knowledge_edges 섹터 연결
+                                    for (const g of (act.goodSectors || [])) {
+                                        if (!g.name) continue;
+                                        ledger.upsertEdge({ source_type: 'ISSUE', source_id: act.issue_id, target_type: 'SECTOR', target_id: g.name, relation: 'BENEFITS', confidence: 0.85, logical_path: g.reason || null, created_by: 'MASTER_AI' });
+                                    }
+                                    for (const b of (act.badSectors || [])) {
+                                        if (!b.name) continue;
+                                        ledger.upsertEdge({ source_type: 'ISSUE', source_id: act.issue_id, target_type: 'SECTOR', target_id: b.name, relation: 'HURTS', confidence: 0.85, logical_path: b.reason || null, created_by: 'MASTER_AI' });
+                                    }
+                                    console.log('[MCA] 이슈 ' + act.action + ': ' + act.name);
+                                } else if (act.action === 'RESOLVE') {
+                                    ledger.resolveIssue(act.issue_id);
+                                    console.log('[MCA] 이슈 RESOLVE: ' + act.issue_id);
+                                }
+                            } catch(actErr: any) {
+                                console.error('[MCA] 이슈 액션 처리 실패 (' + act.issue_id + '):', actErr.message);
+                            }
+                        }
+                        console.log('[MCA] 통합 이슈 장부 업데이트 완료 (' + decision.issue_actions.length + '건)');
+                    }
+                } catch(issueErr: any) {
+                    console.error('[MCA] 통합 이슈 장부 처리 중 에러:', issueErr.message);
                 }
             }
 
@@ -268,7 +319,7 @@ export class MarketConditionAgent {
         const slots = PIPELINE_REGISTRY.filter(s => s.cycles.includes(cycle))
 
         const results = await Promise.allSettled(
-            slots.map(slot => this.pipeline.runPipeline(slot.id as any))
+            slots.map(slot => this.pipeline.runPipeline(slot.id as any, { forceFetch: true }))
         )
 
         const available: { id: string; markdown: string }[] = []
@@ -289,20 +340,43 @@ export class MarketConditionAgent {
             }
         })
 
-        // ── NewsDataHub 캐시 주입 (PL-NewsFlow + PL-NewsKeyword 대체) ──
-        // 외부 API 호출 없이 미리 수집된 캐시를 읽음 (키워드 빈도 테이블 포함)
+        // ── NewsDataHub 캐시 주입 ──
+        // Cycle A: 이슈 관리 통합을 위해 대량 뉴스(50건/카테고리) + 강제 갱신
+        // Cycle B/P: 기존대로 10건/카테고리
         try {
             const { NewsDataHub } = await import('../NewsDataHub');
-            const hubMarkdown = NewsDataHub.getInstance().getNewsAsMarkdown({ maxPerCategory: 10 });
+            const hub = NewsDataHub.getInstance();
+            if (cycle === 'A') {
+                console.log('[MCA] Cycle A: 이슈 통합 분석을 위한 뉴스 대량 수집 시작...');
+                await hub.runBatchCollect();
+            }
+            const newsLimit = cycle === 'A' ? 50 : 10;
+            const hubMarkdown = hub.getNewsAsMarkdown({ maxPerCategory: newsLimit });
             if (!hubMarkdown.includes('캐시 없음')) {
                 available.push({ id: 'NEWS_HUB', markdown: hubMarkdown });
-                console.log('[MCA] NewsDataHub 캐시 주입 완료');
+                console.log('[MCA] NewsDataHub 캐시 주입 완료 (maxPerCategory: ' + newsLimit + ')');
             } else {
                 missing.push('NEWS_HUB (캐시 미준비 — Hub 배치 수집 대기 중)');
                 console.warn('[MCA] NewsDataHub 캐시 없음 — 뉴스 컨텍스트 누락');
             }
         } catch(e: any) {
-            missing.push(`NEWS_HUB (오류: ${e.message})`);
+            missing.push('NEWS_HUB (오류: ' + (e as Error).message + ')');
+        }
+
+        // ── Cycle A 전용: PL-Research 추가 수집 ──
+        if (cycle === 'A') {
+            try {
+                const researchResult = await this.pipeline.runPipeline('PL-Research' as any, { forceFetch: true });
+                if (researchResult.status === 'success') {
+                    const md = (researchResult as any).aggregatedMarkdown || '';
+                    if (md) {
+                        available.push({ id: 'PL-Research', markdown: md });
+                        console.log('[MCA] PL-Research 추가 수집 완료');
+                    }
+                }
+            } catch(e) {
+                console.warn('[MCA] PL-Research 수집 실패 (비필수):', (e as Error).message);
+            }
         }
 
         // Active Rules 로드
@@ -341,8 +415,8 @@ export class MarketConditionAgent {
             const { IssueLedgerDB } = await import('./IssueLedgerDB');
             let activeIssues = IssueLedgerDB.getInstance().getActiveIssues();
 
-            // 🔥 수동 실행 또는 스케줄 지연 등으로 인해 이슈 장부가 비어있다면, 강제로 트래커 선행 가동
-            if ((!activeIssues || activeIssues.length === 0) && (cycle === 'A' || cycle === 'P')) {
+            // 🔥 수동 실행 또는 스케줄 지연 등으로 인해 이슈 장부가 비어있다면, 강제로 트래커 선행 가동 (Cycle A 제외)
+            if ((!activeIssues || activeIssues.length === 0) && cycle === 'P') {
                 console.log('[MCA] 활성화된 로컬 이슈 장부가 비어있습니다. IssueManagementAgent 선행 분석을 긴급 가동합니다...');
                 const { IssueManagementAgent } = await import('./IssueManagementAgent');
                 await IssueManagementAgent.getInstance().runDailyAnalysis();
@@ -361,7 +435,21 @@ export class MarketConditionAgent {
             console.error('[MCA] 현장 트래커(이슈 장부) 브리핑 로드 실패:', e); 
         }
 
-        return { available, missing, cycle, activeRules, recentHistory, dailyReview, weeklyReview, monthlyReview, todayCycleA, trackerBriefingBlock }
+        // ── Cycle A 전용: 섹터/테마 어휘 사전 로드 (이슈 관리 통합용) ──
+        let sectorListStr: string | undefined;
+        let themeListStr: string | undefined;
+        if (cycle === 'A') {
+            try {
+                const vocabSectors = this.db.getNaverVocabulary('SECTOR');
+                const vocabThemes = this.db.getNaverVocabulary('THEME');
+                sectorListStr = vocabSectors.length > 0 ? vocabSectors.map((v: any) => v.name).join(', ') : undefined;
+                themeListStr = vocabThemes.length > 0 ? vocabThemes.map((v: any) => v.name).join(', ') : undefined;
+            } catch(e) {
+                console.warn('[MCA] 네이버 어휘 사전 로드 실패:', e);
+            }
+        }
+
+        return { available, missing, cycle, activeRules, recentHistory, dailyReview, weeklyReview, monthlyReview, todayCycleA, trackerBriefingBlock, sectorListStr, themeListStr }
     }
 
     /**
@@ -416,6 +504,9 @@ export class MarketConditionAgent {
                 t20_predict: parsed.t20?.direction && ['LONG', 'SHORT', 'HOLD'].includes(parsed.t20.direction) ? parsed.t20.direction : undefined,
                 t20_target_return: parsed.t20?.target_return ? Number(parsed.t20.target_return) : undefined,
                 issue_feedbacks: Array.isArray(parsed.issue_feedbacks) ? parsed.issue_feedbacks : [],
+                // 통합 이슈 관리 출력 (Cycle A)
+                briefing: parsed.briefing || undefined,
+                issue_actions: Array.isArray(parsed.issue_actions) ? parsed.issue_actions : undefined,
             }
         } catch (e) {
             console.error('[MCA] JSON parse error:', e)

@@ -65,12 +65,6 @@ export class SchedulerService {
         // ═══ [Step 2] V2 Agent Swarm Schedules ═══
         const settings = store.get('ai_schedule_settings') as any || { enabled: true }
         if (settings.enabled) {
-            // [정상화] 기존 트래커 제거 및 진짜 이슈 통합 AI(IssueManagementAgent)를 08:30에 정규 배치
-            const imaJob = cron.schedule('30 08 * * 1-5', async () => {
-                const { IssueManagementAgent } = await import('./v2_agents/IssueManagementAgent')
-                await IssueManagementAgent.getInstance().runDailyAnalysis()
-            }, { timezone: 'Asia/Seoul' })
-
             // Cycle A: 08:50 (장전 시장 파악 - 제미나이가 트래커들의 의견을 종합)
             const mcaJobA = cron.schedule('50 08 * * 1-5', async () => {
                 const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
@@ -243,8 +237,8 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(imaJob, mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, portfolioManagerJob, portfolioJudgeJob, marketDailyJob, ...swarmJobs)
-            console.log(`[SchedulerService] V2 AI schedules initialized (IMA: 08:30, MCA: 08:50, CCI, Swarms, Retros)`)
+            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, portfolioManagerJob, portfolioJudgeJob, marketDailyJob, ...swarmJobs)
+            console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
             console.log(`[SchedulerService] 📊 종목 AI 파이프라인 등록 완료 (수급: 09:35, 리포트: 09:40, 매니저: 09:45, 채점: 15:45, 전종목펌프: 16:30)`)
 
         }

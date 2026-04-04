@@ -178,7 +178,7 @@ export class NewsDataHub {
     //  에이전트 공개 API: 캐시된 뉴스 → 마크다운 (강화版)
     //  PL-NewsFlow 장전 필터/오후 정렬 + PL-NewsKeyword 키워드빈도 통합
     // ─────────────────────────────────────────────────────
-    public getNewsAsMarkdown(options?: { maxPerCategory?: number }): string {
+    public getNewsAsMarkdown(options?: { maxPerCategory?: number; skipKeywords?: boolean }): string {
         if (!this.cache || this.cache.articles.length === 0) {
             return '> ⚠️ NewsDataHub 캐시 없음. Hub 배치 수집이 완료되지 않았습니다.';
         }
@@ -235,7 +235,8 @@ export class NewsDataHub {
         ];
 
         // ── 키워드 빈도 Top10 (PL-NewsKeyword 기능 이식) ────────
-        const wordFreq: Record<string, number> = {};
+        if (!options?.skipKeywords) {
+            const wordFreq: Record<string, number> = {};
         const STOP_WORDS = new Set(['및', '등', '의', '이', '가', '은', '는', '에서', '으로', '를', '을', '한', '하다', '대한', '위한', '관련', '통해', '따라', '대해', '기자']);
         for (const a of articles) {
             // 제목에서 단어 추출 (한글 2자 이상)
@@ -258,6 +259,7 @@ export class NewsDataHub {
             for (const [word, count] of topKeywords) {
                 const bar = '█'.repeat(Math.round((count / maxCount) * 8));
                 lines.push(`| **${word}** | ${count}회 | ${bar} |`);
+            }
             }
             lines.push('');
         }

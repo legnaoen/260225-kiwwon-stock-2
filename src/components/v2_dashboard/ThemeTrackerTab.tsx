@@ -508,36 +508,91 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                             </div>
                         </div>
 
-                        {selectedItem.top_stocks && selectedItem.top_stocks.length > 0 && (
-                            <div className="space-y-3 pt-2">
-                                <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
-                                    <Sparkles size={14} className="text-primary" /> 데이터 파이프라인 주도주
-                                </h3>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    {selectedItem.top_stocks.map((stock: any, idx: number) => (
-                                        <button 
-                                            key={stock.stock_code} 
-                                            className="group flex items-center gap-1.5 text-[12px] bg-muted/40 hover:bg-muted/80 text-foreground px-3 py-1.5 rounded-full border border-border/50 transition-colors cursor-pointer"
-                                            onClick={() => setSelectedStock({ 
-                                                stockCode: stock.stock_code, 
-                                                stockName: stock.stock_name,
-                                                relatedTheme: { type: selectedItem.type || 'THEME', name: selectedItem.name },
-                                                relatedIssues: linkedEdges || []
-                                            })}
-                                        >
-                                            <span className="font-bold">
-                                                {stock.stock_name}
-                                            </span>
-                                            {stock.change_rate != null && (
-                                                <span className={cn("text-[10px] font-bold font-mono tracking-tighter", stock.change_rate > 0 ? "text-red-500" : stock.change_rate < 0 ? "text-blue-500" : "text-muted-foreground")}>
-                                                    {stock.change_rate > 0 ? '+' : ''}{stock.change_rate}%
-                                                </span>
-                                            )}
-                                        </button>
-                                    ))}
+                        {(() => {
+                            if (!selectedItem.top_stocks || selectedItem.top_stocks.length === 0) return null;
+                            const themeRate = selectedItem.change_rate || 0;
+                            const leaders: any[] = [];
+                            const followers: any[] = [];
+                            
+                            selectedItem.top_stocks.forEach((s: any) => {
+                                if (s.change_rate == null) {
+                                    followers.push(s);
+                                    return;
+                                }
+                                
+                                if (s.change_rate >= 15.0) {
+                                    leaders.push(s);
+                                } else if (s.change_rate > themeRate && leaders.length < 5) {
+                                    leaders.push(s);
+                                } else {
+                                    followers.push(s);
+                                }
+                            });
+                            
+                            return (
+                                <div className="space-y-4 pt-2">
+                                    <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                                        <Sparkles size={14} className="text-primary" /> 소속 종목 리스트
+                                    </h3>
+                                    
+                                    {leaders.length > 0 && (
+                                        <div className="space-y-2">
+                                            <div className="text-[10px] text-foreground/70 font-semibold px-1">🔥 핵심 주도주 (테마/섹터 견인)</div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                {leaders.map((stock: any) => (
+                                                    <button 
+                                                        key={stock.stock_code} 
+                                                        className="group flex items-center gap-1.5 text-[12px] bg-muted/40 hover:bg-muted/80 text-foreground px-3 py-1.5 rounded-full border border-primary/20 hover:border-primary/50 transition-colors cursor-pointer"
+                                                        onClick={() => setSelectedStock({ 
+                                                            stockCode: stock.stock_code, 
+                                                            stockName: stock.stock_name,
+                                                            relatedTheme: { type: selectedItem.type || 'THEME', name: selectedItem.name },
+                                                            relatedIssues: linkedEdges || []
+                                                        })}
+                                                    >
+                                                        <span className="font-bold">
+                                                            {stock.stock_name}
+                                                        </span>
+                                                        {stock.change_rate != null && (
+                                                            <span className={cn("text-[10px] font-bold font-mono tracking-tighter", stock.change_rate > 0 ? "text-red-500" : stock.change_rate < 0 ? "text-blue-500" : "text-muted-foreground")}>
+                                                                {stock.change_rate > 0 ? '+' : ''}{stock.change_rate}%
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {followers.length > 0 && (
+                                        <div className="space-y-2 mt-1">
+                                            <div className="text-[10px] text-muted-foreground/70 font-semibold px-1">기타 소속 종목</div>
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                {followers.map((stock: any) => (
+                                                    <button 
+                                                        key={stock.stock_code} 
+                                                        className="group flex items-center gap-1 text-[11px] bg-muted/20 hover:bg-muted/40 text-muted-foreground hover:text-foreground px-2 py-1 rounded-md border border-border/30 transition-colors cursor-pointer"
+                                                        onClick={() => setSelectedStock({ 
+                                                            stockCode: stock.stock_code, 
+                                                            stockName: stock.stock_name,
+                                                            relatedTheme: { type: selectedItem.type || 'THEME', name: selectedItem.name },
+                                                            relatedIssues: linkedEdges || []
+                                                        })}
+                                                    >
+                                                        <span>{stock.stock_name}</span>
+                                                        {stock.change_rate != null && (
+                                                            <span className={cn("text-[9px] font-mono", stock.change_rate > 0 ? "text-red-500/70" : stock.change_rate < 0 ? "text-blue-500/70" : "text-muted-foreground/50")}>
+                                                                {stock.change_rate > 0 ? '+' : ''}{stock.change_rate}%
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                        )}
+                            );
+                        })()}
 
                         {selectedItem.reason && (
                             <div className="space-y-4 pt-2">
@@ -854,7 +909,7 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                                             {(row.reason || (row.top_stocks && row.top_stocks.length > 0)) && (
                                                 <div className="text-[11px] text-muted-foreground mt-1.5 text-wrap w-full leading-tight flex flex-col gap-1">
                                                     {row.top_stocks && row.top_stocks.length > 0 && (
-                                                        <span className="text-primary/90 font-bold" title={`주요 종목: ${row.top_stocks.map((s:any)=>s.stock_name).join(', ')}`}>
+                                                        <span className="text-primary/90 font-bold" title={`전체 소속 종목: ${row.top_stocks.slice(0, 10).map((s:any)=>s.stock_name).join(', ')}${row.top_stocks.length > 10 ? ` 외 ${row.top_stocks.length - 10}개` : ''}`}>
                                                             🎯 {row.top_stocks.slice(0, 3).map((s:any) => 
                                                                 `${s.stock_name}${s.change_rate != null ? `(${s.change_rate > 0 ? '+' : ''}${s.change_rate}%)` : ''}`
                                                             ).join(', ')}

@@ -63,13 +63,13 @@ export class NaverFlowAggregator implements IBaseAggregator {
                     }
                     lines.push('');
 
-                    // Phase 2: 알파 추출 (Top 3의 상세 페이지에서 주도주 추출)
-                    lines.push(`\n**🔍 핵심 선도주 (Alpha) 발굴 (Top 3 ${typeNameKOR} 기준)**`);
-                    lines.push('> 해당 그룹 평균 등락률을 상회하는 진짜 주도주 추출 및 자동 태깅');
+                    // Phase 2: 주도주 및 전체 종목 추출 (Top 20 전체 기준)
+                    lines.push(`\n**🔍 핵심 선도주 (Alpha) 및 전체 종목 수집 (Top 20 ${typeNameKOR} 기준)**`);
+                    lines.push('> UI 표시를 위해 전체 종목을 수집하며, 그룹 평균 등락률을 고려해 대장주를 선별합니다.');
                     lines.push('');
 
-                    const top3 = top20.slice(0, 3);
-                    for (const topItem of top3) {
+                    const targetGroups = top20;
+                    for (const topItem of targetGroups) {
                         if (!topItem.detail_url) continue;
 
                         try {
@@ -94,17 +94,13 @@ export class NaverFlowAggregator implements IBaseAggregator {
                             const stocks = subRes.data?.stocks || (Array.isArray(subRes.data) ? subRes.data : []);
                             
                             if (stocks.length > 0) {
-                                // 그룹 평균 등락률 상회 종목만 추출 (진짜 주도주)
-                                const alphaStocks = stocks.filter((s: any) => {
-                                    const rate = parseFloat(s.fluctuationsRatio || '0');
-                                    return rate > topItem.change_rate;
-                                });
+                                const allStocks = stocks.sort((a: any, b: any) => parseFloat(b.fluctuationsRatio || '0') - parseFloat(a.fluctuationsRatio || '0'));
 
-                                if (alphaStocks.length > 0) {
-                                    lines.push(`- **[${topItem.name}] 대표 주도주** (그룹 평균 ${topItem.change_rate}%)`);
+                                if (allStocks.length > 0) {
+                                    lines.push(`- **[${topItem.name}] 주요 종목군 현황**`);
                                     const tagPayloads = [];
 
-                                    for (const s of alphaStocks.slice(0, 10)) { // 최대 10개
+                                    for (const s of allStocks.slice(0, 30)) { // 넉넉히 최대 30개 전체 수집
                                         const stockCode = s.itemCode || '000000';
                                         const stockName = s.stockName || s.stockNameEng || '?';
                                         const changeRate = parseFloat(s.fluctuationsRatio || '0');
@@ -117,19 +113,31 @@ export class NaverFlowAggregator implements IBaseAggregator {
                                             change_rate: changeRate,
                                             added_date: dateStr
                                         });
-                                        const arrow = changeRate > 0 ? '+' : '';
-                                        lines.push(`  - ${stockName} (${stockCode}): **${arrow}${changeRate}%**`);
+                                    }
+
+                                    // 주도주(알파) 추출 (로깅 및 Price Index 구축용 필터링)
+                                    const alphaStocks = tagPayloads.filter((s: any) => {
+                                        return s.change_rate >= 1.0 || (s.change_rate > 0 && s.change_rate >= topItem.change_rate * 0.5);
+                                    });
+
+                                    for (const s of alphaStocks.slice(0, 5)) {
+                                        const arrow = s.change_rate > 0 ? '+' : '';
+                                        lines.push(`  - [주도] ${s.stock_name} (${s.stock_code}): **${arrow}${s.change_rate}%**`);
                                     }
 
                                     if (tagPayloads.length > 0) {
                                         this.dbService.upsertStockThemeTags(tagPayloads);
-                                        lines.push(`    *(💡 DB에 ${tagPayloads.length}개 주도주 태그 자동 등록 완료)*`);
+                                        lines.push(`    *(💡 DB에 ${tagPayloads.length}개 전체 소속 종목 태그 동기화 완료)*`);
 
-                                        // Step 2: 하이브리드 Price Index 구축 및 업데이트
-                                        await this.buildThemePriceIndex(dateStr, type, topItem.name, tagPayloads, lines);
+                                        // Step 2: 하이브리드 Price Index 구축 및 업데이트 (주도주만 대상)
+                                        if (alphaStocks.length > 0) {
+                                            await this.buildThemePriceIndex(dateStr, type, topItem.name, alphaStocks, lines);
+                                        } else {
+                                            lines.push(`    *(⚠️ Price Index 생략: 주도주 조건 만족 종목 없음)*`);
+                                        }
                                     }
                                 } else {
-                                    lines.push(`- **[${topItem.name}]** 조건 상회 주도주 발견 안 됨 (${stocks.length}개 종목 중)`);
+                                    lines.push(`- **[${topItem.name}]** 상승 유효 종목 발견 안 됨 (${stocks.length}개 종목 중)`);
                                 }
                             } else {
                                 lines.push(`- **[${topItem.name}]** API 응답에 종목 데이터 없음`);

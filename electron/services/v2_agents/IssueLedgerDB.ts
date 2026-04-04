@@ -243,7 +243,7 @@ export class IssueLedgerDB {
      * Get active (non-RESOLVED) issues with populated sectors and timeline.
      */
     public getActiveIssues(): IssueRecord[] {
-        const issues = this.db.prepare(`SELECT * FROM issues WHERE status != 'RESOLVED' ORDER BY updated_date DESC`).all() as any[];
+        const issues = this.db.prepare(`SELECT * FROM issues WHERE UPPER(status) != 'RESOLVED' ORDER BY updated_date DESC`).all() as any[];
 
         return issues.map(row => {
             const sectors = this.db.prepare(`SELECT * FROM issue_sectors WHERE issue_id = ?`).all(row.id) as any[];
@@ -304,9 +304,6 @@ export class IssueLedgerDB {
         `).run(date, riskScore, summaryMarkdown, macroVix, macroKrw, macroTnx, macroOil);
     }
 
-    /**
-     * Get the most recent daily briefing
-     */
     public getLatestBriefing(): any | null {
         try {
             const row = this.db.prepare(`
@@ -317,6 +314,22 @@ export class IssueLedgerDB {
             return row || null;
         } catch (e) {
             return null;
+        }
+    }
+
+    /**
+     * Get historical daily briefings for charting
+     */
+    public getBriefingsHistory(limit: number = 10): any[] {
+        try {
+            const rows = this.db.prepare(`
+                SELECT * FROM issue_briefings 
+                ORDER BY date DESC 
+                LIMIT ?
+            `).all(limit) as any[];
+            return rows.reverse(); // Return in chronological order
+        } catch (e) {
+            return [];
         }
     }
 

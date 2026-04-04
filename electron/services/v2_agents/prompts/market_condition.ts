@@ -22,7 +22,18 @@ export function buildSystemPrompt(context: DataContext): string {
         '- 기존 이슈만 무사안일하게 UPDATE/RESOLVE 하지 말 것\n\n' +
         '[좀비 이슈 소멸 규정]\n' +
         '- 뉴스에 전혀 언급되지 않거나 [침묵 경고] 태그가 붙은 이슈는 FADING 강등 또는 RESOLVE 처리\n' +
-        '- 무소식은 영향력 해소를 의미' : ''
+        '- 무소식은 영향력 해소를 의미\n\n' +
+        '[Severity 10단계 등급 분류 규정]\n' +
+        '1. AAA (최강) : 시장 패러다임을 붕괴하거나 상승을 이끄는 글로벌 지배/매크로 이슈\n' +
+        '2. AA (매우 강함) : 1개월 이상 지속되며 시장 전체 방향성을 지배\n' +
+        '3. A (강함) : 복수 섹터에 걸친 강력한 주도 테마\n' +
+        '4. BBB (상당함) : 단일 섹터/테마를 독점적으로 주도\n' +
+        '5. BB (다소 강함) : 1주일 내외의 중견 규모 일시적 모멘텀\n' +
+        '6. B (일반적) : 단기적/일회성 호재나 악재\n' +
+        '7. CC (국지적) : 제한적 종목에만 한정된 지엽적 이슈\n' +
+        '8. C (미미함) : 단순 노이즈, 가벼운 시장 루머\n' +
+        '9. D (소멸 임박) : 소멸 단계, 영향력이 거의 증발한 단계\n' +
+        '10. E (완전 해소) : 수급 영향력 0%, 완료/해소된 이슈 (status는 RESOLVE 위주)' : ''
 
     // Cycle A 전용 확장 JSON 스키마
     const issueOutputSchema = (context.cycle === 'A') ? ',\n' +
@@ -39,18 +50,17 @@ export function buildSystemPrompt(context: DataContext): string {
         '      "action": "CREATE | UPDATE | RESOLVE",\n' +
         '      "issue_id": "기존 이슈 ID 또는 새 ID (예: 2604-03)",\n' +
         '      "name": "위키백과식 가치 중립적 이슈 명칭",\n' +
-        '      "current_stance": "[단기 1주내 / 중기 1~3개월 / 장기 구조적] 투자 스탠스 요약",\n' +
-        '      "severity": "AAA|AA|A|B|C",\n' +
-        '      "status": "ESCALATING|FADING|RESOLVED|NEW",\n' +
+        '      "severity": "AAA|AA|A|BBB|BB|B|CC|C|D|E (위 10단계 규정 중 택 1)",\n' +
+        '      "status": "NEW|ESCALATING|FADING|RESOLVED (주의: 반드시 영문 대문자만 사용)",\n' +
         '      "impactDirection": "상승|하락|중립",\n' +
         '      "market_bias": -5~+5,\n' +
         '      "dominant_regime": "지정학 리스크, 통화정책 등",\n' +
-        '      "summary": "1~2문장 핵심 상태 요약",\n' +
+        '      "summary": "[단기 1주내 / 중기 1~3개월 / 장기 구조적] 등 기간 꼬리표를 문장 맨 앞에 포함하여, 이 이슈의 본질적 영향 1~2문장 요약",\n' +
         '      "goodSectors": [{"name": "업종명", "reason": "이유"}],\n' +
         '      "badSectors": [{"name": "업종명", "reason": "이유"}],\n' +
         '      "timelineDetails": {\n' +
         '        "summary": "타임라인 요약 제목",\n' +
-        '        "ai_analysis": "파급력 서술",\n' +
+        '        "ai_analysis": "전체 요약을 반복하지 말고, 어제와 달라진 \'오늘 새로 발생한 팩트\'와 그 여파만 간결하게 서술",\n' +
         '        "market_reaction": "정량적 시장 반응",\n' +
         '        "status_snapshot": "현재 상태"\n' +
         '      }\n' +
@@ -214,7 +224,12 @@ export function buildUserPrompt(context: DataContext): string {
             '1. 기존 이슈 장부에 새 정보가 있으면 UPDATE, 영향력 해소 시 RESOLVE\n' +
             '2. 기존 장부에 없는 새로운 거시적 이슈/메가 트렌드 발견 시 CREATE\n' +
             '3. 노이즈성 뉴스는 무시\n' +
-            '4. briefing 객체에 전체 시장 위험도(risk_score 0~100)와 핵심 테제(summary_markdown) 작성\n'
+            '4. briefing 객체에 전체 시장 위험도(risk_score 0~100)와 핵심 테제(summary_markdown) 작성\n' +
+            '  * [risk_score(0~100) 측정 가이드라인]\n' +
+            '    - 70~100점 (고위험/공포): VIX, 환율 등 매크로가 요동치고 악재 이슈(AA등급 이상)가 시장을 압도하는 투매 국면\n' +
+            '    - 40~69점 (주의/관망): 상하방 재료가 혼재하거나, 시장이 눈치를 보며 횡보하는 국면\n' +
+            '    - 0~39점 (안전/탐욕): 매크로가 안정되고 강력한 주도 테마 호재(AA등급)가 악재를 집어삼키는 랠리 국면\n' +
+            '    - 주의: 기계적인 환율/금리 수치만 보지 말고 "현재 장부에 등록된 이슈들의 전체 파급력(Severity) 무게감"을 종합하여 당신이 느끼는 체감 공포 점수를 능동적으로 부여하십시오.\n'
 
         if (context.sectorListStr) {
             issueTaskBlock += '\n[네이버 증권 추적 섹터 목록 (goodSectors/badSectors 참고)]\n' +

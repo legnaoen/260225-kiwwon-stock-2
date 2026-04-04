@@ -29,9 +29,9 @@ export class ThemeIntelligenceAgent {
             // 1. 해당 일자의 순위 데이터 가져오기
             const rawDb = (this.db as any).db;
             const marketFlow = rawDb.prepare(`
-                SELECT type, name, rank_num
+                SELECT type, name, rank_num, change_rate
                 FROM naver_market_flow
-                WHERE date = ? AND rank_num <= 10
+                WHERE date = ? AND rank_num <= 20
                 ORDER BY type, rank_num ASC
             `).all(dateStr) as any[];
 
@@ -40,29 +40,35 @@ export class ThemeIntelligenceAgent {
                 return null;
             }
 
-            const themeNames = marketFlow.filter(m => m.type === 'THEME').map(m => m.name);
-            const sectorNames = marketFlow.filter(m => m.type === 'SECTOR').map(m => m.name);
+            // 1.5 필터링: 테마 20위, 섹터 10위까지 수용하되 전체 카테고리 상승률이 2.0% 이하인 경우는 제외
+            const topThemes = marketFlow.filter(m => m.type === 'THEME' && m.rank_num <= 20 && m.change_rate > 2.0).map(m => m.name);
+            const topSectors = marketFlow.filter(m => m.type === 'SECTOR' && m.rank_num <= 10 && m.change_rate > 2.0).map(m => m.name);
+            const targets = Array.from(new Set([...topThemes, ...topSectors]));
 
             // 2. 컨텍스트용 이슈/뉴스 수집
             let newsContext = "[최근 트래커 이슈 장부]\n";
             try {
                 const issues = IssueLedgerDB.getInstance().getActiveIssues();
-                newsContext += issues.map(i => `- ${i.name}: ${i.summary}`).join('\n');
+                const uniqueSummaries = new Set<string>();
+                const uniqueIssues = issues.filter(i => {
+                    const sumPrefix = i.summary.substring(0, 30).trim();
+                    if (uniqueSummaries.has(sumPrefix)) return false;
+                    uniqueSummaries.add(sumPrefix);
+                    return true;
+                });
+                newsContext += uniqueIssues.map(i => `- ${i.name}: ${i.summary}`).join('\n');
             } catch (e) {
                 console.error('[ThemeIntelligence] 이슈 장부 로드 실패', e);
             }
 
             newsContext += "\n\n[당일 수집된 핵심 뉴스]\n";
             try {
-                newsContext += NewsDataHub.getInstance().getNewsAsMarkdown({ maxPerCategory: 20 });
+                newsContext += NewsDataHub.getInstance().getNewsAsMarkdown({ maxPerCategory: 20, skipKeywords: true });
             } catch (e) {
                 console.error('[ThemeIntelligence] 뉴스 데이터 허브 로드 실패', e);
             }
 
             // 2.5 [핵심 고도화] 테마 파급력(Mega-ness) 등급별 주도주 동적 검색 및 프롬프트 주입
-            const top5Themes = marketFlow.filter(m => m.type === 'THEME' && m.rank_num <= 5).map(m => m.name);
-            const top3Sectors = marketFlow.filter(m => m.type === 'SECTOR' && m.rank_num <= 3).map(m => m.name);
-            const targets = [...top5Themes, ...top3Sectors];
             
             let targetedNewsContext = "\n\n[🔥 최상위 주도 테마/섹터 심층 실시간 뉴스]\n";
             let thematicStockPoolContext = "\n[📊 테마별 파급력 등급(S/A/B) 및 대장주 풀]\n";
@@ -71,9 +77,11 @@ export class ThemeIntelligenceAgent {
                 const { NaverSearchCollector } = await import('../v2_pipeline/collectors/NaverSearchCollector');
                 const collector = new NaverSearchCollector();
                 
+                // 변경: 무조건 5% 이상 하드코딩 제거. 당일 0% 초과 상승한 유효 종목들을 가져와서 판단.
+                // 1% 이상인 종목부터는 대형주라 할지라도 테마에 기여했다고 판단합니다.
                 const stmtGetStocks = rawDb.prepare(`
                     SELECT stock_code, stock_name, change_rate FROM stock_theme_tags 
-                    WHERE tag_name = ? AND change_rate >= 5.0
+                    WHERE tag_name = ? AND change_rate > 0.0
                     ORDER BY change_rate DESC 
                 `);
 
@@ -93,33 +101,47 @@ export class ThemeIntelligenceAgent {
                 const now = new Date();
                 const timeBucket = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
                 let dbRowsToInsert: any[] = [];
+                const searchedKeywords = new Set<string>();
 
                 for (const targetName of targets) {
                     const stocks = stmtGetStocks.all(targetName) as any[];
-                    if (!stocks || stocks.length === 0) continue;
+                    // 너무 미미한 상승(1% 미만)만 있는 테마는 무시
+                    const validStocks = stocks.filter(s => s.change_rate >= 1.0);
+                    if (!validStocks || validStocks.length === 0) continue;
                     
-                    const limitUps = stocks.filter(s => s.change_rate >= 29.5).length;
-                    const surges = stocks.filter(s => s.change_rate >= 10.0).length;
+                    const limitUps = validStocks.filter(s => s.change_rate >= 29.5).length;
+                    const surges = validStocks.filter(s => s.change_rate >= 10.0).length;
+                    
+                    const maxChange = validStocks[0].change_rate;
+                    const avgChange = validStocks.reduce((sum, s) => sum + s.change_rate, 0) / validStocks.length;
 
                     let pickCount = 1;
                     let grade = 'B등급(일반 테마)';
                     
-                    if (limitUps >= 2 || surges >= 5) {
-                        pickCount = 4;
+                    // 개선: 등급 판별 로직 고도화 (상한가 갯수뿐만 아니라, 최고점 및 평균 등락률로 파급력 측정)
+                    if (limitUps >= 2 || surges >= 5 || (maxChange >= 20.0 && avgChange >= 10.0)) {
+                        pickCount = Math.min(4, validStocks.length);
                         grade = 'S등급(메가 확산)';
-                    } else if (limitUps >= 1 || surges >= 3) {
-                        pickCount = Math.min(3, stocks.length);
+                    } else if (limitUps >= 1 || surges >= 3 || (maxChange >= 10.0 && avgChange >= 5.0)) {
+                        pickCount = Math.min(3, validStocks.length);
                         grade = 'A등급(강세 주도)';
                     } else {
-                        pickCount = Math.min(1, stocks.length);
+                        // 기본 B등급도 유효 종목이 여러 개면 2개까지는 AI에 컨텍스트로 전달
+                        pickCount = Math.min(2, validStocks.length);
                     }
 
-                    const leadingStocks = stocks.slice(0, pickCount);
+                    // AI의 프롬프트에는 토큰 관리를 위해 최상위 대장주만 (1~4개) 들어갑니다.
+                    // 화면 (UI) 에는 DB에 이미 10개까지 저장된 모든 tag 데이터가 내려가 노출됩니다.
+                    const leadingStocks = validStocks.slice(0, pickCount);
                     thematicStockPoolContext += `- [${targetName}] ${grade} | 주도주 후보: ${leadingStocks.map(s => `${s.stock_name}(${s.stock_code}, +${Number(s.change_rate).toFixed(1)}%)`).join(', ')}\n`;
-                    targetedNewsContext += `\n[${targetName} 주도주 최신 팩트 - ${grade}]\n`;
+                    
+                    let themeTargetNewNews = "";
 
                     for (const st of leadingStocks) {
                         const keyword = st.stock_name; 
+                        if (searchedKeywords.has(keyword)) continue;
+                        searchedKeywords.add(keyword);
+
                         try {
                             const rawSearch = await collector.collect({ keyword: keyword });
                             const articles = rawSearch?.articles || [];
@@ -127,7 +149,7 @@ export class ThemeIntelligenceAgent {
                                 for (const a of articles.slice(0, 2)) { 
                                     const title = (a.title || '').replace(/<[^>]+>/g, '');
                                     const snippet = (a.description || '').replace(/<[^>]+>/g, '');
-                                    targetedNewsContext += `- (${keyword}) ${title} (${snippet.substring(0, 60)}...)\n`;
+                                    themeTargetNewNews += `- (${keyword}) ${title} (${snippet.substring(0, 60)}...)\n`;
                                     
                                     let source = 'Naver';
                                     try { source = a.originallink ? new URL(a.originallink).hostname.replace('www.', '') : 'Naver'; } catch(e){}
@@ -145,6 +167,11 @@ export class ThemeIntelligenceAgent {
                             console.error(`[ThemeIntelligence] 타겟 뉴스 검색 실패 (${keyword}):`, err.message);
                         }
                         await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                    
+                    if (themeTargetNewNews) {
+                        targetedNewsContext += `\n[${targetName} 주도주 최신 팩트 - ${grade}]\n`;
+                        targetedNewsContext += themeTargetNewNews;
                     }
                 }
 
@@ -229,12 +256,11 @@ export class ThemeIntelligenceAgent {
 
             const systemInstruction = `당신은 대한민국 주식 시장의 메가트렌드와 테마의 생애주기(Lifecycle)를 분석하는 최상위 퀀트(Quant) 및 시황 전략가입니다. 단순히 뉴스만 보고 해석하지 않으며, 현재 코스피의 거시적 투심(롱/숏 장세)과 해당 테마의 과거 며칠간 랭킹 변화(발생→성장→눌림목→피크아웃→설거지) 이력을 복합적으로 추론합니다.`;
             
-            const userPrompt = `
-[오늘 상위 랭크된 주도 섹터 목록 (Top 10)]
-${sectorNames.join(', ')}
+            const userPrompt = `[오늘 분석 대상 주도 섹터 목록]
+${topSectors.join(', ')}
 
-[오늘 상위 랭크된 주도 테마 목록 (Top 10)]
-${themeNames.join(', ')}
+[오늘 분석 대상 주도 테마 목록]
+${topThemes.join(', ')}
 ${thematicStockPoolContext}
 ${marketConditionContext}
 
@@ -247,7 +273,7 @@ ${themeHistoryContext}
 ${issueListForPrompt}
 
 ---
-위 컨텍스트를 완벽하게 분석하여, 오늘 랭크된 총 ${marketFlow.length}개의 (섹터 + 테마) 항목 각각에 대해 상승한 핵심 호재 이유를 짧게 요약하고, 해당 모멘텀의 예상 수명 및 현재 생애주기(Lifecycle)를 판단하시오.
+위 컨텍스트를 완벽하게 분석하여, 오늘 분석 대상으로 지정된 총 ${targets.length}개의 (섹터 + 테마) 항목 전체에 대해 **예외 없이 하나도 누락하지 말고** 상승한 핵심 호재 이유를 짧게 요약하고, 해당 모멘텀의 예상 수명 및 현재 생애주기(Lifecycle)를 판단하시오.
 
 [분석 지침]
 1. 거시 지수(KOSPI) 투심이 꺾였을 때 뜨는 테마는 단발성 해지 테마일 확률이 높습니다. 반면 상승장에서는 메가트렌드로 갈 확률이 높습니다.

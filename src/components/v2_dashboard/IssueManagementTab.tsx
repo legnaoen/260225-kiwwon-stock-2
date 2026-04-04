@@ -18,6 +18,20 @@ const getSeverityBadgeClasses = (sev: string) => {
   if (sev.startsWith('C')) return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
 }
 
+const getRiskColorClass = (score: number) => {
+  if (score >= 70) return 'text-rose-500';
+  if (score >= 40) return 'text-amber-500';
+  return 'text-emerald-500';
+}
+
+const getTodayString = () => {
+  const d = new Date();
+  const yy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
 const formatDaysFrom = (dateStr: string) => {
   const d = new Date(dateStr);
   const now = new Date();
@@ -96,6 +110,7 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
 
   // 시황 마스터 AI 예측 (Market Risk 아래 출력용)
   const [masterPrediction, setMasterPrediction] = useState<any>(null);
+  const [briefingsHistory, setBriefingsHistory] = useState<any[]>([]);
 
   useEffect(() => {
     async function loadBriefingAndMaster() {
@@ -108,6 +123,15 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
         } catch (err) {
           console.error('[IssueManagementTab] Failed to load briefing', err);
         }
+      }
+
+      if ((window.electronAPI as any)?.getBriefingsHistory) {
+        try {
+          const res = await (window.electronAPI as any).getBriefingsHistory(15);
+          if (res.success && res.data) {
+            setBriefingsHistory(res.data);
+          }
+        } catch (err) {}
       }
 
       if ((window.electronAPI as any)?.getMarketConditionHistory) {
@@ -207,9 +231,9 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
         const res = await window.electronAPI.getActiveIssues();
         if (res.success && res.data && res.data.length > 0) {
           const SEVERITY_WEIGHTS: Record<string, number> = {
-            'S': 100, 'AAA': 90, 'AA': 80, 'A': 70, 
-            'BBB': 60, 'BB': 50, 'B': 40, 
-            'CCC': 30, 'CC': 20, 'C': 10, 'D': 0
+            'AAA': 100, 'AA': 90, 'A': 80,
+            'BBB': 70, 'BB': 60, 'B': 50,
+            'CC': 40, 'C': 30, 'D': 20, 'E': 10
           };
           const getWeight = (sev: string) => SEVERITY_WEIGHTS[sev?.toUpperCase()?.trim()] ?? 0;
 
@@ -222,9 +246,7 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
             const wA = getWeight(a.severity);
             const wB = getWeight(b.severity);
             if (wA !== wB) return wB - wA; // 1차 정렬: 파급력(Severity) 높은 순
-            if (a.status === 'ESCALATING' && b.status !== 'ESCALATING') return -1; // 2차 정렬: ESCALATING 우선
-            if (a.status !== 'ESCALATING' && b.status === 'ESCALATING') return 1;
-            return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime(); // 3차 정렬: 최근 갱신일 순
+            return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime(); // 2차 정렬: 최근 갱신일 순
           });
           
           setIssues(formatted);
@@ -380,13 +402,58 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
                     {/* 1. Market Risk & Macro Indicators */}
                     <div className="flex flex-wrap items-center gap-6 pb-4 border-b border-border/30">
                       <div className="flex-1 min-w-[200px]">
-                        <div className="text-xs text-muted-foreground mb-1 font-bold">Market Risk Score</div>
-                        <div className="flex items-end gap-2">
-                          <span className="text-2xl font-bold text-rose-500 tracking-tighter">{briefing?.risk_score || 0}<span className="text-xs font-normal text-muted-foreground ml-1">/100</span></span>
-                          <div className="flex-1 h-1.5 bg-muted/50 rounded-full mb-2 overflow-hidden">
-                            <div className={cn("h-full", (briefing?.risk_score || 0) > 80 ? 'bg-rose-600' : 'bg-gradient-to-r from-amber-500 to-rose-500')} style={{ width: `${briefing?.risk_score || 0}%` }} />
-                          </div>
+                        <div className="flex justify-between items-end mb-1">
+                          <div className="text-xs text-muted-foreground font-bold">Market Risk Score</div>
+                          <span className={cn("text-2xl font-bold tracking-tighter leading-none", getRiskColorClass(briefing?.risk_score || 0))}>
+                            {briefing?.risk_score || 0}<span className="text-[10px] font-normal text-muted-foreground ml-1">/100</span>
+                          </span>
                         </div>
+                        
+                        {briefingsHistory.length > 0 ? (
+                          <div className="h-[60px] w-full mt-2">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <AreaChart data={briefingsHistory} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+                                <defs>
+                                  <linearGradient id="riskGradFill" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="10%" stopColor="#f43f5e" stopOpacity={0.4}/>
+                                    <stop offset="40%" stopColor="#f59e0b" stopOpacity={0.3}/>
+                                    <stop offset="80%" stopColor="#10b981" stopOpacity={0.2}/>
+                                    <stop offset="100%" stopColor="#10b981" stopOpacity={0.0}/>
+                                  </linearGradient>
+                                  <linearGradient id="riskGradStroke" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="10%" stopColor="#f43f5e"/>
+                                    <stop offset="40%" stopColor="#f59e0b"/>
+                                    <stop offset="80%" stopColor="#10b981"/>
+                                    <stop offset="100%" stopColor="#10b981"/>
+                                  </linearGradient>
+                                </defs>
+                                <XAxis dataKey="date" hide />
+                                <YAxis domain={[0, 100]} hide />
+                                <Tooltip 
+                                  content={({ active, payload }) => {
+                                    if (active && payload && payload.length) {
+                                      const val = typeof payload[0].value === 'number' ? payload[0].value : 0;
+                                      return (
+                                        <div className="bg-background border border-border p-2 rounded shadow-lg text-xs">
+                                          <p className="font-bold text-muted-foreground mb-1">{payload[0].payload.date}</p>
+                                          <p className={cn("font-bold", getRiskColorClass(val))}>Score: {val}</p>
+                                        </div>
+                                      )
+                                    }
+                                    return null;
+                                  }}
+                                />
+                                <Area type="monotone" dataKey="risk_score" stroke="url(#riskGradStroke)" strokeWidth={2} fillOpacity={1} fill="url(#riskGradFill)" />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </div>
+                        ) : (
+                          <div className="flex items-end gap-2 mt-3">
+                            <div className="flex-1 h-1.5 bg-muted/50 rounded-full mb-1 overflow-hidden">
+                              <div className={cn("h-full", (briefing?.risk_score || 0) >= 70 ? 'bg-rose-500' : (briefing?.risk_score || 0) >= 40 ? 'bg-amber-500' : 'bg-emerald-500')} style={{ width: `${briefing?.risk_score || 0}%` }} />
+                            </div>
+                          </div>
+                        )}
                       </div>
                       
                       {/* 매크로 지표 (이슈 AI 산출) */}
@@ -566,7 +633,12 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
                 <span className="text-[10px] font-mono bg-background px-2 py-0.5 rounded border border-border/50 text-muted-foreground">{issues.length} Total</span>
               </div>
               <div className="p-4 overflow-y-auto space-y-3 pb-8 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                {issues.slice(0, visibleCount).map(issue => (
+                {issues.slice(0, visibleCount).map(issue => {
+                  const todayStr = getTodayString()
+                  const isNewIssue = issue.date === todayStr || issue.status === 'NEW'
+                  const isUpdatedIssue = !isNewIssue && issue.lastUpdated === todayStr
+
+                  return (
                   <div
                     key={issue.id}
                     id={`issue-item-${issue.id}`}
@@ -582,11 +654,15 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
                     <div className="flex flex-col w-full gap-1.5">
                       <div className="flex items-start justify-between w-full">
                         <div className="flex flex-col w-full gap-0.5 mt-0.5">
-                          <span className="text-base font-bold text-foreground group-hover:text-indigo-600 dark:text-indigo-400 transition-colors w-full leading-tight">{issue.name}</span>
-                          {issue.current_stance && (
-                             <span className="text-[11px] text-muted-foreground/80 font-medium leading-snug mt-1 flex items-start gap-1">
-                               <span className="shrink-0 text-indigo-400/70">↳</span>
-                               {issue.current_stance}
+                          <div className="flex items-center gap-2">
+                            <span className="text-base font-bold text-foreground group-hover:text-indigo-600 dark:text-indigo-400 transition-colors leading-tight">{issue.name}</span>
+                            {isNewIssue && <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-fuchsia-500/10 text-fuchsia-500 border border-fuchsia-500/20 animate-pulse">✨ NEW</span>}
+                            {isUpdatedIssue && <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-cyan-500/10 text-cyan-500 border border-cyan-500/20">⚡ UPDATE</span>}
+                          </div>
+                          {issue.summary && (
+                             <span className="text-[13px] text-foreground/85 font-medium leading-relaxed mt-1.5 flex items-start gap-1.5 text-balance">
+                               <span className="shrink-0 text-indigo-400/70 mt-0.5 font-bold">↳</span>
+                               {issue.summary}
                              </span>
                           )}
                         </div>
@@ -651,7 +727,7 @@ export default function IssueManagementTab({ onNavigate, initialSelection }: { o
                       </div>
                     </div>
                   </div>
-                ))}
+                )})}
 
                 {/* 더 보기 버튼 */}
                 {visibleCount < issues.length && (

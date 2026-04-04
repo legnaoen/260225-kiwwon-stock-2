@@ -295,6 +295,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     resolveIssue: (issueId: string) => ipcRenderer.invoke('agent:issues:resolve', issueId),
     runIssueAnalysis: () => ipcRenderer.invoke('agent:issues:run'),
     getIssueBriefing: () => ipcRenderer.invoke('agent:issues:briefing'),
+    getBriefingsHistory: (limit?: number) => ipcRenderer.invoke('agent:issues:briefings', limit),
 
     // V2 Co-Pilot (HITL)
     sendCoPilotMessage: (message: string, mode: 'auto' | 'short' | 'detail' = 'auto') => ipcRenderer.send('copilot:chat', { message, mode }),

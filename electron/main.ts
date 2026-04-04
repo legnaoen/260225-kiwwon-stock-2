@@ -1025,6 +1025,15 @@ ipcMain.handle('agent:issues:active', async () => {
     }
 })
 
+ipcMain.handle('agent:issues:briefings', async (_event, limit: number = 30) => {
+    try {
+        const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
+        return { success: true, data: IssueLedgerDB.getInstance().getBriefingsHistory(limit) }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
 ipcMain.handle('agent:issues:timeline', async (_event, issueId: string) => {
     try {
         const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')

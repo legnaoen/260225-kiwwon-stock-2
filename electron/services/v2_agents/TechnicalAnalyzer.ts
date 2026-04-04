@@ -253,7 +253,6 @@ export class TechnicalAnalyzer {
                 // 스토어에서 사용자 설정 불러오기
                 const mcaSettings = store.get('market_agent_settings', {}) as any;
                 const P = mcaSettings.cciPeriod || 20;
-                let cciAnalysis = "동기화 부족으로 계산 실패";
 
                 const currentCCI = calcCCI(intradayData.length - 1, P);
                 const prevCCI = calcCCI(intradayData.length - 2, P);

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Brain, X, ShieldAlert, Sparkles, Clock, Target, ArrowUpRight, ArrowDownRight, Minus, Activity, ChevronRight, Search, Settings, Trash2, Link2 } from 'lucide-react'
+import { Brain, X, ShieldAlert, Sparkles, Clock, Target, ArrowUpRight, ArrowDownRight, Minus, Activity, ChevronRight, Search, Settings, Trash2, Link2, Copy } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import ReactMarkdown from 'react-markdown'
@@ -152,7 +152,14 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
     const [showDigestModal, setShowDigestModal] = useState(false)
     const [digestContent, setDigestContent] = useState('')
     const [isDigestLoading, setIsDigestLoading] = useState(false)
-    
+
+    // 복수선택 삭제 팝업 state
+    const [showDeleteModal, setShowDeleteModal] = useState(false)
+    const [deleteModalTarget, setDeleteModalTarget] = useState<'classic' | 'intraday'>('classic')
+    const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(new Set())
+    const [showMoreMenu, setShowMoreMenu] = useState(false)
+    const moreMenuRef = React.useRef<HTMLDivElement>(null)
+
     // Settings States
     const [telegramEnabled, setTelegramEnabled] = useState(true)
     const [cciPeriod, setCciPeriod] = useState(20)
@@ -180,6 +187,64 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
             setDigestContent('오류가 발생했습니다: ' + e.message)
         } finally {
             setIsDigestLoading(false)
+        }
+    }
+
+    const handleCopyFullContext = (trade: any) => {
+        let content = "=== [Source Data] ===\n"
+        try {
+            const srcs = JSON.parse(trade.sources_json || '[]')
+            if (srcs.length > 0) {
+                content += srcs.join('\n') + "\n\n"
+            } else {
+                content += "No source data\n\n"
+            }
+        } catch {
+            content += "Parse error\n\n"
+        }
+        
+        content += "=== [Main AI Rationale] ===\n"
+        content += (trade.rationale || "분석 내용 없음") + "\n\n"
+        
+        if (trade.comments_json) {
+            content += "=== [Swarm AI Comments] ===\n"
+            try {
+                const comments = JSON.parse(trade.comments_json)
+                comments.forEach((c: any) => {
+                    content += `[${c.name} / ${c.predict}] ${c.comment}\n`
+                })
+            } catch {
+                content += "Parse error\n"
+            }
+            content += "\n"
+        }
+
+        const fallbackCopy = () => {
+            const textArea = document.createElement("textarea");
+            textArea.value = content;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                alert('소스 데이터와 AI 분석 내용이 클립보드에 복사되었습니다.');
+            } catch (err) {
+                alert('보안 정책상 복사에 실패했습니다. 설정에서 권한을 확인해주세요.');
+            }
+            textArea.remove();
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(content).then(() => {
+                alert('소스 데이터와 AI 분석 내용이 클립보드에 복사되었습니다.');
+            }).catch(err => {
+                fallbackCopy();
+            });
+        } else {
+            fallbackCopy();
         }
     }
 
@@ -450,6 +515,18 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                         <button disabled={isRunning} onClick={handleRunCycleB} className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50">
                             Run B
                         </button>
+                        <button disabled={isRunning} onClick={async () => { 
+                            alert("성과 채점을 요청합니다. 잠시만 기다려주세요.");
+                            const res = await window.electronAPI.runTracker(); 
+                            if (!res.success) {
+                                alert("채점 중 오류가 발생했습니다: " + res.error);
+                            } else {
+                                alert("채점이 완료되었습니다.");
+                            }
+                            await fetchData(); 
+                        }} className="px-2 py-1 bg-violet-500/10 hover:bg-violet-500/20 text-violet-500 border border-violet-500/30 rounded text-xs font-bold transition-colors" title="과거 기록을 최신 5분봉 기준으로 다시 채점하여 비어있는 고점 기록을 복구합니다.">
+                            🔄 성과 재평가
+                        </button>
                         <button onClick={async () => { await window.electronAPI.runIntradayPrediction('09:30'); await new Promise(r => setTimeout(r, 300)); await fetchData() }} className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded text-xs font-bold transition-colors" title="기존 09:30 장중 예측 실행">
                             ⚡ 09:30
                         </button>
@@ -614,7 +691,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
 
             {/* ── Decision Log Table (with Tab) ── */}
             <div className="flex-1 flex flex-col overflow-hidden select-none">
-                <div className="flex items-center justify-between px-4 py-2">
+                <div className="flex items-center justify-between px-4 py-2 relative z-20">
                     {/* Tab Switcher */}
                     <div className="flex items-center gap-1 bg-muted/30 rounded p-0.5">
                         <button
@@ -674,7 +751,34 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                 전처리 다이제스트
                             </button>
                         )}
-                        <span className="text-xs text-muted-foreground opacity-60">Click row for details</span>
+                        <div className="relative flex items-center" ref={moreMenuRef}>
+                            <button
+                                onClick={() => setShowMoreMenu(v => !v)}
+                                className="flex items-center gap-1 px-2 py-1 rounded hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors text-xs font-medium border border-border/40 opacity-80 hover:opacity-100"
+                            >
+                                <span>더보기</span>
+                                <span className="text-[10px] opacity-60">⋯</span>
+                            </button>
+                            {showMoreMenu && (
+                                <div
+                                    className="absolute right-0 top-full mt-1 z-[100] bg-background dark:bg-[#0f172a] shadow-lg border border-border/60 rounded-lg min-w-[140px] py-1"
+                                    onMouseLeave={() => setShowMoreMenu(false)}
+                                >
+                                    <button
+                                        onClick={() => {
+                                            setDeleteModalTarget(decisionTab as 'classic' | 'intraday')
+                                            setSelectedDeleteIds(new Set())
+                                            setShowDeleteModal(true)
+                                            setShowMoreMenu(false)
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-xs hover:bg-rose-500/10 text-rose-500 flex items-center gap-2 transition-colors"
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        항목 삭제...
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
                 <div className="flex-1 overflow-auto px-4">
@@ -715,6 +819,11 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                     </td>
                                     <td className="py-2 pr-4 font-mono text-right font-bold">
                                         {(() => {
+                                            const vPredict = returnView === 'T+5' && t.t5_predict ? t.t5_predict : returnView === 'T+20' && t.t20_predict ? t.t20_predict : t.predict;
+                                            if (vPredict === 'HOLD') {
+                                                return <span className="text-muted-foreground font-normal">-</span>;
+                                            }
+
                                             const code = t.predict === 'LONG' ? '069500' : t.predict === 'SHORT' ? '114800' : null;
                                             const isPending = t.t1_final === null;
                                             let liveVal = t.t1_final;
@@ -786,7 +895,8 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                 <th className="py-2 pr-4 font-bold">Position</th>
                                 <th className="py-2 pr-4 font-bold">Swarm Sentiment</th>
                                 <th className="py-2 pr-4 font-bold text-right">Entry Price</th>
-                                <th className="py-2 pr-4 font-bold text-right">Return</th>
+                                <th className="py-2 pr-4 font-bold text-right">Max Return</th>
+                                <th className="py-2 pr-4 font-bold text-right">Close Return</th>
                                 <th className="py-2 pr-4 font-bold text-center">Result</th>
                                 <th className="py-2 pr-4 font-bold">Confidence</th>
                                 <th className="py-2"></th>
@@ -794,7 +904,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                         </thead>
                         <tbody>
                             {intradayData.length === 0 ? (
-                                <tr><td colSpan={8} className="py-8 text-center text-muted-foreground text-xs">장중 예측 데이터가 없습니다. (09:30, 11:00, 13:00 자동 실행)</td></tr>
+                                <tr><td colSpan={10} className="py-8 text-center text-muted-foreground text-xs">장중 예측 데이터가 없습니다. (09:30, 11:00, 13:00 자동 실행)</td></tr>
                             ) : intradayData.map((row) => {
                                 const posLabel = row.position || (row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD')
                                 const posStyle = posLabel.includes('200')
@@ -818,11 +928,13 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                     isLive = true
                                 }
 
+                                const isHold = row.predict === 'HOLD'
+
                                 const resultBadge = row.result === 'HIT'
                                     ? <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded text-xs font-bold">✅ HIT</span>
                                     : row.result === 'MISS'
                                     ? <span className="px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded text-xs font-bold">❌ MISS</span>
-                                    : row.result === 'HOLD'
+                                    : row.result === 'HOLD' || isHold
                                     ? <span className="px-2 py-0.5 bg-muted/50 border border-border text-muted-foreground rounded text-xs font-bold">— HOLD</span>
                                     : isLive && returnVal != null
                                     ? <span className={cn("px-2 py-0.5 border rounded text-xs font-bold flex items-center gap-1 justify-center w-min mx-auto", returnVal > 0 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-rose-500/10 border-rose-500/20 text-rose-500")}>
@@ -857,7 +969,10 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                                 </div>
                                             ) : <span className="text-xs text-muted-foreground opacity-50">진행중...</span>}
                                         </td>
-                                        <td className="py-2 pr-4 font-mono text-right text-muted-foreground">{row.entry_price ? row.entry_price.toLocaleString() : '-'}</td>
+                                        <td className="py-2 pr-4 font-mono text-right text-muted-foreground">{!row.entry_price ? '-' : row.entry_price.toLocaleString()}</td>
+                                        <td className={cn("py-2 pr-4 font-mono text-right opacity-80", row.max_return_pct > 0 ? "text-rose-500" : row.max_return_pct < 0 ? "text-blue-500" : "text-muted-foreground")}>
+                                            {row.max_return_pct != null ? `${row.max_return_pct > 0 ? '+' : ''}${Number(row.max_return_pct).toFixed(2)}%` : '-'}
+                                        </td>
                                         <td className={cn("py-2 pr-4 font-mono text-right font-bold", returnVal > 0 ? "text-rose-500" : returnVal < 0 ? "text-blue-500" : "")}>
                                             {returnVal != null ? (
                                                 <span className={cn(isLive && "opacity-80 transition-all")}>
@@ -916,6 +1031,11 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                 <button onClick={() => document.getElementById('trade-rationale')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">🧠 메인 AI 분석</button>
                                 {selectedTrade.comments_json && <button onClick={() => document.getElementById('trade-swarm')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">👥 군집 AI 의견</button>}
                                 <button onClick={() => document.getElementById('trade-source')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">📊 소스 데이터</button>
+                                <div className="flex-1"></div>
+                                <button onClick={() => handleCopyFullContext(selectedTrade)} className="px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 bg-muted/20 border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-all shadow-sm" title="AI 판단 근거 및 분석 전문 클립보드 복사">
+                                    <Copy className="w-3.5 h-3.5" />
+                                    전체 복사
+                                </button>
                             </div>
                             <div id="trade-rationale" className="scroll-mt-4">
                                 <div className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5"><Brain className="w-3.5 h-3.5" /> Main AI Rationale</div>
@@ -1039,33 +1159,47 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             </div>
                         </div>
                         <div className="p-5 overflow-y-auto space-y-4">
-                            <div className="flex gap-4 p-3 bg-muted/20 rounded-lg border border-border/40 text-sm">
-                                <div className="flex-1">
-                                    <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Position</div>
-                                    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-bold', posStyle)}>
-                                        {posIcon} {posLabel} ({selectedIntraday.predict === 'UP' ? '상승' : selectedIntraday.predict === 'DOWN' ? '하락' : '대기'})
-                                    </span>
-                                </div>
-                                <div className="w-px bg-border/40" />
-                                <div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">Entry Price</div><div className="font-mono">{selectedIntraday.entry_price ? selectedIntraday.entry_price.toLocaleString() : '-'}</div></div>
-                                <div className="w-px bg-border/40" />
-                                <div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">Close Price</div><div className="font-mono">{selectedIntraday.close_price ? selectedIntraday.close_price.toLocaleString() : '-'}</div></div>
-                                <div className="w-px bg-border/40" />
-                                <div>
-                                    <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Return</div>
-                                    <div className={cn("font-mono font-bold", retVal > 0 ? "text-rose-500" : retVal < 0 ? "text-blue-500" : "")}>
-                                        {retVal != null ? `${retVal > 0 ? '+' : ''}${Number(retVal).toFixed(2)}%` : '⏳'}
+                            <div className="flex flex-col gap-3">
+                                <div className="flex gap-4 p-3 bg-muted/20 rounded-lg border border-border/40 text-sm">
+                                    <div className="flex-1">
+                                        <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Position</div>
+                                        <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-bold', posStyle)}>
+                                            {posIcon} {posLabel} ({selectedIntraday.predict === 'UP' ? '상승' : selectedIntraday.predict === 'DOWN' ? '하락' : '대기'})
+                                        </span>
+                                    </div>
+                                    <div className="w-px bg-border/40" />
+                                    <div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">Entry Price</div><div className="font-mono">{selectedIntraday.entry_price ? selectedIntraday.entry_price.toLocaleString() : '-'}</div></div>
+                                    <div className="w-px bg-border/40" />
+                                    <div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">Max Price</div><div className="font-mono text-amber-500">{selectedIntraday.max_price ? selectedIntraday.max_price.toLocaleString() : '-'}</div></div>
+                                    <div className="w-px bg-border/40" />
+                                    <div><div className="text-xs text-muted-foreground uppercase font-bold mb-1">Close Price</div><div className="font-mono opacity-80">{selectedIntraday.close_price ? selectedIntraday.close_price.toLocaleString() : '-'}</div></div>
+                                    <div className="w-px bg-border/40" />
+                                    <div>
+                                        <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Max Return</div>
+                                        <div className={cn("font-mono font-bold", selectedIntraday.max_return_pct > 0 ? "text-amber-500" : selectedIntraday.max_return_pct < 0 ? "text-blue-500/80" : "text-muted-foreground")}>
+                                            {selectedIntraday.max_return_pct != null ? `${selectedIntraday.max_return_pct > 0 ? '+' : ''}${Number(selectedIntraday.max_return_pct).toFixed(2)}%` : '-'}
+                                        </div>
+                                    </div>
+                                    <div className="w-px bg-border/40" />
+                                    <div>
+                                        <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Close Return</div>
+                                        <div className={cn("font-mono font-bold", retVal > 0 ? "text-rose-500" : retVal < 0 ? "text-blue-500" : "")}>
+                                            {retVal != null ? `${retVal > 0 ? '+' : ''}${Number(retVal).toFixed(2)}%` : '⏳'}
+                                        </div>
+                                    </div>
+                                    <div className="w-px bg-border/40" />
+                                    <div>
+                                        <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Result</div>
+                                        <div className="font-mono font-bold flex flex-col pt-0.5">
+                                            {selectedIntraday.result === 'HIT' ? <span className="text-emerald-500">✅ HIT</span>
+                                            : selectedIntraday.result === 'MISS' ? <span className="text-rose-500">❌ MISS</span>
+                                            : selectedIntraday.result === 'HOLD' ? <span className="text-muted-foreground">— HOLD</span>
+                                            : <span className="text-indigo-400">⏳ Pending</span>}
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="w-px bg-border/40" />
-                                <div>
-                                    <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Result</div>
-                                    <div className="font-mono font-bold">
-                                        {selectedIntraday.result === 'HIT' ? <span className="text-emerald-500">✅ HIT</span>
-                                        : selectedIntraday.result === 'MISS' ? <span className="text-rose-500">❌ MISS</span>
-                                        : selectedIntraday.result === 'HOLD' ? <span className="text-muted-foreground">— HOLD</span>
-                                        : <span className="text-indigo-400">⏳ Pending</span>}
-                                    </div>
+                                <div className="text-[11px] text-muted-foreground px-1 opacity-70">
+                                    ※ 장중 고점 수익률이 <strong className="text-foreground">+1.0%</strong>를 넘거나 종가 수익률이 <strong className="text-foreground">+0.5%</strong>를 초과할 경우 목표 달성(HIT)으로 평가됩니다.
                                 </div>
                             </div>
 
@@ -1074,6 +1208,11 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                 <button onClick={() => document.getElementById('intraday-rationale')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">🧠 메인 AI 분석</button>
                                 {selectedIntraday.comments_json && <button onClick={() => document.getElementById('intraday-swarm')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">👥 군집 AI 의견</button>}
                                 <button onClick={() => document.getElementById('intraday-source')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">📊 소스 데이터</button>
+                                <div className="flex-1"></div>
+                                <button onClick={() => handleCopyFullContext(selectedIntraday)} className="px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 bg-muted/20 border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-all shadow-sm" title="AI 판단 근거 및 분석 전문 클립보드 복사">
+                                    <Copy className="w-3.5 h-3.5" />
+                                    전체 복사
+                                </button>
                             </div>
                             <div id="intraday-rationale" className="scroll-mt-4">
                                 <div className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5"><Brain className="w-3.5 h-3.5" /> Main AI Rationale</div>
@@ -1411,6 +1550,130 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                     </div>
                 </div>
             )}
+
+            {/* ── 복수선택 삭제 팝업 ── */}
+            {showDeleteModal && (
+                <div
+                    className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+                    onClick={() => setShowDeleteModal(false)}
+                >
+                    <div
+                        className="bg-background border border-border/60 rounded-xl shadow-2xl w-[560px] max-h-[75vh] flex flex-col overflow-hidden"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* 헤더 */}
+                        <div className="p-4 border-b border-border/40 bg-muted/20 flex items-center justify-between">
+                            <h3 className="font-bold flex items-center gap-2 text-sm">
+                                <Trash2 className="w-4 h-4 text-rose-400" />
+                                {deleteModalTarget === 'classic' ? '장전·마감 예측' : '장중 타이밍'} 항목 삭제
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">{selectedDeleteIds.size}건 선택됨</span>
+                                <button onClick={() => setShowDeleteModal(false)} className="text-muted-foreground hover:text-foreground">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 전체선택 */}
+                        <div className="px-4 py-2 border-b border-border/30 bg-muted/10 flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                id="delete-select-all"
+                                className="w-3.5 h-3.5 accent-rose-500"
+                                checked={(() => {
+                                    const list = deleteModalTarget === 'classic' ? history : intradayData
+                                    return list.length > 0 && selectedDeleteIds.size === list.length
+                                })()}
+                                onChange={e => {
+                                    const list = deleteModalTarget === 'classic' ? history : intradayData
+                                    if (e.target.checked) {
+                                        setSelectedDeleteIds(new Set(list.map((r: any) => r.id)))
+                                    } else {
+                                        setSelectedDeleteIds(new Set())
+                                    }
+                                }}
+                            />
+                            <label htmlFor="delete-select-all" className="text-xs text-muted-foreground cursor-pointer select-none">
+                                전체선택 ({deleteModalTarget === 'classic' ? history.length : intradayData.length}건)
+                            </label>
+                        </div>
+
+                        {/* 항목 리스트 */}
+                        <div className="overflow-y-auto flex-1 py-1">
+                            {(deleteModalTarget === 'classic' ? history : intradayData).map((row: any) => {
+                                const isChecked = selectedDeleteIds.has(row.id)
+                                const label = deleteModalTarget === 'classic'
+                                    ? `${row.date}  ${row.cycle === 'A' ? '장전(A)' : row.cycle === 'P' ? '장중(P)' : '마감(B)'}  ${row.position || row.predict}`
+                                    : `${row.date}  ${row.time_slot}  ${row.position || (row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD')}`
+                                return (
+                                    <label
+                                        key={row.id}
+                                        className={cn(
+                                            'flex items-center gap-3 px-4 py-2 cursor-pointer select-none transition-colors text-xs hover:bg-muted/30',
+                                            isChecked && 'bg-rose-500/5'
+                                        )}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            className="w-3.5 h-3.5 accent-rose-500 shrink-0"
+                                            checked={isChecked}
+                                            onChange={e => {
+                                                const next = new Set(selectedDeleteIds)
+                                                if (e.target.checked) next.add(row.id)
+                                                else next.delete(row.id)
+                                                setSelectedDeleteIds(next)
+                                            }}
+                                        />
+                                        <span className={cn('flex-1 font-mono', isChecked ? 'text-rose-400' : 'text-foreground/80')}>
+                                            {label}
+                                        </span>
+                                        {isChecked && <Trash2 className="w-3 h-3 text-rose-400/60 shrink-0" />}
+                                    </label>
+                                )
+                            })}
+                        </div>
+
+                        {/* 하단 액션 */}
+                        <div className="p-4 border-t border-border/40 bg-muted/10 flex items-center justify-between gap-3">
+                            <p className="text-xs text-muted-foreground opacity-70">⚠️ 삭제된 항목은 복구할 수 없습니다.</p>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setShowDeleteModal(false)}
+                                    className="px-4 py-1.5 text-xs border border-border/50 text-muted-foreground rounded-lg hover:bg-muted/30 transition-colors"
+                                >
+                                    취소
+                                </button>
+                                <button
+                                    disabled={selectedDeleteIds.size === 0}
+                                    onClick={async () => {
+                                        if (selectedDeleteIds.size === 0) return
+                                        const tableName = deleteModalTarget === 'classic' ? 'agent_predictions' : 'intraday_predictions'
+                                        const ids = Array.from(selectedDeleteIds)
+                                        try {
+                                            const res = await (window.electronAPI as any).deleteManyMarketPredictions(ids, tableName)
+                                            if (res.success) {
+                                                setShowDeleteModal(false)
+                                                setSelectedDeleteIds(new Set())
+                                                await fetchData()
+                                            } else {
+                                                alert('삭제 실패: ' + res.error)
+                                            }
+                                        } catch (err: any) {
+                                            alert('삭제 중 오류: ' + err.message)
+                                        }
+                                    }}
+                                    className="px-4 py-1.5 text-xs bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    선택 삭제 ({selectedDeleteIds.size}건)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
+
     )
 }

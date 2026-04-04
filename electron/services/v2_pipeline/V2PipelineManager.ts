@@ -24,6 +24,8 @@ import { FinanceInfoAggregator } from './aggregators/FinanceInfoAggregator';
 import { InvestorFlowCollector } from './collectors/InvestorFlowCollector';
 import { InvestorFlowAggregator } from './aggregators/InvestorFlowAggregator';
 
+import { MarketDataCollectorService } from './MarketDataCollectorService';
+
 export class V2PipelineManager {
     private static instance: V2PipelineManager;
 
@@ -110,6 +112,11 @@ export class V2PipelineManager {
             let aggregatedMarkdown: string = '';
 
             switch (pipelineId) {
+                case 'PL-MarketDaily':
+                    await MarketDataCollectorService.getInstance().runDailyCollection(60);
+                    rawData = { message: 'Data Pump Completed' };
+                    aggregatedMarkdown = '### ✅ 전 종목(KOSPI/KOSDAQ) 60봉 데이터 수집 펌프 구동 완료\n관제 로그 화면을 확인하십시오.';
+                    break;
                 case 'PL-Macro':
                     rawData = await this.macroCollector.collect(options);
                     aggregatedMarkdown = await this.macroAggregator.process(rawData);
@@ -158,24 +165,23 @@ export class V2PipelineManager {
             const executionTimeMs = Date.now() - startTime;
             
             return {
-                id: pipelineId,
+                pipeline_id: pipelineId,
                 status: 'success',
-                executionTimeMs,
-                lastRunTime: new Date().toISOString(),
-                rawData,
-                aggregatedMarkdown
+                exec_time_ms: executionTimeMs,
+                raw_data: rawData,
+                aggregated_markdown: aggregatedMarkdown
             };
 
         } catch (error: any) {
             console.error(`[V2PipelineManager] Pipeline ${pipelineId} Failed:`, error);
             
             return {
-                id: pipelineId,
+                pipeline_id: pipelineId,
                 status: 'failed',
-                executionTimeMs: Date.now() - startTime,
-                lastRunTime: new Date().toISOString(),
-                rawData: { error: error.message || 'Unknown Error', stack: error.stack },
-                aggregatedMarkdown: `### ❌ 실행 실패\n${error.message}`
+                exec_time_ms: Date.now() - startTime,
+                raw_data: { error: error.message || 'Unknown Error', stack: error.stack },
+                aggregated_markdown: `### ❌ 실행 실패\n${error.message}`,
+                error_message: error.message
             };
         }
     }

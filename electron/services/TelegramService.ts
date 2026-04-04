@@ -983,6 +983,18 @@ export class TelegramService {
             throw new Error("Chat ID가 설정되지 않았습니다. 텔레그램 개인 톡방 혹은 단톡방에서 봇에게 /start 를 먼저 입력해주세요.");
         }
 
+        // 로그 기록 (시스템 시작 메시지는 DatabaseService.insertTelegramLog 내에서 필터링됨)
+        try {
+            let senderType = "일반 메시지";
+            const match = message.match(/\[([^\]\|]+)/);
+            if (match && match[1]) {
+                senderType = match[1].trim();
+            }
+            DatabaseService.getInstance().insertTelegramLog(senderType, message);
+        } catch (e) {
+            console.error('[TelegramService] failed to call insertTelegramLog', e);
+        }
+
         try {
             // Telegram MarkdownV1 엔진은 특수문자 처리에 매우 엄격하므로 에러 발생 가능성 대비
             await this.bot.telegram.sendMessage(this.chatId, message, { parse_mode: 'Markdown' });

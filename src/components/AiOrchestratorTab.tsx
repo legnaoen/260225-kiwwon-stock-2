@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Bot, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Timer, RefreshCw, Radio, Activity, ChevronRight } from 'lucide-react'
+import { Bot, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Timer, RefreshCw, Radio, Activity, ChevronRight, Copy } from 'lucide-react'
 
 // ═══ 에이전트 레지스트리 (프론트엔드 상수) ═══
 const AI_AGENTS = [
@@ -104,6 +104,9 @@ interface ExecutionLogEntry {
     finishedAt?: string
     durationMs?: number
     error?: string
+    prompt?: string
+    systemInstruction?: string
+    result?: string
 }
 
 const TRIGGER_BADGES: Record<string, { label: string; className: string }> = {
@@ -116,13 +119,14 @@ export default function AiOrchestratorTab() {
     const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null) // null = All
     const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null)
     const [executionLog, setExecutionLog] = useState<ExecutionLogEntry[]>([])
+    const [selectedLog, setSelectedLog] = useState<ExecutionLogEntry | null>(null)
 
     const fetchData = useCallback(async () => {
         try {
             const api = window.electronAPI as any
             const [status, log] = await Promise.all([
                 api.getAiQueueStatus?.() ?? null,
-                api.getAiExecutionLog?.(50) ?? [],
+                api.getAiExecutionLog?.(200) ?? [],
             ])
             if (status) setQueueStatus(status)
             if (Array.isArray(log)) setExecutionLog(log)
@@ -155,6 +159,41 @@ export default function AiOrchestratorTab() {
     const dayOfWeek = now.getDay() // 0=일, 6=토
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
     const dayLabel = ['일', '월', '화', '수', '목', '금', '토'][dayOfWeek]
+
+    const handleCopyFullLog = () => {
+        if (!selectedLog) return;
+        const formattedLog = `📋 AI 관제센터 작업 상세 리포트\n────────────────────────────────────────\n[기본 정보]\n- 동작 에이전트 : ${selectedLog.agentName} (${selectedLog.agentId})\n- 실행 결과 상태: ${selectedLog.status}\n- 발생(실행)시각: ${selectedLog.startedAt || selectedLog.queuedAt}\n- 소요 시간     : ${selectedLog.durationMs ? (selectedLog.durationMs / 1000).toFixed(1) + 's' : '-'}\n- 요청(트리거)  : ${TRIGGER_BADGES[selectedLog.triggerType]?.label || selectedLog.triggerType}\n\n[시스템 프롬프트 (System)]\n${selectedLog.systemInstruction || '없음'}\n\n[입력 데이터 (Prompt)]\n${selectedLog.prompt || '없음'}\n${selectedLog.error ? `\n[오류 내용 (Error)]\n${selectedLog.error}\n` : ''}\n[출력 결과 (Result)]\n${selectedLog.result || '없음'}\n────────────────────────────────────────\nReport Generated: ${now.toLocaleString('ko-KR')}`;
+        
+        const fallbackCopy = () => {
+            const textArea = document.createElement("textarea");
+            textArea.value = formattedLog;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                alert('전체 내용이 클립보드에 복사되었습니다.');
+            } catch (err) {
+                console.error('Fallback 복사 실패:', err);
+                alert('보안 정책상 복사에 실패했습니다. 설정에서 권한을 확인해주세요.');
+            }
+            textArea.remove();
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(formattedLog).then(() => {
+                alert('전체 내용이 클립보드에 복사되었습니다.');
+            }).catch(err => {
+                console.warn('Clipboard API 실패, Fallback 시도...', err);
+                fallbackCopy();
+            });
+        } else {
+            fallbackCopy();
+        }
+    }
 
     // 필터된 데이터
     const selectedAgent = AI_AGENTS.find(a => a.id === selectedAgentId) || null
@@ -472,7 +511,7 @@ export default function AiOrchestratorTab() {
                                     </thead>
                                     <tbody className="divide-y divide-border/50">
                                         {filteredLog.map(entry => (
-                                            <tr key={entry.id} className="hover:bg-muted/30 transition-colors">
+                                            <tr key={entry.id} className="hover:bg-muted/30 transition-colors cursor-pointer" onClick={() => setSelectedLog(entry)}>
                                                 <td className="py-4 pl-8 font-mono text-muted-foreground whitespace-nowrap">
                                                     {entry.startedAt ? entry.startedAt.split(' ').pop()?.replace(/:\d{2}$/, '') : '-'}
                                                 </td>
@@ -520,6 +559,103 @@ export default function AiOrchestratorTab() {
                     </section>
                 </div>
             </main>
+
+            {/* ═══ 실행 내역 상세 팝업 ═══ */}
+            {selectedLog && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setSelectedLog(null)}>
+                    <div 
+                        className="bg-card w-full max-w-3xl max-h-[85vh] rounded-2xl border border-border shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-muted/30">
+                            <h3 className="font-bold text-lg flex items-center gap-2">
+                                <Bot size={20} className="text-primary" />
+                                {selectedLog.agentName} 실행 상세
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                <button 
+                                    onClick={handleCopyFullLog} 
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-muted text-muted-foreground text-xs font-semibold transition-colors border border-transparent hover:border-border"
+                                >
+                                    <Copy size={14} /> 복사
+                                </button>
+                                <button onClick={() => setSelectedLog(null)} className="p-1 rounded-md hover:bg-muted text-muted-foreground transition-colors">
+                                    <XCircle size={20} />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6 text-sm">
+                            <div className="grid grid-cols-2 gap-4 bg-muted/30 p-4 rounded-xl border border-border">
+                                <div>
+                                    <p className="text-muted-foreground text-xs font-semibold mb-1">상태</p>
+                                    <div className="flex items-center gap-2 font-bold">
+                                        {selectedLog.status === 'SUCCESS' ? <CheckCircle2 size={16} className="text-emerald-500" /> : selectedLog.status === 'FAILED' ? <XCircle size={16} className="text-rose-500" /> : <RefreshCw size={16} className="text-primary animate-spin" />}
+                                        {selectedLog.status}
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className="text-muted-foreground text-xs font-semibold mb-1">실행 시각</p>
+                                    <p className="font-mono font-bold">{selectedLog.startedAt || selectedLog.queuedAt}</p>
+                                </div>
+                                <div>
+                                    <p className="text-muted-foreground text-xs font-semibold mb-1">트리거 방식</p>
+                                    <span className={`px-2 py-0.5 rounded-md border text-xs font-bold ${TRIGGER_BADGES[selectedLog.triggerType]?.className || 'bg-muted text-muted-foreground border-border'}`}>
+                                        {TRIGGER_BADGES[selectedLog.triggerType]?.label || selectedLog.triggerType}
+                                    </span>
+                                </div>
+                                <div>
+                                    <p className="text-muted-foreground text-xs font-semibold mb-1">소요 시간</p>
+                                    <p className="font-mono font-bold">{selectedLog.durationMs ? `${(selectedLog.durationMs / 1000).toFixed(1)}s` : '-'}</p>
+                                </div>
+                            </div>
+                            
+                            {selectedLog.systemInstruction && (
+                                <div>
+                                    <h4 className="text-sm font-bold mb-2 flex items-center gap-2 text-primary">
+                                        시스템 프롬프트 (System)
+                                    </h4>
+                                    <div className="bg-muted p-4 rounded-xl border border-border whitespace-pre-wrap font-mono text-xs text-foreground/80 max-h-40 overflow-y-auto">
+                                        {selectedLog.systemInstruction}
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedLog.prompt && (
+                                <div>
+                                    <h4 className="text-sm font-bold mb-2 flex items-center gap-2 text-foreground">
+                                        입력 데이터 (Prompt)
+                                    </h4>
+                                    <div className="bg-primary/5 p-4 rounded-xl border border-primary/20 whitespace-pre-wrap font-mono text-xs text-foreground max-h-60 overflow-y-auto">
+                                        {selectedLog.prompt}
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedLog.error && (
+                                <div>
+                                    <h4 className="text-sm font-bold mb-2 flex items-center gap-2 text-destructive">
+                                        <AlertCircle size={16} /> 오류 내용
+                                    </h4>
+                                    <div className="bg-destructive/10 p-4 rounded-xl border border-destructive/20 whitespace-pre-wrap font-mono text-xs text-destructive max-h-40 overflow-y-auto">
+                                        {selectedLog.error}
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedLog.result && (
+                                <div>
+                                    <h4 className="text-sm font-bold mb-2 flex items-center gap-2 text-emerald-600">
+                                        <CheckCircle2 size={16} /> 출력 결과 (Result)
+                                    </h4>
+                                    <div className="bg-emerald-500/5 p-4 rounded-xl border border-emerald-500/20 whitespace-pre-wrap font-mono text-xs text-foreground max-h-80 overflow-y-auto">
+                                        {selectedLog.result}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

@@ -232,9 +232,20 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(imaJob, mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, portfolioManagerJob, portfolioJudgeJob, ...swarmJobs)
+            // [Step 5] 16:30 전 종목 60봉 데이터 수집 펌프 구동 (Market Leader Discovery용)
+            const marketDailyJob = cron.schedule('30 16 * * 1-5', async () => {
+                console.log('[Scheduler] 🚀 전 종목 데이터 수집 펌프 자동 실행 시작...')
+                try {
+                    const { MarketDataCollectorService } = await import('./v2_pipeline/MarketDataCollectorService')
+                    await MarketDataCollectorService.getInstance().runDailyCollection(60)
+                } catch (e: any) {
+                    console.error('[Scheduler] 데이터 수집 펌프 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            this.scheduledJobs.push(imaJob, mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, portfolioManagerJob, portfolioJudgeJob, marketDailyJob, ...swarmJobs)
             console.log(`[SchedulerService] V2 AI schedules initialized (IMA: 08:30, MCA: 08:50, CCI, Swarms, Retros)`)
-            console.log(`[SchedulerService] 📊 종목 AI 파이프라인 등록 완료 (수급: 09:35, 리포트: 09:40, 매니저: 09:45, 채점: 15:45)`)
+            console.log(`[SchedulerService] 📊 종목 AI 파이프라인 등록 완료 (수급: 09:35, 리포트: 09:40, 매니저: 09:45, 채점: 15:45, 전종목펌프: 16:30)`)
 
         }
 

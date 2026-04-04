@@ -252,6 +252,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verifyThemeIntelligence: (params: any) => ipcRenderer.invoke('naverflow:verify-theme', params),
     getThemeRelatedNews: (themeName: string, keywords: string[]) => ipcRenderer.invoke('naverflow:get-theme-news', themeName, keywords),
     searchLiveNews: (keyword: string) => ipcRenderer.invoke('naverflow:search-live-news', keyword),
+    getMarketLeaders: (days: number, topN: number) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN }),
+    runThemeOntology: () => ipcRenderer.invoke('v2:run-theme-ontology'),
     // Graph RAG: Knowledge Edges
     getKnowledgeEdgesFrom: (sourceType: string, sourceId: string, targetType?: string) => ipcRenderer.invoke('graph:edges-from', sourceType, sourceId, targetType),
     getKnowledgeEdgesTo: (targetType: string, targetId: string) => ipcRenderer.invoke('graph:edges-to', targetType, targetId),
@@ -264,6 +266,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runMarketConditionAgent: (cycle: 'A' | 'B') => ipcRenderer.invoke('agent:market:run', cycle),
     getMarketConditionHistory: (limit?: number) => ipcRenderer.invoke('agent:market:history', limit),
     deleteMarketPrediction: (id: string, tableName?: 'agent_predictions' | 'intraday_predictions') => ipcRenderer.invoke('agent:market:delete', id, tableName),
+    deleteManyMarketPredictions: (ids: string[], tableName?: 'agent_predictions' | 'intraday_predictions') => ipcRenderer.invoke('agent:market:delete-many', ids, tableName),
     getMarketConditionLatest: () => ipcRenderer.invoke('agent:market:latest'),
     getMarketConditionStats: () => ipcRenderer.invoke('agent:market:stats'),
     getMarketConditionRules: () => ipcRenderer.invoke('agent:market:rules'),

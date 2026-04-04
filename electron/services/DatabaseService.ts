@@ -170,6 +170,21 @@ export class DatabaseService {
             );
         `
 
+        const createMarketOhlcvHistoryTable = `
+            CREATE TABLE IF NOT EXISTS market_ohlcv_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                date TEXT NOT NULL,
+                open INTEGER,
+                high INTEGER,
+                low INTEGER,
+                close INTEGER,
+                volume INTEGER,
+                trading_value INTEGER,
+                UNIQUE(stock_code, date)
+            );
+        `
+
         const createDailyRisingStocksTable = `
             CREATE TABLE IF NOT EXISTS daily_rising_stocks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,6 +240,25 @@ export class DatabaseService {
                 change_type TEXT NOT NULL,
                 trigger_context TEXT,
                 changed_at TEXT NOT NULL
+            );
+        `
+
+        const createAiExecutionLogTable = `
+            CREATE TABLE IF NOT EXISTS ai_execution_log (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT,
+                agent_name TEXT,
+                trigger_type TEXT,
+                target_type TEXT,
+                status TEXT,
+                queued_at TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                duration_ms INTEGER,
+                error TEXT,
+                prompt TEXT,
+                system_instruction TEXT,
+                result TEXT
             );
         `
 
@@ -555,10 +589,12 @@ export class DatabaseService {
         this.db.exec(createAiStrategyHistoryTable)
         this.db.exec(createHoldingHistoryTable)
         this.db.exec(createMarketDailyReportsTable)
+        this.db.exec(createMarketOhlcvHistoryTable)
         this.db.exec(createDailyRisingStocksTable)
         this.db.exec(createAiLearningLogTable)
         this.db.exec(createStockRawDataTable)
         this.db.exec(createSkillsFileHistoryTable)
+        this.db.exec(createAiExecutionLogTable)
         this.db.exec(createStockMasterTable)
         this.db.exec(createMaiisInventoryTable)
         this.db.exec(createMaiisStatsTable)
@@ -575,6 +611,16 @@ export class DatabaseService {
         this.db.exec(createMaiisThemeRankingsTable)
         this.db.exec(createMaiisKeywordRankingsTable)
         this.db.exec(createMaiisActivePicksTable)
+        
+        // Theme Ontology
+        const createThemeOntologyTable = `
+            CREATE TABLE IF NOT EXISTS theme_ontology (
+                raw_tag TEXT PRIMARY KEY,
+                macro_category TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        `
+        this.db.exec(createThemeOntologyTable)
 
         // ═══ V2 Agent Swarm: Market Condition Agent ═══
         const createAgentPredictionsTable = `
@@ -661,12 +707,16 @@ export class DatabaseService {
                 entry_price REAL,
                 close_price REAL,
                 return_pct REAL,
+                max_price REAL,
+                max_return_pct REAL,
                 sources_json TEXT,
                 created_at TEXT DEFAULT (datetime('now', 'localtime')),
                 UNIQUE(date, time_slot)
             );
         `
         this.db.exec(createIntradayPredictionsTable)
+        try { this.db.exec("ALTER TABLE intraday_predictions ADD COLUMN max_price REAL;"); } catch { }
+        try { this.db.exec("ALTER TABLE intraday_predictions ADD COLUMN max_return_pct REAL;"); } catch { }
 
         // Phase 2: Persona Performance (AI 댓글 적중률 채점용)
         try {
@@ -701,6 +751,16 @@ export class DatabaseService {
             );
         `
         this.db.exec(createAiRunLogsTable)
+
+        const createTelegramLogsTable = `
+            CREATE TABLE IF NOT EXISTS telegram_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+        `
+        this.db.exec(createTelegramLogsTable)
 
         // 기존 테이블에 새 컬럼 추가 (ALTER TABLE은 이미 존재하면 무시)
         const intradayAlterColumns = ['position', 'entry_price', 'close_price', 'return_pct', 'sources_json', 'comments_json', 'swarm_sentiment']
@@ -959,6 +1019,34 @@ export class DatabaseService {
                 `);
             }
         } catch (e) {}
+
+        const createAiExecutionLogsTable = `
+            CREATE TABLE IF NOT EXISTS ai_execution_logs (
+                id TEXT PRIMARY KEY,
+                agentId TEXT NOT NULL,
+                agentName TEXT NOT NULL,
+                triggerType TEXT NOT NULL,
+                targetType TEXT NOT NULL,
+                status TEXT NOT NULL,
+                queuedAt TEXT NOT NULL,
+                startedAt TEXT,
+                finishedAt TEXT,
+                durationMs INTEGER,
+                error TEXT,
+                prompt TEXT,
+                systemInstruction TEXT,
+                result TEXT
+            );
+        `
+        this.db.exec(createAiExecutionLogsTable)
+        
+        try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN prompt TEXT;"); } catch { }
+        try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN systemInstruction TEXT;"); } catch { }
+        try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN result TEXT;"); } catch { }
+
+        // [HOTFIX] SQLite의 문자열 정렬(DESC) 시 '오전/오후' 한글 문자열로 인해 정렬 오작동이 발생했음.
+        // 이를 수정하기 위해 이전 포맷을 사용한 로그들을 삭제하여 테이블 포맷을 초기화합니다.
+        try { this.db.exec("DELETE FROM ai_execution_logs WHERE queuedAt LIKE '% %';"); } catch { }
     }
 
 
@@ -984,6 +1072,38 @@ export class DatabaseService {
                 created_at: '2026-02-24T00:00:00Z'
             });
         }
+    }
+
+    public saveAiExecutionLog(log: any) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO ai_execution_logs 
+            (id, agentId, agentName, triggerType, targetType, status, queuedAt, startedAt, finishedAt, durationMs, error, prompt, systemInstruction, result)
+            VALUES (@id, @agentId, @agentName, @triggerType, @targetType, @status, @queuedAt, @startedAt, @finishedAt, @durationMs, @error, @prompt, @systemInstruction, @result)
+        `)
+        stmt.run({
+            id: log.id,
+            agentId: log.agentId,
+            agentName: log.agentName,
+            triggerType: log.triggerType,
+            targetType: log.targetType,
+            status: log.status,
+            queuedAt: log.queuedAt,
+            startedAt: log.startedAt || null,
+            finishedAt: log.finishedAt || null,
+            durationMs: log.durationMs || null,
+            error: log.error || null,
+            prompt: log.prompt || null,
+            systemInstruction: log.systemInstruction || null,
+            result: log.result || null,
+        })
+    }
+
+    public getAiExecutionLogs(limit: number = 200) {
+        return this.db.prepare(`
+            SELECT * FROM ai_execution_logs 
+            ORDER BY queuedAt DESC 
+            LIMIT ?
+        `).all(limit)
     }
 
     public insertCorpCodes(codes: { corp_code: string, corp_name: string, stock_code: string, modify_date: string }[]) {
@@ -2263,5 +2383,87 @@ export class DatabaseService {
         return this.db.prepare(
             'SELECT * FROM naver_news_flow WHERE date = ? ORDER BY category, collected_at DESC'
         ).all(targetDate) as any[]
+    }
+
+    public insertTelegramLog(senderType: string, message: string) {
+        // Skip specific startup message
+        if (message.includes('정상적으로 시작되었습니다')) {
+            return;
+        }
+        
+        try {
+            const stmt = this.db.prepare(`
+                INSERT INTO telegram_logs (sender_type, message, created_at)
+                VALUES (@sender_type, @message, @created_at)
+            `);
+            stmt.run({
+                sender_type: senderType,
+                message: message,
+                created_at: this.getKstTimestamp()
+            });
+
+            // Cleanup older than 3 days
+            const threeDaysAgo = new Date();
+            threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+            const limitDate = this.getKstTimestamp(threeDaysAgo);
+            
+            this.db.prepare('DELETE FROM telegram_logs WHERE created_at < ?').run(limitDate);
+        } catch (error) {
+            console.error('[DatabaseService] failed to save telegram log', error);
+        }
+    }
+
+    public getTelegramLogs() {
+        return this.db.prepare('SELECT * FROM telegram_logs ORDER BY created_at DESC LIMIT 1000').all() as any[];
+    }
+
+    // ═══ AI Execution Log ═══
+    public saveAiExecutionLog(log: any) {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO ai_execution_log (
+                id, agent_id, agent_name, trigger_type, target_type, status,
+                queued_at, started_at, finished_at, duration_ms, error,
+                prompt, system_instruction, result
+            ) VALUES (
+                @id, @agentId, @agentName, @triggerType, @targetType, @status,
+                @queuedAt, @startedAt, @finishedAt, @durationMs, @error,
+                @prompt, @systemInstruction, @result
+            )
+        `)
+        stmt.run({
+            id: log.id,
+            agentId: log.agentId,
+            agentName: log.agentName,
+            triggerType: log.triggerType,
+            targetType: log.targetType,
+            status: log.status,
+            queuedAt: log.queuedAt,
+            startedAt: log.startedAt || null,
+            finishedAt: log.finishedAt || null,
+            durationMs: log.durationMs || null,
+            error: log.error || null,
+            prompt: log.prompt || null,
+            systemInstruction: log.systemInstruction || null,
+            result: log.result || null
+        })
+    }
+
+    public getAiExecutionLogs(limit: number = 200) {
+        return this.db.prepare('SELECT * FROM ai_execution_log ORDER BY queued_at DESC LIMIT ?').all(limit).map((r: any) => ({
+            id: r.id,
+            agentId: r.agent_id,
+            agentName: r.agent_name,
+            triggerType: r.trigger_type,
+            targetType: r.target_type,
+            status: r.status,
+            queuedAt: r.queued_at,
+            startedAt: r.started_at,
+            finishedAt: r.finished_at,
+            durationMs: r.duration_ms,
+            error: r.error,
+            prompt: r.prompt,
+            systemInstruction: r.system_instruction,
+            result: r.result
+        }));
     }
 }

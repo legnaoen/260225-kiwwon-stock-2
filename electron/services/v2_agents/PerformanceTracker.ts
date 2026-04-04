@@ -99,7 +99,7 @@ export class PerformanceTracker {
         // 최근 45일 내의 예측이거나 아직 t20_final이 완료되지 않은(과거 오류로 남은) 대상
         const pendingRows = rawDb.prepare(`
             SELECT * FROM agent_predictions 
-            WHERE predict != 'HOLD' AND (t20_final IS NULL OR date >= date('now', 'localtime', '-45 days'))
+            WHERE (t20_final IS NULL OR date >= date('now', 'localtime', '-45 days'))
             ORDER BY date ASC
         `).all() as AgentPrediction[]
 
@@ -352,23 +352,23 @@ export class PerformanceTracker {
 
         // 1. 장중 예측 (Intraday) 중 진입가가 없는 행에 진입가 최초 1회 등록
         const pendingIntraday = rawDb.prepare(
-            `SELECT id, predict FROM intraday_predictions WHERE date = ? AND (entry_price IS NULL OR entry_price <= 0) AND predict IN ('UP', 'DOWN')`
+            `SELECT id, predict FROM intraday_predictions WHERE date = ? AND (entry_price IS NULL OR entry_price <= 0) AND predict IN ('UP', 'DOWN', 'HOLD')`
         ).all(dateStr) as any[]
 
         for (const row of pendingIntraday) {
-            const etfData = row.predict === 'UP' ? this.latestPrices['069500'] : row.predict === 'DOWN' ? this.latestPrices['114800'] : null
-            if (!etfData || etfData.open <= 0) continue
+            const etfData = row.predict === 'UP' ? this.latestPrices['069500'] : row.predict === 'DOWN' ? this.latestPrices['114800'] : this.latestPrices['069500']
+            if (!etfData || etfData.price <= 0) continue
 
-            rawDb.prepare(`UPDATE intraday_predictions SET entry_price = ? WHERE id = ?`).run(etfData.open, row.id)
+            rawDb.prepare(`UPDATE intraday_predictions SET entry_price = ? WHERE id = ?`).run(etfData.price, row.id)
             evaluated++
         }
 
         const pendingDaily = rawDb.prepare(
-            `SELECT id, date, predict, cycle, entry_price FROM agent_predictions WHERE (t1_final IS NULL OR entry_price IS NULL OR entry_price <= 0) AND predict IN ('LONG', 'SHORT', 'UP', 'DOWN')`
+            `SELECT id, date, predict, cycle, entry_price FROM agent_predictions WHERE (t1_final IS NULL OR entry_price IS NULL OR entry_price <= 0) AND predict IN ('LONG', 'SHORT', 'UP', 'DOWN', 'HOLD')`
         ).all() as any[]
         
         for (const row of pendingDaily) {
-            const etfData = (row.predict === 'LONG' || row.predict === 'UP') ? this.latestPrices['069500'] : (row.predict === 'SHORT' || row.predict === 'DOWN') ? this.latestPrices['114800'] : null
+            const etfData = (row.predict === 'LONG' || row.predict === 'UP') ? this.latestPrices['069500'] : (row.predict === 'SHORT' || row.predict === 'DOWN') ? this.latestPrices['114800'] : this.latestPrices['069500']
             // 시가가 없으면 안전하게 통과 (0으로 나누기 방지)
             if (!etfData || etfData.open <= 0) continue
 
@@ -419,96 +419,123 @@ export class PerformanceTracker {
         const today = new Date()
         const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
-        // 오늘 장중 예측 전체 (장중에는 가격이 변하므로 매번 재평가)
-        const pending = rawDb.prepare(
-            `SELECT * FROM intraday_predictions WHERE date = ?`
-        ).all(dateStr) as any[]
+        // 최근 5일 중 max_price가 없는 것들을 소급 평가 (과거 날짜 포함)
+        const pending = rawDb.prepare(`
+            SELECT * FROM intraday_predictions 
+            WHERE date >= date('now', 'localtime', '-5 days')
+              AND predict IN ('UP', 'DOWN', 'HOLD')
+              AND (max_price IS NULL OR max_price = 0)
+            ORDER BY date ASC, time_slot ASC
+        `).all() as any[]
 
         if (pending.length === 0) {
-            console.log('[MCA-Tracker] 장중 평가 대상 없음')
+            console.log('[MCA-Tracker] 장중 평가 대상 없음 (최근 5일 내 미평가 데이터 없음)')
             return
         }
+        console.log(`[MCA-Tracker] 소급 평가 대상: ${pending.length}건`)
 
-        // KODEX 200, KODEX 인버스 당일 5분봉 차트 (시간별 고점 탐색용)
-        const { KiwoomService } = await import('../KiwoomService')
-        const chartK200_5m = await KiwoomService.getInstance().getOhlcv5m('069500', 1)
-        const chartInv_5m = await KiwoomService.getInstance().getOhlcv5m('114800', 1)
-
-        // 일봉 데이터 (종가 확인용)
+        // 일봉 데이터 (모든 날짜의 종가/고가 조회용 - 80봉 충분)
         const chartK200Daily = await this.fetchParsedChart('069500')
         const chartInvDaily = await this.fetchParsedChart('114800')
 
-        const todayK200Info = chartK200Daily.find(c => c.date === dateStr) || chartK200Daily[0]
-        const todayInvInfo = chartInvDaily.find(c => c.date === dateStr) || chartInvDaily[0]
-
-        if (!todayK200Info || !todayInvInfo) {
-            console.error('[MCA-Tracker] 장중 평가: 오늘 ETF 데이터 없음')
-            return
+        // 5분봉 3일치 로드 (오늘 + 전일 포함하여 날짜별로 진입시간 이후 고점 계산)
+        let chartK200_5m: any[] = []
+        let chartInv_5m: any[] = []
+        try {
+            chartK200_5m = await KiwoomService.getInstance().getOhlcv5m('069500', 3)
+            chartInv_5m = await KiwoomService.getInstance().getOhlcv5m('114800', 3)
+            console.log(`[MCA-Tracker] 5분봉 로드(3일치): K200=${chartK200_5m.length}봉, INV=${chartInv_5m.length}봉`)
+        } catch (e: any) {
+            console.warn('[MCA-Tracker] 5분봉 로드 실패, 일봉 고가로 대체:', e.message)
         }
 
-        console.log(`[MCA-Tracker] 장중 평가 ETF - K200: C=${todayK200Info.close} | INV: C=${todayInvInfo.close}`)
+        const todayK200Info = chartK200Daily.find((c: any) => c.date === dateStr) || chartK200Daily[0]
 
         let evaluated = 0
         for (const row of pending) {
-            const position = row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : null
-            const etfCandle5m = row.predict === 'UP' ? chartK200_5m : row.predict === 'DOWN' ? chartInv_5m : []
-            const todayEtfDaily = row.predict === 'UP' ? todayK200Info : row.predict === 'DOWN' ? todayInvInfo : null
+            // HOLD 포지션일 때 KODEX 200(069500) 변동성을 추적 기준으로 삼음.
+            const position = row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD(KODEX 200 기준)'
 
-            if (!position || !todayEtfDaily || row.predict === 'HOLD') {
-                // HOLD 예측이거나 데이터 없음
-                rawDb.prepare(`UPDATE intraday_predictions SET position = 'HOLD', result = 'HOLD', close_kospi = ? WHERE id = ?`)
-                    .run(todayK200Info.close, row.id)
-                evaluated++
+            // 해당 날짜의 ETF 일봉 데이터 조회
+            const etfDailyArr = (row.predict === 'UP' || row.predict === 'HOLD') ? chartK200Daily : chartInvDaily
+            const rowEtfDaily = etfDailyArr.find((c: any) => c.date === row.date)
+
+            if (!rowEtfDaily) {
+                console.warn(`[MCA-Tracker] ${row.date} ETF 일봉 없음, 스킵: ${row.id}`)
                 continue
             }
 
-            // 진입가 보호: 만약 기존에 5분봉 등에서 정확하게 담긴 entry_price가 있다면 절대 당일 시가로 덮어쓰지 않음
-            const entryPrice = (row.entry_price > 0) ? row.entry_price : todayEtfDaily.open
-            const closePrice = todayEtfDaily.close
+            // 진입가 보호
+            const entryPrice = (row.entry_price > 0) ? row.entry_price : rowEtfDaily.open
+            const closePrice = rowEtfDaily.close
             const returnPct = ((closePrice - entryPrice) / entryPrice) * 100
 
-            // 진입 시점을 찾아 기간 내 고점(maxHigh) 계산
-            let maxHigh = entryPrice;
-            if (row.time_slot && etfCandle5m.length > 0) {
-                // time_slot format is typically 'HH:MM' or 'HH:MM (CCI)'
+            // 고점: 5분봉에서 해당 날짜 + 진입시간 이후 캔들만 필터해서 MAX(high)
+            // 5분봉 없으면 일봉 HIGH를 fallback으로 사용
+            let maxHigh = rowEtfDaily.high  // fallback
+            const candles5m = (row.predict === 'UP' || row.predict === 'HOLD') ? chartK200_5m : chartInv_5m
+            if (candles5m.length > 0 && row.time_slot) {
                 const hmMatch = row.time_slot.match(/(\d{2}):(\d{2})/)
                 if (hmMatch) {
-                    const entryTimeEpoch = new Date(today.getFullYear(), today.getMonth(), today.getDate(), parseInt(hmMatch[1]), parseInt(hmMatch[2]), 0).getTime() / 1000
-                    const afterEntryCandles = etfCandle5m.filter(c => c.time >= entryTimeEpoch)
-                    if (afterEntryCandles.length > 0) {
-                        maxHigh = Math.max(...afterEntryCandles.map(c => c.high))
+                    // 해당 날짜(row.date)의 진입시간을 epoch으로 변환
+                    const [year, month, day] = row.date.split('-').map(Number)
+                    const entryEpoch = new Date(year, month - 1, day,
+                        parseInt(hmMatch[1]), parseInt(hmMatch[2]), 0).getTime() / 1000
+                    // 같은 날짜이면서 진입시간 이후인 캔들만
+                    const dayEndEpoch = new Date(year, month - 1, day, 23, 59, 59).getTime() / 1000
+                    const afterEntry = candles5m.filter((c: any) => c.time >= entryEpoch && c.time <= dayEndEpoch)
+                    if (afterEntry.length > 0) {
+                        maxHigh = Math.max(...afterEntry.map((c: any) => c.high))
                     }
                 }
             }
             const maxReturnPct = ((maxHigh - entryPrice) / entryPrice) * 100
 
-            // 적중 판정 (가혹한 실전 기준): 종가 기준 +0.5% 초과 OR 기간 내 고점 +1.0% 돌파 시 적중
-            const CLOSE_HIT = 0.5
-            const HIGH_HIT = 1.0
-            
+            // ═══ HOLD 정량 평가 및 횡보장(Sideways) vs 추세장(Trend) 알고리즘 ═══
+            // 추세장(Trend): 종가 기준 수익률 절대값 0.5% 이상, 혹은 장중 최대 상승분 1.0% 이상 발생 시.
+            const isTrend = Math.abs(returnPct) >= 0.5 || maxReturnPct >= 1.0
+
             let result: string
-            if (returnPct >= CLOSE_HIT || maxReturnPct >= HIGH_HIT) {
-                result = 'HIT'
-            } else {
-                result = 'MISS' // 종가도 안 오르고 익절 타점도 안 줬으면 무조건 실패
+            if (row.predict === 'UP' || row.predict === 'DOWN') {
+                if (isTrend) {
+                    // 추세가 터졌을 때 방향이 맞았는가 (수익 0.5% 이상이거나 고점 1.0% 이상)
+                    if (returnPct >= 0.5 || maxReturnPct >= 1.0) {
+                        result = 'HIT'
+                    } else {
+                        result = 'MISS'
+                    }
+                } else {
+                    // 횡보장인데 UP/DOWN 억지 베팅 -> 기회비용 및 수수료 패배
+                    result = 'MISS'
+                }
+            } else { // HOLD (관망)
+                if (isTrend) {
+                    // 추세가 터졌는데 방관 -> 기회 상실(패배)
+                    result = 'MISS'
+                } else {
+                    // 변동성 없는 장에서 억지 베팅을 피하고 자산 방어 성공
+                    result = 'HIT'
+                }
             }
+
+            const rowK200Info = chartK200Daily.find((c: any) => c.date === row.date) || todayK200Info
 
             rawDb.prepare(`
                 UPDATE intraday_predictions 
                 SET position = ?, entry_price = ?, close_price = ?, return_pct = ?, 
+                    max_price = ?, max_return_pct = ?,
                     close_kospi = ?, result = ?
                 WHERE id = ?
-            `).run(position, entryPrice, closePrice, returnPct, todayK200Info.close, result, row.id)
+            `).run(position, entryPrice, closePrice, returnPct, maxHigh, maxReturnPct, rowK200Info?.close ?? 0, result, row.id)
 
-            console.log(`[MCA-Tracker] 장중 ${row.time_slot}: ${position} entry=${entryPrice} close=${closePrice} (고점:$${maxHigh}) | 리턴=${returnPct.toFixed(2)}% 고점리턴=${maxReturnPct.toFixed(2)}% → ${result}`)
+            console.log(`[MCA-Tracker] 장중평가${isToday ? '' : '(소급)'} [${row.date}] ${row.time_slot}: ${position} entry=${entryPrice} 고점=${maxHigh} close=${closePrice} | 결과:${result} (Trend:${isTrend}, 변동:${maxReturnPct.toFixed(2)}%, 종가:${returnPct.toFixed(2)}%)`)
             evaluated++
 
-            // 페르소나 개별 성적 기록
-            this.trackPersonaPerformance(row, returnPct)
+            this.trackPersonaPerformance(row, returnPct, isTrend)
         }
         
         if (evaluated > 0) {
-            console.log(`[MCA-Tracker] 장중 예측 ${evaluated}건 평가 완료`)
+            console.log(`[MCA-Tracker] 장중 예측 ${evaluated}건 평가 완료 (소급 포함)`)
             eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, null)
         }
     }
@@ -518,7 +545,7 @@ export class PerformanceTracker {
      * @param row intraday_predictions DB row
      * @param masterReturnPct 선택된 포지션 KODEX의 최종 수익률
      */
-    private trackPersonaPerformance(row: any, masterReturnPct: number) {
+    private trackPersonaPerformance(row: any, masterReturnPct: number, isTrend: boolean) {
         if (!row.comments_json) return;
         
         try {
@@ -528,28 +555,35 @@ export class PerformanceTracker {
             for (const c of comments) {
                 if (!c.id || !c.predict) continue;
 
-                // 마스터가 UP 예측하여 KODEX 200 수익률이 returnPct이 된 경우:
-                // 페르소나가 동일하게 UP이면 수익률 그대로 사용, 반대면 역산 필요.
-                // 직관적으로 방향이 맞았는지(returnPct > 0인지)로 판별.
                 let pResult = 'HOLD';
                 let pIsHit = 0;
 
-                // 마스터 방향에 맞춘 수익률(masterReturnPct)을 이용해 현재 시장이 상승장인지 하락장인지 유추:
-                // row.predict === 'UP' -> 마스터가 매수함. masterReturnPct > 0 이면 주가 올랐음(UP Hit).
-                // row.predict === 'DOWN' -> 마스터가 인버스 매수함. masterReturnPct > 0 이면 주가 내렸음(DOWN Hit).
-                const marketWentUp = (row.predict === 'UP' && masterReturnPct > 0) || (row.predict === 'DOWN' && masterReturnPct < 0);
-                const marketWentDown = (row.predict === 'DOWN' && masterReturnPct > 0) || (row.predict === 'UP' && masterReturnPct < 0);
+                // 마스터의 수익률을 바탕으로 시장의 상승/하락을 유추
+                // row.predict가 UP/HOLD면 masterReturnPct은 KODEX200 수익률
+                const isK200Assumed = row.predict === 'UP' || row.predict === 'HOLD';
+                const marketWentUp = isK200Assumed ? masterReturnPct > 0 : masterReturnPct < 0;
+                const marketWentDown = isK200Assumed ? masterReturnPct < 0 : masterReturnPct > 0;
 
                 if (c.predict === 'UP') {
-                    pResult = marketWentUp ? 'HIT' : 'MISS';
-                    pIsHit = marketWentUp ? 1 : 0;
+                    if (isTrend) {
+                        pIsHit = marketWentUp ? 1 : 0;
+                        pResult = marketWentUp ? 'HIT' : 'MISS';
+                    } else {
+                        pIsHit = 0; pResult = 'MISS'; 
+                    }
                 } else if (c.predict === 'DOWN') {
-                    pResult = marketWentDown ? 'HIT' : 'MISS';
-                    pIsHit = marketWentDown ? 1 : 0;
-                } else {
-                    // HOLD는 타율에서 제외하거나 중립
-                    pResult = 'HOLD';
-                    pIsHit = 0;
+                    if (isTrend) {
+                        pIsHit = marketWentDown ? 1 : 0;
+                        pResult = marketWentDown ? 'HIT' : 'MISS';
+                    } else {
+                        pIsHit = 0; pResult = 'MISS';
+                    }
+                } else if (c.predict === 'HOLD') {
+                    if (isTrend) {
+                        pIsHit = 0; pResult = 'MISS'; // 방관에 따른 기회비용 상실
+                    } else {
+                        pIsHit = 1; pResult = 'HIT'; // 불확실성 방어
+                    }
                 }
 
                 rawDb.prepare(`
@@ -580,7 +614,6 @@ export class PerformanceTracker {
                 SELECT persona_id, is_hit, predict, date
                 FROM persona_performance
                 WHERE date >= date('now', 'localtime', '-30 days')
-                AND predict != 'HOLD'
                 ORDER BY created_at DESC
             `).all() as any[];
 

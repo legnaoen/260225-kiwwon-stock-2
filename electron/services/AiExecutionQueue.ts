@@ -16,6 +16,7 @@
 import { AiService } from './AiService'
 import { LocalAiService } from './LocalAiService'
 import { eventBus } from '../utils/EventBus'
+import { DatabaseService } from './DatabaseService'
 
 export interface AiQueueJob {
     id: string
@@ -50,6 +51,9 @@ export interface AiExecutionLogEntry {
     finishedAt?: string
     durationMs?: number
     error?: string
+    prompt?: string
+    systemInstruction?: string
+    result?: string
 }
 
 export class AiExecutionQueue {
@@ -256,12 +260,18 @@ export class AiExecutionQueue {
     }
 
     /**
-     * 실행 이력 기록 (최근 100건 보관)
+     * 실행 이력 기록 (DB에 영구 보관)
      */
     private recordLog(job: AiQueueJob) {
-        const kstNow = (ts: number) => new Date(ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+        const kstNow = (ts: number) => {
+            const d = new Date(ts);
+            const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+            const nd = new Date(utc + (3600000 * 9)); // KST (UTC+9)
+            const pad = (n: number) => n.toString().padStart(2, '0');
+            return `${nd.getFullYear()}-${pad(nd.getMonth()+1)}-${pad(nd.getDate())} ${pad(nd.getHours())}:${pad(nd.getMinutes())}:${pad(nd.getSeconds())}`;
+        };
 
-        this.executionLog.unshift({
+        const logEntry = {
             id: job.id,
             agentId: job.agentId,
             agentName: job.agentName,
@@ -273,10 +283,22 @@ export class AiExecutionQueue {
             finishedAt: job.finishedAt ? kstNow(job.finishedAt) : undefined,
             durationMs: job.durationMs,
             error: job.error,
-        })
+            prompt: job.prompt,
+            systemInstruction: job.systemInstruction,
+            result: job.result,
+        }
+
+        this.executionLog.unshift(logEntry)
 
         if (this.executionLog.length > 100) {
             this.executionLog = this.executionLog.slice(0, 100)
+        }
+
+        // DB에 저장 (최근 일주일치 이상 확인 가능하도록 영구 보관)
+        try {
+            DatabaseService.getInstance().saveAiExecutionLog(logEntry)
+        } catch (e) {
+            console.error('[AiQueue] Failed to save execution log to DB:', e)
         }
     }
 
@@ -318,8 +340,13 @@ export class AiExecutionQueue {
         }
     }
 
-    /** 최근 실행 이력 */
-    public getExecutionLog(limit: number = 50): AiExecutionLogEntry[] {
-        return this.executionLog.slice(0, limit)
+    /** 최근 실행 이력 (DB에서 조회) */
+    public getExecutionLog(limit: number = 200): AiExecutionLogEntry[] {
+        try {
+            return DatabaseService.getInstance().getAiExecutionLogs(limit) as AiExecutionLogEntry[]
+        } catch (e) {
+            console.error('[AiQueue] DB fetch failed, returning in-memory log', e)
+            return this.executionLog.slice(0, limit)
+        }
     }
 }

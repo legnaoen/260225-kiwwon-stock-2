@@ -46,18 +46,24 @@ export class IssueManagementAgent {
                 if (md) dataParts.push(`[PL-Research]\n${md}`)
             }
 
-            // 뉴스 — NewsDataHub 캐시 읽기 (PL-NewsFlow + PL-NewsKeyword 대체)
+            // 뉴스 — NewsDataHub 강제 동기화 후 최대치로 데이터 추출 (제미나이 3.1 롱컨텍스트 대응)
             try {
                 const { NewsDataHub } = await import('../NewsDataHub')
-                const hubMarkdown = NewsDataHub.getInstance().getNewsAsMarkdown({ maxPerCategory: 10 })
+                const hub = NewsDataHub.getInstance()
+                
+                console.log('[IssueAgent] 뉴스 데이터 최신화 (강제 수집 시작...)')
+                await hub.runBatchCollect() // 캐시에 의존하지 않고 신규 데이터를 즉시 병합
+                
+                // maxPerCategory 10 -> 50 으로 5배 상향. 5개 카테고리 기준 최대 250건의 뉴스가 통째로 들어감
+                const hubMarkdown = hub.getNewsAsMarkdown({ maxPerCategory: 50 })
                 if (!hubMarkdown.includes('캐시 없음')) {
                     dataParts.push(`[NEWS_HUB]\n${hubMarkdown}`)
-                    console.log('[IssueAgent] NewsDataHub 캐시 주입 완료')
+                    console.log('[IssueAgent] NewsDataHub 최신 데이터 대량 주입 완료')
                 } else {
-                    console.warn('[IssueAgent] NewsDataHub 캐시 없음 — 뉴스 컨텍스트 누락')
+                    console.warn('[IssueAgent] NewsDataHub 수집 결과 없음 — 뉴스 컨텍스트 누락')
                 }
             } catch(e: any) {
-                console.error('[IssueAgent] NewsDataHub 오류:', e.message)
+                console.error('[IssueAgent] NewsDataHub 수집/주입 오류:', e.message)
             }
 
             if (dataParts.length === 0) {
@@ -69,6 +75,23 @@ export class IssueManagementAgent {
 
             // 3-a. 네이버 어휘 사전 로드 (이슈 AI 정합 기준)
             const db = DatabaseService.getInstance()
+            
+            // 3-b. 장기 방치(Stale) 이슈 경고 태그 주입 (소멸 처리 유도)
+            const todayKst = db.getKstDate()
+            const MS_PER_DAY = 1000 * 60 * 60 * 24;
+            const todayMs = new Date(todayKst).getTime();
+            
+            const annotatedIssues = activeIssues.map(issue => {
+                const updatedMs = new Date(issue.updated_date).getTime();
+                const daysOld = Math.floor((todayMs - updatedMs) / MS_PER_DAY);
+                if (daysOld >= 3) {
+                    return {
+                        ...issue,
+                        _AI_WARNING_: `[⚠️ 침묵 경고] 이 이슈는 ${daysOld}일 동안 관련 뉴스 갱신이 없었습니다. 오늘 데이터에도 모멘텀이 없다면 반드시 UPDATE하여 status를 FADING이나 RESOLVE로 낮추십시오.`
+                    }
+                }
+                return issue;
+            });
             const vocabSectors = db.getNaverVocabulary('SECTOR');
             const vocabThemes  = db.getNaverVocabulary('THEME');
             const sectorListStr = vocabSectors.length > 0
@@ -87,65 +110,61 @@ export class IssueManagementAgent {
 - 반드시 위키백과 표제어처럼 100% 가치 중립적이고 건조하게 명명해야 합니다. (예: "미-이란 중동 전쟁 폭발" ➔ "중동 지정학적 갈등 동향")
 - **강제 지시:** 현재 장부에 있는 기존 이슈 제목 중 감정적인 단어가 하나라도 포함되어 있다면, 이번 업데이트를 통해 무조건 가치 중립적인 명칭으로 전면 개칭(Rename)하여 출력하십시오! 기존 명칭을 절대 답습하지 마십시오.
 
-[👑 마스터 시황 AI 피드백 수용 의무]
-- 제공된 기존 이슈 데이터 중 'master_veto'가 true이거나 'master_comment'에 마스터 AI의 지적사항이 적혀 있다면, 당신의 이전 분석이 거부(Veto)당한 것입니다.
-- 개별 이슈 업데이트 시 해당 이슈의 'impactDirection'(상승/하락)과 'current_stance'(스탠스/의견)를 마스터의 코멘트에 완벽히 부합하도록 반성하고 전면 수정하십시오.
-- **전체 시황 종합 브리핑(summary_markdown) 작성 시에도**, 마스터가 남긴 VETO나 코멘트 기조를 최우선 가이드라인으로 삼아 팩트체크된 거시적 관점에서 전체 시장의 방향성을 조망하십시오.`
-            const userPrompt = `오늘 날짜: ${today}
+[🎯 신규 메가 트렌드 발굴 의무 (CREATE 강제)]
+- 주어진 뉴스/데이터에서 기존 장부에 없는 "완전히 새로운 거시적 돌발 이슈"나 "새로운 기술 패러다임/메가 트렌드(예: 거대 인프라 수요 폭발, 초대형 IPO 등)"가 강하게 관측된다면, 기존 이슈에 억지로 병합하지 말고 무조건 비중 있는 새로운 이슈로 'CREATE' 하십시오.
+- 기존 이슈들만 무사안일하게 UPDATE/RESOLVE 하고 넘어가는 소극적인 태도를 버리십시오.
 
-[현재 추적 중인 이슈 장부 (Active Issues)]
-${JSON.stringify(activeIssues, null, 2)}
-
-[오늘의 파이프라인 수집 데이터]
-${dataParts.join('\n\n---\n\n')}
-
-당신의 임무:
-위 파이프라인 데이터(뉴스, 키워드, 매크로, 리포트)를 심층 분석하여 다음을 수행합니다.
-1. '현재 추적 중인 이슈 장부'에 있는 기존 이슈들의 연장선상에 있는 새로운 정보가 있다면, 해당 이슈를 'UPDATE' 하라. 완전히 영향력이 해소되었다면 'RESOLVE' 하라.
-2. 기존 장부에 속하지 않는 완전히 새로운 거시적 돌발/메가 트렌드 이슈가 발생했다면 'CREATE' 하라.
-6. 아주 자잘하고 노이즈성 뉴스인 경우 무시하라.
-7. 추가로, 전체 시장 위험도(risk_score)와 현재 시장의 핵심 테제(summary_markdown)를 포함하는 briefing 객체도 같이 생성하라. (risk_score는 0~100 사이, VIX, KRW, TNX(미 10년물 국채), 그리고 OIL(WTI 유가) 코멘트 포함)
-
-결과는 반드시 아래 JSON 형식의 객체로만 출력하라. (마크다운 백틱 허용, 기타 설명 금지)
-{
-  "briefing": {
-    "risk_score": 68,
-    "summary_markdown": "<p>...현재 시장 요약 2~3줄 HTML/Markdown (반드시 마스터 AI가 이전 이슈들에 내렸던 VETO/코멘트 기조를 종합하여 시장 방향성을 서술할 것)...</p>",
-    "macro_vix": "+2.4% (18.5)",
-    "macro_krw": "+5.0원 (1340.5)",
-    "macro_tnx": "+0.03%p (4.320%)",
-    "macro_oil": "-0.5% ($78.50)"
-  },
-  "actions": [
-    {
-      "action": "CREATE" | "UPDATE" | "RESOLVE",
-      "issue_id": "기존 이슈 ID (CREATE인 경우 새로운 고유 ID 생성, 예: 2603-05)",
-      "name": "위키백과식 가치 중립적 이슈 명칭 (예: 글로벌 AI 반도체 수요 논란)",
-      "current_stance": "마이크론 실적 호조로 초기 피크아웃 우려는 과도했다는 인식 확산 중 (현재 국면/투자 심리를 요약하는 1줄 의견)",
-      "severity": "위험도/파급력 (예: AA, B, C 등)",
-      "status": "ESCALATING" | "FADING" | "RESOLVED" | "NEW",
-      "impactDirection": "상승" | "하락" | "중립",
-      "market_bias": -5부터 +5 사이의 정수 (해당 이슈가 전체 시장에 미치는 하방/상방 압력 강도),
-      "dominant_regime": "예: 지정학 리스크, 통화정책 등",
-      "summary": "1~2문장의 핵심 상태 요약",
-      "goodSectors": [{"name": "업종명 (아래 [네이버 추적 섹터 목록]에서 선택 권장)", "reason": "이유"}],
-      "badSectors": [{"name": "업종명 (아래 [네이버 추적 섹터 목록]에서 선택 권장)", "reason": "이유"}],
-      "timelineDetails": {
-        "summary": "타임라인 트리에 표시할 짧은 요약 (제목격)",
-        "ai_analysis": "해당 사건 혹은 뉴스가 무슨 파급력을 야기할지에 대한 AI의 심도 깊은 서술",
-        "market_reaction": "PL-Macro나 수급 등을 통해 관찰되는 실제 통계적/정량적 시장 반응(없으면 생략)",
-        "status_snapshot": "현재 판단된 상태(ESCALATING 등)"
-      }
-    }
-  ]
-}
-
-[🔒 네이버 증권 추적 섹터 목록 (goodSectors/badSectors 작명 시 이 목록에서 선택 권장 - 완벽 일치하지 않아도 되나 최대한 근사한 이름 사용)]
-${sectorListStr}
-
-[🔒 네이버 증권 추적 테마 목록 (참고용 - 이슈와 직결된 테마가 있으면 언급 가능)]
-${themeListStr}
-`
+[⏳ 방치된 좀비 이슈 소멸(Decay) 규정]
+- 추적 중인 장부에 있는 이슈 중, 오늘 파이프라인에서 단 한 번도 언급되지 않거나 데이터에 [⚠️ 침묵 경고] 태그가 붙은 이슈를 결코 그대로 방치(무시)하지 마십시오.
+- **무소식은 곧 영향력 해소를 의미합니다.** 관련 뉴스가 보이지 않는다면 반드시 해당 이슈를 'UPDATE' 액션으로 포함시켜 상태를 'FADING'으로 강등하거나, 완전히 식었다면 'RESOLVE' 처리하십시오.`
+            const userPrompt = '오늘 날짜: ' + today + '\n\n'
+                + '[현재 추적 중인 이슈 장부 (Active Issues)]\n'
+                + JSON.stringify(annotatedIssues, null, 2) + '\n\n'
+                + '[오늘의 파이프라인 수집 데이터]\n'
+                + dataParts.join('\n\n---\n\n') + '\n\n'
+                + '당신의 임무:\n'
+                + '위 파이프라인 데이터(뉴스, 키워드, 매크로, 리포트)를 심층 분석하여 다음을 수행합니다.\n'
+                + '1. \'현재 추적 중인 이슈 장부\'에 있는 기존 이슈들의 연장선상에 있는 새로운 정보가 있다면, 해당 이슈를 \'UPDATE\' 하라. 완전히 영향력이 해소되었다면 \'RESOLVE\' 하라.\n'
+                + '2. 기존 장부에 속하지 않는 완전히 새로운 거시적 돌발/메가 트렌드 이슈가 발생했다면 \'CREATE\' 하라. (단순 노이즈성 제외, 시장 주도 테마 위주 발굴)\n'
+                + '6. 아주 자잘하고 노이즈성 뉴스인 경우 무시하라.\n'
+                + '7. 추가로, 전체 시장 위험도(risk_score)와 현재 시장의 핵심 테제(summary_markdown)를 포함하는 briefing 객체도 같이 생성하라. (risk_score는 0~100 사이, VIX, KRW, TNX(미 10년물 국채), 그리고 OIL(WTI 유가) 코멘트 포함)\n\n'
+                + '결과는 반드시 아래 JSON 형식의 객체로만 출력하라. (마크다운 백틱 허용, 기타 설명 금지)\n'
+                + '{\n'
+                + '  "briefing": {\n'
+                + '    "risk_score": 68,\n'
+                + '    "summary_markdown": "<p><b>[오늘의 핵심 테제(Top Impact)]</b> 오늘 시장의 멱살을 잡고 흔드는 <b>단 하나의 가장 중요한 서사(Narrative)</b>를 첫 문장으로 선언하세요.</p><p>...그리고 분석된 데이터를 바탕으로 향후 시장 방향성을 예언적으로 추가 서술하세요...</p>",\n'
+                + '    "macro_vix": "+2.4% (18.5)",\n'
+                + '    "macro_krw": "+5.0원 (1340.5)",\n'
+                + '    "macro_tnx": "+0.03%p (4.320%)",\n'
+                + '    "macro_oil": "-0.5% ($78.50)"\n'
+                + '  },\n'
+                + '  "actions": [\n'
+                + '    {\n'
+                + '      "action": "CREATE" | "UPDATE" | "RESOLVE",\n'
+                + '      "issue_id": "기존 이슈 ID (CREATE인 경우 새로운 고유 ID 생성, 예: 2603-05)",\n'
+                + '      "name": "위키백과식 가치 중립적 이슈 명칭 (예: 글로벌 AI 반도체 수요 논란)",\n'
+                + '      "current_stance": "[지속: 단기 1주내 / 중기 1~3개월 / 장기 구조적] 마이크론 실적 호조로... (반드시 맨 앞에 대괄호로 예상 지속 기간을 명시하고, 투자 심리를 요약할 것)",\n'
+                + '      "severity": "위험도/파급력 (예: AAA, AA, A, B, C 등 - 전체 시장을 지배하는 1등 트렌드에만 AAA나 S를 부여하여 랭킹 격차를 둘 것)",\n'
+                + '      "status": "ESCALATING" | "FADING" | "RESOLVED" | "NEW",\n'
+                + '      "impactDirection": "상승" | "하락" | "중립",\n'
+                + '      "market_bias": "-5부터 +5 사이의 정수 (해당 이슈가 전체 시장에 미치는 하방/상방 압력 강도)",\n'
+                + '      "dominant_regime": "예: 지정학 리스크, 통화정책 등",\n'
+                + '      "summary": "1~2문장의 핵심 상태 요약",\n'
+                + '      "goodSectors": [{"name": "업종명 (아래 [네이버 추적 섹터 목록]에서 선택 권장)", "reason": "이유"}],\n'
+                + '      "badSectors": [{"name": "업종명 (아래 [네이버 추적 섹터 목록]에서 선택 권장)", "reason": "이유"}],\n'
+                + '      "timelineDetails": {\n'
+                + '        "summary": "타임라인 트리에 표시할 짧은 요약 (제목격)",\n'
+                + '        "ai_analysis": "해당 사건 혹은 뉴스가 무슨 파급력을 야기할지에 대한 AI의 심도 깊은 서술",\n'
+                + '        "market_reaction": "PL-Macro나 수급 등을 통해 관찰되는 실제 통계적/정량적 시장 반응(없으면 생략)",\n'
+                + '        "status_snapshot": "현재 판단된 상태(ESCALATING 등)"\n'
+                + '      }\n'
+                + '    }\n'
+                + '  ]\n'
+                + '}\n\n'
+                + '[🔒 네이버 증권 추적 섹터 목록 (goodSectors/badSectors 작명 시 이 목록에서 선택 권장 - 완벽 일치하지 않아도 되나 최대한 근사한 이름 사용)]\n'
+                + sectorListStr + '\n\n'
+                + '[🔒 네이버 증권 추적 테마 목록 (참고용 - 이슈와 직결된 테마가 있으면 언급 가능)]\n'
+                + themeListStr
 
             console.log('[IssueAgent] Gemini 판단 요청 중 (큐 대기)...')
             const rawResponse = await AiExecutionQueue.getInstance().enqueue({
@@ -158,13 +177,14 @@ ${themeListStr}
             
             // 4. 파싱
             let jsonStr = rawResponse
-            const codeBlockMatch = rawResponse.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/)
+            const codeBlockRegex = new RegExp('[`]{3}(?:json)?\\s*\\n?([\\s\\S]*?)\\n?[`]{3}')
+            const codeBlockMatch = rawResponse.match(codeBlockRegex)
             if (codeBlockMatch) {
                 jsonStr = codeBlockMatch[1]
             }
             const jsonMatch = jsonStr.match(/\{\s*"briefing"[\s\S]*\}/) || jsonStr.match(/\{[\s\S]*\}/)
             if (!jsonMatch) {
-                console.error('[IssueAgent] JSON 파싱 실패:', rawResponse.substring(0,200))
+                console.error('[IssueAgent] JSON parse fail:', rawResponse.substring(0,200))
                 return
             }
 
@@ -172,7 +192,7 @@ ${themeListStr}
             const briefing = parsedObject.briefing
             const actions = parsedObject.actions || []
 
-            console.log(`[IssueAgent] 파싱된 액션 수: ${actions.length}`)
+            console.log('[IssueAgent] action count: ' + actions.length)
 
             // 5. 브리핑 저장
             if (briefing) {

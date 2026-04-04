@@ -6,9 +6,9 @@ import { Switch } from './ui/Switch'
 import { useScheduleStore } from '../store/useScheduleStore'
 import { useUiStore, FontSizeTier } from '../store/useUiStore'
 import ApiDiagnosticsTab from './ApiDiagnosticsTab'
-import MaiisMonitorTab from './MaiisMonitorTab'
 import AiOrchestratorTab from './AiOrchestratorTab'
 import NewsHubSettingsTab from './NewsHubSettingsTab'
+import TelegramLogsTab from './TelegramLogsTab'
 
 export default function Settings() {
     const [keys, setKeys] = useState({ appkey: '', secretkey: '' })
@@ -90,7 +90,7 @@ export default function Settings() {
     const [messageAi, setMessageAi] = useState('')
     const [isTestingAi, setIsTestingAi] = useState(false)
 
-    const [activeTab, setActiveTab] = useState<'monitor' | 'accounts' | 'strategy' | 'system' | 'diagnostics' | 'telegram' | 'ai-orchestrator' | 'news-hub'>('monitor')
+    const [activeTab, setActiveTab] = useState<'accounts' | 'strategy' | 'system' | 'diagnostics' | 'telegram' | 'ai-orchestrator' | 'news-hub'>('ai-orchestrator')
     
     // UI Global State
     const { fontSizeTier, setFontSizeTier } = useUiStore()
@@ -542,7 +542,6 @@ export default function Settings() {
     }
 
     const menuItems = [
-        { id: 'monitor', label: 'MAIIS 관제 센터', icon: Activity, color: 'text-primary' },
         { id: 'ai-orchestrator', label: 'AI 관제', icon: Bot, color: 'text-violet-500' },
         { id: 'news-hub', label: '뉴스 허브 설정', icon: Newspaper, color: 'text-sky-500' },
         { id: 'system', label: '시스템 및 UI 설정', icon: MonitorSmartphone, color: 'text-zinc-500' },
@@ -577,11 +576,9 @@ export default function Settings() {
             </aside>
 
             {/* Content Area */}
-            <main className={`flex-1 overflow-y-auto bg-background/50 backdrop-blur-3xl ${activeTab === 'diagnostics' || activeTab === 'monitor' || activeTab === 'ai-orchestrator' ? 'h-full p-0 relative' : 'p-12'}`}>
+            <main className={`flex-1 overflow-y-auto bg-background/50 backdrop-blur-3xl ${activeTab === 'diagnostics' || activeTab === 'ai-orchestrator' ? 'h-full p-0 relative' : 'p-12'}`}>
                 {activeTab === 'diagnostics' ? (
                     <ApiDiagnosticsTab />
-                ) : activeTab === 'monitor' ? (
-                    <MaiisMonitorTab />
                 ) : activeTab === 'ai-orchestrator' ? (
                     <AiOrchestratorTab />
                 ) : activeTab === 'news-hub' ? (
@@ -1032,6 +1029,9 @@ export default function Settings() {
                                         </div>
                                     </form>
                                 </div>
+                                </div>
+                                <div className="pt-12 border-t border-border/40">
+                                    <TelegramLogsTab />
                                 </div>
                             </div>
                         )}

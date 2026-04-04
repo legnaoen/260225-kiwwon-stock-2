@@ -1,6 +1,6 @@
 import { DatabaseService } from '../DatabaseService';
 import { KiwoomService } from '../KiwoomService';
-import { AiExecutionQueue } from './AiExecutionQueue';
+import { AiExecutionQueue } from '../AiExecutionQueue';
 import fs from 'fs';
 import path from 'path';
 

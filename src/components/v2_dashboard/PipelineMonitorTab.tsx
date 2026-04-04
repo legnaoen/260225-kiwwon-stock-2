@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 type PipelineStatus = 'idle' | 'running' | 'success' | 'failed';
 
 const PIPELINES = [
+    { id: 'PL-MarketDaily', name: 'Market Daily (All OHLCV)', description: '전 종목 60봉 데이터 캐싱 펌프', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
     { id: 'PL-Macro', name: 'Macro & Global', description: '글로벌 지수, 환율, VIX 및 이평선 가공', status: 'success', lastRun: '14:20:00', timeMs: 340 },
     { id: 'PL-LocalFlow', name: 'Domestic Flow', description: '코스피/코스닥 외인·기관 누적 수급', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
     { id: 'PL-RisingStock', name: 'Rising Stocks', description: '당일 특징주 및 급등주 리스트 픽업', status: 'success', lastRun: '15:30:10', timeMs: 80 },
@@ -293,8 +294,8 @@ export default function PipelineMonitorTab() {
                                 <div className="text-xs text-muted-foreground flex items-center gap-3 border-l pl-4">
                                     <span>{activePipeline.description}</span>
                                     <span className="flex items-center gap-1 opacity-70"><Clock size={10}/> 
-                                        {pipelineResults[activePipeline.id]?.lastRunTime ? new Date(pipelineResults[activePipeline.id].lastRunTime).toLocaleTimeString() : activePipeline.lastRun} 
-                                        ({pipelineResults[activePipeline.id]?.executionTimeMs || activePipeline.timeMs}ms)
+                                        {pipelineResults[activePipeline.id]?.exec_time_ms !== undefined ? activePipeline.lastRun : activePipeline.lastRun} 
+                                        ({pipelineResults[activePipeline.id]?.exec_time_ms || activePipeline.timeMs}ms)
                                     </span>
                                 </div>
                             </div>
@@ -408,7 +409,7 @@ export default function PipelineMonitorTab() {
                                                 <ReactMarkdown 
                                                     remarkPlugins={[remarkGfm]}
                                                 >
-                                                    {pipelineResults[activePipeline.id]?.aggregatedMarkdown}
+                                                    {pipelineResults[activePipeline.id]?.aggregated_markdown}
                                                 </ReactMarkdown>
                                             </div>
                                         )}
@@ -419,11 +420,11 @@ export default function PipelineMonitorTab() {
                                 <div className="flex-1 overflow-hidden flex flex-col bg-[#1e1e1e]">
                                     <div className="px-4 py-2 text-xs font-mono text-muted-foreground/50 border-b border-white/10 flex justify-between bg-black/20 shrink-0">
                                         <span>RAW JSON RESPONSE</span>
-                                        <span>Size: {pipelineResults[activePipeline.id]?.rawData ? (JSON.stringify(pipelineResults[activePipeline.id].rawData).length / 1024).toFixed(2) : 0} KB</span>
+                                        <span>Size: {pipelineResults[activePipeline.id]?.raw_data ? (JSON.stringify(pipelineResults[activePipeline.id].raw_data).length / 1024).toFixed(2) : 0} KB</span>
                                     </div>
                                     <pre className="text-sm font-mono text-green-400/90 overflow-auto scrollbar-hide p-4 m-0 flex-1">
                                         {pipelineResults[activePipeline.id] 
-                                            ? JSON.stringify(pipelineResults[activePipeline.id].rawData, null, 2)
+                                            ? JSON.stringify(pipelineResults[activePipeline.id].raw_data, null, 2)
                                             : '// 데이터를 수집해주세요.'}
                                     </pre>
                                 </div>

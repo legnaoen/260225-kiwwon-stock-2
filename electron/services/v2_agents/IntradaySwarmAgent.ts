@@ -5,6 +5,7 @@ import { eventBus } from '../../utils/EventBus';
 import { PerformanceTracker } from './PerformanceTracker';
 import { PriceStore } from '../PriceStore';
 import { KiwoomService } from '../KiwoomService';
+import { TechnicalAnalyzer } from './TechnicalAnalyzer';
 
 export const INTRADAY_PERSONAS = [
     {
@@ -99,7 +100,6 @@ export class IntradaySwarmAgent {
             // 차트 브리핑 (Daily 일봉 + Intraday 5분봉) 가져오기
             let chartDigest = '[오류] 분봉 차트 데이터를 불러오지 못했습니다.';
             try {
-                const { TechnicalAnalyzer } = await import('./TechnicalAnalyzer');
                 const analyzer = new TechnicalAnalyzer(KiwoomService.getInstance());
                 // 일봉(매크로) + 분봉(초단기 타점) 순차 확보 (Kiwoom API 동시 호출 제한 방지)
                 const dailyDigest = await analyzer.generateDailyTechnicalDigest();
@@ -108,6 +108,7 @@ export class IntradaySwarmAgent {
                 chartDigest = `${dailyDigest}\n\n---\n\n${intraDigest}`;
             } catch (e: any) {
                 console.error('[IntradaySwarm] 차트 분석기 로드 실패:', e.message);
+                chartDigest = `[오류] 차트 데이터를 생성하는 중 문제가 발생했습니다: ${e.message}`;
             }
 
             const dataParts: string[] = [];
@@ -122,9 +123,6 @@ export class IntradaySwarmAgent {
             const votes: Array<{ id: string, name: string, predict: string, rationale: string }> = [];
 
             // --- 실시간 자기 성찰 피드백을 위한 데이터 사전 소싱 ---
-            const { DatabaseService } = await import('../DatabaseService');
-            const { KiwoomService } = await import('../KiwoomService');
-            
             const rawDb = (DatabaseService.getInstance() as any).db;
             const kstDate = DatabaseService.getInstance().getKstDate();
             
@@ -301,25 +299,24 @@ ${votes.map(v => {
 
             // 5. DB 저장 및 진입가(entry_price) 조회
             const position = predict === 'UP' ? 'KODEX 200' : predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD';
-            const code = predict === 'UP' ? '069500' : predict === 'DOWN' ? '114800' : null;
+            // HOLD도 KODEX 200(069500)을 기준 인덱스로 사용 (기회비용 평가를 위해)
+            const code = predict === 'DOWN' ? '114800' : '069500';
             let entryPrice = 0;
             
-            if (code) {
-                // 1차: 실시간 WebSocket 연동된 PriceStore 확인
-                entryPrice = PriceStore.getInstance().getPrice(code) || 0;
-                if (!entryPrice || entryPrice <= 0) {
-                    // 2차: REST API로 현재가 백업 조회
-                    try {
-                        const res = await KiwoomService.getInstance().getCurrentPrice(code);
-                        const body = res?.Body || res?.output || res;
-                        const p = body?.stck_prpr || body?.cur_prc || body?.prpr || body?.close;
-                        if (p) {
-                            entryPrice = Math.abs(Number(p));
-                            PriceStore.getInstance().setPrice(code, entryPrice);
-                        }
-                    } catch (e) {
-                        console.error('[IntradaySwarm] 진입가 조회 실패:', e);
+            // 1차: 실시간 WebSocket 연동된 PriceStore 확인
+            entryPrice = PriceStore.getInstance().getPrice(code) || 0;
+            if (!entryPrice || entryPrice <= 0) {
+                // 2차: REST API로 현재가 백업 조회
+                try {
+                    const res = await KiwoomService.getInstance().getCurrentPrice(code);
+                    const body = res?.Body || res?.output || res;
+                    const p = body?.stck_prpr || body?.cur_prc || body?.prpr || body?.close;
+                    if (p) {
+                        entryPrice = Math.abs(Number(p));
+                        PriceStore.getInstance().setPrice(code, entryPrice);
                     }
+                } catch (e) {
+                    console.error('[IntradaySwarm] 진입가 조회 실패:', e);
                 }
             }
 

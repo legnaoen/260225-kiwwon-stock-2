@@ -80,8 +80,13 @@ export class SwarmSimulationAgent {
 
         console.log(`[Swarm] 🧠 이슈 평가 시작: [${issue.name}] (현재 등급: ${issue.severity})`);
 
-        const sessionId = `SS_${new Date().toISOString().replace(/[:.-]/g, '').substring(0, 14)}_${issueId}`;
-        const sessionDate = new Date().toISOString().substring(0, 10);
+        // KST 로칼 날짜 기준으로 sessionId 생성 (UTC toISOString 사용 시 UTC 기준 하루 전 날짜가 나오는 버그 방지)
+        const _now = new Date();
+        const _pad = (n: number) => String(n).padStart(2, '0');
+        const localDate = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-${_pad(_now.getDate())}`;
+        const localTs = `${String(_now.getFullYear())}${_pad(_now.getMonth() + 1)}${_pad(_now.getDate())}T${_pad(_now.getHours())}${_pad(_now.getMinutes())}${_pad(_now.getSeconds())}`;
+        const sessionId = `SS_${localTs}_${issueId}`;
+        const sessionDate = localDate;
         const queue = AiExecutionQueue.getInstance();
         const votes: SwarmVote[] = [];
 

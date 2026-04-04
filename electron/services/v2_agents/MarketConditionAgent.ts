@@ -515,11 +515,31 @@ export class MarketConditionAgent {
         }
     }
 
+    public deleteManyPredictions(ids: string[], tableName: 'agent_predictions' | 'intraday_predictions' = 'agent_predictions'): number {
+        if (!ids || ids.length === 0) return 0;
+        try {
+            const rawDb = (this.db as any).db;
+            const placeholders = ids.map(() => '?').join(',');
+            const result = rawDb.prepare(`DELETE FROM ${tableName} WHERE id IN (${placeholders})`).run(...ids);
+            const deleted = result.changes ?? 0;
+            if (tableName === 'agent_predictions') {
+                eventBus.emit('MARKET_CONDITION_COMPLETE' as any, null);
+            } else {
+                eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, null);
+            }
+            console.log(`[MCA] 복수 삭제 완료: ${tableName} ${deleted}건`);
+            return deleted;
+        } catch (error: any) {
+            console.error(`[MCA] 복수 삭제 실패:`, error.message);
+            return 0;
+        }
+    }
+
     public getStats(): { total: number; wins: number; winRate: number; totalReturn: number } {
         try {
             const rawDb = (this.db as any).db
-            const total = (rawDb.prepare(`SELECT COUNT(*) as cnt FROM agent_predictions WHERE predict != 'HOLD' AND t1_final IS NOT NULL`).get() as any)?.cnt || 0
-            const wins = (rawDb.prepare(`SELECT COUNT(*) as cnt FROM agent_predictions WHERE predict != 'HOLD' AND t1_final IS NOT NULL AND ((predict = 'LONG' AND t1_final > 0) OR (predict = 'SHORT' AND t1_final < 0))`).get() as any)?.cnt || 0
+            const total = (rawDb.prepare(`SELECT COUNT(*) as cnt FROM agent_predictions WHERE t1_final IS NOT NULL`).get() as any)?.cnt || 0
+            const wins = (rawDb.prepare(`SELECT COUNT(*) as cnt FROM agent_predictions WHERE t1_final IS NOT NULL AND ((predict IN ('LONG', 'UP') AND t1_final > 0) OR (predict IN ('SHORT', 'DOWN') AND t1_final < 0) OR (predict = 'HOLD' AND ABS(t1_final) < 0.5 AND (t1_peak IS NULL OR t1_peak < 1.0)))`).get() as any)?.cnt || 0
             const sumReturn = (rawDb.prepare(`SELECT SUM(t1_final) as total FROM agent_predictions WHERE predict != 'HOLD' AND t1_final IS NOT NULL`).get() as any)?.total || 0
             
             return {

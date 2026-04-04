@@ -349,7 +349,7 @@ export class IssueLedgerDB {
             VALUES (?, datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?)
         `).run(
             issueId,
-            node.snapshot_date || new Date().toISOString().substring(0, 10),
+            node.snapshot_date || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
             node.status_snapshot || null,
             node.severity || null,
             node.summary || null,

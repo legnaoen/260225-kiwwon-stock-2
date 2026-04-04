@@ -21,6 +21,7 @@ import { VirtualAccountService } from './services/VirtualAccountService'
 import { SchedulerService } from './services/SchedulerService'
 import { StockMasterService } from './services/StockMasterService'
 import { IngestionManager } from './services/IngestionManager'
+import { ThemeOntologyAgent } from './services/v2_agents/ThemeOntologyAgent'
 import { eventBus, SystemEvent } from './utils/EventBus'
 
 const store = new Store()
@@ -595,6 +596,54 @@ ipcMain.handle('v2-pipeline:run', async (_event, { pipelineId, options }) => {
     }
 })
 
+// ═══ V2 Market Leader Discovery: 주도주 판독 파이프라인 ═══
+ipcMain.handle('v2:get-market-leaders', async (_event, { days, topN }) => {
+    try {
+        const { MarketLeaderDiscoveryService } = await import('./services/v2_pipeline/MarketLeaderDiscoveryService')
+        const { getPastDateKst } = await import('./utils/DateUtils');
+        const DatabaseService = (await import('./services/DatabaseService')).DatabaseService;
+        const db = DatabaseService.getInstance().db as any;
+
+        const targetDays = days ?? 10;
+        const targetDate = getPastDateKst(targetDays);
+
+        // KODEX 200을 KOSPI 대용 지수로 사용하여 기간 내 시장 상승률 산출
+        let marketIndexChange = 0;
+        try {
+            const kodexRows = db.prepare(`SELECT close FROM market_ohlcv_history WHERE stock_code='069500' AND date >= ? ORDER BY date ASC`).all(targetDate) as any[];
+            if (kodexRows && kodexRows.length > 0) {
+                const first = kodexRows[0].close;
+                const last = kodexRows[kodexRows.length - 1].close;
+                if (first > 0) {
+                    marketIndexChange = ((last - first) / first) * 100;
+                }
+            }
+        } catch(e) {}
+
+        const service = MarketLeaderDiscoveryService.getInstance()
+        // KODEX 200 상승률을 시장 지수 대비 알파 계산의 기준으로 주입
+        const leaders = service.getMarketLeaders(targetDays, marketIndexChange, topN ?? 30)
+        const themes = service.discoverMainThemes(leaders)
+        console.log(`[MarketLeader] days=${targetDays}, KODEX=${marketIndexChange.toFixed(2)}%, leaders=${leaders.length}, themes=${themes.length}`)
+        return { success: true, leaders, themes, marketIndexChange }
+    } catch (error: any) {
+        console.error('[MarketLeader] get-market-leaders error:', error)
+        return { success: false, error: error.message, leaders: [], themes: [] }
+    }
+})
+
+// ═══ V2 Theme Ontology Agent (수동 트리거) ═══
+ipcMain.handle('v2:run-theme-ontology', async () => {
+    try {
+        const agent = new ThemeOntologyAgent();
+        const result = await agent.runOntologyMapping();
+        return { success: true, result };
+    } catch (error: any) {
+        console.error('[ThemeOntology] Error:', error);
+        return { success: false, error: error.message };
+    }
+})
+
 // NaverFlow Settings
 ipcMain.handle('naverflow:get-settings', async () => {
     const raw: any = store.get('naverflow_settings') || { enabled: false, scheduleSlots: [{ time: '09:30', enabled: true }, { time: '15:30', enabled: true }] };
@@ -781,6 +830,16 @@ ipcMain.handle('agent:market:settings:save', async (_event, settings) => {
     return { success: true }
 })
 
+ipcMain.handle('telegram:get-logs', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const data = DatabaseService.getInstance().getTelegramLogs()
+        return { success: true, data }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
 // V2 Co-Pilot IPC
 ipcMain.on('copilot:chat', async (event, data: { message: string, mode: 'auto'|'short'|'detail' }) => {
     const { message, mode } = data;
@@ -830,6 +889,17 @@ ipcMain.handle('agent:market:delete', async (_event, id: string, tableName?: 'ag
         return { success: false, error: error.message }
     }
 })
+
+ipcMain.handle('agent:market:delete-many', async (_event, ids: string[], tableName?: 'agent_predictions' | 'intraday_predictions') => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const deleted = MarketConditionAgent.getInstance().deleteManyPredictions(ids, tableName)
+        return { success: true, deleted }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
 
 ipcMain.handle('agent:market:latest', async () => {
     try {
@@ -940,6 +1010,7 @@ ipcMain.handle('agent:tracker:run', async () => {
         await tracker.evaluateIntraday()
         return { success: true }
     } catch (error: any) {
+        console.error('[Main] agent:tracker:run failed:', error);
         return { success: false, error: error.message }
     }
 })

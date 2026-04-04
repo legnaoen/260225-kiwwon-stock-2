@@ -16,6 +16,7 @@ import IssueManagementTab from './components/v2_dashboard/IssueManagementTab'
 import { ThemeTrackerTab } from './components/v2_dashboard/ThemeTrackerTab'
 import { PortfolioManagerTab } from './components/v2_dashboard/PortfolioManagerTab'
 import { IncubatorLabTab } from './components/v2_dashboard/IncubatorLabTab'
+import { MarketLeadersTab } from './components/v2_dashboard/MarketLeadersTab'
 import CoPilotDrawer from './components/common/CoPilotDrawer'
 
 // ─── V2 Hooks & Stores ───────────────────────────────────────────────────────
@@ -365,9 +366,10 @@ function AppContent() {
                         {activeTab === 'theme-tracker' && <ThemeTrackerTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'theme-tracker' ? navTarget.entityId : undefined} />}
                         {activeTab === 'incubator-lab' && <IncubatorLabTab />}
                         {activeTab === 'portfolio-manager' && <PortfolioManagerTab />}
+                        {activeTab === 'market-leaders' && <MarketLeadersTab />}
 
                         {/* 등록된 탭이 아닌 경우 폴백 화면 */}
-                        {(['dashboard','holdings','settings','maiis-command','macro-dashboard','pipeline-monitor','market-agent','issue-agent','theme-tracker','incubator-lab','portfolio-manager'].indexOf(activeTab) === -1) && (
+                        {(['dashboard', 'holdings', 'settings', 'maiis-command', 'macro-dashboard', 'pipeline-monitor', 'market-agent', 'issue-agent', 'theme-tracker', 'incubator-lab', 'portfolio-manager', 'market-leaders'].indexOf(activeTab) === -1) && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />
@@ -386,8 +388,8 @@ function AppContent() {
             {/* Status Bar */}
             <footer className={cn(
                 "h-6 px-4 border-t flex items-center justify-between text-[10px] shrink-0 transition-colors duration-500",
-                systemError 
-                    ? (systemError.level === 'warning' 
+                systemError
+                    ? (systemError.level === 'warning'
                         ? "bg-amber-500 text-black border-amber-400 shadow-[0_-4px_12px_rgba(245,158,11,0.2)]"
                         : "bg-red-600 text-white border-red-500 shadow-[0_-4px_12px_rgba(220,38,38,0.2)]")
                     : "bg-muted/80 text-muted-foreground border-border"
@@ -397,7 +399,7 @@ function AppContent() {
                         <div className="flex items-center gap-2 font-bold animate-pulse">
                             <AlertCircle size={12} />
                             <span>{systemError.message} ({systemError.code}) - {systemError.time}</span>
-                            <button 
+                            <button
                                 onClick={(e) => { e.stopPropagation(); clearSystemError(); }}
                                 className="ml-2 hover:bg-white/20 rounded-full p-0.5 transition-colors"
                             >

@@ -19,10 +19,10 @@ export const menuItems = [
     { id: 'market-agent', name: '시황 AI', icon: Sparkles },
     { id: 'issue-agent', name: '이슈 AI', icon: Brain },
     { id: 'theme-tracker', name: '테마 AI', icon: Activity },
-    { id: 'incubator-lab', name: '인큐베이터', icon: Telescope },
     { id: 'portfolio-manager', name: '종목 AI', icon: Wallet },
     { id: 'market-leaders', name: '주도주 AI', icon: TrendingUp },
     /* [V1 Legacy - 제외]
+    { id: 'incubator-lab', name: '인큐베이터', icon: Telescope }, // PortfolioManagerTab 내부로 기능 통합
     { id: 'narrative-insight', name: '내러티브', icon: Brain }, // IncubatorLab으로 진화
     { id: 'rising-stocks', name: '급등주', icon: TrendingUp },   // 수급AI에 통합 예정
     { id: 'pm-tracker', name: 'PM 트래커', icon: LineChart },   // PortfolioManagerTab으로 대체

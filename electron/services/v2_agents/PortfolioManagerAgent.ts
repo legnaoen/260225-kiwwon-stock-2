@@ -96,6 +96,34 @@ export class PortfolioManagerAgent {
                 }
             });
 
+            // ─── P3-4: IGNITE 종목 강제 주입 ────────────────────────────────────
+            // neglect_score 80+ 달성 후 READY_TO_IGNITE 상태인 인큐베이터 종목을 evalPool에 강제 삽입
+            const igniteList = this.db.getIncubatorList('READY_TO_IGNITE') as any[];
+            if (igniteList.length > 0) {
+                console.log(`[PortfolioManager] 🔥 IGNITE 후보 ${igniteList.length}개 evalPool 강제 주입`);
+                igniteList.forEach(inc => {
+                    if (inc.stock_code && inc.stock_name && !evalPool[inc.stock_name]) {
+                        codeMap[inc.stock_name] = inc.stock_code;
+                        evalPool[inc.stock_name] = {
+                            stock_code: inc.stock_code,
+                            stock_name: inc.stock_name,
+                            source: 'INCUBATOR_IGNITE',
+                            status: 'WATCHLIST',
+                            profit_rate: 0,
+                            conviction_score: inc.neglect_score,
+                            analysts: [{
+                                agent: 'INCUBATOR',
+                                reason: inc.source_context || '인큐베이터 감시 후 IGNITE 신호 발생',
+                                confidence: inc.neglect_score,
+                                date: inc.updated_at
+                            }]
+                        };
+                    }
+                    // GRADUATED 처리 (PM 평가 대상에 편입됨을 기록)
+                    this.db.graduateIncubator(inc.stock_code);
+                });
+            }
+
             // Add/Merge today's picks
             todaysPicks.forEach(pick => {
                 if (!evalPool[pick.stock_name]) {
@@ -217,8 +245,68 @@ export class PortfolioManagerAgent {
                 chartRiskSkill = "MA20 이격도가 극심하게 높을 경우 IMMEDIATE_BUY를 금지하라.";
             }
 
-            // 5. Construct System Prompt Context
+            // 5. 시장 맥락 데이터 수집 (Alpha + 이슈 브리핑)
+            let marketContextBlock = '';
+
+            // 5-A. MarketLeader Alpha Top 15 조회 (전일 기준 10일 알파)
+            try {
+                const { MarketLeaderDiscoveryService } = await import('../v2_pipeline/MarketLeaderDiscoveryService');
+                const leaders = MarketLeaderDiscoveryService.getInstance().getMarketLeaders(10, 0, 15);
+                if (leaders && leaders.length > 0) {
+                    marketContextBlock += `#### 📈 전일 기준 시장 주도주 Alpha Top ${leaders.length} (10일 누적 시장초과수익률)\n`;
+                    leaders.forEach((l, idx) => {
+                        const themes = l.relatedThemes.slice(0, 2).join(', ') || '테마 미분류';
+                        marketContextBlock += `${idx + 1}위. ${l.stockName}(${l.stockCode}) — Alpha +${l.marketAlpha.toFixed(1)}% / 누적 ${l.totalChangeRate.toFixed(1)}% [${themes}]\n`;
+                    });
+                    marketContextBlock += `\n> Alpha Top 15 안에 포함된 종목이 오늘 애널리스트 추천을 받았다면 conviction_score +10점 가산.\n> Alpha Top 15 종목이 오늘 조정(-3%~-8%)이면 눌림목 진입 타점 고려.\n\n`;
+                    console.log(`[PortfolioManager] ✅ Alpha 주도주 Top ${leaders.length} 수집 완료`);
+                }
+            } catch (e) {
+                console.warn('[PortfolioManager] ⚠️ Alpha 데이터 수집 실패 (무시하고 계속):', (e as any).message);
+            }
+
+            // 5-B. 이슈AI / 시황AI 맥락 수집
+            try {
+                const { IssueLedgerDB } = await import('./IssueLedgerDB');
+                const issueDb = IssueLedgerDB.getInstance();
+
+                const briefing = issueDb.getLatestBriefing();
+                if (briefing) {
+                    marketContextBlock += `#### 📋 오늘의 시황 브리핑 (위험도: ${briefing.risk_score}/100)\n`;
+                    marketContextBlock += `${briefing.summary_markdown}\n\n`;
+                }
+
+                const activeIssues = issueDb.getActiveIssues();
+                const criticalIssues = activeIssues
+                    .filter(i => ['CRITICAL', 'HIGH'].includes(i.severity))
+                    .slice(0, 5);
+
+                if (criticalIssues.length > 0) {
+                    marketContextBlock += `#### 🚨 활성 핵심 이슈 & 섹터 영향\n`;
+                    criticalIssues.forEach(issue => {
+                        marketContextBlock += `\n**[${issue.severity}] ${issue.name}**\n`;
+                        marketContextBlock += `> ${issue.current_stance || issue.summary || '분석 없음'}\n`;
+                        if (issue.goodSectors?.length > 0) {
+                            marketContextBlock += `- ✅ 수혜 섹터: ${issue.goodSectors.map(s => `${s.name}(${s.reason})`).join(' / ')}\n`;
+                        }
+                        if (issue.badSectors?.length > 0) {
+                            marketContextBlock += `- ❌ 피해 섹터: ${issue.badSectors.map(s => `${s.name}(${s.reason})`).join(' / ')}\n`;
+                        }
+                    });
+                    marketContextBlock += '\n';
+                }
+                console.log(`[PortfolioManager] ✅ 이슈 맥락 수집 완료 (${criticalIssues.length}개)`);
+            } catch (e) {
+                console.warn('[PortfolioManager] ⚠️ 이슈 맥락 수집 실패 (무시하고 계속):', (e as any).message);
+            }
+
+            // 6. Construct System Prompt Context (맥락 블록 앞에 삽입)
+            const marketContextHeader = marketContextBlock
+                ? `[🌐 오늘의 시장 맥락 — 종목 판단 전 반드시 숙지]\n\n${marketContextBlock}\n---\n\n`
+                : '';
+
             const promptContext =
+                marketContextHeader +
                 `[종합 심사 대상 팩트시트 리스트 (신규+보유 통합 총 ${stockList.length}개 종목)]\n\n` +
                 stockList.map(s => s.dossier).join('\n\n');
 
@@ -229,13 +317,28 @@ ${sysConditionMsg}
 [차트 리스크 분석 교본 (필수 준수 지침)]
 ${chartRiskSkill}
 
+[🌐 시장 맥락 활용 원칙 — 반드시 준수]
+프롬프트 최상단에 오늘의 시장 맥락(Alpha 랭킹 + 이슈 수혜/피해 섹터 + 시황 브리핑)이 제공된다.
+1. **Alpha Top 15 교차 확인**: 애널리스트 추천 종목이 Alpha Top 15 안에 있으면 conviction_score +10점 가산. 시장이 실제로 인정한 종목이라는 증거.
+2. **이슈 수혜 섹터 우대**: 이슈AI가 판정한 수혜 섹터 종목은 시장 전체 하락 시에도 역발상 매수 기회. conviction_score +10~15점. 피해 섹터 종목의 반등에는 보수적 판단.
+3. **시황 위험도 반영**: 브리핑의 risk_score가 80 이상이면 IMMEDIATE_BUY 기준을 평소보다 10점 높여 적용. 60 미만이면 적극적 편입.
+4. **Alpha + 이슈 쌍발 신호**: Alpha Top 15 + 이슈 수혜 섹터 동시 해당 시 최우선 편입 대상.
+
+[전략별 판단 기준 — 반드시 구분하여 적용]
+각 종목의 strategy 필드를 확인하고, 전략에 맞는 기준으로 DROP/HOLD/BUY를 판정하라:
+- **MOMENTUM (1~3일)**: 신규 재료와 거래량 폭증이 핵심. 수명 초과 or 재료 소멸 시 신속히 DROP. 추격매수(등락률 +15% 이상) 불허.
+- **PULLBACK (3~7일)**: MA20 위에서 지지 여부가 핵심. 거래량이 줄어드는 것은 긍정 신호(매물 소화 중). MA20 이탈 시에만 DROP.
+- **SWING (5~20일)**: 테마 내러티브의 성장이 핵심. 단기 조정(-5%~-10%)은 HOLD. MA20 이탈 + 테마 소멸 시에만 DROP.
+- **VALUE (본질가치)**: 수급과 거래량이 바닥일 때 인내. 펀더멘털 훼손(적자 전환, 목표주가 대폭 하향) 시에만 DROP.
+
 [펀드매니저 추가 업무 지침]
 1. [독립적 개별 평가]: 종목별로 제공되는 '과거~현재 AI 분석 리포트 타임라인'을 세밀하게 읽어라. 이 종목의 내러티브가 점진적으로 쌓이고 있는지 확인하라.
 2. 타임라인 과거에 등장하던 부정적 평가나 리스크가 최근 타임라인의 뉴스와 수급을 통해 해소되었다면 가산점을 주라. 반대로 과거와 동일한 재료만 앵무새처럼 반복된다면 피로감이 쌓인 것으로 보고 점수를 차감하라.
 3. [차트 분석 교본 최우선 반영]: 위에 주입된 '차트 리스크 분석 교본'의 조건(이격도, 단기 모멘텀, 역배열 등)을 절대적으로 준수하라. 가이드북의 위험 기준에 해당할 경우 스토리가 아무리 좋아도 추격매수(IMMEDIATE_BUY)를 불허한다.
-4. 기존 보유 종목 중 수익률이 부진하고 한 달 이상 모멘텀이 죽었다면 과감히 떨어내라(DROP).
+4. 기존 보유 종목 중 수익률이 부진하고 한 달 이상 모멘텀이 죽었다면 과감히 떨어내라(DROP). 단, strategy가 PULLBACK/VALUE인 종목은 위 전략별 기준을 따른다.
 5. 주도 대장주는 여러 애널리스트(서브 AI)들이 중복으로 추천하거나 타임라인에 등장 빈도가 높을 수밖에 없다. 여러 근거가 합쳐질수록 편입 확신도를 극대화해라.
 6. 각 종목에 대해 팩트시트를 근거로 '최종 확신 점수(conviction_score: 0~100)'와 '포지션(IMMEDIATE_BUY, WAIT_DIP, HOLD, DROP, HIT)'을 내려라.
+7. last_signal_reason 서술 시 ①시장 맥락(Alpha 포함 여부, 이슈 수혜/피해 섹터 해당 여부) ②전략별 판단 근거를 반드시 명시하라.
 
 응답은 오직 JSON 형식으로만 작성해라:
 \`\`\`json
@@ -250,17 +353,20 @@ ${chartRiskSkill}
             "strategy": "SWING",
             "lifespan_days": 20,
             "analysts_json": ["REPORT", "MOMENTUM"], 
-            "last_signal_reason": "과거 타임라인상 지속 지적되던 수급 부재가 이번 리포트로 해소되었고, 차트 위치도 완벽함. 적극 매수."
+            "last_signal_reason": "Alpha Top 5 + 방산 이슈 수혜 섹터 일치. 과거 타임라인 내러티브 지속 성장 중. SWING 전략 기준 MA20 지지 확인."
         }
     ]
 }
 \`\`\``;
 
             const response = await AiExecutionQueue.getInstance().enqueue({
-                taskType: 'PORTFOLIO_MANAGER',
-                modelName: 'gemini-exp-1206',
-                prompt: systemPrompt + '\n\n' + promptContext,
-                temperature: 0.1
+                agentId: 'PORTFOLIO_MANAGER',
+                agentName: '포트폴리오 매니저',
+                triggerType: 'CRON',
+                targetType: 'gemini',
+                prompt: promptContext,
+                systemInstruction: systemPrompt,
+                customModel: 'gemini-exp-1206'
             });
 
             let jsonStr = response;

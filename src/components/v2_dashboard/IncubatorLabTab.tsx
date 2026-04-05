@@ -1,9 +1,13 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Telescope, Brain, X, TrendingDown, Clock, AlertTriangle, Flame, Eye, BarChart2, Activity, Zap } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
+
+const appendLog = (msg: string) => {
+    console.log(msg)
+}
 
 // ── 소외 지수 등급 스타일 ──
 const NEGLECT_STYLE = (score: number): string => {
@@ -43,8 +47,9 @@ interface IncubatorStock {
 }
 
 // ── Detail Drawer ──
-function IncubatorDrawer({ stock, onClose }: { stock: IncubatorStock; onClose: () => void }) {
-    const volRatio = Math.round((stock.current_volume / stock.peak_volume) * 100)
+function IncubatorDrawer({ stock, onClose }: { stock: any; onClose: () => void }) {
+    const volRatio = Math.round((stock.volume_ratio || 1.0) * 100);
+    const fundamentalStatus = stock.source === 'FUNDAMENTAL' ? 'SOLID' : 'AVERAGE';
     return (
         <div className="fixed inset-0 z-50 flex justify-end">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
@@ -64,12 +69,12 @@ function IncubatorDrawer({ stock, onClose }: { stock: IncubatorStock; onClose: (
                 {/* Stats Grid */}
                 <div className="grid grid-cols-2 gap-3 p-4 border-b border-border/30 shrink-0">
                     {[
-                        { label: '소외 지수', value: `${stock.neglect_score} / 100`, color: stock.neglect_score >= 90 ? 'text-rose-400' : stock.neglect_score >= 70 ? 'text-amber-400' : 'text-indigo-400' },
-                        { label: '펀더멘탈', value: stock.fundamental_status, color: stock.fundamental_status === 'SOLID' ? 'text-emerald-500' : '' },
-                        { label: '잠복 기간', value: `${stock.incubated_days}일`, color: '' },
+                        { label: '소외 지수', value: `${stock.neglect_score || 0} / 100`, color: (stock.neglect_score || 0) >= 90 ? 'text-rose-400' : (stock.neglect_score || 0) >= 70 ? 'text-amber-400' : 'text-indigo-400' },
+                        { label: '펀더멘탈 (추정)', value: fundamentalStatus, color: fundamentalStatus === 'SOLID' ? 'text-emerald-500' : '' },
+                        { label: '잠복 기간', value: `${stock.days_watched || 0}일`, color: '' },
                         { label: '거래량 소진율', value: `피크 대비 ${volRatio}%`, color: volRatio < 20 ? 'text-rose-400' : '' },
-                        { label: '피크 날짜', value: stock.peak_date, color: '' },
-                        { label: '현재 거래량', value: `${(stock.current_volume / 10000).toFixed(0)}만주`, color: '' },
+                        { label: '관찰 시작일', value: stock.entry_date || '-', color: '' },
+                        { label: 'MA60 이격', value: `${stock.ma60_disparity ? stock.ma60_disparity.toFixed(1) : 0}%`, color: '' },
                     ].map(({ label, value, color }) => (
                         <div key={label} className="bg-muted/10 border border-border/30 rounded-lg p-2.5">
                             <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">{label}</div>
@@ -85,10 +90,11 @@ function IncubatorDrawer({ stock, onClose }: { stock: IncubatorStock; onClose: (
                     </div>
                     <div className="mb-3">
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
-                            {stock.theme_name}
+                            {stock.source}
                         </span>
                     </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{stock.reason}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">내용: {stock.source_context || '-'}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed mt-2">AI 평가: {stock.ai_evaluation || '-'}</p>
 
                     {/* AI Logic Note */}
                     <div className="mt-4 p-3 bg-muted/10 border border-border/40 rounded-lg">
@@ -107,46 +113,51 @@ function IncubatorDrawer({ stock, onClose }: { stock: IncubatorStock; onClose: (
     )
 }
 
-// ── Mock Data (TODO: DB 연동 후 제거) ──
-const MOCK_DATA: IncubatorStock[] = [
-    {
-        stock_code: '005930', stock_name: '테스트전자', theme_name: '유리 기판',
-        reason: '내년 북미 데이터센터 독점 공급 계약 임박 찌라시. 증권사 영업이익 추정치 20% 상향 조정 완료.',
-        incubated_days: 14, neglect_score: 95, fundamental_status: 'SOLID',
-        peak_date: '2026-03-15', peak_volume: 15400000, current_volume: 320000, status: 'READY_TO_IGNITE'
-    },
-    {
-        stock_code: '000660', stock_name: '하이반도체', theme_name: 'HBM 장비',
-        reason: '피크아웃 우려로 주가 25% 하락했으나, 3분기 실적 컨센서스 상회 확실시. 외국인 5일 연속 순매수.',
-        incubated_days: 28, neglect_score: 80, fundamental_status: 'SOLID',
-        peak_date: '2026-02-28', peak_volume: 8500000, current_volume: 1200000, status: 'WATCHING'
-    },
-    {
-        stock_code: '003550', stock_name: '조선중공', theme_name: '조선 슈퍼사이클',
-        reason: 'LNG 운반선 수주잔고 사상 최대치이나 현재 시장의 시선은 AI 반도체로 쏠림. 대형 블록딜 이후 조용히 반등 시작.',
-        incubated_days: 45, neglect_score: 72, fundamental_status: 'SOLID',
-        peak_date: '2026-01-20', peak_volume: 6200000, current_volume: 980000, status: 'WATCHING'
-    },
-    {
-        stock_code: '028260', stock_name: '삼성물산', theme_name: '데이터센터 건설',
-        reason: '미국 빅테크 데이터센터 EPC 계약 보도 있었으나, 시장 피로감으로 뚝 떨어진 상태. 재무구조 최상위급.',
-        incubated_days: 7, neglect_score: 58, fundamental_status: 'AVERAGE',
-        peak_date: '2026-03-22', peak_volume: 3100000, current_volume: 750000, status: 'WATCHING'
-    },
-]
-
 export function IncubatorLabTab() {
-    const [selected, setSelected] = useState<IncubatorStock | null>(null)
+    const [selected, setSelected] = useState<any | null>(null)
     const [filterStatus, setFilterStatus] = useState<'ALL' | 'READY_TO_IGNITE' | 'WATCHING'>('ALL')
+    const [incubatorList, setIncubatorList] = useState<any[]>([])
+    const [isScanning, setIsScanning] = useState(false)
 
-    const stats = {
-        total: MOCK_DATA.length,
-        readyCount: MOCK_DATA.filter(s => s.status === 'READY_TO_IGNITE').length,
-        avgNeglect: Math.round(MOCK_DATA.reduce((a, s) => a + s.neglect_score, 0) / MOCK_DATA.length),
-        solidCount: MOCK_DATA.filter(s => s.fundamental_status === 'SOLID').length,
+    const fetchIncubator = useCallback(async () => {
+        try {
+            const incResult = await (window.electronAPI as any).getIncubatorList()
+            if (incResult?.success && Array.isArray(incResult.data)) {
+                setIncubatorList(incResult.data)
+            }
+        } catch (e: any) {
+            console.error('인큐베이터 로드 실패', e)
+        }
+    }, [])
+
+    useEffect(() => {
+        fetchIncubator()
+    }, [fetchIncubator])
+
+    const handleScan = async () => {
+        setIsScanning(true)
+        try {
+            const r = await (window.electronAPI as any).runIncubatorScan()
+            if (r?.success) {
+                await fetchIncubator()
+            } else {
+                alert(`스캔 실패: ${r?.error}`)
+            }
+        } catch (e: any) {
+            alert(`오류: ${e.message}`)
+        } finally {
+            setIsScanning(false)
+        }
     }
 
-    const filteredRows = MOCK_DATA.filter(s => {
+    const stats = {
+        total: incubatorList.length,
+        readyCount: incubatorList.filter(s => s.status === 'READY_TO_IGNITE').length,
+        avgNeglect: incubatorList.length > 0 ? Math.round(incubatorList.reduce((a, s) => a + (s.neglect_score || 0), 0) / incubatorList.length) : 0,
+        solidCount: incubatorList.filter(s => s.source === 'FUNDAMENTAL').length,
+    }
+
+    const filteredRows = incubatorList.filter(s => {
         if (filterStatus === 'ALL') return true
         return s.status === filterStatus
     }).sort((a, b) => b.neglect_score - a.neglect_score)
@@ -168,9 +179,21 @@ export function IncubatorLabTab() {
                         <span className="font-bold text-sm">인큐베이터 랩 (Discovery Lab)</span>
                         <span className="text-[10px] text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded font-bold">Phase 2 Experimental</span>
                     </div>
-                    <button className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/30 transition-colors">
-                        ⟳ 새로고침
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={handleScan}
+                            disabled={isScanning}
+                            className={cn(
+                                "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-colors font-bold",
+                                isScanning ? "bg-amber-500/10 text-amber-500 border border-amber-500/30 animate-pulse" : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20"
+                            )}>
+                            <Zap className="w-3.5 h-3.5" />
+                            {isScanning ? '스캔 중...' : '지표 스캔 실행'}
+                        </button>
+                        <button onClick={fetchIncubator} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded hover:bg-muted/30 transition-colors">
+                            ⟳ 새로고침
+                        </button>
+                    </div>
                 </div>
 
                 {/* Stats Bar */}
@@ -233,7 +256,7 @@ export function IncubatorLabTab() {
                                 </td>
                             </tr>
                         ) : filteredRows.map(s => {
-                            const volRatio = Math.round((s.current_volume / s.peak_volume) * 100)
+                            const volRatio = Math.round((s.volume_ratio || 1.0) * 100)
                             const isReady = s.status === 'READY_TO_IGNITE'
 
                             return (
@@ -260,7 +283,7 @@ export function IncubatorLabTab() {
                                     {/* 테마 */}
                                     <td className="py-2.5 pr-4">
                                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
-                                            {s.theme_name}
+                                            {s.source}
                                         </span>
                                     </td>
 
@@ -269,17 +292,17 @@ export function IncubatorLabTab() {
                                         <div className="flex flex-col items-center gap-1">
                                             <span className={cn(
                                                 'text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap',
-                                                NEGLECT_STYLE(s.neglect_score)
+                                                NEGLECT_STYLE(s.neglect_score || 0)
                                             )}>
-                                                {NEGLECT_LABEL(s.neglect_score)}
+                                                {NEGLECT_LABEL(s.neglect_score || 0)}
                                             </span>
                                             {/* 점수 바 */}
                                             <div className="flex items-center gap-1.5">
-                                                <span className="text-[11px] font-mono font-bold">{s.neglect_score}</span>
+                                                <span className="text-[11px] font-mono font-bold">{s.neglect_score || 0}</span>
                                                 <div className="w-14 h-1.5 bg-muted/40 rounded-full overflow-hidden">
                                                     <div
-                                                        className={cn('h-full rounded-full', s.neglect_score >= 90 ? 'bg-rose-500' : s.neglect_score >= 70 ? 'bg-amber-500' : 'bg-indigo-500')}
-                                                        style={{ width: `${s.neglect_score}%` }}
+                                                        className={cn('h-full rounded-full', (s.neglect_score||0) >= 90 ? 'bg-rose-500' : (s.neglect_score||0) >= 70 ? 'bg-amber-500' : 'bg-indigo-500')}
+                                                        style={{ width: `${s.neglect_score || 0}%` }}
                                                     />
                                                 </div>
                                             </div>
@@ -290,9 +313,9 @@ export function IncubatorLabTab() {
                                     <td className="py-2.5 pr-4 text-center">
                                         <span className={cn(
                                             'text-[10px] font-bold px-1.5 py-0.5 rounded border',
-                                            FUNDAMENTAL_STYLE[s.fundamental_status]
+                                            FUNDAMENTAL_STYLE[s.source === 'FUNDAMENTAL' ? 'SOLID' : 'AVERAGE']
                                         )}>
-                                            {s.fundamental_status}
+                                            {s.source === 'FUNDAMENTAL' ? 'SOLID' : 'AVERAGE'}
                                         </span>
                                     </td>
 
@@ -300,8 +323,8 @@ export function IncubatorLabTab() {
                                     <td className="py-2.5 pr-4 text-center">
                                         <div className="flex items-center justify-center gap-1 text-[11px] font-mono">
                                             <Clock className="w-3 h-3 text-muted-foreground" />
-                                            <span className={cn(s.incubated_days >= 30 ? 'text-amber-400 font-bold' : 'text-muted-foreground')}>
-                                                {s.incubated_days}일
+                                            <span className={cn((s.days_watched || 0) >= 30 ? 'text-amber-400 font-bold' : 'text-muted-foreground')}>
+                                                {s.days_watched || 0}일
                                             </span>
                                         </div>
                                     </td>
@@ -315,7 +338,7 @@ export function IncubatorLabTab() {
                                             피크 대비 {volRatio}%
                                         </div>
                                         <div className="text-[10px] text-muted-foreground mt-0.5">
-                                            {volRatio <= 20 ? '🔴 수급 고갈' : volRatio <= 40 ? '🟠 감소 중' : '🟡 소진 중'}
+                                            {volRatio <= 50 ? '🔴 수급 고갈' : volRatio <= 100 ? '🟠 감소 중' : '🟡 활성화'}
                                         </div>
                                     </td>
 

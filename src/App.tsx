@@ -15,7 +15,7 @@ import MarketAgentTab from './components/v2_dashboard/MarketAgentTab'
 import IssueManagementTab from './components/v2_dashboard/IssueManagementTab'
 import { ThemeTrackerTab } from './components/v2_dashboard/ThemeTrackerTab'
 import { PortfolioManagerTab } from './components/v2_dashboard/PortfolioManagerTab'
-import { IncubatorLabTab } from './components/v2_dashboard/IncubatorLabTab'
+// import { IncubatorLabTab } from './components/v2_dashboard/IncubatorLabTab'
 import { MarketLeadersTab } from './components/v2_dashboard/MarketLeadersTab'
 import CoPilotDrawer from './components/common/CoPilotDrawer'
 
@@ -364,12 +364,12 @@ function AppContent() {
                         {activeTab === 'market-agent' && <MarketAgentTab onNavigate={navigateTo} />}
                         {activeTab === 'issue-agent' && <IssueManagementTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'issue-agent' ? navTarget.entityId : undefined} />}
                         {activeTab === 'theme-tracker' && <ThemeTrackerTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'theme-tracker' ? navTarget.entityId : undefined} />}
-                        {activeTab === 'incubator-lab' && <IncubatorLabTab />}
+                        {/* {activeTab === 'incubator-lab' && <IncubatorLabTab />} */}
                         {activeTab === 'portfolio-manager' && <PortfolioManagerTab />}
                         {activeTab === 'market-leaders' && <MarketLeadersTab />}
 
                         {/* 등록된 탭이 아닌 경우 폴백 화면 */}
-                        {(['dashboard', 'holdings', 'settings', 'maiis-command', 'macro-dashboard', 'pipeline-monitor', 'market-agent', 'issue-agent', 'theme-tracker', 'incubator-lab', 'portfolio-manager', 'market-leaders'].indexOf(activeTab) === -1) && (
+                        {(['dashboard', 'holdings', 'settings', 'maiis-command', 'macro-dashboard', 'pipeline-monitor', 'market-agent', 'issue-agent', 'theme-tracker', 'portfolio-manager', 'market-leaders'].indexOf(activeTab) === -1) && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

@@ -230,9 +230,11 @@ function PortfolioStockModal({ stock, watchlist, onClose }: { stock: any; watchl
 // MAIN COMPONENT
 // ─────────────────────────────────────────────
 export const PortfolioManagerTab: React.FC = () => {
-    const [activeTab, setActiveTab]       = useState<'portfolio' | 'watchlist2' | 'picks' | 'runner'>('portfolio')
+    const [activeTab, setActiveTab]       = useState<'portfolio' | 'watchlist2' | 'picks' | 'incubator' | 'history' | 'runner'>('portfolio')
     const [portfolio, setPortfolio]         = useState<any[]>([])
+    const [history, setHistory]             = useState<any[]>([])
     const [watchlist, setWatchlist]         = useState<any[]>([])
+    const [incubatorList, setIncubatorList] = useState<any[]>([])
     const [selected, setSelected]           = useState<any | null>(null)
     const [filterStatus, setFilterStatus]   = useState('ALL')
     const [runLog, setRunLog]               = useState<string[]>([])
@@ -241,6 +243,7 @@ export const PortfolioManagerTab: React.FC = () => {
     const [confirmModal, setConfirmModal]   = useState<{ type: 'portfolio' | 'picks' } | null>(null)
     const [showSkillModal, setShowSkillModal] = useState(false)
     const [skillContent, setSkillContent] = useState('')
+    const [incubatorScanRunning, setIncubatorScanRunning] = useState(false)
 
     const handleShowSkill = async () => {
         setShowSkillModal(true);
@@ -263,12 +266,21 @@ export const PortfolioManagerTab: React.FC = () => {
             const data = await window.electronAPI.getActivePortfolio()
             setPortfolio(Array.isArray(data) ? data : [])
             
+            const histData = await (window.electronAPI as any).getPortfolioHistory()
+            setHistory(Array.isArray(histData) ? histData : [])
+
             const picksData = await window.electronAPI.getAiPicks()
             setWatchlist(Array.isArray(picksData) ? picksData : [])
 
             const logsData = await (window.electronAPI as any).getAiRunLogs()
             if (Array.isArray(logsData) && logsData.length > 0) {
                 setRunLog(logsData.reverse())
+            }
+
+            // P4: 인큐베이터 목록 로드
+            const incResult = await (window.electronAPI as any).getIncubatorList()
+            if (incResult?.success && Array.isArray(incResult.data)) {
+                setIncubatorList(incResult.data)
             }
         } catch (e: any) {
             appendLog(`[ERROR] 로드 실패: ${e.message}`)
@@ -373,11 +385,36 @@ export const PortfolioManagerTab: React.FC = () => {
 
     // ── Derived stats ──
     const activeList    = portfolio.filter(p => p.status !== 'DROPPED')
-    const hitCount      = portfolio.filter(p => p.status === 'HIT').length
-    const droppedCount  = portfolio.filter(p => p.status === 'DROPPED').length
+    const hitCount      = history.filter(p => p.status === 'HIT').length
+    const droppedCount  = history.filter(p => p.status === 'DROPPED').length
     const avgScore      = activeList.length ? Math.round(activeList.reduce((s, p) => s + (p.conviction_score || 0), 0) / activeList.length) : 0
     const withReturn    = activeList.filter(p => p.profit_rate != null)
     const avgReturn     = withReturn.length ? (withReturn.reduce((s, p) => s + Number(p.profit_rate), 0) / withReturn.length) : 0
+
+    // ── History Stats ──
+    const aiStats = React.useMemo(() => {
+        const stats: Record<string, { count: number, hit: number, sumReturn: number }> = {
+            THEME:    { count: 0, hit: 0, sumReturn: 0 },
+            MOMENTUM: { count: 0, hit: 0, sumReturn: 0 },
+            REPORT:   { count: 0, hit: 0, sumReturn: 0 },
+            UNKNOWN:  { count: 0, hit: 0, sumReturn: 0 },
+        };
+        history.forEach(p => {
+            let type = 'UNKNOWN';
+            try { 
+                const tags = typeof p.analysts_json === 'string' ? JSON.parse(p.analysts_json) : (p.analysts_json || []);
+                if (tags.includes('THEME')) type = 'THEME';
+                else if (tags.includes('MOMENTUM')) type = 'MOMENTUM';
+                else if (tags.includes('REPORT')) type = 'REPORT';
+            } catch { }
+
+            stats[type].count++;
+            if (p.status === 'HIT') stats[type].hit++;
+            const rt = Number(p.profit_rate);
+            if (!isNaN(rt)) stats[type].sumReturn += rt;
+        });
+        return stats;
+    }, [history]);
 
     // ── Filtered rows ──
     const SIGNAL_WEIGHT: Record<string, number> = {
@@ -401,7 +438,14 @@ export const PortfolioManagerTab: React.FC = () => {
     // 💰 매수 포지션: IMMEDIATE_BUY 신호 + HIT/DROPPED 이력
     const buyRows = sortBySignal(portfolio.filter(p => {
         const sig = p.last_signal || p.status;
-        if (filterStatus === 'ALL') return sig === 'IMMEDIATE_BUY' || p.status === 'HIT' || p.status === 'DROPPED';
+        
+        // 매수 포지션이 아닌 관심종목(WAIT_DIP, HOLD, WATCHLIST)은 
+        // 목표가/수명이 만료되어 HIT/DROPPED 상태가 되더라도 매수 탭에서 제외
+        if (sig === 'WAIT_DIP' || sig === 'HOLD' || sig === 'WATCHLIST') {
+            return false;
+        }
+
+        if (filterStatus === 'ALL') return sig === 'IMMEDIATE_BUY';
         if (filterStatus === 'ACTIVE') return sig === 'IMMEDIATE_BUY';
         return p.status === filterStatus || sig === filterStatus;
     }))
@@ -416,6 +460,8 @@ export const PortfolioManagerTab: React.FC = () => {
         { id: 'portfolio',  label: '💰 매수 포지션' },
         { id: 'watchlist2', label: '👀 관심종목' },
         { id: 'picks',      label: '⭐ 추천 종목' },
+        { id: 'incubator',  label: '🧪 인큐베이터' },
+        { id: 'history',    label: '🏆 성적표(History)' },
         { id: 'runner',     label: '⚙ AI 수동실행' },
     ] as const
 
@@ -423,8 +469,6 @@ export const PortfolioManagerTab: React.FC = () => {
         { id: 'ALL',           label: '전체' },
         { id: 'ACTIVE',        label: '활성' },
         { id: 'IMMEDIATE_BUY', label: '🟡 즉시매수' },
-        { id: 'HIT',           label: '✅ HIT' },
-        { id: 'DROPPED',       label: '❌ 만료' },
     ]
 
     return (
@@ -589,11 +633,18 @@ export const PortfolioManagerTab: React.FC = () => {
                                                 <AnalystBadges json={p.analysts_json} />
                                             </td>
 
-                                            {/* 추가일 */}
+                                            {/* 포착 시간 */}
                                             <td className="py-2 pr-4 text-center">
-                                                <span className="text-[11px] font-mono text-muted-foreground">
-                                                    {p.entry_date ? p.entry_date.substring(0, 10).replace(/-/g, '.') : '-'}
-                                                </span>
+                                                <div className="flex flex-col items-center justify-center font-mono">
+                                                    {p.created_at ? (
+                                                        <>
+                                                            <span className="text-[11px] text-muted-foreground">{p.created_at.substring(5, 10).replace(/-/g, '.')}</span>
+                                                            <span className="text-[9px] text-muted-foreground/60">{p.created_at.substring(11, 16)}</span>
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-[11px] text-muted-foreground">{p.entry_date ? p.entry_date.substring(0, 10).replace(/-/g, '.') : '-'}</span>
+                                                    )}
+                                                </div>
                                             </td>
 
                                             {/* 단가 및 수익률 */}
@@ -693,9 +744,16 @@ export const PortfolioManagerTab: React.FC = () => {
                                             </td>
                                             <td className="py-2 pr-4"><AnalystBadges json={p.analysts_json} /></td>
                                             <td className="py-2 pr-4 text-center">
-                                                <span className="text-[11px] font-mono text-muted-foreground">
-                                                    {p.entry_date ? p.entry_date.substring(0, 10).replace(/-/g, '.') : '-'}
-                                                </span>
+                                                <div className="flex flex-col items-center justify-center font-mono">
+                                                    {p.created_at ? (
+                                                        <>
+                                                            <span className="text-[11px] text-muted-foreground">{p.created_at.substring(5, 10).replace(/-/g, '.')}</span>
+                                                            <span className="text-[9px] text-muted-foreground/60">{p.created_at.substring(11, 16)}</span>
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-[11px] text-muted-foreground">{p.entry_date ? p.entry_date.substring(0, 10).replace(/-/g, '.') : '-'}</span>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="py-2 pr-4 text-right">
                                                 <div className="text-[11px] font-mono text-muted-foreground">D+{daysHeld} / {lifespan}일</div>
@@ -800,6 +858,294 @@ export const PortfolioManagerTab: React.FC = () => {
                                             </td>
                                         </tr>
                                     );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 🧪 인큐베이터 Tab (Pool B) ── */}
+            {activeTab === 'incubator' && (
+                <div className="flex flex-col flex-1 overflow-hidden">
+                    {/* Header */}
+                    <div className="shrink-0 px-4 py-2 border-b border-border/30 flex items-center gap-3">
+                        <div className="flex-1 text-xs text-muted-foreground">
+                            🧪 <span className="font-bold text-amber-400">Pool B — 인큐베이터</span>: 테마가 살아있으나 단기 소외된 종목 감시 풀입니다.
+                            neglect_score 80+ 달성 시 IGNITE → PM AI 재심사 대상으로 자동 승격됩니다.
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono text-amber-400 font-bold">{incubatorList.length}종목 감시 중</span>
+                            <button
+                                onClick={async () => {
+                                    setIncubatorScanRunning(true)
+                                    appendLog('🧪 인큐베이터 스캔 시작...')
+                                    try {
+                                        const r = await (window.electronAPI as any).runIncubatorScan()
+                                        if (r?.success) {
+                                            appendLog('✅ 인큐베이터 스캔 완료 — neglect_score 갱신됨')
+                                            await fetchPortfolio()
+                                        } else {
+                                            appendLog(`❌ 스캔 실패: ${r?.error}`)
+                                        }
+                                    } catch (e: any) {
+                                        appendLog(`❌ 오류: ${e.message}`)
+                                    } finally {
+                                        setIncubatorScanRunning(false)
+                                    }
+                                }}
+                                disabled={incubatorScanRunning}
+                                className={cn(
+                                    'text-xs px-2 py-1 rounded border transition-all',
+                                    incubatorScanRunning
+                                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-400 animate-pulse'
+                                        : 'bg-muted/20 border-border/40 hover:bg-amber-500/10 hover:border-amber-500/40 hover:text-amber-400'
+                                )}
+                            >
+                                {incubatorScanRunning ? '⚙ 스캔 중...' : '⟳ 스캔 실행'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Table */}
+                    <div className="flex-1 overflow-auto px-4">
+                        <table className="w-full text-sm text-left whitespace-nowrap">
+                            <thead className="sticky top-0 z-10 bg-background">
+                                <tr className="text-xs uppercase text-muted-foreground border-b border-border/60">
+                                    <th className="py-2 pr-2 font-bold w-6">상태</th>
+                                    <th className="py-2 pr-4 font-bold">종목</th>
+                                    <th className="py-2 pr-4 font-bold text-center">출처</th>
+                                    <th className="py-2 pr-4 font-bold text-center w-28">neglect score</th>
+                                    <th className="py-2 pr-4 font-bold text-right">거래량비율</th>
+                                    <th className="py-2 pr-4 font-bold text-right">MA60이격</th>
+                                    <th className="py-2 pr-4 font-bold text-right">감시일</th>
+                                    <th className="py-2 pr-4 font-bold text-right">강등횟수</th>
+                                    <th className="py-2 pr-2 font-bold">액션</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {incubatorList.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={9} className="py-16 text-center">
+                                            <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                                                <span className="text-4xl">🧪</span>
+                                                <div className="text-sm font-bold">인큐베이터가 비어 있습니다</div>
+                                                <div className="text-xs max-w-xs text-center leading-relaxed">
+                                                    장마감 채점(⚖) 실행 시 테마가 살아있는 DROPPED 종목이<br />
+                                                    자동으로 이곳으로 이관됩니다.
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : incubatorList.map(inc => {
+                                    const status = inc.status || 'WATCHING'
+                                    const statusConf: Record<string, { label: string; cls: string; icon: string }> = {
+                                        WATCHING:        { label: '감시중',    cls: 'text-blue-400 bg-blue-400/10 border-blue-400/30',    icon: '👁' },
+                                        READY_TO_IGNITE: { label: '🔥 IGNITE', cls: 'text-amber-400 bg-amber-400/10 border-amber-400/30',  icon: '🔥' },
+                                        GRADUATED:       { label: '졸업',      cls: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30', icon: '✅' },
+                                        DROPPED:         { label: '탈락',      cls: 'text-muted-foreground bg-muted/20 border-border/30',   icon: '❌' },
+                                    }
+                                    const sc = statusConf[status] || statusConf['WATCHING']
+                                    const score = inc.neglect_score || 0
+                                    const scoreColor = score >= 80 ? 'bg-amber-400' : score >= 50 ? 'bg-indigo-400' : 'bg-muted-foreground/40'
+                                    const volRatio = inc.volume_ratio ?? 1
+                                    const ma60 = inc.ma60_disparity ?? 0
+
+                                    const SOURCE_LABEL: Record<string, string> = {
+                                        PORTFOLIO_DEMOTED: '포폴 강등',
+                                        THEME_AI: '테마 AI',
+                                        FUNDAMENTAL: '펀더멘털',
+                                        MARKET_LEADER: '알파',
+                                        MANUAL: '수동',
+                                    }
+
+                                    return (
+                                        <tr
+                                            key={inc.stock_code}
+                                            className="border-b border-border/20 hover:bg-accent/20 transition-colors group"
+                                        >
+                                            <td className="py-2 pr-2">
+                                                <span className="text-base">{sc.icon}</span>
+                                            </td>
+                                            <td className="py-2 pr-4">
+                                                <div className="font-semibold text-sm">{inc.stock_name}</div>
+                                                <div className="text-xs font-mono text-muted-foreground">{inc.stock_code}</div>
+                                            </td>
+                                            <td className="py-2 pr-4 text-center">
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded border bg-muted/20 text-muted-foreground border-border font-bold">
+                                                    {SOURCE_LABEL[inc.source] || inc.source}
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-4">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={cn('text-xs font-mono font-bold w-7 text-right', score >= 80 ? 'text-amber-400' : score >= 50 ? 'text-indigo-400' : 'text-muted-foreground')}>{score}</span>
+                                                    <div className="flex-1 h-1.5 bg-muted/40 rounded-full overflow-hidden">
+                                                        <div className={cn('h-full rounded-full transition-all', scoreColor)} style={{ width: `${score}%` }} />
+                                                    </div>
+                                                    <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap', sc.cls)}>{sc.label}</span>
+                                                </div>
+                                                {inc.source_context && (
+                                                    <div className="text-[10px] text-muted-foreground mt-1 truncate max-w-[200px]" title={inc.source_context}>
+                                                        {inc.source_context}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="py-2 pr-4 text-right">
+                                                <span className={cn('font-mono text-xs', volRatio < 0.5 ? 'text-amber-400 font-bold' : 'text-muted-foreground')}>
+                                                    {volRatio.toFixed(2)}x
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-4 text-right">
+                                                <span className={cn('font-mono text-xs', ma60 >= -2 && ma60 <= 5 ? 'text-emerald-400 font-bold' : 'text-muted-foreground')}>
+                                                    {ma60 > 0 ? '+' : ''}{ma60.toFixed(1)}%
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-4 text-right">
+                                                <span className="font-mono text-xs text-muted-foreground">D+{inc.days_watched || 0}</span>
+                                            </td>
+                                            <td className="py-2 pr-4 text-right">
+                                                {(inc.demotion_count || 0) > 0 ? (
+                                                    <span className="font-mono text-xs text-rose-400">{inc.demotion_count}회</span>
+                                                ) : (
+                                                    <span className="font-mono text-xs text-muted-foreground">-</span>
+                                                )}
+                                            </td>
+                                            <td className="py-2 pr-2">
+                                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    {status === 'WATCHING' && (
+                                                        <button
+                                                            title="수동 IGNITE 승격"
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation()
+                                                                await (window.electronAPI as any).updateIncubatorStatus(inc.stock_code, 'READY_TO_IGNITE', '수동 IGNITE 승격')
+                                                                fetchPortfolio()
+                                                            }}
+                                                            className="text-[10px] px-1.5 py-1 rounded border bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
+                                                        >🔥</button>
+                                                    )}
+                                                    <button
+                                                        title="탈락 처리"
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation()
+                                                            await (window.electronAPI as any).updateIncubatorStatus(inc.stock_code, 'DROPPED', '수동 탈락 처리')
+                                                            fetchPortfolio()
+                                                        }}
+                                                        className="text-[10px] px-1.5 py-1 rounded border bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20"
+                                                    >✕</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 성적표(History) Tab ── */}
+            {activeTab === 'history' && (
+                <div className="flex flex-col flex-1 overflow-hidden">
+                    {/* Stats Dashboard */}
+                    <div className="shrink-0 p-4 border-b border-border/30 bg-muted/5">
+                        <div className="text-xs font-bold text-muted-foreground uppercase mb-3 flex items-center gap-1.5">
+                            <Activity className="w-3.5 h-3.5 text-indigo-400" /> 부서별 AI 누적 실적 (Win Rate & Return)
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                            {[
+                                { k: 'THEME', label: '테마 AI', icon: '🌊', color: 'text-indigo-400' },
+                                { k: 'MOMENTUM', label: '수급/모멘텀 AI', icon: '📈', color: 'text-rose-400' },
+                                { k: 'REPORT', label: '리포트 AI', icon: '📄', color: 'text-emerald-400' },
+                                { k: 'ALL', label: '전체 요약', icon: '🏆', color: 'text-amber-400' },
+                            ].map(({ k, label, icon, color }) => {
+                                let total = 0, hits = 0, sums = 0;
+                                if (k === 'ALL') {
+                                    Object.values(aiStats).forEach(s => { total += s.count; hits += s.hit; sums += s.sumReturn; });
+                                } else {
+                                    total = aiStats[k].count; hits = aiStats[k].hit; sums = aiStats[k].sumReturn;
+                                }
+                                const winRate = total > 0 ? ((hits / total) * 100).toFixed(1) : '0.0';
+                                const avgRet = total > 0 ? (sums / total).toFixed(2) : '0.00';
+                                return (
+                                    <div key={k} className="bg-background border border-border/50 rounded-lg p-3 flex flex-col gap-1.5 shadow-sm">
+                                        <div className="text-xs font-bold text-muted-foreground">{icon} {label}</div>
+                                        <div className="flex items-end justify-between">
+                                            <div className="flex flex-col">
+                                                <span className="text-[10px] text-muted-foreground/60 uppercase">승률</span>
+                                                <span className={cn("text-lg font-bold font-mono", color)}>{winRate}%</span>
+                                            </div>
+                                            <div className="flex flex-col items-end">
+                                                <span className="text-[10px] text-muted-foreground/60 uppercase">평균 수익</span>
+                                                <span className={cn("font-bold font-mono text-sm", Number(avgRet) > 0 ? 'text-rose-500' : Number(avgRet) < 0 ? 'text-blue-500' : 'text-muted-foreground')}>
+                                                    {Number(avgRet) > 0 ? '+' : ''}{avgRet}%
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="text-[10px] text-right font-mono text-muted-foreground px-1 bg-muted/20 border-t border-border/30 mt-1">총 {total}건 추천 / {hits}건 성공</div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Table */}
+                    <div className="flex-1 overflow-auto px-4">
+                        <table className="w-full text-sm text-left whitespace-nowrap">
+                            <thead className="sticky top-0 z-10 bg-background">
+                                <tr className="text-xs uppercase text-muted-foreground border-b border-border/60">
+                                    <th className="py-2 pr-3 font-bold w-12 text-center">결과</th>
+                                    <th className="py-2 pr-4 font-bold">종목 (진입가)</th>
+                                    <th className="py-2 pr-4 font-bold">추천 AI</th>
+                                    <th className="py-2 pr-4 font-bold text-right">종료 수익률</th>
+                                    <th className="py-2 pr-4 font-bold text-center">종료일</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {history.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="py-12 text-center text-muted-foreground text-xs">
+                                            종료된 포트폴리오(성적) 내역이 없습니다.
+                                        </td>
+                                    </tr>
+                                ) : history.map(p => {
+                                    const prof = Number(p.profit_rate);
+                                    let rateColor = 'text-muted-foreground';
+                                    if (p.status === 'HIT') rateColor = 'text-emerald-500 font-bold';
+                                    else if (prof > 0) rateColor = 'text-rose-500';
+                                    else if (prof < 0) rateColor = 'text-blue-500';
+
+                                    let rawDate = p.updated_at || p.closed_date || '';
+                                    if (rawDate.includes('T')) rawDate = rawDate.split('T')[0];
+
+                                    return (
+                                        <tr
+                                            key={p.id || p.stock_code}
+                                            onClick={() => setSelected(p)}
+                                            className="border-b border-border/20 hover:bg-accent/30 cursor-pointer transition-colors group"
+                                        >
+                                            <td className="py-2.5 pr-3 text-center">
+                                                <span className={cn('text-[10px] px-2 py-0.5 rounded font-bold border', p.status === 'HIT' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'bg-rose-500/10 text-rose-500 border-rose-500/30')}>
+                                                    {p.status === 'HIT' ? 'HIT ✅' : 'DROP ❌'}
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-4">
+                                                <div className="font-semibold text-sm flex items-center gap-1.5">
+                                                    {p.stock_name}
+                                                    <span className="text-[10px] text-muted-foreground bg-muted px-1.5 rounded">{p.entry_price ? p.entry_price.toLocaleString() : '-'}원</span>
+                                                </div>
+                                                <div className="text-xs font-mono text-muted-foreground">{p.stock_code}</div>
+                                            </td>
+                                            <td className="py-2 pr-4">
+                                                <AnalystBadges json={p.analysts_json} />
+                                            </td>
+                                            <td className="py-2 pr-4 text-right">
+                                                <span className={cn("text-base font-bold", rateColor)}>
+                                                    {prof > 0 ? '+' : ''}{!isNaN(prof) ? prof.toFixed(2) : '-'}%
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-4 text-center font-mono text-xs text-muted-foreground">{rawDate}</td>
+                                        </tr>
+                                    )
                                 })}
                             </tbody>
                         </table>

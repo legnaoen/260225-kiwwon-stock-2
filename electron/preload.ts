@@ -336,6 +336,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runPortfolioManager: () => ipcRenderer.invoke('ai-analyst:run-portfolio-manager'),
     runPortfolioJudge: () => ipcRenderer.invoke('ai-analyst:run-daily-judge'),
     getActivePortfolio: () => ipcRenderer.invoke('ai-analyst:get-portfolio-active'),
+    getPortfolioHistory: () => ipcRenderer.invoke('ai-analyst:get-portfolio-history'),
     getAiPicks: () => ipcRenderer.invoke('ai-analyst:get-picks'),
     clearPortfolio: () => ipcRenderer.invoke('ai-analyst:clear-portfolio'),
     clearAiPicks: () => ipcRenderer.invoke('ai-analyst:clear-picks'),
@@ -351,5 +352,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // AI 데일리 원본 전문 (Raw Log)
     getAiDailyRawLog: (date: string, agentType: string) => ipcRenderer.invoke('ai-daily-raw-logs:get', date, agentType),
+
+    // P4: 인큐베이터 (Pool B)
+    getIncubatorList: (status?: string) => ipcRenderer.invoke('incubator:get-list', status),
+    updateIncubatorStatus: (stock_code: string, status: string, reason?: string) => ipcRenderer.invoke('incubator:update-status', { stock_code, status, reason }),
+    runIncubatorScan: () => ipcRenderer.invoke('incubator:run-scan'),
+    addIncubatorStock: (stock_code: string, stock_name: string, reason: string) => ipcRenderer.invoke('incubator:add-manual', { stock_code, stock_name, reason }),
 })
 

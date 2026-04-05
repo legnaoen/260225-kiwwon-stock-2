@@ -66,9 +66,61 @@ export class MomentumAnalystAgent {
             }
 
             console.log(`[MomentumAnalyst] 총 ${targetStocks.length}개 종목의 최신 뉴스(10개씩) 및 과거 노트 수집 시작...`);
-            
-            // 2. 뉴스 및 과거 이력 수집 (병렬 제어)
-            let promptContext = `[당일 시장 수급 및 급등주 ${targetStocks.length}선 Raw Data]\n\n`;
+
+            // 2-A. 시장 전체 주체별 수급 수집 (PL-InvestorFlow)
+            let investorFlowMarkdown = '';
+            try {
+                const { V2PipelineManager } = await import('../v2_pipeline/V2PipelineManager');
+                const flowResult = await V2PipelineManager.getInstance().runPipeline('PL-InvestorFlow' as any);
+                if (flowResult?.aggregatedMarkdown) {
+                    investorFlowMarkdown = flowResult.aggregatedMarkdown;
+                    console.log(`[MomentumAnalyst] ✅ 주체별 수급 데이터 수집 완료 (InvestorFlow)`);
+                }
+            } catch (e) {
+                console.warn(`[MomentumAnalyst] ⚠️ 주체별 수급 데이터 수집 실패 (무시하고 계속):`, (e as any).message);
+            }
+
+            // 2-B. 이슈AI / 시황AI 맥락 수집 (IssueLedgerDB)
+            let issueContextBlock = '';
+            try {
+                const { IssueLedgerDB } = await import('./IssueLedgerDB');
+                const issueDb = IssueLedgerDB.getInstance();
+
+                // 1) 일일 브리핑 (시황 AI 종합 판단)
+                const briefing = issueDb.getLatestBriefing();
+                if (briefing) {
+                    issueContextBlock += `#### 📋 오늘의 시황 브리핑 (위험도: ${briefing.risk_score}/100)\n`;
+                    issueContextBlock += `${briefing.summary_markdown}\n\n`;
+                }
+
+                // 2) 활성 이슈별 수혜/피해 섹터 정리
+                const activeIssues = issueDb.getActiveIssues();
+                const criticalIssues = activeIssues
+                    .filter(i => ['CRITICAL', 'HIGH'].includes(i.severity))
+                    .slice(0, 5); // 상위 5개만 (토큰 절약)
+
+                if (criticalIssues.length > 0) {
+                    issueContextBlock += `#### 🚨 현재 활성 핵심 이슈 & 섹터 영향\n`;
+                    criticalIssues.forEach(issue => {
+                        issueContextBlock += `\n**[${issue.severity}] ${issue.name}**\n`;
+                        issueContextBlock += `> ${issue.current_stance || issue.summary || '분석 없음'}\n`;
+                        if (issue.goodSectors?.length > 0) {
+                            issueContextBlock += `- ✅ 수혜 섹터: ${issue.goodSectors.map(s => `${s.name}(${s.reason})`).join(' / ')}\n`;
+                        }
+                        if (issue.badSectors?.length > 0) {
+                            issueContextBlock += `- ❌ 피해 섹터: ${issue.badSectors.map(s => `${s.name}(${s.reason})`).join(' / ')}\n`;
+                        }
+                    });
+                    issueContextBlock += '\n';
+                }
+                console.log(`[MomentumAnalyst] ✅ 이슈 맥락 수집 완료 (활성 이슈 ${criticalIssues.length}개)`);
+            } catch (e) {
+                console.warn(`[MomentumAnalyst] ⚠️ 이슈 맥락 수집 실패 (무시하고 계속):`, (e as any).message);
+            }
+
+            // 2-C. 뉴스 및 과거 이력 수집 (병렬 제어)
+            let promptContext = `[📊 오늘의 시장 주체별 수급 현황]\n${investorFlowMarkdown || '수급 데이터 없음'}\n\n---\n\n[🗞️ 시황·이슈 AI 맥락 (역발상 섹터 판별 핵심)]\n${issueContextBlock || '이슈 맥락 데이터 없음'}\n\n---\n\n[당일 시장 수급 및 급등주 ${targetStocks.length}선 Raw Data]\n\n`;
+
             
             // 2개씩 끊어서 뉴스 수집 (네이버 API Rate Limit 방지 - 1초에 10회 이하 유지)
             for (let i = 0; i < targetStocks.length; i += 2) {
@@ -124,10 +176,19 @@ export class MomentumAnalystAgent {
 너에게는 오늘 시장을 가장 강하게 주도하는 ${targetStocks.length}개의 주도주 정보(거래대금, 등락률, 종목별 최신 뉴스 10건, 과거 흐름 노트)가 '단 한 번에' 주어졌다.
 이 방대한 문맥(Context) 속에서 전체 지도의 퍼즐을 맞추며 다음 임무를 수행해야 한다.
 
+[🏦 수급 + 이슈 맥락 통합 판단 원칙 — 반드시 준수]
+오늘의 시장 주체별 수급 현황과 이슈AI/시황AI의 분석 결과가 함께 제공된다.
+
+1. **수급은 '맥락 파악'용** — 코스피/코스닥 전체 외인 순매도 = 시장 분위기 파악. 이것만으로 종목 확신도를 낮추지 마라.
+2. **이슈 '수혜 섹터' 종목은 시장 하락 시에도 역발상 매수 기회** — 관세 전쟁 → 방산 수혜 섹터 급등은 확신도 +15~20점 가산. 이슈 피해 섹터 반등은 추격 금물.
+3. **시황 브리핑의 dominant_regime(국면)과 종목을 매칭** — "내수/안전자산 순환 국면"이면 수출주 대신 내수주 우대.
+4. **수급+이슈 쌍발 신호** — 이슈 수혜 섹터이면서 동시에 해당 시장(코스피/코스닥) 외인 순매수이면 최고 확신도. 반대(이슈 피해 + 외인 순매도)이면 단호히 제외.
+5. **개인 단독 급등 경고** — 시장 전체 외인 순매도 + 이슈 맥락 없는 급등 = 개인 세력 작전 가능성. 확신도 -20점.
+
 [지시사항] 통합 주도주 분석 리포트(analyzed_stocks) 작성
-- 30개 종목을 서로 비교하면서 돈(수급)이 확실하게 쏠리고, 뉴스와 재료가 강하게 맞물리는 '의미 있는 주도 종목(최대 15개 내외)'을 골라 현미경 분석 노트를 작성한다.
-- 뉴스 요약과 거래대금 파워를 결합해 "이 상승이 과거의 단순 연장선인지", "진짜 폭발적인 신규 수급 유입인지" 날카롭게 짚어 종합적인 사유(reason)로 서술해라.
-- 각 종목마다 이 종목이 얼마나 강력한 대장주인지 '매수 확신도(confidence)'를 0~100 사이로 평가해라. 확신도가 높은 종목일수록 포트폴리오 편입 확률이 높아진다.
+- 제공된 모든 맥락(수급 + 이슈 수혜·피해 섹터 + 시황 국면)을 교차하여 '진짜 수익 가능한 주도 종목(최대 10개 내외)'을 선별하라.
+- 뉴스 요약과 거래대금 파워를 결합해 "이 상승이 이슈 맥락과 맞닿아 있는지", "단순 개인 세력 장난인지" 날카롭게 짚어 종합적인 사유(reason)로 서술해라.
+- 각 종목마다 '매수 확신도(confidence)'를 0~100으로 평가. reason 서술 시 반드시 ①이슈 맥락(수혜/피해 여부) ②수급 환경을 각 한 문장씩 명시하라.
 
 결과물은 오직 JSON으로만 반환하라. 시작이나 끝에 마크다운 이외의 불필요한 사족은 달지 마라.
 \`\`\`json
@@ -146,10 +207,13 @@ export class MomentumAnalystAgent {
 
             console.log(`[MomentumAnalyst] AI에게 100만 컨텍스트 메가 프롬프트 전송 시작... (Tokens 대기 중)`);
             const response = await AiExecutionQueue.getInstance().enqueue({
-                taskType: 'MOMENTUM_ANALYST',
-                modelName: 'gemini-exp-1206', 
-                prompt: systemPrompt + '\n\n' + promptContext,
-                temperature: 0.1
+                agentId: 'MOMENTUM_ANALYST',
+                agentName: '수급/모멘텀 분석기',
+                triggerType: 'CRON',
+                targetType: 'gemini',
+                prompt: promptContext,
+                systemInstruction: systemPrompt,
+                customModel: 'gemini-exp-1206'
             });
 
             const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/);

@@ -1047,6 +1047,35 @@ export class DatabaseService {
         // [HOTFIX] SQLite의 문자열 정렬(DESC) 시 '오전/오후' 한글 문자열로 인해 정렬 오작동이 발생했음.
         // 이를 수정하기 위해 이전 포맷을 사용한 로그들을 삭제하여 테이블 포맷을 초기화합니다.
         try { this.db.exec("DELETE FROM ai_execution_logs WHERE queuedAt LIKE '% %';"); } catch { }
+
+        // ═══ P3-1: Incubator (Pool B) ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS maiis_incubator (
+                id TEXT PRIMARY KEY,                     -- 'INC-{stock_code}'
+                stock_code TEXT NOT NULL UNIQUE,
+                stock_name TEXT NOT NULL,
+                source TEXT NOT NULL,                   -- 'THEME_AI'|'MARKET_LEADER'|'FUNDAMENTAL'|'PORTFOLIO_DEMOTED'|'MANUAL'
+                source_context TEXT,                    -- 입수 당시 사유 (AI 분석 근거)
+                entry_date TEXT NOT NULL,               -- 인큐베이터 편입일
+                entry_price REAL DEFAULT 0,             -- 편입 시점 가격
+                current_price REAL DEFAULT 0,
+                neglect_score INTEGER DEFAULT 0,        -- 소외 지수 0~100 (높을수록 과열 대기)
+                volume_ratio REAL DEFAULT 1.0,          -- 최근 거래량 / 20일 평균 거래량
+                ma60_disparity REAL DEFAULT 0,          -- MA60 대비 이격도 (%)
+                investor_flow TEXT,                     -- 외인/기관 순매수 동향 텍스트
+                last_catalyst TEXT,                     -- 마지막 뉴스 촉매
+                catalyst_date TEXT,
+                status TEXT DEFAULT 'WATCHING',         -- WATCHING|READY_TO_IGNITE|GRADUATED|DROPPED
+                ai_evaluation TEXT,                     -- AI 판단 근거
+                days_watched INTEGER DEFAULT 0,
+                demotion_count INTEGER DEFAULT 0,       -- Pool A에서 강등된 횟수
+                original_portfolio_id INTEGER,          -- 강등 시 원본 maiis_portfolio id
+                updated_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+        `);
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_incubator_status ON maiis_incubator(status);");
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_incubator_score  ON maiis_incubator(neglect_score DESC);");
     }
 
 
@@ -1074,37 +1103,147 @@ export class DatabaseService {
         }
     }
 
-    public saveAiExecutionLog(log: any) {
-        const stmt = this.db.prepare(`
-            INSERT OR REPLACE INTO ai_execution_logs 
-            (id, agentId, agentName, triggerType, targetType, status, queuedAt, startedAt, finishedAt, durationMs, error, prompt, systemInstruction, result)
-            VALUES (@id, @agentId, @agentName, @triggerType, @targetType, @status, @queuedAt, @startedAt, @finishedAt, @durationMs, @error, @prompt, @systemInstruction, @result)
-        `)
-        stmt.run({
-            id: log.id,
-            agentId: log.agentId,
-            agentName: log.agentName,
-            triggerType: log.triggerType,
-            targetType: log.targetType,
-            status: log.status,
-            queuedAt: log.queuedAt,
-            startedAt: log.startedAt || null,
-            finishedAt: log.finishedAt || null,
-            durationMs: log.durationMs || null,
-            error: log.error || null,
-            prompt: log.prompt || null,
-            systemInstruction: log.systemInstruction || null,
-            result: log.result || null,
-        })
+    // ═══════════════════════════════════════════════════
+    // P3-1: maiis_incubator CRUD
+    // ═══════════════════════════════════════════════════
+
+    /** 인큐베이터에 종목 추가 또는 갱신. stock_code가 unique key. */
+    public upsertIncubator(item: {
+        stock_code: string;
+        stock_name: string;
+        source: string;
+        source_context?: string;
+        entry_price?: number;
+        original_portfolio_id?: number;
+    }): void {
+        const now = this.getKstTimestamp();
+        const today = this.getKstDate();
+        const id = `INC-${item.stock_code}`;
+        const existing = this.db.prepare('SELECT id, demotion_count FROM maiis_incubator WHERE stock_code = ?').get(item.stock_code) as any;
+
+        if (existing) {
+            // 이미 존재하면 source_context와 demotion_count만 갱신
+            const demotionCount = (item.source === 'PORTFOLIO_DEMOTED') ? (existing.demotion_count + 1) : existing.demotion_count;
+            this.db.prepare(`
+                UPDATE maiis_incubator
+                SET source = @source, source_context = @source_context,
+                    status = 'WATCHING', neglect_score = 0,
+                    demotion_count = @demotion_count,
+                    original_portfolio_id = COALESCE(@original_portfolio_id, original_portfolio_id),
+                    updated_at = @updated_at
+                WHERE stock_code = @stock_code
+            `).run({
+                source: item.source,
+                source_context: item.source_context || null,
+                demotion_count: demotionCount,
+                original_portfolio_id: item.original_portfolio_id || null,
+                updated_at: now,
+                stock_code: item.stock_code
+            });
+            console.log(`[Incubator] ♻️  기존 인큐베이터 종목 재편입: ${item.stock_name} (강등 누적: ${demotionCount}회)`);
+        } else {
+            this.db.prepare(`
+                INSERT INTO maiis_incubator
+                (id, stock_code, stock_name, source, source_context, entry_date, entry_price,
+                 status, days_watched, demotion_count, original_portfolio_id, updated_at, created_at)
+                VALUES
+                (@id, @stock_code, @stock_name, @source, @source_context, @entry_date, @entry_price,
+                 'WATCHING', 0, @demotion_count, @original_portfolio_id, @updated_at, @created_at)
+            `).run({
+                id,
+                stock_code: item.stock_code,
+                stock_name: item.stock_name,
+                source: item.source,
+                source_context: item.source_context || null,
+                entry_date: today,
+                entry_price: item.entry_price || 0,
+                demotion_count: item.source === 'PORTFOLIO_DEMOTED' ? 1 : 0,
+                original_portfolio_id: item.original_portfolio_id || null,
+                updated_at: now,
+                created_at: now
+            });
+            console.log(`[Incubator] 🧪 신규 인큐베이터 편입: ${item.stock_name} (출처: ${item.source})`);
+        }
     }
 
-    public getAiExecutionLogs(limit: number = 200) {
+    /** 인큐베이터 전체 목록 조회 */
+    public getIncubatorList(status?: string): any[] {
+        if (status) {
+            return this.db.prepare('SELECT * FROM maiis_incubator WHERE status = ? ORDER BY neglect_score DESC').all(status) as any[];
+        }
         return this.db.prepare(`
-            SELECT * FROM ai_execution_logs 
-            ORDER BY queuedAt DESC 
-            LIMIT ?
-        `).all(limit)
+            SELECT * FROM maiis_incubator
+            WHERE status NOT IN ('GRADUATED', 'DROPPED')
+            ORDER BY neglect_score DESC, days_watched DESC
+        `).all() as any[];
     }
+
+    /** 개별 종목 조회 */
+    public getIncubatorByCode(stock_code: string): any | null {
+        return this.db.prepare('SELECT * FROM maiis_incubator WHERE stock_code = ?').get(stock_code) as any;
+    }
+
+    /** neglect_score 및 기술적 지표 일괄 갱신 (P3-3 스캔 엔진에서 호출) */
+    public updateIncubatorScore(stock_code: string, data: {
+        current_price: number;
+        neglect_score: number;
+        volume_ratio: number;
+        ma60_disparity: number;
+        investor_flow?: string;
+        last_catalyst?: string;
+        catalyst_date?: string;
+    }): void {
+        const now = this.getKstTimestamp();
+        this.db.prepare(`
+            UPDATE maiis_incubator
+            SET current_price    = @current_price,
+                neglect_score    = @neglect_score,
+                volume_ratio     = @volume_ratio,
+                ma60_disparity   = @ma60_disparity,
+                investor_flow    = COALESCE(@investor_flow, investor_flow),
+                last_catalyst    = COALESCE(@last_catalyst, last_catalyst),
+                catalyst_date    = COALESCE(@catalyst_date, catalyst_date),
+                days_watched     = days_watched + 1,
+                updated_at       = @updated_at
+            WHERE stock_code = @stock_code
+        `).run({ ...data, investor_flow: data.investor_flow || null, last_catalyst: data.last_catalyst || null, catalyst_date: data.catalyst_date || null, updated_at: now, stock_code });
+    }
+
+    /** 상태 변경 (WATCHING → READY_TO_IGNITE → GRADUATED / DROPPED) */
+    public updateIncubatorStatus(stock_code: string, status: string, ai_evaluation?: string): void {
+        const now = this.getKstTimestamp();
+        this.db.prepare(`
+            UPDATE maiis_incubator
+            SET status = @status,
+                ai_evaluation = COALESCE(@ai_evaluation, ai_evaluation),
+                updated_at = @updated_at
+            WHERE stock_code = @stock_code
+        `).run({ status, ai_evaluation: ai_evaluation || null, updated_at: now, stock_code });
+    }
+
+    /** IGNITE 완료 처리 (Pool A로 졸업) */
+    public graduateIncubator(stock_code: string): void {
+        this.updateIncubatorStatus(stock_code, 'GRADUATED', '✅ IGNITE → Pool A 승격');
+    }
+
+    /** Pool A DROP 시 인큐베이터로 자동 이관 (P3-6에서 호출) */
+    public demoteToIncubator(portfolioItem: {
+        stock_code: string;
+        stock_name: string;
+        current_price: number;
+        last_signal_reason?: string;
+        id?: number;
+    }): void {
+        this.upsertIncubator({
+            stock_code: portfolioItem.stock_code,
+            stock_name: portfolioItem.stock_name,
+            source: 'PORTFOLIO_DEMOTED',
+            source_context: portfolioItem.last_signal_reason || 'PM DROP 후 테마 생존 감지',
+            entry_price: portfolioItem.current_price,
+            original_portfolio_id: portfolioItem.id
+        });
+    }
+
 
     public insertCorpCodes(codes: { corp_code: string, corp_name: string, stock_code: string, modify_date: string }[]) {
         const stmt = this.db.prepare(`
@@ -1821,11 +1960,15 @@ export class DatabaseService {
     }
 
     public getActivePortfolio() {
-        return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status != 'DROPPED' ORDER BY conviction_score DESC").all();
+        return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status NOT IN ('DROPPED', 'HIT') ORDER BY conviction_score DESC").all();
+    }
+
+    public getPortfolioHistory() {
+        return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status IN ('DROPPED', 'HIT') ORDER BY updated_at DESC LIMIT 100").all();
     }
 
     public getPortfolioStocksCount() {
-        const row = this.db.prepare("SELECT COUNT(*) as cnt FROM maiis_portfolio WHERE status != 'DROPPED'").get() as any;
+        const row = this.db.prepare("SELECT COUNT(*) as cnt FROM maiis_portfolio WHERE status NOT IN ('DROPPED', 'HIT')").get() as any;
         return row ? row.cnt : 0;
     }
 

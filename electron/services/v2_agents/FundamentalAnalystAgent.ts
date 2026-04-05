@@ -1,6 +1,44 @@
 import { AiExecutionQueue } from '../AiExecutionQueue';
 import { DatabaseService } from '../DatabaseService';
 
+/**
+ * AI가 생성한 종목명으로 stocks_master를 검색, 실제 종목코드를 반환합니다.
+ * 1차: 완전 일치 / 2차: 정규화 후 일치(주식회사·Inc 등 제거) / 3차: 부분 문자열 포함
+ * 모두 실패 시 null 반환 → 해당 pick 제거
+ */
+function resolveStockCode(db: DatabaseService, aiName: string, aiCode: string): { stock_code: string; stock_name: string } | null {
+    const rawDb = (db as any).db;
+
+    // 1차: AI가 준 코드가 6자리 숫자이고 실제 존재하면 그대로 사용
+    if (/^\d{6}$/.test(aiCode)) {
+        const byCode = rawDb.prepare('SELECT stock_code, stock_name FROM stocks_master WHERE stock_code = ?').get(aiCode);
+        if (byCode) return byCode;
+    }
+
+    // 2차: 종목명 완전 일치
+    const exact = rawDb.prepare('SELECT stock_code, stock_name FROM stocks_master WHERE stock_name = ?').get(aiName);
+    if (exact) return exact;
+
+    // 3차: 정규화 (주식회사, (주), Inc, Corp 등 제거 후 일치)
+    const normalized = aiName
+        .replace(/(주식회사|\(주\)|\(코스닥\)|\(코스피\)|Inc\.?|Corp\.?|Co\.?)/gi, '')
+        .trim();
+    if (normalized.length >= 2) {
+        const normMatch = rawDb.prepare('SELECT stock_code, stock_name FROM stocks_master WHERE stock_name = ?').get(normalized);
+        if (normMatch) return normMatch;
+    }
+
+    // 4차: 부분 문자열 포함 (LIKE) — 가장 짧은 종목명 우선 (오탐 최소화)
+    if (normalized.length >= 2) {
+        const likeMatches = rawDb.prepare(
+            'SELECT stock_code, stock_name FROM stocks_master WHERE stock_name LIKE ? ORDER BY LENGTH(stock_name) ASC LIMIT 1'
+        ).get(`%${normalized}%`);
+        if (likeMatches) return likeMatches;
+    }
+
+    return null;
+}
+
 export class FundamentalAnalystAgent {
     private static instance: FundamentalAnalystAgent;
     private db: DatabaseService;
@@ -69,24 +107,45 @@ export class FundamentalAnalystAgent {
                 promptContext += `\n`;
             }
 
-            const systemPrompt = `너는 여의도의 최고참 프랍 트레이더이자 리서치 센터장이다.
-아래는 오늘 발간된 각종 산업 및 기업 리포트의 주요 내용(제목과 스니펫)이다. 
-단순 동향이나 '시장 예상치 부합', '유지(HOLD)' 사인의 브리핑성 리포트는 전부 다 걸러내라.
-오직 '구조적 증익', '영업 이익 턴어라운드', '시장 예상 밖 수주 대박', '목표주가 대폭 상향' 과 같이 폭발력이 가장 강한 종목만 찾아내라. 리포트 제목과 내용을 보면 이 리포트가 어떤 개별 종목을 대상으로 썼는지 유추할 수 있다.
+            // ─── [NEW] 당일 기업 실적/수주 속보 뉴스 필터링 ───
+            const filteredNewsRows = rawDb.prepare(`
+                SELECT title, source, body_snippet 
+                FROM naver_news_flow 
+                WHERE date = ? AND category = 'STOCK_ANALYSIS'
+            `).all(dateStr) as any[];
 
-[펀더멘털 선별 원칙]
-1. 단순 매크로/경제 시황 분석 문서는 버린다. (종목 유추 불가 시 버림)
-2. 가장 호평받고, 1달 내에 +15% 상승 논리가 명백한 찐 실적(펀더멘털) 가치주를 최대 3개 선별하라.
-3. 어떤 종목명인지 제목이나 요약에서 유추할 수 있어야 한다. 만약 개별 기업 리포트가 아니면 제외하라.
+            const targetKeywords = /실적|영업이익|흑자|수주|공급계약|임상|수출|FDA|사상 최대|어닝/i;
+            const coreNews = filteredNewsRows.filter((n: any) => targetKeywords.test(n.title) || targetKeywords.test(n.body_snippet));
+
+            let newsContext = `[당일 기업 실적/수주 속보 뉴스]\n\n`;
+            if (coreNews.length === 0) {
+                newsContext += `오늘은 주목할 만한 실적/수주 뉴스가 없습니다.\n`;
+            } else {
+                coreNews.slice(0, 15).forEach((n: any, idx: number) => {
+                    newsContext += `**${idx + 1}. ${n.title}** (${n.source})\n> ${n.body_snippet}\n\n`;
+                });
+            }
+            promptContext += `\n\n` + newsContext;
+
+            const systemPrompt = `너는 여의도의 최고참 프랍 트레이더이자 리서치 센터장이다.
+오늘 수집된 두 가지 펀더멘털 소스(증권사 리포트 요약본과 핵심 실적/수주 뉴스)를 모두 분석하라.
+단순 동향, '유지(HOLD)', 무의미한 사업 협약 등의 브리핑은 걸러내고, 가장 폭발력이 강한 진짜 가치주를 선별한다.
+
+[2-Track 선별 원칙]
+너는 다음 두 가지 트랙에서 각각 가장 유망한 종목을 최대 3개씩 선별한다 (총 6개 이하).
+트랙 A (증권사 리포트): '구조적 증익', '어닝 서프라이즈 전망', '목표주가 30% 이상 상향' 등 펀더멘털 리레이팅이 명백한 종목
+트랙 B (실적/수주 뉴스): '대규모 수주 공시', '흑자 전환', '사상 최대 영업이익' 등 즉각적이고 폭발적인 매출 발생 속보가 뜬 종목
+
+어떤 종목명인지 제목이나 요약에서 정확히 유추할 수 있어야 한다.
 
 결과물은 오직 JSON으로만 반환하라.
 \`\`\`json
 {
     "picks": [
         {
-            "stock_code": "해당 종목의 6자리 숫자 코드 (검색이 불가능하면 000000으로 기입)",
-            "stock_name": "유추된 기업명",
-            "reason": "테마가 아닌 오직 리포트의 펀더멘털, 밸류에이션 리레이팅 관점에서의 추천 논리 (ex. 1분기 어닝 서프라이즈 확실시, 목표주가 66,000원으로 40% 상향 조정 등)",
+            "stock_code": "000000",
+            "stock_name": "리포트나 뉴스에서 유추한 정확한 상장 기업명",
+            "reason": "[리포트] 1분기 어닝 서프라이즈 확실시, 목표주가 40% 상향됨 OR [어닝공시] 400억 규모 공급계약 체결로 흑자전환 확정",
             "confidence": 90,
             "lifespan_days": 20
         }
@@ -95,32 +154,48 @@ export class FundamentalAnalystAgent {
 \`\`\``;
 
             const response = await AiExecutionQueue.getInstance().enqueue({
-                taskType: 'FUNDAMENTAL_ANALYST',
-                modelName: 'gemini-exp-1206',
-                prompt: systemPrompt + '\n\n' + promptContext,
-                temperature: 0.1
+                agentId: 'FUNDAMENTAL_ANALYST',
+                agentName: '펀더멘탈 AI',
+                triggerType: 'CRON',
+                targetType: 'gemini',
+                prompt: promptContext,
+                systemInstruction: systemPrompt
             });
 
             const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/);
             if (jsonMatch && jsonMatch[1]) {
                 const parsed = JSON.parse(jsonMatch[1]);
                 if (parsed.picks && Array.isArray(parsed.picks)) {
-                    let mappedPicks = parsed.picks.map((p: any) => ({
-                        date: dateStr,
-                        agent_type: 'REPORT',
-                        stock_code: p.stock_code,
-                        stock_name: p.stock_name,
-                        reason: p.reason,
-                        confidence: p.confidence,
-                        lifespan_days: p.lifespan_days || 20,
-                        created_at: this.db.getKstTimestamp()
-                    }));
-
-                    if (mappedPicks.length > 0) {
-                        this.db.saveAiAnalystPicks(mappedPicks);
-                        console.log(`[FundamentalAnalyst] ✅ ${mappedPicks.length}개 펀더멘털/리포트 종목 추천 완료.`);
+                    // ── 종목코드 검증 및 교체 (핵심 후처리) ──
+                    const resolvedPicks: any[] = [];
+                    for (const p of parsed.picks) {
+                        const resolved = resolveStockCode(this.db, p.stock_name, p.stock_code);
+                        if (!resolved) {
+                            console.warn(`[FundamentalAnalyst] ⚠️ 종목코드 매칭 실패, 제외: "${p.stock_name}" (AI코드: ${p.stock_code})`);
+                            continue; // 매칭 실패 종목은 evalPool에 넣지 않음
+                        }
+                        if (resolved.stock_code !== p.stock_code) {
+                            console.log(`[FundamentalAnalyst] 🔧 종목코드 교정: "${p.stock_name}" ${p.stock_code} → ${resolved.stock_code} (${resolved.stock_name})`);
+                        }
+                        resolvedPicks.push({
+                            date: dateStr,
+                            agent_type: 'REPORT',
+                            stock_code: resolved.stock_code,
+                            stock_name: resolved.stock_name, // DB의 공식 종목명으로 교체
+                            reason: p.reason,
+                            confidence: p.confidence,
+                            lifespan_days: p.lifespan_days || 20,
+                            created_at: this.db.getKstTimestamp()
+                        });
                     }
-                    return mappedPicks;
+
+                    if (resolvedPicks.length > 0) {
+                        this.db.saveAiAnalystPicks(resolvedPicks);
+                        console.log(`[FundamentalAnalyst] ✅ ${resolvedPicks.length}개 펀더멘털/리포트 종목 추천 완료 (총 ${parsed.picks.length}개 중 코드 검증 통과).`);
+                    } else {
+                        console.warn(`[FundamentalAnalyst] ⚠️ 모든 AI 추천 종목이 종목코드 검증 실패로 제외됨.`);
+                    }
+                    return resolvedPicks;
                 }
             }
 

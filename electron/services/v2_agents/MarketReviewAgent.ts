@@ -79,7 +79,7 @@ export class MarketReviewAgent {
      * Option 2: Post-Market 일간 회고 AI (15:40 실행)
      * 오늘 하루 전체(Cycle A, B) 결과를 요약하여 Daily Retrospective 저장
      */
-    public async runDailyReview(): Promise<AgentRetrospective> {
+    public async runDailyReview(): Promise<AgentRetrospective | null> {
         const rawDb = (this.db as any).db;
         const dateStr = this.db.getKstDate();
         
@@ -90,8 +90,10 @@ export class MarketReviewAgent {
             ORDER BY cycle ASC
         `).all(dateStr) as any[];
 
+        // [FIX] throw 대신 graceful skip — MCA가 미실행된 날에도 크론이 정상 종료되도록
         if (rows.length === 0) {
-            throw new Error("일간 회고를 위한 오늘 예측 데이터가 없습니다.");
+            console.log(`[MarketReview] ⚠️ ${dateStr} 시황AI 예측 데이터 없음. 일간 회고 건너뜀.`);
+            return null;
         }
 
         let logText = `[오늘(${dateStr}) 하루 동안의 AI 판단 내역]\n\n`;
@@ -114,20 +116,35 @@ export class MarketReviewAgent {
 
         const userPrompt = `다음은 오늘 하루 동안 기록된 매매 예측 로그입니다.\n\n${logText}\n\n위 데이터를 바탕으로 <일간 회고 리포트>를 마크다운 텍스트로 즉시 작성하라. (JSON 금지)`;
 
-        console.log('[MarketReview] 일간 회고(Daily Retro) 로컬 프롬프트 전송 중...');
+        console.log('[MarketReview] 일간 회고(Daily Retro) 프롬프트 전송 중...');
         let reportMarkdown = "분석 실패";
         try {
+            // [FIX] 1차: 로컬AI 시도
             reportMarkdown = await AiExecutionQueue.getInstance().enqueue({
                 agentId: 'MRA_DAILY_RETRO',
                 agentName: '회고 AI (일간)',
                 triggerType: 'CRON',
-                targetType: 'local', // 로컬 AI 호출
+                targetType: 'local',
                 prompt: userPrompt,
                 systemInstruction: systemPrompt,
             });
         } catch(e: any) {
-            console.error('[MarketReview] 일간 회고 생성 에러:', e.message);
-            reportMarkdown = "일간 회고 생성 실패: " + e.message;
+            console.warn('[MarketReview] 로컬AI 일간 회고 실패, Gemini로 fallback 시도:', e.message);
+            try {
+                // [FIX] 2차: Gemini fallback — 로컬AI 꺼져 있어도 회고 생성 보장
+                reportMarkdown = await AiExecutionQueue.getInstance().enqueue({
+                    agentId: 'MRA_DAILY_RETRO',
+                    agentName: '회고 AI (일간/Fallback)',
+                    triggerType: 'CRON',
+                    targetType: 'gemini',
+                    prompt: userPrompt,
+                    systemInstruction: systemPrompt,
+                });
+                console.log('[MarketReview] ✅ Gemini fallback 일간 회고 성공');
+            } catch(e2: any) {
+                console.error('[MarketReview] ❌ 일간 회고 Gemini fallback도 실패:', e2.message);
+                reportMarkdown = `일간 회고 생성 실패 (로컬+Gemini 모두 실패): ${e2.message}`;
+            }
         }
 
         return this.saveRetrospective('DAILY', dateStr, reportMarkdown.trim());
@@ -193,13 +210,21 @@ export class MarketReviewAgent {
         const userPrompt = `다음은 지난 5일간의 오전 매매 예측 기록입니다.\n\n${logText}\n\n위 데이터를 바탕으로 이번 주 주간 회고 리포트와 새로운 시스템 룰을 JSON으로 작성하세요.`;
 
         console.log('[MarketReview] 주간 회고 프롬프트 전송 중...');
-        const rawResponse = await AiExecutionQueue.getInstance().enqueue({
-            agentId: 'MRA',
-            agentName: '회고 AI (주간)',
-            triggerType: 'MANUAL',
-            prompt: userPrompt,
-            systemInstruction: systemPrompt,
-        });
+        // [FIX] triggerType MANUAL→CRON (AI 큐 우선순위 최상위 보장), try/catch 추가
+        let rawResponse = '분석 실패';
+        try {
+            rawResponse = await AiExecutionQueue.getInstance().enqueue({
+                agentId: 'MRA_WEEKLY',
+                agentName: '회고 AI (주간)',
+                triggerType: 'CRON',
+                targetType: 'gemini',
+                prompt: userPrompt,
+                systemInstruction: systemPrompt,
+            });
+        } catch(e: any) {
+            console.error('[MarketReview] ❌ 주간 회고 Gemini 호출 실패:', e.message);
+            return this.saveRetrospective('WEEKLY', targetPeriod, `주간 회고 생성 실패: ${e.message}`);
+        }
 
         let reportMarkdown = "분석 실패"
         let newRules: string[] = []
@@ -270,13 +295,21 @@ export class MarketReviewAgent {
         const userPrompt = `아래 4주 치의 주간 회고를 종합하여 ${targetPeriod} 월간 리캡과 새로운 시스템 룰을 JSON으로 작성해라.\n\n${logText}`;
 
         console.log('[MarketReview] 월간 회고 프롬프트 전송 중...');
-        const rawResponse = await AiExecutionQueue.getInstance().enqueue({
-            agentId: 'MRA',
-            agentName: '회고 AI (월간)',
-            triggerType: 'MANUAL',
-            prompt: userPrompt,
-            systemInstruction: systemPrompt,
-        });
+        // [FIX] triggerType MANUAL→CRON (AI 큐 우선순위 최상위 보장), try/catch 추가
+        let rawResponse = '분석 실패';
+        try {
+            rawResponse = await AiExecutionQueue.getInstance().enqueue({
+                agentId: 'MRA_MONTHLY',
+                agentName: '회고 AI (월간)',
+                triggerType: 'CRON',
+                targetType: 'gemini',
+                prompt: userPrompt,
+                systemInstruction: systemPrompt,
+            });
+        } catch(e: any) {
+            console.error('[MarketReview] ❌ 월간 회고 Gemini 호출 실패:', e.message);
+            return this.saveRetrospective('MONTHLY', targetPeriod, `월간 회고 생성 실패: ${e.message}`);
+        }
 
         let reportMarkdown = "분석 실패"
         let newRules: string[] = []

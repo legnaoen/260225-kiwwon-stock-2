@@ -492,6 +492,15 @@ ipcMain.handle('ai-analyst:get-portfolio-active', async () => {
     }
 });
 
+ipcMain.handle('ai-analyst:get-portfolio-history', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getPortfolioHistory();
+    } catch (e: any) {
+        return { error: e.message };
+    }
+});
+
 ipcMain.handle('ai-analyst:get-picks', async () => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService');
@@ -526,6 +535,55 @@ ipcMain.handle('ai-analyst:clear-picks', async () => {
     } catch (e: any) {
         console.error('[Main] clear-picks 오류:', e);
         return { error: e.message };
+    }
+});
+
+// ─── P4: 인큐베이터 IPC 핸들러 (강제 재빌드 터치 v2) ────────────────────────────────
+console.log('[Main] Registering Incubator IPC handlers...');
+ipcMain.handle('incubator:get-list', async (_event, status?: string) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const list = DatabaseService.getInstance().getIncubatorList(status);
+        console.log('[Main] incubator:get-list called, count:', list.length);
+        return { success: true, data: list };
+    } catch (e: any) {
+        console.error('[Main] incubator:get-list error:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('incubator:update-status', async (_event, { stock_code, status, reason }: any) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        DatabaseService.getInstance().updateIncubatorStatus(stock_code, status, reason);
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('incubator:run-scan', async () => {
+    try {
+        const { IncubatorScanEngine } = await import('./services/v2_agents/IncubatorScanEngine');
+        await IncubatorScanEngine.getInstance().runDailyScan();
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('incubator:add-manual', async (_event, { stock_code, stock_name, reason }: any) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        DatabaseService.getInstance().upsertIncubator({
+            stock_code,
+            stock_name,
+            source: 'MANUAL',
+            source_context: reason || '수동 등록'
+        });
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
     }
 });
 

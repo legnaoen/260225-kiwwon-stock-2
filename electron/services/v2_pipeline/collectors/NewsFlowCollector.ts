@@ -34,8 +34,8 @@ export class NewsFlowCollector implements IBaseCollector {
                 url: 'https://m.stock.naver.com/front-api/news/worldnews?pageSize=20&page=1'
             },
             {
-                category: 'STOCK_ANALYSIS', // 뉴스포커스 > 기업·종목분석
-                url: `https://stock.naver.com/api/domestic/news/focus?sid=402&page=1&pageSize=15&date=${todayStr}&enableFallback=true`
+                category: 'STOCK_ANALYSIS', // 뉴스포커스 > 기업·종목분석 (50건 수집 후 펀더멘탈AI에서 필수 키워드 필터링)
+                url: `https://stock.naver.com/api/domestic/news/focus?sid=402&page=1&pageSize=50&date=${todayStr}&enableFallback=true`
             },
             {
                 category: 'GLOBAL_MARKET', // 뉴스포커스 > 해외증시

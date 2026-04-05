@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Bot, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Timer, RefreshCw, Radio, Activity, ChevronRight, Copy } from 'lucide-react'
+import { Bot, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Timer, RefreshCw, Radio, Activity, ChevronRight, Copy, ScrollText } from 'lucide-react'
 
 // ═══ 에이전트 레지스트리 (프론트엔드 상수) ═══
 const AI_AGENTS = [
@@ -76,6 +76,54 @@ const AI_AGENTS = [
         schedules: [
             { time: '09:40', label: '오전 주도테마 요약', description: '09:40 정규 수집 시 연계 분석' },
             { time: '15:45', label: '장마감 메가트렌드 요약', description: '15:45 최종 수집 시 연계 분석' },
+        ],
+    },
+    {
+        id: 'MOMENTUM_ANALYST', name: '수급/모멘텀 분석기', fullName: 'Momentum Analyst',
+        description: '급등주 및 시장 주도주의 실시간 외인/기관 수급과 뉴스를 분석하여 단기 진입 타점을 포착합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '09:35', label: '주도주 수급 스캔', description: '키움 실시간 Top 30 + 외인/기관 수급 교차 분석' },
+        ],
+    },
+    {
+        id: 'FUNDAMENTAL_ANALYST', name: '리포트/펀더멘털 분석기', fullName: 'Fundamental Analyst',
+        description: '매일 발행되는 리서치와 실적 속보를 분석해 구조적 증익주를 선별합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '09:40', label: '핵심 실적/리포트 진단', description: '증권사 리서치 내용 및 실적 뉴스 필터링' },
+        ],
+    },
+    {
+        id: 'PULLBACK_SCANNER', name: '눌림목 스캐너', fullName: 'Pullback Scanner',
+        description: 'Alpha 상위 주도주 중 거래량을 소화하며 합리적 조정(MA20 지지)을 받는 종목을 스나이핑합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '09:42', label: '주도주 눌림목 탐색', description: '10일 누적 Alpha 상위 종목 차트 교차 분석' },
+        ],
+    },
+    {
+        id: 'PORTFOLIO_MANAGER', name: '포트폴리오 매니저', fullName: 'Portfolio Manager',
+        description: '서브 AI들의 리포트를 종합하여 보유 포지션을 재평가하고 최종 포트폴리오 편입/방출을 지시합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '09:45', label: '포트폴리오 종합 심사', description: '서브 AI + 인큐베이터 편입 후보 종합 리뷰 (IMMEDIATE_BUY 확정)' },
+        ],
+    },
+    {
+        id: 'PORTFOLIO_JUDGE', name: '장마감 포트폴리오 심판', fullName: 'Portfolio Judge Scheduler',
+        description: '장 마감 후 종가 기준으로 당일 포트폴리오의 생존 여부와 전략 수명을 엄격하게 채점합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '15:41', label: '포트폴리오 일일 마감 채점', description: '차트 이격도/수명 및 누적 수익률 평가 (방출 판단)' },
+        ],
+    },
+    {
+        id: 'INCUBATOR', name: '인큐베이터 스캐너', fullName: 'Incubator Scan Engine',
+        description: 'MA200을 돌파한 장기 우상향 예비 후보들의 활력(Neglect Score)을 관리합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '16:30', label: '관심종목 활력도 갱신', description: '일일 활성도 감소분 차감 및 IGNITE 승급 평가' },
         ],
     },
 ] as const
@@ -206,8 +254,8 @@ export default function AiOrchestratorTab() {
 
     const filteredLog = selectedAgent
         ? executionLog.filter(e => e.agentId.startsWith(selectedAgent.id))
-        : executionLog
-
+        : executionLog // 'LOGS' 일 때도 전체 원본 사용
+        
     // 마지막 실행 조회
     const getLastRun = (agentId: string) => executionLog.find(e => e.agentId.startsWith(agentId))
 
@@ -265,13 +313,33 @@ export default function AiOrchestratorTab() {
                     >
                         <div className="flex-1 min-w-0">
                             <p className="text-base font-bold">
-                                전체 보기
+                                전체 스케줄
                             </p>
                             <p className="text-sm text-muted-foreground mt-0.5">
-                                {AI_AGENTS.length}개 에이전트 · {AI_AGENTS.flatMap(a => a.schedules).length}개 스케줄
+                                {AI_AGENTS.length}개 에이전트
                             </p>
                         </div>
                         {selectedAgentId === null && <ChevronRight size={18} className="text-primary" />}
+                    </button>
+
+                    {/* AI LOGS 항목 */}
+                    <button
+                        onClick={() => setSelectedAgentId('LOGS')}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-colors font-medium border ${
+                            selectedAgentId === 'LOGS'
+                                ? 'bg-primary/10 border-primary/30 text-primary shadow-sm'
+                                : 'bg-transparent border-transparent hover:bg-muted text-foreground'
+                        }`}
+                    >
+                        <div className="flex-1 min-w-0">
+                            <p className="text-base font-bold flex items-center gap-2">
+                                AI 실행 로그
+                            </p>
+                            <p className="text-sm text-muted-foreground mt-0.5">
+                                전체 실행 이력 및 에러
+                            </p>
+                        </div>
+                        {selectedAgentId === 'LOGS' && <ChevronRight size={18} className="text-primary" />}
                     </button>
 
                     <div className="h-px bg-border my-2" />
@@ -345,10 +413,10 @@ export default function AiOrchestratorTab() {
                     <div className="flex items-center justify-between">
                         <div>
                             <h3 className="text-3xl font-extrabold tracking-tight text-foreground">
-                                {selectedAgent ? selectedAgent.name : '전체 AI 에이전트'}
+                                {selectedAgent ? selectedAgent.name : selectedAgentId === 'LOGS' ? 'AI 연합 실행 로그' : '전체 AI 스케줄'}
                             </h3>
                             <p className="text-base text-muted-foreground mt-2">
-                                {selectedAgent ? selectedAgent.description : `총 ${AI_AGENTS.length}개 에이전트의 크론 스케줄 및 실행 이력`}
+                                {selectedAgent ? selectedAgent.description : selectedAgentId === 'LOGS' ? '모든 에이전트의 상세 작업 처리 및 통신 결과 내역' : `총 ${AI_AGENTS.length}개 에이전트의 분산 스케줄 관제`}
                             </p>
                         </div>
                         {selectedAgent && (
@@ -385,140 +453,123 @@ export default function AiOrchestratorTab() {
                             </div>
                         </div>
                     )}
-
-                    {/* ═══ 크론 스케줄 섹션 ═══ */}
-                    <section className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-                        <div className="px-6 py-5 border-b border-border flex items-center justify-between bg-muted/30">
-                            <h4 className="text-lg font-bold flex items-center gap-2 text-foreground">
-                                <Clock size={20} className="text-primary" />
-                                정규 크론 스케줄
-                            </h4>
-                            <div className="flex items-center gap-3">
-                                {isWeekend && (
-                                    <span className="text-xs px-3 py-1 rounded-md bg-destructive/10 text-destructive font-bold border border-destructive/20">
-                                        {dayLabel}요일 (비활성)
-                                    </span>
-                                )}
-                                <span className="text-sm text-muted-foreground font-medium border border-border px-3 py-1 bg-background rounded-md">
-                                    총 {filteredSchedules.length}건
+                    {/* ═══ 예약 스케줄표 (로그 화면이 아닐 때만 표시) ═══ */}
+                    {selectedAgentId !== 'LOGS' && (
+                        <section className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+                            <div className="px-6 py-5 border-b border-border flex items-center justify-between bg-muted/30">
+                                <h4 className="text-lg font-bold flex items-center gap-2 text-foreground">
+                                    <Clock size={20} className="text-primary" />
+                                    에이전트 크론(CRON) 스케줄 정보
+                                </h4>
+                                <span className="text-sm text-muted-foreground font-medium bg-background border border-border px-3 py-1 rounded-md">
+                                    등록된 예약 {filteredSchedules.length}건
                                 </span>
                             </div>
-                        </div>
 
-                        {/* 주말 휴장 배너 */}
-                        {isWeekend && filteredSchedules.length > 0 && (
-                            <div className="mx-6 mt-6 p-4 rounded-xl bg-muted border border-border">
-                                <p className="text-sm font-bold text-foreground flex items-center gap-2">
-                                    <AlertCircle size={16} className="text-muted-foreground" />
-                                    주말 휴장으로 인한 스케줄 비활성 상태
-                                </p>
-                                <p className="text-sm text-muted-foreground mt-1">
-                                    모든 자동 예측 스케줄은 정규장이 열리는 평일(월~금)에만 동작합니다. 아래는 평일 기준 스케줄표입니다.
-                                </p>
-                            </div>
-                        )}
+                            {filteredSchedules.length === 0 ? (
+                                <div className="py-20 text-center text-muted-foreground">
+                                    <Clock size={48} className="mx-auto mb-4 opacity-20" />
+                                    <p className="text-base font-semibold text-foreground">등록된 스케줄이 없습니다</p>
+                                </div>
+                            ) : (
+                                <div className="divide-y divide-border/50">
+                                    {filteredSchedules.map((s, idx) => {
+                                        const hrStr = s.time.split(':')[0]
+                                        const minStr = s.time.split(':')[1]
+                                        const isPast = (parseInt(hrStr) * 100 + parseInt(minStr)) < (now.getHours() * 100 + now.getMinutes())
 
-                        {filteredSchedules.length === 0 ? (
-                            <div className="py-16 text-center text-muted-foreground">
-                                <Clock size={48} className="mx-auto mb-4 opacity-20" />
-                                <p className="text-base font-semibold text-foreground">등록된 스케줄이 없습니다</p>
-                                <p className="text-sm mt-2">해당 에이전트는 이벤트 또는 채팅 기반으로 동작합니다.</p>
-                            </div>
-                        ) : (
-                            <div className="divide-y divide-border">
-                                {filteredSchedules.map((s, i) => {
-                                    const isPast = !isWeekend && currentTimeStr > s.time
-                                    const isNext = !isWeekend && !isPast && (i === 0 || currentTimeStr > filteredSchedules[i - 1].time)
+                                        const nextScheduleIdx = filteredSchedules.findIndex(sched => {
+                                            const h = parseInt(sched.time.split(':')[0])
+                                            const m = parseInt(sched.time.split(':')[1])
+                                            return (h * 100 + m) >= (now.getHours() * 100 + now.getMinutes())
+                                        })
+                                        const isNext = idx === nextScheduleIdx
 
-                                    return (
-                                        <div
-                                            key={`${s.agentId}-${s.time}`}
-                                            className={`flex items-start gap-6 px-8 py-5 transition-colors ${
-                                                isWeekend ? 'opacity-50 grayscale' :
-                                                isNext ? 'bg-primary/5' : isPast ? 'opacity-60' : ''
-                                            }`}
-                                        >
-                                            <span className={`font-mono text-lg font-extrabold w-20 pt-0.5 ${
-                                                isNext ? 'text-primary' : isPast ? 'text-muted-foreground' : 'text-foreground'
-                                            }`}>
-                                                {s.time}
-                                            </span>
-
-                                            <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                                <div className="flex items-center gap-3">
-                                                    {!selectedAgent && (
-                                                        <span className="text-sm font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20">{s.agentName}</span>
-                                                    )}
-                                                    <span className={`text-base font-bold ${selectedAgent ? 'text-foreground' : 'text-muted-foreground'}`}>
-                                                        {s.label}
+                                        return (
+                                            <div key={`${s.agentId}-${s.time}-${idx}`} className={`flex gap-6 p-6 transition-colors hover:bg-muted/30 ${isNext ? 'bg-primary/5' : ''}`}>
+                                                <div className="shrink-0 w-24">
+                                                    <span className={`font-mono text-xl font-bold flex items-center gap-2 ${isPast ? 'text-muted-foreground opacity-50' : 'text-foreground'}`}>
+                                                        {s.time}
                                                     </span>
-                                                    {isNext && (
-                                                        <span className="text-xs font-bold text-primary bg-primary/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                                            Next Target
+                                                    {!selectedAgent && (
+                                                        <span className="block text-xs font-semibold text-muted-foreground mt-1 truncate">
+                                                            {s.agentName}
                                                         </span>
                                                     )}
                                                 </div>
-                                                {s.description && (
-                                                    <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">{s.description}</p>
-                                                )}
+
+                                                <div className="flex-1 mb-1">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className={`text-base font-bold ${selectedAgent ? 'text-foreground' : 'text-muted-foreground'}`}>
+                                                            {s.label}
+                                                        </span>
+                                                        {isNext && (
+                                                            <span className="text-xs font-bold text-primary bg-primary/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                                                Next Target
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {s.description && (
+                                                        <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">{s.description}</p>
+                                                    )}
+                                                </div>
+
+                                                <div className="shrink-0 pt-2">
+                                                    {isPast ? (
+                                                        <CheckCircle2 size={24} className="text-emerald-500" />
+                                                    ) : isNext ? (
+                                                        <Timer size={24} className="text-primary animate-pulse" />
+                                                    ) : (
+                                                        <div className="w-3 h-3 rounded-full bg-border" />
+                                                    )}
+                                                </div>
                                             </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </section>
+                    )}
 
-                                            <div className="shrink-0 pt-2">
-                                                {isPast ? (
-                                                    <CheckCircle2 size={24} className="text-emerald-500" />
-                                                ) : isNext ? (
-                                                    <Timer size={24} className="text-primary animate-pulse" />
-                                                ) : (
-                                                    <div className="w-3 h-3 rounded-full bg-border" />
-                                                )}
-                                            </div>
-                                        </div>
-                                    )
-                                })}
+                    {/* ═══ 실행 이력 섹션 (LOGS 메뉴이거나 특정 에이전트일 때만 표시) ═══ */}
+                    {(selectedAgentId === 'LOGS' || (selectedAgentId !== null)) && (
+                        <section className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500 mt-10">
+                            <div className="px-6 py-5 border-b border-border flex items-center justify-between bg-muted/30">
+                                <h4 className="text-lg font-bold flex items-center gap-2 text-foreground">
+                                    <Activity size={20} className="text-primary" />
+                                    {selectedAgentId === 'LOGS' ? '통합 작업 실행 이력' : '해당 에이전트 작업 이력'}
+                                </h4>
+                                <span className="text-sm text-muted-foreground font-medium bg-background border border-border px-3 py-1 rounded-md">
+                                    기록 {filteredLog.length}건
+                                </span>
                             </div>
-                        )}
-                    </section>
 
-                    {/* ═══ 실행 이력 섹션 ═══ */}
-                    <section className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-                        <div className="px-6 py-5 border-b border-border flex items-center justify-between bg-muted/30">
-                            <h4 className="text-lg font-bold flex items-center gap-2 text-foreground">
-                                <Activity size={20} className="text-primary" />
-                                작업 실행 이력
-                            </h4>
-                            <span className="text-sm text-muted-foreground font-medium bg-background border border-border px-3 py-1 rounded-md">
-                                기록 {filteredLog.length}건
-                            </span>
-                        </div>
-
-                        {filteredLog.length === 0 ? (
-                            <div className="py-20 text-center text-muted-foreground">
-                                <Activity size={48} className="mx-auto mb-4 opacity-20" />
-                                <p className="text-base font-semibold text-foreground">실행 기록이 없습니다</p>
-                                <p className="text-sm mt-2 opacity-80">AI 작업이 발생하면 이곳에 로깅됩니다.</p>
-                            </div>
-                        ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm">
-                                    <thead>
-                                        <tr className="border-b border-border bg-muted/50 text-muted-foreground">
-                                            <th className="text-left py-4 pl-8 font-semibold w-32">실행 시각</th>
-                                            {!selectedAgent && <th className="text-left py-4 font-semibold">동작 에이전트</th>}
-                                            <th className="text-left py-4 font-semibold w-24">요청 방식</th>
-                                            <th className="text-right py-4 font-semibold w-28">소요 시간</th>
-                                            <th className="text-center py-4 pr-8 font-semibold w-24">상태결과</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-border/50">
-                                        {filteredLog.map(entry => (
-                                            <tr key={entry.id} className="hover:bg-muted/30 transition-colors cursor-pointer" onClick={() => setSelectedLog(entry)}>
-                                                <td className="py-4 pl-8 font-mono text-muted-foreground whitespace-nowrap">
-                                                    {entry.startedAt ? entry.startedAt.split(' ').pop()?.replace(/:\d{2}$/, '') : '-'}
-                                                </td>
-                                                {!selectedAgent && (
+                            {filteredLog.length === 0 ? (
+                                <div className="py-20 text-center text-muted-foreground">
+                                    <Activity size={48} className="mx-auto mb-4 opacity-20" />
+                                    <p className="text-base font-semibold text-foreground">실행 기록이 없습니다</p>
+                                    <p className="text-sm mt-2 opacity-80">AI 작업이 발생하면 이곳에 로깅됩니다.</p>
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="border-b border-border bg-muted/50 text-muted-foreground">
+                                                <th className="text-left py-4 pl-8 font-semibold w-32">실행 시각</th>
+                                                <th className="text-left py-4 font-semibold">동작 에이전트</th>
+                                                <th className="text-left py-4 font-semibold w-24">요청 방식</th>
+                                                <th className="text-right py-4 font-semibold w-28">소요 시간</th>
+                                                <th className="text-center py-4 pr-8 font-semibold w-24">상태결과</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-border/50">
+                                            {filteredLog.map(entry => (
+                                                <tr key={entry.id} className="hover:bg-muted/30 transition-colors cursor-pointer" onClick={() => setSelectedLog(entry)}>
+                                                    <td className="py-4 pl-8 font-mono text-muted-foreground whitespace-nowrap">
+                                                        {entry.startedAt ? entry.startedAt.split(' ').pop()?.replace(/:\d{2}$/, '') : '-'}
+                                                    </td>
                                                     <td className="py-4 font-semibold text-foreground">{entry.agentName}</td>
-                                                )}
-                                                <td className="py-4">
+                                                    <td className="py-4">
                                                     <span className={`px-2 py-1 rounded-md border text-xs font-bold ${TRIGGER_BADGES[entry.triggerType]?.className || 'bg-muted text-muted-foreground border-border'}`}>
                                                         {TRIGGER_BADGES[entry.triggerType]?.label || entry.triggerType}
                                                     </span>

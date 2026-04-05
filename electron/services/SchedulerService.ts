@@ -82,12 +82,18 @@ export class SchedulerService {
                 await MarketConditionAgent.getInstance().runPrediction('B')
             }, { timezone: 'Asia/Seoul' })
 
-            // PerformanceTracker \uae30\ub85d\uc6a9 (15:35 T+1 / T+5 / T+20) + \uc7a5\uc911 \uc778\ud2b8\ub77c\ub370\uc774 \ud3c9\uac00
+            // PerformanceTracker 기록용 (15:35 T+1 / T+5 / T+20) + 장중 인트라데이 평가
             const mcaTrackerJob = cron.schedule('35 15 * * 1-5', async () => {
-                const { PerformanceTracker } = await import('./v2_agents/PerformanceTracker')
-                const tracker = PerformanceTracker.getInstance()
-                await tracker.runDailyTracking()
-                await tracker.evaluateIntraday()  // \uc7a5\uc911 \uc608\uce21 \uc885\uac00 \ub300\ube44 \ud3c9\uac00
+                try {
+                    const { PerformanceTracker } = await import('./v2_agents/PerformanceTracker')
+                    const tracker = PerformanceTracker.getInstance()
+                    await tracker.runDailyTracking()
+                    await tracker.evaluateIntraday()
+                    this.telegram.sendMessage(`✅ [15:35] 성과 추적 완료\nT+1/T+5/T+20 수익률 집계 및 장중 예측 평가 정상 완료`)
+                } catch (e: any) {
+                    console.error('[Scheduler] 성과추적 오류:', e.message)
+                    this.telegram.sendMessage(`❌ [15:35] 성과 추적 실패\n오류: ${e.message}`)
+                }
             }, { timezone: 'Asia/Seoul' })
 
             // 장중 5분봉 CCI 모니터링 및 이벤트 트리거 (09:10 ~ 14:00 사이, 매 5분마다)
@@ -156,16 +162,28 @@ export class SchedulerService {
                 swarmJobs.push(job)
             }
 
-            // 주간 회고 AI (금요일 16:00 종료 후)
-            const weeklyReviewJob = cron.schedule('0 16 * * 5', async () => {
-                const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
-                await MarketReviewAgent.getInstance().runWeeklyReview()
+            // 주간 회고 AI (금요일 15:44, 3분 텀 내 편성)
+            const weeklyReviewJob = cron.schedule('44 15 * * 5', async () => {
+                try {
+                    const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
+                    await MarketReviewAgent.getInstance().runWeeklyReview()
+                    this.telegram.sendMessage('✅ [15:44] 주간 회고 AI 완료\n이번 주 시장 성과 및 패턴 종합 분석 완료')
+                } catch (e: any) {
+                    console.error('[Scheduler] 주간 회고 오류:', e.message)
+                    this.telegram.sendMessage(`❌ [15:44] 주간 회고 AI 실패\n오류: ${e.message}`)
+                }
             }, { timezone: 'Asia/Seoul' })
 
-            // 월간 회고 AI (매월 28일 16:30)
-            const monthlyReviewJob = cron.schedule('30 16 28 * *', async () => {
-                const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
-                await MarketReviewAgent.getInstance().runMonthlyReview()
+            // 월간 회고 AI (매월 28일 15:47, 3분 텀 내 편성)
+            const monthlyReviewJob = cron.schedule('47 15 28 * *', async () => {
+                try {
+                    const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
+                    await MarketReviewAgent.getInstance().runMonthlyReview()
+                    this.telegram.sendMessage('✅ [15:47] 월간 회고 AI 완료\n이번 달 시장 성과 종합 분석 완료')
+                } catch (e: any) {
+                    console.error('[Scheduler] 월간 회고 오류:', e.message)
+                    this.telegram.sendMessage(`❌ [15:47] 월간 회고 AI 실패\n오류: ${e.message}`)
+                }
             }, { timezone: 'Asia/Seoul' })
 
             // Option 1: Pre-Close 일간 피드백 (로컬 감시 스웜) (15:00)
@@ -174,10 +192,16 @@ export class SchedulerService {
                 await MarketReviewAgent.getInstance().runPreCloseFeedback()
             }, { timezone: 'Asia/Seoul' })
 
-            // Option 2: Post-Market 일간 회고 AI (로컬) (15:40)
-            const dailyRetroJob = cron.schedule('40 15 * * 1-5', async () => {
-                const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
-                await MarketReviewAgent.getInstance().runDailyReview()
+            // Option 2: Post-Market 일간 회고 AI (15:38, 성과추적 3분 후)
+            const dailyRetroJob = cron.schedule('38 15 * * 1-5', async () => {
+                try {
+                    const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
+                    await MarketReviewAgent.getInstance().runDailyReview()
+                    this.telegram.sendMessage('✅ [15:38] 일간 회고 AI 완료\n오늘 시장 성과 큐리큐 일간 파일 정상 완료')
+                } catch (e: any) {
+                    console.error('[Scheduler] 일간 회고 오류:', e.message)
+                    this.telegram.sendMessage(`❌ [15:38] 일간 회고 AI 실패\n오류: ${e.message}`)
+                }
             }, { timezone: 'Asia/Seoul' })
 
             // ─── 종목 AI 파이프라인 (3단계, 5분 간격) ───────────────────────
@@ -203,6 +227,17 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
+            // [Step 2-B] 09:42 눈림목 스캐너: Alpha 상위 주도주 중 조정 구간 진입 후보 발굴
+            const pullbackJob = cron.schedule('42 09 * * 1-5', async () => {
+                console.log('[Scheduler] 🔍 눈림목 스캐너 (PullbackScanner) 자동 실행 시작...')
+                try {
+                    const { PullbackScannerAgent } = await import('./v2_agents/PullbackScannerAgent')
+                    await PullbackScannerAgent.getInstance().runScan()
+                } catch (e: any) {
+                    console.error('[Scheduler] 눈림목 스캐너 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
             // [Step 3] 09:45 포트폴리오 매니저: 수급+리포트+테마 교차검증 → 최종 종목 풀 확정
             // ⚠️ 장중 스웜(Local AI)과 동시 실행되나 백엔드가 달라 충돌 없음
             const portfolioManagerJob = cron.schedule('45 09 * * 1-5', async () => {
@@ -215,31 +250,58 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Step 4] 15:45 장마감 채점: 종가 기준 수익률·수명 심사 (PerformanceTracker 직후)
-            const portfolioJudgeJob = cron.schedule('45 15 * * 1-5', async () => {
+            // [Step 4] 15:41 장마감 채점: 종가 기준 수익률·수명 심사 (일간 회고 3분 후)
+            const portfolioJudgeJob = cron.schedule('41 15 * * 1-5', async () => {
                 console.log('[Scheduler] ⚖️ 포트폴리오 장마감 채점 자동 실행 시작...')
                 try {
                     const { PortfolioJudgeScheduler } = await import('./v2_pipeline/PortfolioJudgeScheduler')
                     await PortfolioJudgeScheduler.getInstance().runDailyJudgement()
+                    this.telegram.sendMessage('⚖️ [15:41] 장마감 포트폴리오 채점 완료\n종가 기준 수익률·수명 심사 정상 완료\n확인: 종목AI 탭 > 포트폴리오 리스트')
                 } catch (e: any) {
                     console.error('[Scheduler] 장마감 채점 오류:', e.message)
+                    this.telegram.sendMessage(`❌ [15:41] 장마감 채점 실패\n오류: ${e.message}`)
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Step 5] 16:30 전 종목 60봉 데이터 수집 펌프 구동 (Market Leader Discovery용)
-            const marketDailyJob = cron.schedule('30 16 * * 1-5', async () => {
-                console.log('[Scheduler] 🚀 전 종목 데이터 수집 펌프 자동 실행 시작...')
+            // [Step 5] 15:50 전 종목 60봉 데이터 수집 펌프 구동
+            // 15:35~15:47 구간 AI 작업 (성과추적→회고→채점→주간→월간) 3분 텀 완료 후 시작 → DB 락 경합 완전 차단
+            const marketDailyJob = cron.schedule('50 15 * * 1-5', async () => {
+                const startTime = new Date()
+                const fmt = (d: Date) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+                this.telegram.sendMessage(`🚀 [${fmt(startTime)}] OHLCV 전 종목 수집 시작\n코스피/코스닥 전 종목 60일봉 수집 시작.\n완료 시 다시 알림 예정 (약 25~30분 소요)`)
+                console.log('[Scheduler] 🚀 전 종목 데이터 수집 펌프 자동 실행 시작 (15:50, 모든 장마감 AI 완료 후)...')
                 try {
                     const { MarketDataCollectorService } = await import('./v2_pipeline/MarketDataCollectorService')
                     await MarketDataCollectorService.getInstance().runDailyCollection(60)
+                    const endTime = new Date()
+                    const elapsed = Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60)
+                    this.telegram.sendMessage(`✅ [${fmt(endTime)}] OHLCV 전 종목 수집 완료\n코스피/코스닥 전 종목 60일봉 수집 완료\n소요 시간: 약 ${elapsed}분\n내일 09:45 Alpha 랭킹에 자동 반영`)
                 } catch (e: any) {
                     console.error('[Scheduler] 데이터 수집 펌프 오류:', e.message)
+                    this.telegram.sendMessage(`❌ [OHLCV] 전 종목 수집 실패\n오류: ${e.message}\n→ 주도주 탭에서 수동 실행 필요`)
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, portfolioManagerJob, portfolioJudgeJob, marketDailyJob, ...swarmJobs)
+            // [Step 6] 16:30 인큐베이터 스캔: 전종목 OHLCV 수집 완료 후 Pool B neglect_score 갱신
+            const incubatorScanJob = cron.schedule('30 16 * * 1-5', async () => {
+                console.log('[Scheduler] 🧪 인큐베이터 neglect_score 스캔 자동 실행 시작...')
+                try {
+                    const { IncubatorScanEngine } = await import('./v2_agents/IncubatorScanEngine')
+                    await IncubatorScanEngine.getInstance().runDailyScan()
+                    this.telegram.sendMessage('🧪 [16:30] 인큐베이터 스캔 완료\nneglect_score 갱신 및 IGNITE 후보 평가 완료\n확인: 종목AI 탭 > 인큐베이터')
+                } catch (e: any) {
+                    console.error('[Scheduler] 인큐베이터 스캔 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, portfolioManagerJob, portfolioJudgeJob, marketDailyJob, incubatorScanJob, ...swarmJobs)
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
-            console.log(`[SchedulerService] 📊 종목 AI 파이프라인 등록 완료 (수급: 09:35, 리포트: 09:40, 매니저: 09:45, 채점: 15:45, 전종목펌프: 16:30)`)
+            console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:40) → 눈림목(09:42) → PM(09:45)`)
+            console.log(`[SchedulerService] 📊 장마감 파이프라인: 성과추적(15:35) → 회고(15:38) → 채점(15:41) → 주간(15:44,금) → 월간(15:47,28일) → OHLCV펌프(15:50) → 인큐베이터스캔(16:30)`)
+
+
+
+
 
         }
 

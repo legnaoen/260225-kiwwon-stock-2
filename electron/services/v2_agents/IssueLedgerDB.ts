@@ -553,10 +553,14 @@ export class IssueLedgerDB {
      */
     public getEdgesTo(targetType: string, targetId: string): any[] {
         return this.db.prepare(`
-            SELECT * FROM knowledge_edges
-            WHERE target_type = ? AND target_id = ?
-              AND (expires_at IS NULL OR expires_at > datetime('now','localtime'))
-            ORDER BY confidence DESC
+            SELECT ke.*, i.name as source_name, i.updated_date as issue_updated_date
+            FROM knowledge_edges ke
+            LEFT JOIN issues i ON ke.source_type = 'ISSUE' AND ke.source_id = i.id
+            WHERE ke.target_type = ? AND ke.target_id = ?
+              AND (ke.expires_at IS NULL OR ke.expires_at > datetime('now','localtime'))
+            ORDER BY 
+                CASE WHEN i.updated_date IS NOT NULL THEN i.updated_date ELSE ke.created_at END DESC,
+                ke.confidence DESC
         `).all(targetType, targetId);
     }
 

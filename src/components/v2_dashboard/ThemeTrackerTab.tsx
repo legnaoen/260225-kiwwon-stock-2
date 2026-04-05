@@ -23,6 +23,9 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
     const [isVerifying, setIsVerifying] = useState(false);
     const [copilotFeedback, setCopilotFeedback] = useState<string>('');
 
+    // Follower stocks toggle
+    const [showAllStocks, setShowAllStocks] = useState(false);
+
     // Related News State
     const [relatedNews, setRelatedNews] = useState<any[]>([]);
     const [isNewsLoading, setIsNewsLoading] = useState(false);
@@ -88,8 +91,10 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
     useEffect(() => {
         if (!selectedItem) {
             setRelatedNews([]);
+            setShowAllStocks(false);
             return;
         }
+        setShowAllStocks(false);
 
         const fetchNews = async () => {
             setIsNewsLoading(true);
@@ -565,29 +570,39 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                                     )}
                                     
                                     {followers.length > 0 && (
-                                        <div className="space-y-2 mt-1">
-                                            <div className="text-[10px] text-muted-foreground/70 font-semibold px-1">기타 소속 종목</div>
-                                            <div className="flex flex-wrap items-center gap-1.5">
-                                                {followers.map((stock: any) => (
-                                                    <button 
-                                                        key={stock.stock_code} 
-                                                        className="group flex items-center gap-1 text-[11px] bg-muted/20 hover:bg-muted/40 text-muted-foreground hover:text-foreground px-2 py-1 rounded-md border border-border/30 transition-colors cursor-pointer"
-                                                        onClick={() => setSelectedStock({ 
-                                                            stockCode: stock.stock_code, 
-                                                            stockName: stock.stock_name,
-                                                            relatedTheme: { type: selectedItem.type || 'THEME', name: selectedItem.name },
-                                                            relatedIssues: linkedEdges || []
-                                                        })}
-                                                    >
-                                                        <span>{stock.stock_name}</span>
-                                                        {stock.change_rate != null && (
-                                                            <span className={cn("text-[9px] font-mono", stock.change_rate > 0 ? "text-red-500/70" : stock.change_rate < 0 ? "text-blue-500/70" : "text-muted-foreground/50")}>
-                                                                {stock.change_rate > 0 ? '+' : ''}{stock.change_rate}%
-                                                            </span>
-                                                        )}
-                                                    </button>
-                                                ))}
+                                        <div className="space-y-2 mt-2">
+                                            <div className="flex items-center justify-between px-1">
+                                                <div className="text-[10px] text-muted-foreground/70 font-semibold">기타 소속 종목 ({followers.length})</div>
+                                                <button 
+                                                    onClick={() => setShowAllStocks(!showAllStocks)}
+                                                    className="text-[10px] text-indigo-500 hover:text-indigo-400 font-semibold"
+                                                >
+                                                    {showAllStocks ? '숨기기' : '더보기 ▼'}
+                                                </button>
                                             </div>
+                                            {showAllStocks && (
+                                                <div className="flex flex-wrap items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                                                    {followers.map((stock: any) => (
+                                                        <button 
+                                                            key={stock.stock_code} 
+                                                            className="group flex items-center gap-1 text-[11px] bg-muted/20 hover:bg-muted/40 text-muted-foreground hover:text-foreground px-2 py-1 rounded-md border border-border/30 transition-colors cursor-pointer"
+                                                            onClick={() => setSelectedStock({ 
+                                                                stockCode: stock.stock_code, 
+                                                                stockName: stock.stock_name,
+                                                                relatedTheme: { type: selectedItem.type || 'THEME', name: selectedItem.name },
+                                                                relatedIssues: linkedEdges || []
+                                                            })}
+                                                        >
+                                                            <span>{stock.stock_name}</span>
+                                                            {stock.change_rate != null && (
+                                                                <span className={cn("text-[9px] font-mono", stock.change_rate > 0 ? "text-red-500/70" : stock.change_rate < 0 ? "text-blue-500/70" : "text-muted-foreground/50")}>
+                                                                    {stock.change_rate > 0 ? '+' : ''}{stock.change_rate}%
+                                                                </span>
+                                                            )}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>

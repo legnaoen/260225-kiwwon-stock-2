@@ -147,10 +147,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAiRuntimeConfig: () => ipcRenderer.invoke('ai-trade:get-runtime-config'),
     saveAiRuntimeConfig: (config: any) => ipcRenderer.invoke('ai-trade:save-runtime-config', config),
     syncStrategyConfig: () => ipcRenderer.invoke('ai-trade:sync-strategy-config'),
-    saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance?: number, buyStartTime?: string, buyEndTime?: string }) => ipcRenderer.invoke('ai:save-settings', settings),
+    saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance?: number, buyStartTime?: string, buyEndTime?: string, portfolioLimits?: any }) => ipcRenderer.invoke('ai:save-settings', settings),
     getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
     testAiConnection: (settings: { geminiKey: string, modelName: string }) => ipcRenderer.invoke('ai:test-connection', settings),
-    
+
     // Market Condition Agent V2
     getIntradayTechnicalDigest: () => ipcRenderer.invoke('mca:get-technical-digest'),
 
@@ -244,7 +244,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPipelineRunDetail: (runId: string) => ipcRenderer.invoke('pipeline:get-run-detail', runId),
     getAllPipelineRuns: (date?: string) => ipcRenderer.invoke('pipeline:get-all-runs', date),
     runPipelineManual: (pipelineId: string) => ipcRenderer.invoke('maiis:run-pipeline-manual', pipelineId),
-    
+
     // V2 Data Pipeline
     runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => ipcRenderer.invoke('v2-pipeline:run', { pipelineId, options }),
     getThemeTrackerData: (type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => ipcRenderer.invoke('naverflow:get-tracker-data', type, date, limitDays, topN),
@@ -299,7 +299,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // V2 Co-Pilot (HITL)
     sendCoPilotMessage: (message: string, mode: 'auto' | 'short' | 'detail' = 'auto') => ipcRenderer.send('copilot:chat', { message, mode }),
-    onCoPilotReply: (callback: (data: {text: string, isDone: boolean}) => void) => {
+    onCoPilotReply: (callback: (data: { text: string, isDone: boolean }) => void) => {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('copilot:reply', listener)
         return () => ipcRenderer.removeListener('copilot:reply', listener)
@@ -334,12 +334,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runMomentumAnalyst: () => ipcRenderer.invoke('ai-analyst:run-momentum'),
     runFundamentalAnalyst: () => ipcRenderer.invoke('ai-analyst:run-fundamental'),
     runPortfolioManager: () => ipcRenderer.invoke('ai-analyst:run-portfolio-manager'),
+    runPortfolioManagerPhase1: () => ipcRenderer.invoke('ai-analyst:run-portfolio-manager-phase1'),
+    runPortfolioManagerPhase2: () => ipcRenderer.invoke('ai-analyst:run-portfolio-manager-phase2'),
     runPortfolioJudge: () => ipcRenderer.invoke('ai-analyst:run-daily-judge'),
     getActivePortfolio: () => ipcRenderer.invoke('ai-analyst:get-portfolio-active'),
     getPortfolioHistory: () => ipcRenderer.invoke('ai-analyst:get-portfolio-history'),
     getAiPicks: () => ipcRenderer.invoke('ai-analyst:get-picks'),
     clearPortfolio: () => ipcRenderer.invoke('ai-analyst:clear-portfolio'),
     clearAiPicks: () => ipcRenderer.invoke('ai-analyst:clear-picks'),
+    // 관심종목(WAIT_DIP/HOLD/WATCHLIST)에 잘못 기록된 진입가·수익률만 선택적 초기화
+    cleanupWatchlistPrices: () => ipcRenderer.invoke('ai-analyst:cleanup-watchlist-prices'),
     // [TEST] 종목 차트 다이제스트 테스트
     testChartDigest: (code: string, name: string) => ipcRenderer.invoke('ai-analyst:test-chart-digest', code, name),
     // 서브 AI 오답노트 작성 (수동)
@@ -349,7 +353,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveAiRunLog: (message: string) => ipcRenderer.invoke('ai-run-logs:save', message),
     getAiRunLogs: () => ipcRenderer.invoke('ai-run-logs:get'),
     clearAiRunLogs: () => ipcRenderer.invoke('ai-run-logs:clear'),
-    
+
     // AI 데일리 원본 전문 (Raw Log)
     getAiDailyRawLog: (date: string, agentType: string) => ipcRenderer.invoke('ai-daily-raw-logs:get', date, agentType),
 
@@ -358,5 +362,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateIncubatorStatus: (stock_code: string, status: string, reason?: string) => ipcRenderer.invoke('incubator:update-status', { stock_code, status, reason }),
     runIncubatorScan: () => ipcRenderer.invoke('incubator:run-scan'),
     addIncubatorStock: (stock_code: string, stock_name: string, reason: string) => ipcRenderer.invoke('incubator:add-manual', { stock_code, stock_name, reason }),
+    deleteIncubatorItem: (stock_code: string) => ipcRenderer.invoke('incubator:delete-item', stock_code),
+
+    // PM Event Logs
+    getPortfolioEventLogs: (stock_code: string) => ipcRenderer.invoke('maiisAdmin:getPortfolioEventLogs', stock_code),
+
+    // 개별 항목 삭제
+    deletePortfolioItem: (id: number) => ipcRenderer.invoke('ai-analyst:delete-portfolio-item', id),
+    deleteAnalystPick: (id: number) => ipcRenderer.invoke('ai-analyst:delete-pick', id),
 })
 

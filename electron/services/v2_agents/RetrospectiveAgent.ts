@@ -184,7 +184,6 @@ ${fails.slice(0, 5).map(f => `- 종목: ${f.stock_name} / 최고수익: ${f.max_
             try {
                 const response = await AiExecutionQueue.getInstance().enqueue({
                     taskType: 'RETROSPECTIVE',
-                    modelName: 'gemini-exp-1206',
                     prompt: systemPrompt + '\n\n' + promptContext,
                     temperature: 0.3
                 });

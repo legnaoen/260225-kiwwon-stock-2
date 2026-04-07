@@ -52,7 +52,9 @@ export class PerformanceTracker {
 
         // 앱 시작 시, 전날 15:35에 앱이 꺼져 있어서 누락되었거나 값 교정이 필요한 과거 데이터를 즉각 보정합니다.
         setTimeout(() => {
-            this.runDailyTracking().catch(e => console.error('Tracker Boot Sync Error:', e))
+            this.runDailyTracking()
+                .then(() => this.evaluateIntraday())
+                .catch(e => console.error('Tracker Boot Sync Error:', e))
         }, 10000)
     }
 
@@ -424,7 +426,7 @@ export class PerformanceTracker {
             SELECT * FROM intraday_predictions 
             WHERE date >= date('now', 'localtime', '-5 days')
               AND predict IN ('UP', 'DOWN', 'HOLD')
-              AND (max_price IS NULL OR max_price = 0)
+              AND return_pct IS NULL
             ORDER BY date ASC, time_slot ASC
         `).all() as any[]
 

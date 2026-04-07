@@ -212,8 +212,7 @@ export class MomentumAnalystAgent {
                 triggerType: 'CRON',
                 targetType: 'gemini',
                 prompt: promptContext,
-                systemInstruction: systemPrompt,
-                customModel: 'gemini-exp-1206'
+                systemInstruction: systemPrompt
             });
 
             const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/);

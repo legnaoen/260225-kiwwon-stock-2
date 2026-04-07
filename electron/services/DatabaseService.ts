@@ -2,7 +2,9 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import { app } from 'electron'
 import fs from 'fs'
-// Removed external DateUtils import
+import Store from 'electron-store'
+
+const store = new Store()
 
 export class DatabaseService {
     private static instance: DatabaseService
@@ -53,6 +55,20 @@ export class DatabaseService {
     }
 
     private initTables() {
+        const createPortfolioEventLogsTable = `
+            CREATE TABLE IF NOT EXISTS portfolio_event_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT,
+                event_type TEXT NOT NULL,
+                old_status TEXT,
+                new_status TEXT,
+                reason TEXT,
+                price INTEGER,
+                created_at TEXT NOT NULL
+            );
+        `
+
         const createDartCorpTable = `
             CREATE TABLE IF NOT EXISTS dart_corp_code (
                 corp_code TEXT PRIMARY KEY,
@@ -130,7 +146,13 @@ export class DatabaseService {
                 version TEXT NOT NULL,
                 name TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                reasonToPropose TEXT,
+                reasonToPropose TEXT
+            );
+        `
+
+        const createAiSettingsTable = `
+            CREATE TABLE IF NOT EXISTS ai_settings (
+                strategy_id TEXT PRIMARY KEY,
                 is_active INTEGER DEFAULT 0,
                 win_rate REAL DEFAULT 0,
                 avg_hold_time TEXT DEFAULT '0m',
@@ -140,6 +162,21 @@ export class DatabaseService {
                 max_positions INTEGER DEFAULT 2,
                 scoring_weights TEXT,
                 master_prompt TEXT
+            );
+        `
+
+        const createPortfolioEventsTable = `
+            CREATE TABLE IF NOT EXISTS maiis_portfolio_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT,
+                event_type TEXT NOT NULL,
+                old_status TEXT,
+                new_status TEXT,
+                price REAL DEFAULT 0,
+                profit_rate REAL DEFAULT 0,
+                reason TEXT,
+                created_at TEXT NOT NULL
             );
         `
 
@@ -580,6 +617,7 @@ export class DatabaseService {
         this.db.exec(createNaverResearchFlowTable)
 
         this.db.exec(createDartCorpTable)
+        this.db.exec(createPortfolioEventLogsTable)
         this.db.exec(createSchedulesTable)
         this.db.exec(createFinancialDataTable)
         this.db.exec(createAnalysisCacheTable)
@@ -612,6 +650,22 @@ export class DatabaseService {
         this.db.exec(createMaiisKeywordRankingsTable)
         this.db.exec(createMaiisActivePicksTable)
         
+        // Portfolio Events Table (Added for Event Logs)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS maiis_portfolio_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT,
+                event_type TEXT NOT NULL,
+                old_status TEXT,
+                new_status TEXT,
+                price REAL DEFAULT 0,
+                profit_rate REAL DEFAULT 0,
+                reason TEXT,
+                created_at TEXT NOT NULL
+            );
+        `);
+
         // Theme Ontology
         const createThemeOntologyTable = `
             CREATE TABLE IF NOT EXISTS theme_ontology (
@@ -893,6 +947,8 @@ export class DatabaseService {
         try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN target_profit_rate REAL DEFAULT 5.0") } catch (e) { }
         try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN max_profit_rate REAL") } catch (e) { }
         try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN evaluation_status TEXT DEFAULT 'PENDING'") } catch (e) { }
+        // entry_price 확정 시각 (PM AI 실행 완료 시점의 실시간 현재가 스탬프)
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN entry_price_at TEXT") } catch (e) { }
 
         // Ensure macro_indicators_json exists in world state
         try {
@@ -1924,15 +1980,25 @@ export class DatabaseService {
     }
 
     public upsertPortfolioWatchlist(item: any) {
+        // 시그널 타입이 아닌 실제 포지션(팩트) 기반 분류
+        const isWatchStatus = item.status === 'WATCHING';
+        const isHeldStatus = item.status === 'HELD';
+
+        // 관심종목은 진입가 세팅 안 함
+        const safeEntryPrice = isWatchStatus ? 0 : (item.entry_price || 0);
+
+        // 관심종목은 수명 없음(NULL) / 매수 포지션 전환 시에만 전략별 수명 확정
+        const safeLifespanDays = isWatchStatus ? null : (item.lifespan_days || null);
+
         const stmt = this.db.prepare(`
             INSERT INTO maiis_portfolio (
                 stock_code, stock_name, status, strategy, conviction_score, theme, 
                 entry_date, last_signal, last_signal_reason, analysts_json, lifespan_days,
-                last_reviewed_at, created_at, updated_at, raw_context, current_price, entry_price
+                last_reviewed_at, created_at, updated_at, raw_context, current_price, entry_price, entry_price_at
             ) VALUES (
                 @stock_code, @stock_name, @status, @strategy, @conviction_score, @theme,
                 @entry_date, @last_signal, @last_signal_reason, @analysts_json, @lifespan_days,
-                @last_reviewed_at, @created_at, @updated_at, @raw_context, @current_price, @entry_price
+                @last_reviewed_at, @created_at, @updated_at, @raw_context, @current_price, @entry_price, @entry_price_at
             )
             ON CONFLICT(stock_code) DO UPDATE SET
                 status = excluded.status,
@@ -1941,11 +2007,32 @@ export class DatabaseService {
                 last_signal = excluded.last_signal,
                 last_signal_reason = excluded.last_signal_reason,
                 analysts_json = excluded.analysts_json,
-                lifespan_days = excluded.lifespan_days,
                 last_reviewed_at = excluded.last_reviewed_at,
                 updated_at = excluded.updated_at,
                 raw_context = excluded.raw_context,
-                current_price = excluded.current_price
+                current_price = excluded.current_price,
+                lifespan_days = CASE
+                    WHEN excluded.status = 'HELD'
+                    THEN excluded.lifespan_days
+                    ELSE NULL
+                END,
+                days_held = CASE
+                    WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
+                    THEN 0
+                    WHEN excluded.status != 'HELD'
+                    THEN 0
+                    ELSE maiis_portfolio.days_held
+                END,
+                entry_price = CASE
+                    WHEN excluded.entry_price > 0 AND maiis_portfolio.entry_price = 0
+                    THEN excluded.entry_price
+                    ELSE maiis_portfolio.entry_price
+                END,
+                entry_price_at = CASE
+                    WHEN excluded.entry_price > 0 AND maiis_portfolio.entry_price = 0
+                    THEN excluded.entry_price_at
+                    ELSE maiis_portfolio.entry_price_at
+                END
         `);
         stmt.run({
             ...item,
@@ -1955,16 +2042,108 @@ export class DatabaseService {
             last_reviewed_at: this.getKstTimestamp(),
             raw_context: item.raw_context || null,
             current_price: item.current_price || 0,
-            entry_price: item.entry_price || 0
+            lifespan_days: safeLifespanDays,
+            entry_price: safeEntryPrice,
+            entry_price_at: safeEntryPrice > 0 ? (item.entry_price_at || this.getKstTimestamp()) : null
         });
+
+        // [추가] 관심종목 및 매수포지션 캡(Quota) 적용
+        this.enforcePortfolioCaps();
+    }
+
+    private enforcePortfolioCaps() {
+        try {
+            const aiSettings: any = store.get('ai_settings') || {};
+            const limits = aiSettings.portfolioLimits || {
+                buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
+                watchlist: { MOMENTUM: 3, PULLBACK: 3, SWING: 6, VALUE: 3 }
+            };
+
+            const strategies = ['MOMENTUM', 'PULLBACK', 'SWING', 'VALUE'];
+            const types = ['HELD', 'WATCHING'];
+
+            for (const type of types) {
+                const signalCondition = type === 'HELD' ? "status = 'HELD'" : "status = 'WATCHING'";
+                // status 자체가 조건이므로 중복되지만, 캡슐화 논리를 위해 남김
+                const statusCondition = "status NOT IN ('CLEARED', 'DROPPED', 'HIT')"; 
+
+                for (const strategy of strategies) {
+                    const maxCount = type === 'HELD' ? (limits.buy[strategy] || 0) : (limits.watchlist[strategy] || 0);
+
+                    const countRow = this.db.prepare(`
+                        SELECT COUNT(*) as cnt 
+                        FROM maiis_portfolio 
+                        WHERE ${statusCondition} AND ${signalCondition} AND 
+                        CASE WHEN UPPER(strategy) IN ('MOMENTUM', 'PULLBACK', 'VALUE') THEN UPPER(strategy) ELSE 'SWING' END = ?
+                    `).get(strategy) as any;
+
+                    if (countRow && countRow.cnt > maxCount) {
+                        const excess = countRow.cnt - maxCount;
+                        const excessItems = this.db.prepare(`
+                            SELECT stock_code FROM maiis_portfolio 
+                            WHERE ${statusCondition} AND ${signalCondition} AND 
+                            CASE WHEN UPPER(strategy) IN ('MOMENTUM', 'PULLBACK', 'VALUE') THEN UPPER(strategy) ELSE 'SWING' END = ?
+                            ORDER BY conviction_score ASC, updated_at ASC
+                            LIMIT ?
+                        `).all(strategy, excess) as any[];
+
+                        if (excessItems.length > 0) {
+                            const codes = excessItems.map((r: any) => `'${r.stock_code.replace(/'/g, "''")}'`).join(',');
+                            const info = this.db.prepare(`
+                                UPDATE maiis_portfolio 
+                                SET status = 'DROPPED', updated_at = ?
+                                WHERE stock_code IN (${codes})
+                            `).run(this.getKstTimestamp());
+                            console.log(`[DatabaseService] ✂️ 용량 설정 (Cap ${maxCount}) 초과로 ${info.changes}개 자동 DROPPED. (${type} - ${strategy})`);
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(`[DatabaseService] 포트폴리오 전략별 Cap 검사 중 오류:`, e);
+        }
     }
 
     public getActivePortfolio() {
         return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status NOT IN ('DROPPED', 'HIT') ORDER BY conviction_score DESC").all();
     }
 
+    /**
+     * 장마감 채점(Judge)용 — 매수 포지션(HELD)만 반환
+     * WATCHING(관심종목)은 profit_rate 계산/갱신 대상이 아님
+     */
+    public getBuyPositionPortfolio() {
+        return this.db.prepare(
+            "SELECT * FROM maiis_portfolio WHERE status = 'HELD' ORDER BY conviction_score DESC"
+        ).all();
+    }
+
     public getPortfolioHistory() {
-        return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status IN ('DROPPED', 'HIT') ORDER BY updated_at DESC LIMIT 100").all();
+        return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status IN ('DROPPED', 'HIT') AND entry_price > 0 ORDER BY updated_at DESC LIMIT 100").all();
+    }
+
+    /**
+     * 관심종목 중 진입가/수익률이 잘못 기록된 레코드를 일괄 초기화
+     * → entry_price, profit_rate, days_held를 0으로 리셋하고 상태를 WATCHING으로 복구
+     * @returns { fixed: number } 수정된 레코드 수
+     */
+    public cleanupWatchlistEntryPrices(): { fixed: number } {
+        const info = this.db.prepare(`
+            UPDATE maiis_portfolio
+            SET
+                entry_price    = 0,
+                entry_price_at = NULL,
+                profit_rate    = 0,
+                days_held      = 0,
+                status         = 'WATCHING',
+                updated_at     = ?
+            WHERE
+                status = 'WATCHING'
+                AND (entry_price > 0 OR profit_rate != 0)
+        `).run(this.getKstTimestamp());
+
+        console.log(`[DB] cleanupWatchlistEntryPrices: ${info.changes}건 초기화 완료`);
+        return { fixed: info.changes };
     }
 
     public getPortfolioStocksCount() {
@@ -1972,7 +2151,30 @@ export class DatabaseService {
         return row ? row.cnt : 0;
     }
 
-    // === Market News Consensus Methods ===
+    // ── 개별 항목 삭제 ──────────────────────────────────────────────────────
+
+    /** 포트폴리오 (매수 포지션 / 관심종목 / 성적표) 단건 삭제 */
+    public deletePortfolioItem(id: number): { deleted: boolean } {
+        const info = this.db.prepare('DELETE FROM maiis_portfolio WHERE id = ?').run(id);
+        console.log(`[DB] deletePortfolioItem: id=${id}, changes=${info.changes}`);
+        return { deleted: info.changes > 0 };
+    }
+
+    /** 추천종목(ai_analyst_picks) 단건 삭제 */
+    public deleteAnalystPick(id: number): { deleted: boolean } {
+        const info = this.db.prepare('DELETE FROM ai_analyst_picks WHERE id = ?').run(id);
+        console.log(`[DB] deleteAnalystPick: id=${id}, changes=${info.changes}`);
+        return { deleted: info.changes > 0 };
+    }
+
+    /** 인큐베이터(incubator_pool) 단건 삭제 */
+    public deleteIncubatorItem(stock_code: string): { deleted: boolean } {
+        const info = this.db.prepare('DELETE FROM incubator_pool WHERE stock_code = ?').run(stock_code);
+        console.log(`[DB] deleteIncubatorItem: code=${stock_code}, changes=${info.changes}`);
+        return { deleted: info.changes > 0 };
+    }
+
+
     public saveMarketNewsConsensus(data: { 
         date: string, 
         summary_json: string, 
@@ -2203,7 +2405,27 @@ export class DatabaseService {
         `).run(status, status, reason || '', now, stockCode);
     }
 
+    public logPortfolioEvent(stockCode: string, stockName: string, eventType: string, oldStatus: string | null, newStatus: string, reason: string, price: number) {
+        try {
+            const pf = this.getPortfolioItem(stockCode);
+            const profitRate = pf ? pf.profit_rate : 0;
+            this.db.prepare(`
+                INSERT INTO maiis_portfolio_events (stock_code, stock_name, event_type, old_status, new_status, price, profit_rate, reason, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(stockCode, stockName, eventType, oldStatus, newStatus, price, profitRate, reason, this.getKstTimestamp());
+        } catch (e) {
+            console.error('[DB] Failed to log portfolio event:', e);
+        }
+    }
 
+    public getPortfolioEventLogs(stockCode: string) {
+        try {
+            return this.db.prepare('SELECT * FROM maiis_portfolio_events WHERE stock_code = ? ORDER BY created_at DESC').all(stockCode) as any[];
+        } catch (e) {
+            console.error('[DB] Failed to fetch portfolio event logs:', e);
+            return [];
+        }
+    }
 
     // ──────────────────────────────────────────────
     // Phase 2.5: AI Analyst Picks CRUD

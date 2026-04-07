@@ -363,7 +363,7 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                         contentStyle={{ fontSize: '12px', backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
                         itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
                         labelStyle={{ color: 'var(--muted-foreground)', marginBottom: '4px' }}
-                        formatter={(val: number) => [`${val}위`, '순위']}
+                        formatter={(val: any) => [`${val}위`, '순위']}
                     />
                     <Legend wrapperStyle={{ fontSize: '11px' }} />
                     {topNames.map((name, i) => (
@@ -485,7 +485,7 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                                                     <YAxis domain={['dataMin - 1', 'dataMax + 1']} tick={{fontSize: 9}} width={35} tickFormatter={v => v ? v.toFixed(0) : ''} />
                                                     <Tooltip 
                                                         contentStyle={{fontSize: '11px', backgroundColor: 'var(--card)', borderColor: 'var(--border)'}} 
-                                                        formatter={(val: number) => [val?.toFixed(2), 'Index']}
+                                                        formatter={(val: any) => [val?.toFixed(2), 'Index']}
                                                         labelFormatter={(label) => `일자: ${label}`}
                                                     />
                                                     <Line 

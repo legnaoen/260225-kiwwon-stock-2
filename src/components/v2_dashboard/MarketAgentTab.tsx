@@ -921,8 +921,11 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                 let returnVal = row.return_pct
                                 let isLive = false
 
-                                // 당일 마감 전(return_pct가 null)이고 진입가가 있으며 실시간 현재가가 존재할 때
-                                if (returnVal == null && row.entry_price && code && livePrices[code]) {
+                                const tzOffset = new Date().getTimezoneOffset() * 60000;
+                                const todayStr = new Date(Date.now() - tzOffset).toISOString().split('T')[0];
+
+                                // 당일 마감 전(return_pct가 null)이고 진입가가 있으며 실시간 현재가가 존재할 때 (반드시 '오늘' 날짜인 경우에만 실행)
+                                if (returnVal == null && row.entry_price && code && livePrices[code] && row.date === todayStr) {
                                     const curPrice = livePrices[code]
                                     returnVal = ((curPrice - row.entry_price) / row.entry_price) * 100
                                     isLive = true

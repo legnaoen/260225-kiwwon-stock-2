@@ -19,7 +19,7 @@ export class PortfolioManagerService {
     private skills = SkillsService.getInstance()
     private isRunning = false
 
-    private constructor() {}
+    private constructor() { }
 
     public static getInstance(): PortfolioManagerService {
         if (!PortfolioManagerService.instance) {
@@ -59,7 +59,7 @@ export class PortfolioManagerService {
             let candidates = this.db.getRisingStocksByDate(today, 'EVENING')
             if (candidates.length === 0) candidates = this.db.getRisingStocksByDate(today, 'MORNING')
             if (candidates.length === 0) candidates = this.db.getRisingStocksByDate(today, 'MANUAL')
-            
+
             // 최근 날짜 폴백
             if (candidates.length === 0) {
                 const latestRow = this.db.getDb().prepare(
@@ -113,7 +113,7 @@ export class PortfolioManagerService {
                         const curPrice = pData?.cur_prc || pData?.stck_prpr || pData?.Body?.cur_prc || 0;
                         const changeRate = pData?.prc_rt || pData?.Body?.prc_rt || 0;
                         item.fresh_chart = `현재가 ${Math.abs(Number(curPrice))}원 (등락률: ${Number(changeRate) > 0 ? '+' : ''}${changeRate}%)`;
-                    } catch(e) {
+                    } catch (e) {
                         item.fresh_chart = '가격 수집 실패';
                     }
                 } catch (e) {
@@ -123,7 +123,7 @@ export class PortfolioManagerService {
 
             // 4. PM AI 프롬프트 구성
             const prompt = this.buildPmPrompt(currentPortfolio, candidates, marketThesis, sentimentScore)
-            
+
             // 5. AI 호출
             const systemInstruction = `[역할: Portfolio Manager AI]
 당신은 투자 포트폴리오 관리자입니다.
@@ -137,7 +137,7 @@ export class PortfolioManagerService {
 - conviction_score가 60 미만인 종목은 응답에 포함하지 마세요`
 
             console.log('[PortfolioManager] AI 호출 중...')
-            const aiResponse = await this.ai.askGemini(prompt, systemInstruction, undefined, 'gemini-2.5-flash')
+            const aiResponse = await this.ai.askGemini(prompt, systemInstruction)
 
             // 6. 응답 파싱
             const decisions = this.parseAiResponse(aiResponse)
@@ -150,7 +150,7 @@ export class PortfolioManagerService {
             const results = await this.applyDecisions(decisions)
 
             console.log(`[PortfolioManager] === PM AI Review 완료: ${results.updated}건 갱신, ${results.newEntries}건 신규 ===`)
-            
+
             eventBus.emit(SystemEvent.AUTO_TRADE_LOG, {
                 time: new Date().toLocaleTimeString('en-US', { hour12: false }),
                 message: `[PM AI] 리뷰 완료 — ${results.updated}건 갱신, ${results.newEntries}건 신규 편입, ${results.buySignals}건 BUY, ${results.sellSignals}건 SELL`,
@@ -181,7 +181,7 @@ export class PortfolioManagerService {
         sentimentScore: number
     ): string {
         const portfolioSummary = portfolio.length > 0
-            ? portfolio.map(p => 
+            ? portfolio.map(p =>
                 `  - [${p.stock_name}] 상태=${p.status}, 수익률=${p.profit_rate?.toFixed(1)}%, 보유일=${p.days_held}일\n` +
                 `    * 과거사유: ${p.last_signal_reason || '없음'}\n` +
                 `    * 차트추이: ${p.fresh_chart || '정보 없음'}\n` +
@@ -233,7 +233,7 @@ ${candidateSummary}
      */
     private parseAiResponse(response: string): any[] | null {
         console.log('[PortfolioManager] Raw AI response length:', response.length)
-        
+
         // 1. 코드 블록 추출
         let jsonStr = response
         const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/)
@@ -256,19 +256,19 @@ ${candidateSummary}
                 const parsed = JSON.parse(cleanJson(objMatch[0]))
                 if (parsed.portfolio_decisions) return parsed.portfolio_decisions
             }
-        } catch {}
+        } catch { }
 
         // 4. 전체 문자열 직접 시도
         try {
             const parsed = JSON.parse(cleanJson(jsonStr))
             return parsed.portfolio_decisions || (Array.isArray(parsed) ? parsed : null)
-        } catch {}
+        } catch { }
 
         // 5. 배열 직접 추출 시도
         try {
             const arrMatch = jsonStr.match(/\[[\s\S]*\]/)
             if (arrMatch) return JSON.parse(cleanJson(arrMatch[0]))
-        } catch {}
+        } catch { }
 
         // 6. 개별 객체 추출 시도 (배열이 깨진 경우)
         try {
@@ -278,10 +278,10 @@ ${candidateSummary}
             while ((match = regex.exec(jsonStr)) !== null) {
                 try {
                     objects.push(JSON.parse(cleanJson(match[0])))
-                } catch {}
+                } catch { }
             }
             if (objects.length > 0) return objects
-        } catch {}
+        } catch { }
 
         console.error('[PortfolioManager] JSON 파싱 실패. Raw 응답 앞부분:', response.substring(0, 500))
         return null

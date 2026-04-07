@@ -201,6 +201,8 @@ export interface IElectronAPI {
     runMomentumAnalyst: () => Promise<{ success: boolean, data?: any, error?: string }>
     runFundamentalAnalyst: () => Promise<{ success: boolean, data?: any, error?: string }>
     runPortfolioManager: () => Promise<{ success: boolean, data?: any, error?: string }>
+    runPortfolioManagerPhase1: () => Promise<{ success: boolean, data?: any, error?: string }>
+    runPortfolioManagerPhase2: () => Promise<{ success: boolean, data?: any, error?: string }>
     runPortfolioJudge: () => Promise<{ success: boolean, data?: any, error?: string }>
     getActivePortfolio: () => Promise<any[]>
     getAiPicks: () => Promise<any[]>

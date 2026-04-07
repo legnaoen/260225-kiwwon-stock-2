@@ -28,10 +28,18 @@ export class PortfolioJudgeScheduler {
 
         try {
             const rawDb = (this.db as any).db;
-            const activePortfolio = this.db.getActivePortfolio() as any[];
             const startTime = Date.now();
 
-            if (!activePortfolio || activePortfolio.length === 0) {
+            // ── A. 매수 포지션(HELD)만 채점 대상
+            const buyPositions = (this.db as any).getBuyPositionPortfolio() as any[];
+            // ── B. 관심종목(WATCHING)은 현재가 업데이트만
+            const watchlistStocks = rawDb.prepare(
+                "SELECT * FROM maiis_portfolio WHERE status = 'WATCHING'"
+            ).all() as any[];
+
+            const totalEvaluated = buyPositions.length;
+
+            if (totalEvaluated === 0 && watchlistStocks.length === 0) {
                 console.log(`[PortfolioJudge] ℹ️ 현재 활성화된 포트폴리오 종목이 없어 심사를 종료합니다.`);
                 this.db.saveAiExecutionLog({
                     id: `LOG-JUDGE-${Date.now()}`,
@@ -52,10 +60,30 @@ export class PortfolioJudgeScheduler {
                 return;
             }
 
-            let demotedCount = 0;
-            let totalEvaluated = activePortfolio.length;
+            // ── A루프: 관심종목 — current_price / days_held만 업데이트, profit_rate·상태 변경 금지
+            console.log(`[PortfolioJudge] 👀 관심종목 ${watchlistStocks.length}개 현재가 갱신 (수익률 채점 제외)`);
+            for (const stock of watchlistStocks) {
+                let todayPrice = stock.current_price;
+                try {
+                    const priceInfo = await this.kiwoom.getStockBasicInfo(stock.stock_code);
+                    const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
+                    const prcStr = String(body.stk_prc || body.currentPrice || body.cur_prc || body.stck_prpr || 0).replace(/[^0-9-]/g, '');
+                    if (prcStr) todayPrice = Math.abs(parseFloat(prcStr));
+                } catch (e) { /* 조회 실패 시 기존 가격 유지 */ }
 
-            for (const stock of activePortfolio) {
+                // 관심종목은 current_price만 갱신 — days_held는 HELD 전환 시점부터만 카운트
+                rawDb.prepare(`
+                    UPDATE maiis_portfolio
+                    SET current_price = ?, updated_at = ?
+                    WHERE stock_code = ?
+                `).run(todayPrice, this.db.getKstTimestamp(), stock.stock_code);
+            }
+
+            // ── B루프: 매수 포지션(HELD) — 전략별 채점 + HIT/DROPPED 전환
+            let demotedCount = 0;
+            console.log(`[PortfolioJudge] 💰 매수 포지션 ${totalEvaluated}개 수익률 채점 시작`);
+
+            for (const stock of buyPositions) {
                 // 1. 현재가 조회 (키움 API)
                 let todayClosePrice = stock.current_price;
                 let todayHighPrice = stock.current_price;
@@ -72,6 +100,7 @@ export class PortfolioJudgeScheduler {
                     console.warn(`[PortfolioJudge] ${stock.stock_name} 현재가 조회 실패. 기존 가격을 사용합니다.`);
                 }
 
+                // entry_price가 없으면 오늘 현재가로 설정하고 채점 스킵 (다음 사이클에 정상 채점)
                 if (!stock.entry_price || stock.entry_price <= 0) {
                     if (todayClosePrice > 0) {
                         rawDb.prepare('UPDATE maiis_portfolio SET entry_price = ?, current_price = ? WHERE stock_code = ?')
@@ -85,17 +114,19 @@ export class PortfolioJudgeScheduler {
                 const closeProfitPct = ((todayClosePrice - entryPrice) / entryPrice) * 100;
                 const daysHeld = stock.days_held + 1;
 
-                // 2. 판정 로직
+                // 2. 전략별(Strategy-Aware) 판정 로직
                 let newStatus = stock.status;
+                const strategy: string = (stock.strategy || 'SWING').toUpperCase();
 
-                if (newStatus !== 'DROPPED') {
-                    if (highProfitPct >= 15.0 || closeProfitPct >= 10.0) {
-                        newStatus = 'HIT';
-                        console.log(`[PortfolioJudge] 🎉 ${stock.stock_name} 목표 수익률 달성! (고가: ${highProfitPct.toFixed(2)}% / 종가: ${closeProfitPct.toFixed(2)}%) -> HIT`);
-                    } else if (daysHeld >= (stock.lifespan_days || 20)) {
-                        newStatus = 'DROPPED';
-                        console.log(`[PortfolioJudge] ⏳ ${stock.stock_name} 수명 종료(${daysHeld}일 소진). 수익률: ${closeProfitPct.toFixed(2)}% -> DROPPED`);
-                    }
+                if (newStatus !== 'DROPPED' && newStatus !== 'HIT') {
+                    const judgeResult = this.judgeByStrategy(strategy, {
+                        highProfitPct,
+                        closeProfitPct,
+                        daysHeld,
+                        lifespanDays: stock.lifespan_days,
+                        stockName: stock.stock_name,
+                    });
+                    if (judgeResult) newStatus = judgeResult;
                 }
 
                 // 3. DB 갱신
@@ -156,6 +187,14 @@ export class PortfolioJudgeScheduler {
                 result: `총 ${totalEvaluated}개 종목 심사 완료. ${demotedCount}개 인큐베이터로 강등/이관됨.`
             });
 
+            // ─── 1B: LeaderRegime 스냅샷 저장 ───────────────────────────
+            // conviction_score 이력 저장 (A트랙 — 동기 실행)
+            this.savePortfolioScoreHistory();
+            // Alpha 일일 스냅샷 저장 (B트랙 — 비동기, 오류 무시)
+            this.saveLeaderSnapshot().catch(e =>
+                console.warn('[PortfolioJudge] 스냅샷 저장 백그라운드 오류 (무시):', e?.message)
+            );
+
         } catch (e: any) {
             console.error(`[PortfolioJudge] 포트폴리오 채점 중 오류:`, e);
             this.db.saveAiExecutionLog({
@@ -180,7 +219,7 @@ export class PortfolioJudgeScheduler {
     /**
      * P3-6: 종목의 테마 또는 Alpha 랭킹이 아직 살아있는지 확인
      * - theme_intelligence에서 최근 3일 이내 등장 + 피크아웃/설거지가 아닌 경우
-     * - market_leader_alpha에서 최근 Alpha Top 50 내 존재 여부
+     * - market_leader_daily에서 최근 Alpha Top 50 내 존재 여부
      */
     private checkThemeOrAlphaSurvival(rawDb: any, stockCode: string, stockName: string): boolean {
         try {
@@ -201,15 +240,24 @@ export class PortfolioJudgeScheduler {
                 if (activeTheme?.cnt > 0) return true;
             }
 
-            // Alpha 랭킹 확인
+            // Alpha 랭킹 확인 (market_leader_daily 우선, 없으면 market_leader_alpha 폴백)
             try {
                 const alphaCheck = rawDb.prepare(`
-                    SELECT COUNT(*) as cnt FROM market_leader_alpha
-                    WHERE stock_code = ? AND rank_num <= 50
-                    ORDER BY date DESC LIMIT 1
+                    SELECT COUNT(*) as cnt FROM market_leader_daily
+                    WHERE stock_code = ? AND rank <= 50
+                    ORDER BY snapshot_date DESC LIMIT 1
                 `).get(stockCode) as any;
                 if (alphaCheck?.cnt > 0) return true;
-            } catch { /* 테이블 없으면 무시 */ }
+            } catch {
+                try {
+                    const alphaFallback = rawDb.prepare(`
+                        SELECT COUNT(*) as cnt FROM market_leader_alpha
+                        WHERE stock_code = ? AND rank_num <= 50
+                        ORDER BY date DESC LIMIT 1
+                    `).get(stockCode) as any;
+                    if (alphaFallback?.cnt > 0) return true;
+                } catch { /* 테이블 없으면 무시 */ }
+            }
 
             return false;
         } catch (e) {
@@ -218,4 +266,259 @@ export class PortfolioJudgeScheduler {
             return true;
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 1A: 전략별(Strategy-Aware) 판정 엔진
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * 전략(strategy)에 따라 HIT / DROPPED 여부를 판정하고 새 상태 문자열 또는 null을 반환합니다.
+     * null 반환 = 현재 상태 유지
+     *
+     * 전략별 기준:
+     *   MOMENTUM : 5일 기준  /  고가+13% or 종가+10% → HIT  /  종가-8% 즉시 손절
+     *   PULLBACK : 10일 기준 /  고가+18% or 종가+15% → HIT  /  종가-10% 즉시 손절
+     *   SWING    : 20일 기준 /  고가+25% or 종가+20% → HIT  /  종가-12% + 수명 초과 시 손절
+     *   VALUE    : 60일 기준 /  고가+35% or 종가+30% → HIT  /  종가-15% 손절 (가장 관대)
+     */
+    private judgeByStrategy(
+        strategy: string,
+        ctx: { highProfitPct: number; closeProfitPct: number; daysHeld: number; lifespanDays: number; stockName: string }
+    ): 'HIT' | 'DROPPED' | null {
+        const { highProfitPct, closeProfitPct, daysHeld, lifespanDays, stockName } = ctx;
+
+        interface StrategyRule {
+            hitHighPct: number;   // 고가 기준 목표 수익률
+            hitClosePct: number;  // 종가 기준 목표 수익률
+            stopLossPct: number;  // 손절선 (음수)
+            lifespan: number;     // 기본 수명 (lifespan_days 없을 시 fallback)
+        }
+
+        const rules: Record<string, StrategyRule> = {
+            MOMENTUM: { hitHighPct: 13, hitClosePct: 10, stopLossPct: -8,  lifespan: 5  },
+            PULLBACK: { hitHighPct: 18, hitClosePct: 15, stopLossPct: -10, lifespan: 10 },
+            SWING:    { hitHighPct: 25, hitClosePct: 20, stopLossPct: -12, lifespan: 20 },
+            VALUE:    { hitHighPct: 35, hitClosePct: 30, stopLossPct: -15, lifespan: 60 },
+        };
+
+        const rule = rules[strategy] ?? rules['SWING'];
+        const effectiveLifespan = lifespanDays || rule.lifespan;
+
+        // ① 목표 수익률 달성 → HIT
+        if (highProfitPct >= rule.hitHighPct || closeProfitPct >= rule.hitClosePct) {
+            console.log(
+                `[PortfolioJudge] 🎉 [${strategy}] ${stockName} HIT! ` +
+                `고가 ${highProfitPct.toFixed(1)}% (기준 ${rule.hitHighPct}%) / ` +
+                `종가 ${closeProfitPct.toFixed(1)}% (기준 ${rule.hitClosePct}%)`
+            );
+            return 'HIT';
+        }
+
+        // ② 손절선 이탈 → 즉시 DROPPED
+        if (closeProfitPct <= rule.stopLossPct) {
+            console.log(
+                `[PortfolioJudge] 🛑 [${strategy}] ${stockName} 손절 실행! ` +
+                `종가 ${closeProfitPct.toFixed(1)}% ≤ 손절선 ${rule.stopLossPct}%`
+            );
+            return 'DROPPED';
+        }
+
+        // ③ 수명 초과 → DROPPED
+        if (daysHeld >= effectiveLifespan) {
+            console.log(
+                `[PortfolioJudge] ⏳ [${strategy}] ${stockName} 수명 종료 ` +
+                `(${daysHeld}/${effectiveLifespan}일). 수익률: ${closeProfitPct.toFixed(1)}%`
+            );
+            return 'DROPPED';
+        }
+
+        return null; // 현재 상태 유지
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 1B: LeaderRegime 스냅샷 저장
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * B트랙: Alpha 상위 종목 일일 스냅샷을 market_leader_daily 테이블에 저장합니다.
+     * PortfolioJudgeScheduler.runDailyJudgement() 마지막에 호출합니다. (15:40)
+     */
+    public async saveLeaderSnapshot(): Promise<void> {
+        try {
+            const { MarketLeaderDiscoveryService } = await import('./MarketLeaderDiscoveryService');
+            const svc = MarketLeaderDiscoveryService.getInstance();
+            const rawDb = (this.db as any).db;
+            const today = this.db.getKstDate();
+
+            // 테이블 없으면 생성
+            rawDb.prepare(`
+                CREATE TABLE IF NOT EXISTS market_leader_daily (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_date TEXT NOT NULL,
+                    period_days INTEGER NOT NULL,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT NOT NULL,
+                    rank INTEGER NOT NULL,
+                    market_alpha REAL,
+                    total_change_rate REAL,
+                    avg_trading_value REAL,
+                    score REAL,
+                    related_themes TEXT,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                )
+            `).run();
+            rawDb.prepare(`
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_leader_daily
+                ON market_leader_daily(snapshot_date, period_days, stock_code)
+            `).run();
+
+            // 10일 기준 Top50 저장
+            const leaders = svc.getMarketLeaders(10, 0, 50);
+            const stmt = rawDb.prepare(`
+                INSERT OR REPLACE INTO market_leader_daily
+                (snapshot_date, period_days, stock_code, stock_name, rank,
+                 market_alpha, total_change_rate, avg_trading_value, score, related_themes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+
+            const insertMany = rawDb.transaction((rows: any[]) => {
+                for (const r of rows) stmt.run(...r);
+            });
+
+            insertMany(leaders.map((l, idx) => [
+                today, 10, l.stockCode, l.stockName, idx + 1,
+                l.marketAlpha, l.totalChangeRate, l.avgTradingValue, l.score,
+                JSON.stringify(l.relatedThemes)
+            ]));
+
+            console.log(`[PortfolioJudge] 📸 ${today} Alpha 스냅샷 저장 완료 (${leaders.length}종목, 10일 기준)`);
+        } catch (e: any) {
+            console.warn('[PortfolioJudge] ⚠️ Alpha 스냅샷 저장 실패 (무시):', e.message);
+        }
+    }
+
+    /**
+     * A트랙: PM이 오늘 평가한 종목의 conviction_score 이력을 portfolio_score_history 테이블에 저장합니다.
+     * PortfolioManagerAgent.runDailyReview() 완료 후 호출합니다.
+     */
+    public savePortfolioScoreHistory(): void {
+        try {
+            const rawDb = (this.db as any).db;
+            const today = this.db.getKstDate();
+
+            // 테이블 없으면 생성
+            rawDb.prepare(`
+                CREATE TABLE IF NOT EXISTS portfolio_score_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_date TEXT NOT NULL,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT NOT NULL,
+                    conviction_score INTEGER,
+                    last_signal TEXT,
+                    strategy TEXT,
+                    analysts_json TEXT,
+                    theme_sector TEXT,
+                    market_alpha REAL,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                )
+            `).run();
+            rawDb.prepare(`
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_score_history
+                ON portfolio_score_history(snapshot_date, stock_code)
+            `).run();
+
+            // 오늘 PM이 평가한 전체 활성 포트폴리오 스냅샷
+            const activePortfolio = this.db.getActivePortfolio() as any[];
+            if (!activePortfolio || activePortfolio.length === 0) return;
+
+            const stmt = rawDb.prepare(`
+                INSERT OR REPLACE INTO portfolio_score_history
+                (snapshot_date, stock_code, stock_name, conviction_score,
+                 last_signal, strategy, analysts_json, theme_sector, market_alpha)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+
+            const insertMany = rawDb.transaction((rows: any[]) => {
+                for (const r of rows) stmt.run(...r);
+            });
+
+            insertMany(activePortfolio.map(s => [
+                today, s.stock_code, s.stock_name,
+                s.conviction_score ?? null,
+                s.last_signal ?? null,
+                s.strategy ?? null,
+                s.analysts_json ?? null,
+                s.theme_sector ?? null,
+                null  // market_alpha는 별도 Alpha 계산 후 업데이트 가능
+            ]));
+
+            console.log(`[PortfolioJudge] 📊 conviction_score 이력 저장 완료 (${activePortfolio.length}종목)`);
+        } catch (e: any) {
+            console.warn('[PortfolioJudge] ⚠️ conviction 이력 저장 실패 (무시):', e.message);
+        }
+    }
+
+    /**
+     * LeaderRegime 파생 분석 — Crown 연속일 (Alpha Top10 연속 N일 이상 유지 종목)
+     */
+    public getCrownLeaders(minDays: number = 3): any[] {
+        try {
+            const rawDb = (this.db as any).db;
+            return rawDb.prepare(`
+                SELECT stock_code, stock_name,
+                       COUNT(*) as crown_days,
+                       MIN(snapshot_date) as streak_start,
+                       MIN(rank) as best_rank,
+                       MAX(market_alpha) as peak_alpha
+                FROM market_leader_daily
+                WHERE period_days = 10 AND rank <= 10
+                  AND snapshot_date >= date('now', '-30 days')
+                GROUP BY stock_code
+                HAVING COUNT(*) >= ?
+                ORDER BY crown_days DESC
+            `).all(minDays) as any[];
+        } catch { return []; }
+    }
+
+    /**
+     * LeaderRegime 파생 분석 — 신규 진입자 (오늘 Top30인데 어제 없던 종목)
+     */
+    public getNewEntrants(): any[] {
+        try {
+            const rawDb = (this.db as any).db;
+            const today = this.db.getKstDate();
+            return rawDb.prepare(`
+                SELECT t.stock_code, t.stock_name, t.rank, t.market_alpha, t.related_themes
+                FROM market_leader_daily t
+                WHERE t.snapshot_date = ? AND t.period_days = 10
+                  AND NOT EXISTS (
+                      SELECT 1 FROM market_leader_daily y
+                      WHERE y.stock_code = t.stock_code
+                        AND y.snapshot_date = date(?, '-1 day')
+                        AND y.period_days = 10
+                  )
+            `).all(today, today) as any[];
+        } catch { return []; }
+    }
+
+    /**
+     * LeaderRegime 파생 분석 — Revival 후보 (과거 Top15였다가 소강 후 재진입)
+     */
+    public getRevivalCandidates(pastDays: number = 20): any[] {
+        try {
+            const rawDb = (this.db as any).db;
+            const today = this.db.getKstDate();
+            return rawDb.prepare(`
+                SELECT curr.stock_code, curr.stock_name, curr.rank, curr.market_alpha,
+                       past.rank as past_rank, past.snapshot_date as past_date
+                FROM market_leader_daily curr
+                JOIN market_leader_daily past
+                    ON curr.stock_code = past.stock_code
+                    AND past.snapshot_date <= date(?, '-${pastDays} days')
+                    AND past.rank <= 15
+                WHERE curr.snapshot_date = ? AND curr.period_days = 10
+            `).all(today, today) as any[];
+        } catch { return []; }
+    }
 }
+

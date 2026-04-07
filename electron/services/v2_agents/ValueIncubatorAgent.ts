@@ -86,7 +86,6 @@ export class ValueIncubatorAgent {
 
             const response = await AiExecutionQueue.getInstance().enqueue({
                 taskType: 'INCUBATOR_ANALYST',
-                modelName: 'gemini-exp-1206',
                 prompt: systemPrompt + '\n\n' + promptContext,
                 temperature: 0.2
             });

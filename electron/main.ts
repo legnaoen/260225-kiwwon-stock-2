@@ -206,7 +206,7 @@ app.whenReady().then(() => {
     const crawlerDir = app.isPackaged
         ? path.join(process.resourcesPath, 'python')
         : path.join(process.cwd(), 'electron', 'python')
-    
+
     // venv가 있으면 사용, 없으면 시스템 python 사용
     const venvPython = path.join(crawlerDir, 'venv', 'Scripts', 'python.exe')
     const pythonExe = fs.existsSync(venvPython) ? venvPython : 'python'
@@ -235,7 +235,7 @@ app.whenReady().then(() => {
             console.log('[Main] Starting startup Stock Master sync...')
             // 종목 마스터 동기화 (내부에서 오늘 날짜 체크함)
             await StockMasterService.getInstance().checkAndUpdate()
-            
+
             // [DEPRECATED] DART 관심종목 일정 동기화 - UI에서 관심종목/DART 탭 삭제됨
             // 재활용 시: await DartApiService.getInstance().syncWatchlistSchedules()
             console.log('[Main] Startup sync completed.')
@@ -351,7 +351,7 @@ ipcMain.handle('maiis:trigger-sync', async (_event, { providerId, options }) => 
 ipcMain.handle('maiis:analyze-domain', async (_event, { domain, date }) => {
     try {
         const { MaiisDomainService } = await import('./services/MaiisDomainService')
-        return domain === 'YOUTUBE' 
+        return domain === 'YOUTUBE'
             ? await MaiisDomainService.getInstance().analyzeYoutubeDomain(date)
             : await MaiisDomainService.getInstance().analyzeNewsDomain(date)
     } catch (err: any) {
@@ -473,6 +473,26 @@ ipcMain.handle('ai-analyst:run-portfolio-manager', async () => {
     }
 });
 
+ipcMain.handle('ai-analyst:run-portfolio-manager-phase1', async () => {
+    try {
+        const { PortfolioManagerAgent } = await import('./services/v2_agents/PortfolioManagerAgent');
+        const data = await PortfolioManagerAgent.getInstance().runPhase1_Screening();
+        return { success: true, data };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('ai-analyst:run-portfolio-manager-phase2', async () => {
+    try {
+        const { PortfolioManagerAgent } = await import('./services/v2_agents/PortfolioManagerAgent');
+        const data = await PortfolioManagerAgent.getInstance().runPhase2_Rebalancing();
+        return { success: true, data };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('ai-analyst:run-daily-judge', async () => {
     try {
         const { PortfolioJudgeScheduler } = await import('./services/v2_pipeline/PortfolioJudgeScheduler');
@@ -535,6 +555,30 @@ ipcMain.handle('ai-analyst:clear-picks', async () => {
     } catch (e: any) {
         console.error('[Main] clear-picks 오류:', e);
         return { error: e.message };
+    }
+});
+
+// 관심종목(WAIT_DIP/HOLD/WATCHLIST)에 잘못 기록된 진입가·수익률 초기화
+// 이전 버전 데이터 정합성 복구용 (전체 삭제 아님, 해당 필드만 0으로 리셋)
+ipcMain.handle('ai-analyst:cleanup-watchlist-prices', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const result = DatabaseService.getInstance().cleanupWatchlistEntryPrices();
+        console.log(`[Main] 관심종목 진입가 초기화 완료: ${result.fixed}건`);
+        return { success: true, fixed: result.fixed };
+    } catch (e: any) {
+        console.error('[Main] cleanup-watchlist-prices 오류:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('maiisAdmin:getPortfolioEventLogs', async (_event, stock_code: string) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const logs = DatabaseService.getInstance().getPortfolioEventLogs(stock_code);
+        return { success: true, data: logs };
+    } catch (e: any) {
+        return { success: false, error: e.message };
     }
 });
 
@@ -610,12 +654,12 @@ ipcMain.handle('ai-analyst:run-retrospective', async () => {
         const { RetrospectiveAgent } = await import('./services/v2_agents/RetrospectiveAgent');
         const { KiwoomService } = await import('./services/KiwoomService');
         const agent = new RetrospectiveAgent(KiwoomService.getInstance());
-        
+
         // 1단계: 채점
         const count = await agent.evaluatePastPicks();
         // 2단계: 피드백(오답노트) 생성
         await agent.runRetrospectiveLogic();
-        
+
         console.log(`[Main] 성과 회고 프로세스 일체 완료 (채점 건수: ${count})`);
         return { success: true, count };
     } catch (e: any) {
@@ -628,12 +672,12 @@ ipcMain.handle('maiis:run-pipeline-manual', async (_event, pipelineId: string) =
     try {
         console.log(`[Main] Manual pipeline trigger: ${pipelineId}`)
         switch (pipelineId) {
-            case 'PRE_MARKET':    await schedulerService.runPreMarketAnalysis(); break
-            case 'AM_EXECUTION':  await schedulerService.runPendingExecution(); break
-            case 'MORNING':       await schedulerService.runMorningPipeline(); break
-            case 'INTRADAY':      await schedulerService.runIntradayReview(); break
-            case 'EVENING':       await schedulerService.runEveningPipeline(); break
-            case 'CLOSING':       await schedulerService.runClosingReview(); break
+            case 'PRE_MARKET': await schedulerService.runPreMarketAnalysis(); break
+            case 'AM_EXECUTION': await schedulerService.runPendingExecution(); break
+            case 'MORNING': await schedulerService.runMorningPipeline(); break
+            case 'INTRADAY': await schedulerService.runIntradayReview(); break
+            case 'EVENING': await schedulerService.runEveningPipeline(); break
+            case 'CLOSING': await schedulerService.runClosingReview(); break
             default: return { success: false, error: `Unknown pipeline: ${pipelineId}` }
         }
         return { success: true }
@@ -676,7 +720,7 @@ ipcMain.handle('v2:get-market-leaders', async (_event, { days, topN }) => {
                     marketIndexChange = ((last - first) / first) * 100;
                 }
             }
-        } catch(e) {}
+        } catch (e) { }
 
         const service = MarketLeaderDiscoveryService.getInstance()
         // KODEX 200 상승률을 시장 지수 대비 알파 계산의 기준으로 주입
@@ -754,7 +798,7 @@ ipcMain.handle('naverflow:search-live-news', async (_event, keyword: string) => 
         const { DatabaseService } = await import('./services/DatabaseService')
         const collector = new NaverSearchCollector()
         const rawSearch = await collector.collect({ keyword })
-        
+
         const dbSvc = DatabaseService.getInstance()
         const rawDb = (dbSvc as any).db;
         const now = new Date();
@@ -773,7 +817,7 @@ ipcMain.handle('naverflow:search-live-news', async (_event, keyword: string) => 
             const title = item.title?.replace(/<[^>]+>/g, '') || '';
             const snippet = item.description?.replace(/<[^>]+>/g, '') || '';
             let source = 'NaverSearchAPI';
-            try { source = item.originallink ? new URL(item.originallink).hostname.replace('www.', '') : 'Naver'; } catch(e){}
+            try { source = item.originallink ? new URL(item.originallink).hostname.replace('www.', '') : 'Naver'; } catch (e) { }
             const pubDate = item.pubDate ? new Date(item.pubDate).toISOString() : now.toISOString();
             const url = item.originallink || item.link || '';
             const hash = Math.abs((Math.imul(31, 0) + title.charCodeAt(0)) | 0).toString(16) + (item.pubDate || Date.now());
@@ -899,7 +943,7 @@ ipcMain.handle('telegram:get-logs', async () => {
 })
 
 // V2 Co-Pilot IPC
-ipcMain.on('copilot:chat', async (event, data: { message: string, mode: 'auto'|'short'|'detail' }) => {
+ipcMain.on('copilot:chat', async (event, data: { message: string, mode: 'auto' | 'short' | 'detail' }) => {
     const { message, mode } = data;
     try {
         const { CoPilotAgent } = await import('./services/v2_agents/CoPilotAgent')
@@ -916,11 +960,11 @@ ipcMain.handle('agent:market:run', async (_event, cycle: 'A' | 'B') => {
     try {
         const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
         const result = await MarketConditionAgent.getInstance().runPrediction(cycle)
-        
+
         // 동기적으로 즉시 당일 진입가격(Entry Price)과 가능한 수익률 평가(T+1 등)를 반영 시도
         const { PerformanceTracker } = await import('./services/v2_agents/PerformanceTracker')
         await PerformanceTracker.getInstance().runDailyTracking()
-        
+
         return { success: true, data: result }
     } catch (error: any) {
         console.error(`[Agent] MarketCondition run error:`, error)
@@ -2059,10 +2103,10 @@ ipcMain.handle('naver:collect-news', async (_event, { date, stockCode, stockName
     try {
         const { NaverNewsService } = await import('./services/NaverNewsService')
         const news = await NaverNewsService.getInstance().searchNews(stockName, 10)
-        
+
         // DB 저장
         DatabaseService.getInstance().saveNewsRawData(date, stockCode, stockName, news)
-        
+
         return { success: true, data: news }
     } catch (err: any) {
         return { success: false, error: err.message }
@@ -2207,5 +2251,34 @@ ipcMain.handle('ai-daily-raw-logs:get', async (_event, date: string, agentType: 
         return { success: true, data: log ? log.raw_text : null }
     } catch (err: any) {
         return { success: false, error: err.message }
+    }
+})
+
+// ── 개별 항목 삭제 IPC ────────────────────────────────────────────────────────
+
+ipcMain.handle('ai-analyst:delete-portfolio-item', async (_event, id: number) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        return DatabaseService.getInstance().deletePortfolioItem(id)
+    } catch (err: any) {
+        return { deleted: false, error: err.message }
+    }
+})
+
+ipcMain.handle('ai-analyst:delete-pick', async (_event, id: number) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        return DatabaseService.getInstance().deleteAnalystPick(id)
+    } catch (err: any) {
+        return { deleted: false, error: err.message }
+    }
+})
+
+ipcMain.handle('incubator:delete-item', async (_event, stock_code: string) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        return DatabaseService.getInstance().deleteIncubatorItem(stock_code)
+    } catch (err: any) {
+        return { deleted: false, error: err.message }
     }
 })

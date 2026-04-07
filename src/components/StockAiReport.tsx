@@ -10,9 +10,10 @@ interface StockAiReportProps {
     name: string
     refreshTrigger?: number
     hideTitle?: boolean
+    pmEvents?: any[] // Added PM events
 }
 
-export function StockAiReport({ symbol, name, refreshTrigger, hideTitle }: StockAiReportProps) {
+export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvents }: StockAiReportProps) {
     const [reports, setReports] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [tagInput, setTagInput] = useState('')
@@ -58,6 +59,34 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle }: Stock
         }
     }
 
+    const [filterType, setFilterType] = useState<'ALL'|'AI_REPORT'|'PM_EVENT'>('ALL')
+
+    const unifiedTimeline = useMemo(() => {
+        let combined: any[] = [];
+        
+        const rpts = reports.map(r => ({
+            _type: 'AI_REPORT',
+            _sortDate: new Date(r.date).getTime() || 0,
+            ...r
+        }));
+        combined = [...combined, ...rpts];
+
+        if (pmEvents && pmEvents.length > 0) {
+            const evts = pmEvents.map(e => ({
+                _type: 'PM_EVENT',
+                _sortDate: new Date(e.created_at).getTime() || 0,
+                ...e
+            }));
+            combined = [...combined, ...evts];
+        }
+
+        let filtered = combined;
+        if (filterType === 'AI_REPORT') filtered = combined.filter(x => x._type === 'AI_REPORT');
+        if (filterType === 'PM_EVENT') filtered = combined.filter(x => x._type === 'PM_EVENT');
+
+        return filtered.sort((a, b) => b._sortDate - a._sortDate);
+    }, [reports, pmEvents, filterType]);
+
     if (loading) {
         return (
             <div className="flex flex-col items-center justify-center h-full py-20 opacity-50 space-y-4">
@@ -98,21 +127,87 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle }: Stock
                 <div className="h-[1px] w-full bg-border/40 mb-8" />
             </div>
 
-            {/* 리포트 히스토리 목록 */}
-            <div className="space-y-12">
-                {reports.length > 0 ? reports.map((rpt, idx) => {
+            {/* 타임라인 필터 */}
+            <div className="flex items-center gap-2 mb-6 border-b border-border/40 pb-4">
+                <button 
+                    onClick={() => setFilterType('ALL')}
+                    className={cn("px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border", filterType === 'ALL' ? "bg-primary/10 text-primary border-primary/30" : "bg-transparent text-muted-foreground border-transparent hover:bg-muted/50")}
+                >
+                    전체 보기
+                </button>
+                <button 
+                    onClick={() => setFilterType('PM_EVENT')}
+                    className={cn("px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border", filterType === 'PM_EVENT' ? "bg-rose-500/10 text-rose-500 border-rose-500/30" : "bg-transparent text-muted-foreground border-transparent hover:bg-muted/50")}
+                >
+                    매니저 판단 이력
+                </button>
+                <button 
+                    onClick={() => setFilterType('AI_REPORT')}
+                    className={cn("px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border", filterType === 'AI_REPORT' ? "bg-blue-500/10 text-blue-500 border-blue-500/30" : "bg-transparent text-muted-foreground border-transparent hover:bg-muted/50")}
+                >
+                    AI 리포트만 보기
+                </button>
+            </div>
+
+            {/* 리포트/이벤트 통합 타임라인 목록 */}
+            <div className="space-y-10 pl-2">
+                {unifiedTimeline.length > 0 ? unifiedTimeline.map((item, idx) => {
+                    const isPM = item._type === 'PM_EVENT';
+                    
+                    if (isPM) {
+                        const log = item;
+                        return (
+                            <div key={`pm-${idx}`} className="relative pl-8 border-l-2 border-border/40 hover:border-rose-500/30 transition-colors pb-2">
+                                <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-background shadow-sm bg-rose-400" />
+                                <div className="flex flex-wrap items-center gap-2 mb-3">
+                                    <span className="text-[11px] font-mono font-bold text-muted-foreground bg-muted/30 px-2 py-0.5 rounded border border-border/30">
+                                        {log.created_at?.slice(0, 16).replace('T', ' ')}
+                                    </span>
+                                    <span className={cn(
+                                        "text-[11px] font-black px-2.5 py-0.5 rounded-full whitespace-nowrap border shadow-sm",
+                                        log.event_type === 'WATCHLIST_ADDED' ? 'bg-blue-500 text-white border-blue-600' :
+                                            log.event_type === 'BUY_UPGRADED' ? 'bg-rose-500 text-white border-rose-600' :
+                                                log.event_type === 'DROPPED' ? 'bg-muted-foreground text-white border-muted-foreground' :
+                                                    'bg-amber-500 text-white border-amber-600'
+                                    )}>
+                                        {log.event_type === 'WATCHLIST_ADDED' ? '👀 관심종목 편입' :
+                                        log.event_type === 'BUY_UPGRADED' ? '💰 매수 지시' :
+                                        log.event_type === 'DROPPED' ? '❌ 탈락/포기' :
+                                        log.event_type}
+                                    </span>
+                                    {log.price > 0 && (
+                                        <span className="text-[12px] font-mono font-black text-foreground ml-1">
+                                            @ {log.price?.toLocaleString()}원
+                                        </span>
+                                    )}
+                                    {log.profit_rate != null && log.profit_rate !== 0 && (
+                                        <span className={cn("text-[12px] font-black font-mono ml-1", log.profit_rate > 0 ? "text-rose-500" : "text-blue-500")}>
+                                            ({log.profit_rate > 0 ? '+' : ''}{log.profit_rate.toFixed(2)}%)
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="pt-2 pb-1 pl-1">
+                                    <div className="text-[14px] text-foreground/90 font-medium leading-relaxed whitespace-pre-wrap">
+                                        {log.reason}
+                                    </div>
+                                </div>
+                            </div>
+                        )
+                    }
+
+                    const rpt = item;
                     const scoreStyle = getScoreStyle(rpt.ai_score ?? rpt.score ?? 50);
                     return (
-                        <div key={idx} className="relative pl-8 border-l-2 border-border/40 hover:border-primary/30 transition-colors pb-2">
+                        <div key={`ai-${idx}`} className="relative pl-8 border-l-2 border-border/40 hover:border-primary/30 transition-colors pb-4">
                             {/* 타임라인 포인트 아이콘 */}
                             <div 
-                                className="absolute -left-[9px] top-0 w-4 h-4 rounded-full border-2 border-background shadow-sm"
+                                className="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-background shadow-sm"
                                 style={{ backgroundColor: scoreStyle.color }}
                             />
                             
                             {/* 리포트 헤더 */}
-                            <div className="flex items-center gap-3 mb-4">
-                                <span className="text-sm font-black font-mono text-muted-foreground">{rpt.date}</span>
+                            <div className="flex items-center gap-3 mb-2">
+                                <span className="text-[11px] bg-muted/30 px-2 py-0.5 border border-border/30 rounded font-bold font-mono text-muted-foreground">{rpt.date}</span>
                                 <div 
                                     className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-sm shrink-0"
                                     style={{ backgroundColor: scoreStyle.color }}
@@ -127,16 +222,16 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle }: Stock
                             </div>
 
                             {/* 리포트 본문 (분석 의견) */}
-                            <div className="border border-border/20 rounded-xl p-5 hover:border-border/40 transition-colors bg-background">
-                                <div className="space-y-4">
+                            <div className="pt-2 pb-1 pl-1">
+                                <div className="space-y-3">
                                     {rpt.past_reference && (
-                                        <div className="p-4 bg-muted/10 rounded-xl border border-border/30 text-muted-foreground text-[12px] font-bold leading-relaxed">
+                                        <div className="py-2 px-3 bg-muted/10 rounded-lg border-l-2 border-muted-foreground/30 text-muted-foreground text-[12px] font-bold leading-relaxed">
                                             🔍 {rpt.past_reference}
                                         </div>
                                     )}
                                     
                                     {/* 분석 의견 */}
-                                    <div className="text-[15px] font-medium text-foreground/90 leading-relaxed whitespace-pre-wrap">
+                                    <div className="text-[14px] font-medium text-foreground/90 leading-relaxed whitespace-pre-wrap">
                                         <ReactMarkdown 
                                             remarkPlugins={[remarkGfm]}
                                             components={{ p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p> }}
@@ -146,12 +241,14 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle }: Stock
                                     </div>
 
                                     {/* 기술적 진단 첨언 */}
-                                    <div className="mt-4 pt-4 border-t border-border/40">
-                                        <p className="text-[13px] font-bold text-indigo-500/90 leading-relaxed flex items-start gap-2">
-                                            <span className="shrink-0">📈</span>
-                                            <span>{rpt.chart_insight}</span>
-                                        </p>
-                                    </div>
+                                    {rpt.chart_insight && rpt.chart_insight.trim().length > 0 && (
+                                        <div className="mt-4 pt-4 border-t border-border/40">
+                                            <p className="text-[13px] font-bold text-indigo-500/90 leading-relaxed flex items-start gap-2">
+                                                <span className="shrink-0">📈</span>
+                                                <span>{rpt.chart_insight}</span>
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -159,7 +256,7 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle }: Stock
                 }) : (
                     <div className="flex flex-col items-center justify-center py-20 opacity-30">
                         <FileText size={48} className="mb-4" />
-                        <p className="text-sm font-bold">생성된 리포트가 없습니다.</p>
+                        <p className="text-sm font-bold">기록이 없습니다.</p>
                     </div>
                 )}
             </div>

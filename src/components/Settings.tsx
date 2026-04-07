@@ -48,7 +48,12 @@ export default function Settings() {
         modelName: 'gemini-1.5-flash',
         virtualInitialBalance: 1000000,
         buyStartTime: '09:10',
-        buyEndTime: '15:00'
+        buyEndTime: '15:00',
+        phase1PassLimit: 10,
+        portfolioLimits: {
+            buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
+            watchlist: { MOMENTUM: 3, PULLBACK: 3, SWING: 6, VALUE: 3 }
+        }
     })
     const [isSavingTg, setIsSavingTg] = useState(false)
     const [statusTg, setStatusTg] = useState<'idle' | 'success' | 'error'>('idle')
@@ -142,12 +147,16 @@ export default function Settings() {
             }
 
             // DART 설정 로드
-            const savedDartKey = await window.electronAPI.getDartApiKey()
-            setDartKey(savedDartKey)
+            try {
+                const savedDartKey = await window.electronAPI.getDartApiKey()
+                setDartKey(savedDartKey)
 
-            const savedDartSettings = await window.electronAPI.getDartSettings()
-            if (savedDartSettings?.options) {
-                setDartOptions(savedDartSettings.options)
+                const savedDartSettings = await window.electronAPI.getDartSettings()
+                if (savedDartSettings?.options) {
+                    setDartOptions(savedDartSettings.options)
+                }
+            } catch (err) {
+                console.warn('[Settings] DART 설정 로드 실패 (기능 비활성화됨):', err)
             }
 
             const savedAiSettings = await window.electronAPI.getAiSettings()
@@ -157,7 +166,12 @@ export default function Settings() {
                     modelName: savedAiSettings.modelName || 'gemini-1.5-flash',
                     virtualInitialBalance: savedAiSettings.virtualInitialBalance ?? 1000000,
                     buyStartTime: savedAiSettings.buyStartTime || '09:10',
-                    buyEndTime: savedAiSettings.buyEndTime || '15:00'
+                    buyEndTime: savedAiSettings.buyEndTime || '15:00',
+                    phase1PassLimit: savedAiSettings.phase1PassLimit ?? 10,
+                    portfolioLimits: savedAiSettings.portfolioLimits || {
+                        buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
+                        watchlist: { MOMENTUM: 3, PULLBACK: 3, SWING: 6, VALUE: 3 }
+                    }
                 })
             }
 
@@ -1312,9 +1326,102 @@ export default function Settings() {
                                                     />
                                                 </div>
                                             </div>
-                                            <p className="text-[10px] text-muted-foreground ml-1">
+                                            <p className="text-[10px] text-muted-foreground ml-1 mb-6">
                                                 * 장 초반 노이즈 방지를 위해 09:10 이후를 권장하며, 마감 전 진입은 15:00 이전을 권장합니다.
                                             </p>
+
+                                            <div className="space-y-3 pt-6 border-t border-border/40">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-sm font-bold flex items-center gap-2">
+                                                        <Activity size={16} className="text-emerald-500" />
+                                                        1차 평가 (루키 오디션) 통과 인원
+                                                    </label>
+                                                    <span className="text-xs text-emerald-500 font-bold">
+                                                        {aiSettings.phase1PassLimit || 10} 종목
+                                                    </span>
+                                                </div>
+                                                <Input
+                                                    type="number"
+                                                    min="1"
+                                                    max="50"
+                                                    value={aiSettings.phase1PassLimit}
+                                                    onChange={(e) => setAiSettings({ ...aiSettings, phase1PassLimit: Number(e.target.value) })}
+                                                    placeholder="기본값: 10"
+                                                />
+                                                <p className="text-[10px] text-muted-foreground ml-1">
+                                                    * 매일 수십 개의 추천주 중 상위 몇 개만 2차 심사(관심종목)로 올릴지 결정합니다. 숫자가 적을수록 토큰이 획기적으로 절약됩니다.
+                                                </p>
+                                            </div>
+
+                                            {/* 포트폴리오 쿼터제 (Capacity Limits) 추가 */}
+                                            <div className="pt-6 mt-6 border-t border-border/40">
+                                                <div className="space-y-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="text-sm font-bold flex items-center gap-2">
+                                                            <Activity size={16} className="text-pink-500" />
+                                                            포트폴리오 전략별 용량 제한 (하드캡)
+                                                        </label>
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground -mt-2 mb-4">
+                                                        AI 포트폴리오 매니저가 유지할 수 있는 포지션별(매수/관심) 종목 한도입니다.
+                                                    </p>
+                                                    <div className="grid grid-cols-2 gap-8">
+                                                        {/* 매수 (BUY) 캡 */}
+                                                        <div className="space-y-3 bg-muted/20 p-4 rounded-xl border border-border/40">
+                                                            <div className="flex items-center justify-between border-b pb-2">
+                                                                <span className="font-bold text-sm text-rose-500">매수 포지션 (HELD)</span>
+                                                                <span className="text-xs font-bold text-muted-foreground">총 {Object.values(aiSettings.portfolioLimits.buy).reduce((a, b) => a + Number(b), 0)}개</span>
+                                                            </div>
+                                                            {(Object.keys(aiSettings.portfolioLimits.buy) as Array<keyof typeof aiSettings.portfolioLimits.buy>).map(strategy => (
+                                                                <div key={`buy-${strategy}`} className="flex items-center justify-between">
+                                                                    <span className="text-xs font-semibold w-24">{strategy}</span>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        min="0"
+                                                                        max="20"
+                                                                        className="w-20 h-8 text-xs font-bold text-right pl-2 pr-2"
+                                                                        value={aiSettings.portfolioLimits.buy[strategy]}
+                                                                        onChange={(e) => setAiSettings({
+                                                                            ...aiSettings, 
+                                                                            portfolioLimits: {
+                                                                                ...aiSettings.portfolioLimits,
+                                                                                buy: { ...aiSettings.portfolioLimits.buy, [strategy]: Math.max(0, parseInt(e.target.value) || 0) }
+                                                                            }
+                                                                        })}
+                                                                    />
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        {/* 관심 (WATCHLIST) 캡 */}
+                                                        <div className="space-y-3 bg-muted/20 p-4 rounded-xl border border-border/40">
+                                                            <div className="flex items-center justify-between border-b pb-2">
+                                                                <span className="font-bold text-sm text-sky-500">관심/대기 (WATCHING)</span>
+                                                                <span className="text-xs font-bold text-muted-foreground">총 {Object.values(aiSettings.portfolioLimits.watchlist).reduce((a, b) => a + Number(b), 0)}개</span>
+                                                            </div>
+                                                            {(Object.keys(aiSettings.portfolioLimits.watchlist) as Array<keyof typeof aiSettings.portfolioLimits.watchlist>).map(strategy => (
+                                                                <div key={`watch-${strategy}`} className="flex items-center justify-between">
+                                                                    <span className="text-xs font-semibold w-24">{strategy}</span>
+                                                                    <Input 
+                                                                        type="number" 
+                                                                        min="0"
+                                                                        max="30"
+                                                                        className="w-20 h-8 text-xs font-bold text-right pl-2 pr-2"
+                                                                        value={aiSettings.portfolioLimits.watchlist[strategy]}
+                                                                        onChange={(e) => setAiSettings({
+                                                                            ...aiSettings, 
+                                                                            portfolioLimits: {
+                                                                                ...aiSettings.portfolioLimits,
+                                                                                watchlist: { ...aiSettings.portfolioLimits.watchlist, [strategy]: Math.max(0, parseInt(e.target.value) || 0) }
+                                                                            }
+                                                                        })}
+                                                                    />
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                         </div>
 
                                         <div className="flex gap-4">

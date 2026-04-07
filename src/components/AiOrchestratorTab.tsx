@@ -38,11 +38,9 @@ const AI_AGENTS = [
     },
     {
         id: 'ITA', name: '이슈 트래커 (전담 기자)', fullName: 'Issue Tracker Agent',
-        description: '08:30 매일 아침 로컬 뉴스를 긁어와 이슈 타임라인을 업데이트하고 군집을 소집합니다.',
+        description: '08:50 MCA(Cycle A) 동작 시 호출되어 밤사이 뉴스를 긁어와 이슈 타임라인을 업데이트합니다.',
         gemini: false, trigger: 'CRON' as const,
-        schedules: [
-            { time: '08:30', label: '개장 전 이슈 점검', description: '밤사이 뉴스 정독 및 타임라인 요약' },
-        ],
+        schedules: [],
     },
     {
         id: 'COPILOT', name: '코파일럿', fullName: 'Co-Pilot Agent',
@@ -107,7 +105,9 @@ const AI_AGENTS = [
         description: '서브 AI들의 리포트를 종합하여 보유 포지션을 재평가하고 최종 포트폴리오 편입/방출을 지시합니다.',
         gemini: true, trigger: 'CRON' as const,
         schedules: [
-            { time: '09:45', label: '포트폴리오 종합 심사', description: '서브 AI + 인큐베이터 편입 후보 종합 리뷰 (IMMEDIATE_BUY 확정)' },
+            { time: '09:45', label: '1차 평가 (루키 오디션)', description: '서브 AI + 인큐베이터 추천 새 후보 필터링' },
+            { time: '09:48', label: '2차 평가 (아침 리밸런싱)', description: '전체 포트폴리오 재평가 및 한도 내 매수 확정' },
+            { time: '14:05', label: '장중 미니 리뷰 (오후장 점검)', description: '현재 활성된 보유/관심 종목을 대상으로 솎아내기 (손절 방어 및 승급)' },
         ],
     },
     {
@@ -608,6 +608,8 @@ export default function AiOrchestratorTab() {
                             </div>
                         )}
                     </section>
+                    )}
+
                 </div>
             </main>
 

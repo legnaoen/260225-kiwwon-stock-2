@@ -304,13 +304,13 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Step 6] 16:30 인큐베이터 스캔: 전종목 OHLCV 수집 완료 후 Pool B neglect_score 갱신
-            const incubatorScanJob = cron.schedule('30 16 * * 1-5', async () => {
+            // [Step 6] 15:43 인큐베이터 스캔: Pool B neglect_score 갱신
+            const incubatorScanJob = cron.schedule('43 15 * * 1-5', async () => {
                 console.log('[Scheduler] 🧪 인큐베이터 neglect_score 스캔 자동 실행 시작...')
                 try {
                     const { IncubatorScanEngine } = await import('./v2_agents/IncubatorScanEngine')
                     await IncubatorScanEngine.getInstance().runDailyScan()
-                    this.telegram.sendMessage('🧪 [16:30] 인큐베이터 스캔 완료\nneglect_score 갱신 및 IGNITE 후보 평가 완료\n확인: 종목AI 탭 > 인큐베이터')
+                    this.telegram.sendMessage('🧪 [15:43] 인큐베이터 스캔 완료\nneglect_score 갱신 및 IGNITE 후보 평가 완료\n확인: 종목AI 탭 > 인큐베이터')
                 } catch (e: any) {
                     console.error('[Scheduler] 인큐베이터 스캔 오류:', e.message)
                 }

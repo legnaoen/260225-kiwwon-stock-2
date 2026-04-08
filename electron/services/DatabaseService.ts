@@ -649,6 +649,53 @@ export class DatabaseService {
         this.db.exec(createMaiisThemeRankingsTable)
         this.db.exec(createMaiisKeywordRankingsTable)
         this.db.exec(createMaiisActivePicksTable)
+
+        // ── Track A 전용 테이블: LeaderRegime 스냅샷 ————————————————————
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS leader_regime_snapshot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                leader_status TEXT NOT NULL,
+                appearances_10d INTEGER DEFAULT 0,
+                avg_rank_5d REAL,
+                avg_rank_prev5d REAL,
+                rank_today INTEGER,
+                change_rate_today REAL,
+                lifespan_type TEXT,
+                confirmed_since TEXT,
+                heat_score_60d REAL,
+                heat_score_120d REAL,
+                stock_avg_heat_60 REAL,
+                vol_ratio_5d_20d REAL,
+                entry_zone TEXT NOT NULL DEFAULT 'WATCH',
+                combined_signal TEXT NOT NULL DEFAULT 'WATCH',
+                leading_stocks TEXT,
+                ai_summary TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                UNIQUE(snapshot_date, type, name)
+            );
+        `);
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS portfolio_score_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_date TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                conviction_score INTEGER,
+                last_signal TEXT,
+                strategy TEXT,
+                analysts_json TEXT,
+                theme_sector TEXT,
+                theme_regime TEXT,
+                sector_regime TEXT,
+                market_alpha REAL,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                UNIQUE(snapshot_date, stock_code)
+            );
+        `);
+        // ──────────────────────────────────────────────────────────────────
         
         // Portfolio Events Table (Added for Event Logs)
         this.db.exec(`
@@ -2024,9 +2071,16 @@ export class DatabaseService {
                     ELSE maiis_portfolio.days_held
                 END,
                 entry_price = CASE
+                    WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
+                    THEN excluded.entry_price
                     WHEN excluded.entry_price > 0 AND maiis_portfolio.entry_price = 0
                     THEN excluded.entry_price
                     ELSE maiis_portfolio.entry_price
+                END,
+                entry_date = CASE
+                    WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
+                    THEN excluded.entry_date
+                    ELSE maiis_portfolio.entry_date
                 END,
                 entry_price_at = CASE
                     WHEN excluded.entry_price > 0 AND maiis_portfolio.entry_price = 0
@@ -2080,7 +2134,7 @@ export class DatabaseService {
                     if (countRow && countRow.cnt > maxCount) {
                         const excess = countRow.cnt - maxCount;
                         const excessItems = this.db.prepare(`
-                            SELECT stock_code FROM maiis_portfolio 
+                            SELECT stock_code, stock_name FROM maiis_portfolio 
                             WHERE ${statusCondition} AND ${signalCondition} AND 
                             CASE WHEN UPPER(strategy) IN ('MOMENTUM', 'PULLBACK', 'VALUE') THEN UPPER(strategy) ELSE 'SWING' END = ?
                             ORDER BY conviction_score ASC, updated_at ASC
@@ -2094,7 +2148,18 @@ export class DatabaseService {
                                 SET status = 'DROPPED', updated_at = ?
                                 WHERE stock_code IN (${codes})
                             `).run(this.getKstTimestamp());
-                            console.log(`[DatabaseService] ✂️ 용량 설정 (Cap ${maxCount}) 초과로 ${info.changes}개 자동 DROPPED. (${type} - ${strategy})`);
+                            
+                            // [수정] DROP된 종목을 인큐베이터로 강등 처리
+                            excessItems.forEach((r: any) => {
+                                this.demoteToIncubator({
+                                    stock_code: r.stock_code,
+                                    stock_name: r.stock_name || '알수없음',  // join 안했으므로 db조회 필요
+                                    current_price: 0,
+                                    last_signal_reason: '관심종목 캡 한도 초과 자동 탈락'
+                                });
+                            });
+
+                            console.log(`[DatabaseService] ✂️ 용량 설정 (Cap ${maxCount}) 초과로 ${info.changes}개 자동 DROPPED 및 인큐베이터 이관. (${type} - ${strategy})`);
                         }
                     }
                 }
@@ -2160,6 +2225,13 @@ export class DatabaseService {
         return { deleted: info.changes > 0 };
     }
 
+    /** 포트폴리오 이벤트 로그(타임라인) 단건 수동 삭제 */
+    public deletePortfolioEventLog(id: number): { deleted: boolean } {
+        const info = this.db.prepare('DELETE FROM maiis_portfolio_events WHERE id = ?').run(id);
+        console.log(`[DB] deletePortfolioEventLog: id=${id}, changes=${info.changes}`);
+        return { deleted: info.changes > 0 };
+    }
+
     /** 추천종목(ai_analyst_picks) 단건 삭제 */
     public deleteAnalystPick(id: number): { deleted: boolean } {
         const info = this.db.prepare('DELETE FROM ai_analyst_picks WHERE id = ?').run(id);
@@ -2220,6 +2292,26 @@ export class DatabaseService {
 
     public getLatestYoutubeNarrativeTrends(limit: number = 30) {
         return this.db.prepare('SELECT * FROM youtube_narrative_trends ORDER BY date DESC LIMIT ?').all(limit);
+    }
+
+    public deleteIncubatorItemByCode(stockCode: string) {
+        const stmt = this.db.prepare('DELETE FROM maiis_incubator WHERE stock_code = ?')
+        const info = stmt.run(stockCode)
+        return { deleted: info.changes > 0 }
+    }
+
+    public syncPortfolioEntryPrice(stockCode: string, price: number, entryDate: string): { success: boolean; error?: string } {
+        try {
+            const stmt = this.db.prepare(`
+                UPDATE maiis_portfolio 
+                SET entry_price = ?, current_price = ?, entry_date = ?
+                WHERE stock_code = ?
+            `)
+            stmt.run(price, price, entryDate, stockCode)
+            return { success: true }
+        } catch (e: any) {
+            return { success: false, error: e.message }
+        }
     }
 
     public saveYoutubeDailyConsensus(data: { date: string, consensus_report: string, pivot_analysis: string, sources_json: string }) {
@@ -2830,5 +2922,448 @@ export class DatabaseService {
             systemInstruction: r.system_instruction,
             result: r.result
         }));
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Track A: LeaderRegime 스냅샷 저장 / 조회
+    // ────────────────────────────────────────────────────────────────
+
+    /**
+     * [Track A - Layer 1]
+     * 특정 테마/섹터의 최근 N일치 naver_market_flow 랭킹 이력 조회
+     */
+    public getNaverFlowHistory(type: string, days: number = 20): any[] {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        return (this.db.prepare(`
+            SELECT date, type, name, rank_num, change_rate
+            FROM naver_market_flow
+            WHERE type = ? AND date >= ?
+            ORDER BY date ASC, rank_num ASC
+        `).all(type, cutoffStr) as any[]);
+    }
+
+    /**
+     * [Track A - Layer 1]
+     * 오늘 naver_market_flow Top20 전체 (테마 + 섹터)
+     */
+    public getTodayMarketFlow(today: string): any[] {
+        return (this.db.prepare(`
+            SELECT type, name, rank_num, change_rate
+            FROM naver_market_flow
+            WHERE date = ?
+            ORDER BY type, rank_num ASC
+        `).all(today) as any[]);
+    }
+
+    /**
+     * [Track A - Layer 1]
+     * 특정 테마/섹터의 lifespan_type (이전 AI 분석 결과)
+     */
+    public getThemeLifespan(type: string, name: string): string | null {
+        const row = this.db.prepare(`
+            SELECT lifespan_type FROM theme_intelligence
+            WHERE type = ? AND name = ?
+            ORDER BY date DESC LIMIT 1
+        `).get(type, name) as any;
+        return row?.lifespan_type ?? null;
+    }
+
+    /**
+     * [Track A - Layer 1]
+     * 특정 테마의 CONFIRMED 상태 구존 여부 (과거 스냅샷 DB 조회)
+     */
+    public hasPastConfirmedRegime(name: string): boolean {
+        const row = this.db.prepare(`
+            SELECT COUNT(*) as cnt FROM leader_regime_snapshot
+            WHERE name = ? AND leader_status = 'CONFIRMED'
+        `).get(name) as any;
+        return (row?.cnt ?? 0) > 0;
+    }
+
+    /**
+     * [Track A - Layer 2]
+     * 테마/섹터별 Heat Score 계산
+     * theme_price_index의 누적 인덱스에서 60봉/120봉 저점 대비 상승률
+     */
+    public getThemeHeatScores(today: string): Record<string, { heat_60d: number; heat_120d: number; current_index: number }> {
+        const rows = (this.db.prepare(`
+            SELECT
+                curr.type,
+                curr.name,
+                curr.price_index                                                      AS current_index,
+                MIN(h60.price_index)                                                  AS min_60d,
+                MIN(h120.price_index)                                                 AS min_120d,
+                ROUND((curr.price_index - MIN(h60.price_index))
+                      / NULLIF(MIN(h60.price_index), 0) * 100, 1)                     AS heat_60d,
+                ROUND((curr.price_index - MIN(h120.price_index))
+                      / NULLIF(MIN(h120.price_index), 0) * 100, 1)                    AS heat_120d
+            FROM theme_price_index curr
+            JOIN theme_price_index h60
+                ON h60.type = curr.type AND h60.name = curr.name
+                AND h60.date >= date(curr.date, '-60 days')
+                AND h60.date <= curr.date
+            JOIN theme_price_index h120
+                ON h120.type = curr.type AND h120.name = curr.name
+                AND h120.date >= date(curr.date, '-120 days')
+                AND h120.date <= curr.date
+            WHERE curr.date = ?
+            GROUP BY curr.type, curr.name
+        `).all(today) as any[]);
+
+        const result: Record<string, { heat_60d: number; heat_120d: number; current_index: number }> = {};
+        for (const row of rows) {
+            result[row.name] = {
+                heat_60d:      row.heat_60d      ?? 0,
+                heat_120d:     row.heat_120d     ?? 0,
+                current_index: row.current_index ?? 100,
+            };
+        }
+        return result;
+    }
+
+    /**
+     * [Track A - Layer 2]
+     * 테마별 구성종목들의 평균 Heat Score + 거래량 비율
+     * stock_theme_tags → market_ohlcv_history 윌도우 함수 활용
+     */
+    public getStockHeatByTheme(today: string): Record<string, { avg_heat_60: number; avg_heat_120: number; vol_ratio: number; stock_count: number; theme_abs_vol: number }> {
+        const cutoff120 = new Date(today); cutoff120.setDate(cutoff120.getDate() - 120);
+        const cutoff60  = new Date(today); cutoff60.setDate(cutoff60.getDate() - 60);
+        const cutoff20  = new Date(today); cutoff20.setDate(cutoff20.getDate() - 20);
+        const cutoff5   = new Date(today); cutoff5.setDate(cutoff5.getDate() - 5);
+        const d120 = cutoff120.toISOString().slice(0, 10);
+        const d60  = cutoff60.toISOString().slice(0, 10);
+        const d20  = cutoff20.toISOString().slice(0, 10);
+        const d5   = cutoff5.toISOString().slice(0, 10);
+
+        const rows = (this.db.prepare(`
+            WITH BaseStockStats AS (
+                SELECT
+                    stt.tag_name AS theme_name,
+                    stt.stock_code,
+                    CASE WHEN ohlcv.close > 0 AND ohlcv.min_60 > 0
+                         THEN ROUND((ohlcv.close - ohlcv.min_60) * 1.0 / ohlcv.min_60 * 100, 1)
+                         ELSE NULL END AS heat_60,
+                    CASE WHEN ohlcv.close > 0 AND ohlcv.min_120 > 0
+                         THEN ROUND((ohlcv.close - ohlcv.min_120) * 1.0 / ohlcv.min_120 * 100, 1)
+                         ELSE NULL END AS heat_120,
+                    CASE WHEN ohlcv.avg_vol_20d > 0
+                         THEN ROUND(ohlcv.avg_vol_5d * 1.0 / ohlcv.avg_vol_20d, 2)
+                         ELSE NULL END AS vol_ratio,
+                    ohlcv.avg_vol_5d
+                FROM stock_theme_tags stt
+                JOIN (
+                    SELECT
+                        stock_code,
+                        MAX(CASE WHEN date = ? THEN close END)          AS close,
+                        MIN(CASE WHEN date >= ? THEN close END)         AS min_60,
+                        MIN(CASE WHEN date >= ? THEN close END)         AS min_120,
+                        AVG(CASE WHEN date >= ? THEN trading_value END) AS avg_vol_5d,
+                        AVG(CASE WHEN date >= ? THEN trading_value END) AS avg_vol_20d
+                    FROM market_ohlcv_history
+                    WHERE date >= ?
+                    GROUP BY stock_code
+                ) ohlcv ON ohlcv.stock_code = stt.stock_code
+                WHERE stt.stock_name NOT LIKE '%ETN%'
+                  AND stt.stock_name NOT LIKE '%ETF%'
+                  AND stt.stock_name NOT LIKE '%스팩%'
+                  AND stt.stock_name NOT LIKE '%리츠%'
+            ), ThemeAvgStats AS (
+                SELECT 
+                    theme_name,
+                    AVG(heat_60) AS avg_60,
+                    AVG(heat_120) AS avg_120,
+                    AVG(vol_ratio) AS avg_vol,
+                    AVG(avg_vol_5d) AS avg_vol_abs_5d,
+                    COUNT(DISTINCT stock_code) AS stock_count
+                FROM BaseStockStats
+                GROUP BY theme_name
+            )
+            SELECT 
+                b.theme_name,
+                t.stock_count,
+                AVG(CASE WHEN b.heat_60 >= t.avg_60 THEN b.heat_60 ELSE NULL END) AS avg_heat_60,
+                AVG(CASE WHEN b.heat_120 >= t.avg_120 THEN b.heat_120 ELSE NULL END) AS avg_heat_120,
+                MAX(t.avg_vol) AS vol_ratio,
+                MAX(t.avg_vol_abs_5d) AS theme_abs_vol
+            FROM BaseStockStats b
+            JOIN ThemeAvgStats t ON b.theme_name = t.theme_name
+            GROUP BY b.theme_name
+        `).all(today, d60, d120, d5, d20, d120) as any[]);
+
+        const result: Record<string, { avg_heat_60: number; avg_heat_120: number; vol_ratio: number; stock_count: number; theme_abs_vol: number }> = {};
+        for (const row of rows) {
+            result[row.theme_name] = {
+                avg_heat_60:  row.avg_heat_60  ?? 999,
+                avg_heat_120: row.avg_heat_120 ?? 999,
+                vol_ratio:   row.vol_ratio   ?? 1.0,
+                stock_count: row.stock_count ?? 0,
+                theme_abs_vol: row.theme_abs_vol ?? 0,
+            };
+        }
+        return result;
+    }
+
+    /**
+     * [Track A - 개별종목]
+     * 5대 DB(급등, 테마대장, 수급, 등) 교차 검증(Multi-hit) 타겟팅 후보 추출
+     * - daily_rising_stocks (최근 3일 내 급등 여부)
+     * - leader_regime_snapshot (오늘 CONFIRMED/EMERGING/STRENGTHENING 인 테마 소속)
+     * - maiis_incubator (관심종목/수급기록 존재 여부)
+     */
+    public getTrackAStockCandidates(today: string): any[] {
+        const d3 = new Date(today); d3.setDate(d3.getDate() - 3);
+        const cutoff3Str = d3.toISOString().slice(0, 10);
+        const d60 = new Date(today); d60.setDate(d60.getDate() - 60);
+        const cutoff60Str = d60.toISOString().slice(0, 10);
+        const d20 = new Date(today); d20.setDate(d20.getDate() - 20);
+        const cutoff20Str = d20.toISOString().slice(0, 10);
+        const d5 = new Date(today); d5.setDate(d5.getDate() - 5);
+        const cutoff5Str = d5.toISOString().slice(0, 10);
+
+        return this.db.prepare(`
+            WITH RisingStocks AS (
+                SELECT DISTINCT stock_code, stock_name
+                FROM daily_rising_stocks
+                WHERE date >= ? AND date <= ?
+            ),
+            LeaderThemes AS (
+                SELECT name
+                FROM leader_regime_snapshot
+                WHERE snapshot_date = ?
+                  AND leader_status IN ('CONFIRMED', 'EMERGING', 'STRENGTHENING')
+            ),
+            ThemeStocks AS (
+                SELECT DISTINCT stt.stock_code, stt.stock_name
+                FROM stock_theme_tags stt
+                JOIN LeaderThemes lt ON stt.tag_name = lt.name
+            ),
+            IncubatorStocks AS (
+                SELECT DISTINCT stock_code, stock_name
+                FROM maiis_incubator
+            ),
+            AllCandidates AS (
+                SELECT stock_code, stock_name FROM RisingStocks
+                UNION
+                SELECT stock_code, stock_name FROM ThemeStocks
+            ),
+            StockScores AS (
+                SELECT
+                    ac.stock_code,
+                    ac.stock_name,
+                    CASE WHEN rs.stock_code IS NOT NULL THEN 1 ELSE 0 END AS is_rising,
+                    CASE WHEN ts.stock_code IS NOT NULL THEN 1 ELSE 0 END AS is_theme_leader,
+                    CASE WHEN inc.stock_code IS NOT NULL THEN 1 ELSE 0 END AS is_incubator,
+                    (CASE WHEN rs.stock_code IS NOT NULL THEN 1 ELSE 0 END +
+                     CASE WHEN ts.stock_code IS NOT NULL THEN 1 ELSE 0 END +
+                     CASE WHEN inc.stock_code IS NOT NULL THEN 1 ELSE 0 END) AS total_hits
+                FROM AllCandidates ac
+                LEFT JOIN RisingStocks rs ON ac.stock_code = rs.stock_code
+                LEFT JOIN ThemeStocks ts ON ac.stock_code = ts.stock_code
+                LEFT JOIN IncubatorStocks inc ON ac.stock_code = inc.stock_code
+            ),
+            OhlcvData AS (
+                SELECT
+                    stock_code,
+                    MAX(CASE WHEN date = ? THEN close END) AS close,
+                    MIN(CASE WHEN date >= ? THEN close END) AS min_60,
+                    AVG(CASE WHEN date >= ? THEN trading_value END) AS avg_vol_5d,
+                    AVG(CASE WHEN date >= ? THEN trading_value END) AS avg_vol_20d
+                FROM market_ohlcv_history
+                WHERE date >= ? AND stock_code IN (SELECT stock_code FROM AllCandidates)
+                GROUP BY stock_code
+            )
+            SELECT
+                ss.stock_code,
+                ss.stock_name,
+                ss.is_rising,
+                ss.is_theme_leader,
+                ss.is_incubator,
+                ss.total_hits,
+                CASE WHEN o.close > 0 AND o.min_60 > 0
+                     THEN ROUND((o.close - o.min_60) / o.min_60 * 100, 1)
+                     ELSE 999 END AS heat_60,
+                CASE WHEN o.avg_vol_20d > 0
+                     THEN ROUND(o.avg_vol_5d / o.avg_vol_20d, 2)
+                     ELSE 1.0 END AS vol_ratio
+            FROM StockScores ss
+            LEFT JOIN OhlcvData o ON ss.stock_code = o.stock_code
+            WHERE ss.total_hits >= 1
+            ORDER BY ss.total_hits DESC, heat_60 ASC
+        `).all(cutoff3Str, today, today, today, cutoff60Str, cutoff5Str, cutoff20Str, cutoff60Str) as any[];
+    }
+
+    /**
+     * [Track A - 테마 상세조회]
+     * 특정 테마에 속한 종목들의 상세 스펙 (Heat 60, Drawdown 60) 조회
+     */
+    public getThemeConstituentStocks(themeName: string, today: string): any[] {
+        const d60 = new Date(today); d60.setDate(d60.getDate() - 60);
+        const cutoff60Str = d60.toISOString().slice(0, 10);
+        const d20 = new Date(today); d20.setDate(d20.getDate() - 20);
+        const cutoff20Str = d20.toISOString().slice(0, 10);
+        const d5 = new Date(today); d5.setDate(d5.getDate() - 5);
+        const cutoff5Str = d5.toISOString().slice(0, 10);
+
+        return this.db.prepare(`
+            WITH TargetStocks AS (
+                SELECT stock_code, stock_name
+                FROM stock_theme_tags
+                WHERE tag_name = ?
+                  AND stock_name NOT LIKE '%ETN%'
+                  AND stock_name NOT LIKE '%ETF%'
+                  AND stock_name NOT LIKE '%스팩%'
+                  AND stock_name NOT LIKE '%리츠%'
+            ), OhlcvData AS (
+                SELECT
+                    ts.stock_code,
+                    (SELECT close FROM market_ohlcv_history WHERE stock_code = ts.stock_code ORDER BY date DESC LIMIT 1) AS close,
+                    MIN(CASE WHEN h.date >= ? THEN (CASE WHEN h.low > 0 THEN h.low ELSE h.close END) END) AS min_60,
+                    MAX(CASE WHEN h.date >= ? THEN (CASE WHEN h.high > 0 THEN h.high ELSE h.close END) END) AS max_60,
+                    AVG(CASE WHEN h.date >= ? THEN h.trading_value END) AS avg_vol_5d,
+                    AVG(CASE WHEN h.date >= ? THEN h.trading_value END) AS avg_vol_20d
+                FROM TargetStocks ts
+                LEFT JOIN market_ohlcv_history h ON ts.stock_code = h.stock_code AND h.date >= ?
+                GROUP BY ts.stock_code
+            )
+            SELECT
+                t.stock_code,
+                t.stock_name,
+                CASE WHEN o.close > 0 AND o.min_60 > 0 THEN ROUND((o.close - o.min_60) * 100.0 / o.min_60, 1) ELSE 0 END AS heat_60,
+                CASE WHEN o.close > 0 AND o.max_60 > 0 THEN ROUND((o.close - o.max_60) * 100.0 / o.max_60, 1) ELSE 0 END AS drawdown_60,
+                CASE WHEN o.avg_vol_20d > 0 THEN ROUND(o.avg_vol_5d * 1.0 / o.avg_vol_20d, 2) ELSE 1.0 END AS vol_ratio,
+                o.close
+            FROM TargetStocks t
+            LEFT JOIN OhlcvData o ON t.stock_code = o.stock_code
+            ORDER BY heat_60 DESC, vol_ratio DESC
+        `).all(themeName, cutoff60Str, cutoff60Str, cutoff5Str, cutoff20Str, cutoff60Str) as any[];
+    }
+
+    /**
+     * [Track A]
+     * LeaderRegime 스냅샷 일괄 UPSERT
+     */
+    public saveLeaderRegimeSnapshots(snapshots: {
+        snapshot_date: string; type: string; name: string;
+        leader_status: string; appearances_10d: number;
+        avg_rank_5d: number; avg_rank_prev5d: number;
+        rank_today: number | null; change_rate_today: number;
+        lifespan_type: string | null; confirmed_since: string | null;
+        heat_score_60d: number; heat_score_120d: number;
+        stock_avg_heat_60: number; vol_ratio_5d_20d: number;
+        entry_zone: string; combined_signal: string;
+        leading_stocks: string | null; ai_summary: string | null;
+        theme_abs_vol?: number;
+    }[]): void {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO leader_regime_snapshot
+            (snapshot_date, type, name, leader_status, appearances_10d,
+             avg_rank_5d, avg_rank_prev5d, rank_today, change_rate_today,
+             lifespan_type, confirmed_since,
+             heat_score_60d, heat_score_120d, stock_avg_heat_60, vol_ratio_5d_20d,
+             entry_zone, combined_signal, leading_stocks, ai_summary, theme_abs_vol)
+            VALUES
+            (@snapshot_date, @type, @name, @leader_status, @appearances_10d,
+             @avg_rank_5d, @avg_rank_prev5d, @rank_today, @change_rate_today,
+             @lifespan_type, @confirmed_since,
+             @heat_score_60d, @heat_score_120d, @stock_avg_heat_60, @vol_ratio_5d_20d,
+             @entry_zone, @combined_signal, @leading_stocks, @ai_summary, @theme_abs_vol)
+        `);
+        const insert = this.db.transaction((items: typeof snapshots) => {
+            for (const item of items) {
+                if (item.theme_abs_vol === undefined) item.theme_abs_vol = 0;
+                stmt.run(item);
+            }
+        });
+        insert(snapshots);
+    }
+
+    /**
+     * [Track A]
+     * 특정 날짜의 LeaderRegime 스냅샷 전체 조회
+     * combined_signal 지정 시 필터링 가능
+     */
+    public getLeaderRegimeSnapshot(date: string, filter?: {
+        type?: 'THEME' | 'SECTOR';
+        signals?: string[];  // ['BEST_BUY', 'BUY', ...]
+    }): { data: any[], date: string } {
+        
+        let actualDate = date;
+        const latestRow = this.db.prepare(`SELECT MAX(snapshot_date) as max_date FROM leader_regime_snapshot WHERE snapshot_date <= ?`).get(date) as any;
+        if (latestRow && latestRow.max_date) {
+            actualDate = latestRow.max_date;
+        }
+
+        let query = `
+            SELECT * FROM leader_regime_snapshot
+            WHERE snapshot_date = ? AND name NOT LIKE '%기타%'
+        `;
+        const params: any[] = [actualDate];
+        if (filter?.type) {
+            query += ` AND type = ?`;
+            params.push(filter.type);
+        }
+        if (filter?.signals && filter.signals.length > 0) {
+            query += ` AND combined_signal IN (${filter.signals.map(() => '?').join(',')})`;
+            params.push(...filter.signals);
+        }
+        query += ` ORDER BY
+            heat_score_60d DESC NULLS LAST,
+            rank_today ASC NULLS LAST,
+            CASE combined_signal
+                WHEN 'BEST_BUY'    THEN 1
+                WHEN 'BUY'         THEN 2
+                WHEN 'REVIVAL_BUY' THEN 3
+                WHEN 'HOLD_ONLY'   THEN 4
+                WHEN 'WATCH'       THEN 5
+                WHEN 'SELL_ALERT'  THEN 6
+                WHEN 'PREPARE_EXIT'THEN 7
+                WHEN 'EXIT'        THEN 8
+                ELSE 9
+            END`;
+            
+        const data = this.db.prepare(query).all(...params) as any[];
+        return { data, date: actualDate };
+    }
+
+    /**
+     * [Track A]
+     * 특정 테마/섹터의 Regime 타임라인 (N일 chi)
+     */
+    public getRegimeTimeline(type: string, name: string, days: number = 30): any[] {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        return this.db.prepare(`
+            SELECT snapshot_date, leader_status, entry_zone, combined_signal,
+                   rank_today, heat_score_60d, vol_ratio_5d_20d, change_rate_today
+            FROM leader_regime_snapshot
+            WHERE type = ? AND name = ? AND snapshot_date >= ?
+            ORDER BY snapshot_date ASC
+        `).all(type, name, cutoff.toISOString().slice(0, 10)) as any[];
+    }
+
+    /**
+     * [Track A - Phase 2]
+     * 고열주 연속 등장 히트맵 (10일중 N일 이상 등장한 종목)
+     */
+    public getHotStocksTimeline(days: number = 10, minAppearances: number = 3): any[] {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        return this.db.prepare(`
+            SELECT
+                stock_code, stock_name, theme_sector,
+                COUNT(*)                    AS appearance_days,
+                AVG(change_rate)            AS avg_daily_change,
+                AVG(trading_value)          AS avg_trading_value,
+                MIN(date)                   AS first_seen,
+                MAX(date)                   AS last_seen
+            FROM daily_rising_stocks
+            WHERE date >= ? AND timing = 'EVENING'
+            GROUP BY stock_code
+            HAVING COUNT(*) >= ?
+            ORDER BY appearance_days DESC, avg_daily_change DESC
+        `).all(cutoff.toISOString().slice(0, 10), minAppearances) as any[];
     }
 }

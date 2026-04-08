@@ -699,15 +699,16 @@ ipcMain.handle('v2-pipeline:run', async (_event, { pipelineId, options }) => {
 })
 
 // ═══ V2 Market Leader Discovery: 주도주 판독 파이프라인 ═══
-ipcMain.handle('v2:get-market-leaders', async (_event, { days, topN }) => {
+ipcMain.handle('v2:get-market-leaders', async (_event, { days, topN, peakoutSettings }) => {
     try {
-        const { MarketLeaderDiscoveryService } = await import('./services/v2_pipeline/MarketLeaderDiscoveryService')
+        const { MarketLeaderDiscoveryService, DEFAULT_PEAKOUT_SETTINGS } = await import('./services/v2_pipeline/MarketLeaderDiscoveryService')
         const { getPastDateKst } = await import('./utils/DateUtils');
         const DatabaseService = (await import('./services/DatabaseService')).DatabaseService;
         const db = DatabaseService.getInstance().db as any;
 
         const targetDays = days ?? 10;
         const targetDate = getPastDateKst(targetDays);
+        const settings = peakoutSettings ?? DEFAULT_PEAKOUT_SETTINGS;
 
         // KODEX 200을 KOSPI 대용 지수로 사용하여 기간 내 시장 상승률 산출
         let marketIndexChange = 0;
@@ -724,9 +725,9 @@ ipcMain.handle('v2:get-market-leaders', async (_event, { days, topN }) => {
 
         const service = MarketLeaderDiscoveryService.getInstance()
         // KODEX 200 상승률을 시장 지수 대비 알파 계산의 기준으로 주입
-        const leaders = service.getMarketLeaders(targetDays, marketIndexChange, topN ?? 30)
+        const leaders = service.getMarketLeaders(targetDays, marketIndexChange, topN ?? 30, settings)
         const themes = service.discoverMainThemes(leaders)
-        console.log(`[MarketLeader] days=${targetDays}, KODEX=${marketIndexChange.toFixed(2)}%, leaders=${leaders.length}, themes=${themes.length}`)
+        console.log(`[MarketLeader V2] days=${targetDays}, KODEX=${marketIndexChange.toFixed(2)}%, leaders=${leaders.length}, themes=${themes.length}`)
         return { success: true, leaders, themes, marketIndexChange }
     } catch (error: any) {
         console.error('[MarketLeader] get-market-leaders error:', error)
@@ -743,6 +744,88 @@ ipcMain.handle('v2:run-theme-ontology', async () => {
     } catch (error: any) {
         console.error('[ThemeOntology] Error:', error);
         return { success: false, error: error.message };
+    }
+})
+
+// ═══ Track A: LeaderRegime 수급 레짐 IPC ═══
+
+/** 수동 레짐 분석 실행 (오늘 날짜 기준) */
+ipcMain.handle('track-a:run-regime-analysis', async (_event, date?: string) => {
+    try {
+        const { LeaderRegimeTracker } = await import('./services/v2_pipeline/LeaderRegimeTracker')
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const db = DatabaseService.getInstance()
+        const today = date || db.getKstDate()
+        const tracker = new LeaderRegimeTracker(db)
+        const result = await tracker.analyzeDailyRegime(today)
+        return { success: true, data: result }
+    } catch (error: any) {
+        console.error('[TrackA] run-regime-analysis error:', error)
+        return { success: false, error: error.message }
+    }
+})
+
+/** 특정 날짜의 LeaderRegime 스냅샷 조회 (Track A 탭 표시용) */
+ipcMain.handle('track-a:get-regime-snapshot', async (_event, params: {
+    date?: string
+    type?: 'THEME' | 'SECTOR'
+    signals?: string[]
+}) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const db = DatabaseService.getInstance()
+        const today = params?.date || db.getKstDate()
+        const result = db.getLeaderRegimeSnapshot(today, {
+            type:    params?.type,
+            signals: params?.signals,
+        })
+        return { success: true, data: result.data, date: result.date }
+    } catch (error: any) {
+        console.error('[TrackA] get-regime-snapshot error:', error)
+        return { success: false, error: error.message, data: [] }
+    }
+})
+
+/** 특정 테마/섹터의 30일 Regime 타임라인 (상세 패널용) */
+ipcMain.handle('track-a:get-regime-timeline', async (_event, params: {
+    type: string
+    name: string
+    days?: number
+}) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const db = DatabaseService.getInstance()
+        const data = db.getRegimeTimeline(params.type, params.name, params.days ?? 30)
+        return { success: true, data }
+    } catch (error: any) {
+        console.error('[TrackA] get-regime-timeline error:', error)
+        return { success: false, error: error.message, data: [] }
+    }
+})
+
+ipcMain.handle('track-a:get-stock-candidates', async (_event, params?: { date?: string }) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const db = DatabaseService.getInstance()
+        const today = params?.date || db.getKstDate()
+        const data = (db as any).getTrackAStockCandidates ? (db as any).getTrackAStockCandidates(today) : []
+        return { success: true, data }
+    } catch (error: any) {
+        console.error('[TrackA] get-stock-candidates error:', error)
+        return { success: false, error: error.message, data: [] }
+    }
+})
+
+ipcMain.handle('track-a:get-theme-stocks', async (_event, params: { name: string, date?: string }) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const db = DatabaseService.getInstance()
+        const today = params?.date || db.getKstDate()
+        const data = db.getThemeConstituentStocks(params.name, today)
+        return { success: true, data }
+    } catch (error: any) {
+        console.error('[TrackA] get-theme-stocks error:', error)
+        return { success: false, error: error.message, data: [] }
     }
 })
 
@@ -2265,6 +2348,15 @@ ipcMain.handle('ai-analyst:delete-portfolio-item', async (_event, id: number) =>
     }
 })
 
+ipcMain.handle('ai-analyst:delete-event-log', async (_event, id: number) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        return DatabaseService.getInstance().deletePortfolioEventLog(id)
+    } catch (err: any) {
+        return { deleted: false, error: err.message }
+    }
+})
+
 ipcMain.handle('ai-analyst:delete-pick', async (_event, id: number) => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService')
@@ -2280,5 +2372,15 @@ ipcMain.handle('incubator:delete-item', async (_event, stock_code: string) => {
         return DatabaseService.getInstance().deleteIncubatorItem(stock_code)
     } catch (err: any) {
         return { deleted: false, error: err.message }
+    }
+})
+
+ipcMain.handle('ai-analyst:sync-entry-price', async (_event, stock_code: string, price: number, entry_date: string) => {
+    try {
+        console.log(`[Main] sync-entry-price called for ${stock_code} at ${price} (date: ${entry_date})`)
+        const { DatabaseService } = await import('./services/DatabaseService')
+        return DatabaseService.getInstance().syncPortfolioEntryPrice(stock_code, price, entry_date)
+    } catch (e: any) {
+        return { success: false, error: e.message }
     }
 })

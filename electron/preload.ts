@@ -252,7 +252,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verifyThemeIntelligence: (params: any) => ipcRenderer.invoke('naverflow:verify-theme', params),
     getThemeRelatedNews: (themeName: string, keywords: string[]) => ipcRenderer.invoke('naverflow:get-theme-news', themeName, keywords),
     searchLiveNews: (keyword: string) => ipcRenderer.invoke('naverflow:search-live-news', keyword),
-    getMarketLeaders: (days: number, topN: number) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN }),
+    getMarketLeaders: (days: number, topN: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN, peakoutSettings }),
     runThemeOntology: () => ipcRenderer.invoke('v2:run-theme-ontology'),
     // Graph RAG: Knowledge Edges
     getKnowledgeEdgesFrom: (sourceType: string, sourceId: string, targetType?: string) => ipcRenderer.invoke('graph:edges-from', sourceType, sourceId, targetType),
@@ -370,5 +370,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 개별 항목 삭제
     deletePortfolioItem: (id: number) => ipcRenderer.invoke('ai-analyst:delete-portfolio-item', id),
     deleteAnalystPick: (id: number) => ipcRenderer.invoke('ai-analyst:delete-pick', id),
+    deleteEventLog: (id: number) => ipcRenderer.invoke('ai-analyst:delete-event-log', id),
+    syncEntryPrice: (stockCode: string, price: number, entryDate: string) => ipcRenderer.invoke('ai-analyst:sync-entry-price', stockCode, price, entryDate),
 })
 

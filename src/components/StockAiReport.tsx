@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { FileText, ShieldCheck, BarChart2, TrendingUp, AlertCircle, Loader2, Tag, Plus, X } from 'lucide-react'
+import { FileText, ShieldCheck, BarChart2, TrendingUp, AlertCircle, Loader2, Tag, Plus, X, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '../utils'
@@ -157,7 +157,7 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
                     if (isPM) {
                         const log = item;
                         return (
-                            <div key={`pm-${idx}`} className="relative pl-8 border-l-2 border-border/40 hover:border-rose-500/30 transition-colors pb-2">
+                            <div key={`pm-${idx}`} className="group relative pl-8 border-l-2 border-border/40 hover:border-rose-500/30 transition-colors pb-2">
                                 <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-background shadow-sm bg-rose-400" />
                                 <div className="flex flex-wrap items-center gap-2 mb-3">
                                     <span className="text-[11px] font-mono font-bold text-muted-foreground bg-muted/30 px-2 py-0.5 rounded border border-border/30">
@@ -176,14 +176,48 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
                                         log.event_type}
                                     </span>
                                     {log.price > 0 && (
-                                        <span className="text-[12px] font-mono font-black text-foreground ml-1">
-                                            @ {log.price?.toLocaleString()}원
-                                        </span>
+                                        <div className="flex items-center gap-1.5 ml-1">
+                                            <span className="text-[12px] font-mono font-black text-foreground">
+                                                @ {log.price?.toLocaleString()}원
+                                            </span>
+                                            {/* 수동 진입가 동기화 버튼 (매수 관련 이벤트만) */}
+                                            {(log.event_type.includes('BUY') || log.event_type.includes('HELD')) && (
+                                                <button
+                                                    onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        if (window.confirm(`이 날짜(${log.created_at.substring(0, 10)})의 가격(${log.price.toLocaleString()}원)을 진입가로 수동 반영하시겠습니까?\n\n추가일(${log.created_at.substring(0, 10)})과 수익률 계산 기준이 변경됩니다.`)) {
+                                                            const res = await (window as any).electronAPI.syncEntryPrice(symbol, log.price, log.created_at);
+                                                            if (res?.success) alert('진입가가 업데이트 되었습니다. 창을 닫고 리스트를 갱신해 보세요.');
+                                                        }
+                                                    }}
+                                                    className="w-[72px] h-[18px] ml-1 text-[9px] font-bold text-rose-500 border border-rose-500/30 bg-rose-500/5 rounded flex items-center justify-center hover:bg-rose-500 hover:text-white transition-colors"
+                                                    title="이 가격을 포트폴리오 진입가로 강제 반영합니다."
+                                                >
+                                                    진입가로 반영
+                                                </button>
+                                            )}
+                                        </div>
                                     )}
                                     {log.profit_rate != null && log.profit_rate !== 0 && (
                                         <span className={cn("text-[12px] font-black font-mono ml-1", log.profit_rate > 0 ? "text-rose-500" : "text-blue-500")}>
                                             ({log.profit_rate > 0 ? '+' : ''}{log.profit_rate.toFixed(2)}%)
                                         </span>
+                                    )}
+                                    {/* PM Event 삭제 버튼 */}
+                                    {log.id && (
+                                        <button
+                                            onClick={async (e) => {
+                                                e.stopPropagation();
+                                                if (window.confirm('이 타임라인 이력을 완전히 삭제하시겠습니까? (삭제 시 복구 불가)')) {
+                                                    await (window.electronAPI as any).deleteEventLog(log.id);
+                                                    alert('이력이 삭제되었습니다. 화면을 새로고침해주세요.');
+                                                }
+                                            }}
+                                            className="opacity-0 group-hover:opacity-100 ml-auto transition-opacity text-muted-foreground hover:text-rose-500 flex items-center p-1"
+                                            title="이력에서 삭제"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
                                     )}
                                 </div>
                                 <div className="pt-2 pb-1 pl-1">
@@ -198,7 +232,7 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
                     const rpt = item;
                     const scoreStyle = getScoreStyle(rpt.ai_score ?? rpt.score ?? 50);
                     return (
-                        <div key={`ai-${idx}`} className="relative pl-8 border-l-2 border-border/40 hover:border-primary/30 transition-colors pb-4">
+                        <div key={`ai-${idx}`} className="group relative pl-8 border-l-2 border-border/40 hover:border-primary/30 transition-colors pb-4">
                             {/* 타임라인 포인트 아이콘 */}
                             <div 
                                 className="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-background shadow-sm"
@@ -218,6 +252,22 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
                                     <div className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-muted/60 text-muted-foreground border border-border/50 shrink-0">
                                         📝 {rpt.agent_type}
                                     </div>
+                                )}
+                                {/* AI Report 삭제 버튼 */}
+                                {rpt.id && (
+                                    <button
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (window.confirm('이 AI 분석 리포트를 삭제하시겠습니까? (삭제 시 복구 불가)')) {
+                                                await (window.electronAPI as any).deleteAnalystPick(rpt.id);
+                                                alert('리포트가 삭제되었습니다. 화면을 새로고침해주세요.');
+                                            }
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 ml-auto transition-opacity text-muted-foreground hover:text-rose-500 flex items-center p-1"
+                                        title="리포트 삭제"
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
                                 )}
                             </div>
 

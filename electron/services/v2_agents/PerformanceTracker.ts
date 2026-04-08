@@ -417,7 +417,17 @@ export class PerformanceTracker {
      */
     public async evaluateIntraday() {
         console.log('[MCA-Tracker] ═══ 장중 예측 평가 시작 ═══')
-        const rawDb = (this.db as any).db
+        const rawDb = (this.db as any).db;
+
+        // --- 임시 DB 클리닝 로직 (잘못 저장된 포지션 원상복구) ---
+        try {
+            rawDb.prepare(`UPDATE intraday_predictions SET position = 'KODEX 200' WHERE position LIKE '%HOLD(KODEX 200 기준)%' AND time_slot IN ('09:45', '10:15')`).run();
+            rawDb.prepare(`UPDATE intraday_predictions SET position = 'HOLD' WHERE position LIKE '%HOLD(KODEX 200 기준)%' OR position = '- HOLD'`).run();
+        } catch (e) {
+            console.error('[MCA-Tracker] DB 클리닝 에러:', e);
+        }
+        // -------------------------------------------------------------
+
         const today = new Date()
         const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
@@ -426,7 +436,6 @@ export class PerformanceTracker {
             SELECT * FROM intraday_predictions 
             WHERE date >= date('now', 'localtime', '-5 days')
               AND predict IN ('UP', 'DOWN', 'HOLD')
-              AND return_pct IS NULL
             ORDER BY date ASC, time_slot ASC
         `).all() as any[]
 
@@ -455,83 +464,90 @@ export class PerformanceTracker {
 
         let evaluated = 0
         for (const row of pending) {
-            // HOLD 포지션일 때 KODEX 200(069500) 변동성을 추적 기준으로 삼음.
-            const position = row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD(KODEX 200 기준)'
+            // 사용자의 요청: 스웜 기준(predict)이 아닌 포지션 기준(position)으로 평가
+            const actualPosition = (row.position || row.predict || '').toUpperCase();
+            
+            // "UP", "LONG", "KODEX 200" 등은 상방. "DOWN", "SHORT", "인버스" 등은 하방. 
+            // 둘 다 아니면 (주로 "HOLD") 관망.
+            const isUpPos = actualPosition.includes('UP') || actualPosition.includes('LONG') || (actualPosition.includes('200') && !actualPosition.includes('HOLD') && !actualPosition.includes('인버스'));
+            const isDownPos = actualPosition.includes('DOWN') || actualPosition.includes('SHORT') || (actualPosition.includes('인버스') && !actualPosition.includes('HOLD'));
+            const isHoldPos = !isUpPos && !isDownPos;
 
-            // 해당 날짜의 ETF 일봉 데이터 조회
-            const etfDailyArr = (row.predict === 'UP' || row.predict === 'HOLD') ? chartK200Daily : chartInvDaily
-            const rowEtfDaily = etfDailyArr.find((c: any) => c.date === row.date)
+            // 해당 날짜의 ETF 일봉 데이터 조회 (하방일 때만 인버스)
+            const etfDailyArr = isDownPos ? chartInvDaily : chartK200Daily;
+            const rowEtfDaily = etfDailyArr.find((c: any) => c.date === row.date);
 
             if (!rowEtfDaily) {
-                console.warn(`[MCA-Tracker] ${row.date} ETF 일봉 없음, 스킵: ${row.id}`)
-                continue
+                console.warn(`[MCA-Tracker] ${row.date} ETF 일봉 없음, 스킵: ${row.id}`);
+                continue;
             }
 
-            // 진입가 보호
-            const entryPrice = (row.entry_price > 0) ? row.entry_price : rowEtfDaily.open
-            const closePrice = rowEtfDaily.close
-            const returnPct = ((closePrice - entryPrice) / entryPrice) * 100
+            // 진입가 보호 (기존 진입가가 있으면 사용, 없으면 시가)
+            const entryPrice = (row.entry_price > 0) ? row.entry_price : rowEtfDaily.open;
+            const closePrice = rowEtfDaily.close;
+            // 종가 기준 수익률
+            const returnPct = ((closePrice - entryPrice) / entryPrice) * 100;
 
             // 고점: 5분봉에서 해당 날짜 + 진입시간 이후 캔들만 필터해서 MAX(high)
-            // 5분봉 없으면 일봉 HIGH를 fallback으로 사용
-            let maxHigh = rowEtfDaily.high  // fallback
-            const candles5m = (row.predict === 'UP' || row.predict === 'HOLD') ? chartK200_5m : chartInv_5m
+            let maxHigh = rowEtfDaily.high; // fallback
+            const candles5m = isDownPos ? chartInv_5m : chartK200_5m;
+            
             if (candles5m.length > 0 && row.time_slot) {
-                const hmMatch = row.time_slot.match(/(\d{2}):(\d{2})/)
+                const hmMatch = row.time_slot.match(/(\d{2}):(\d{2})/);
                 if (hmMatch) {
-                    // 해당 날짜(row.date)의 진입시간을 epoch으로 변환
-                    const [year, month, day] = row.date.split('-').map(Number)
-                    const entryEpoch = new Date(year, month - 1, day,
-                        parseInt(hmMatch[1]), parseInt(hmMatch[2]), 0).getTime() / 1000
-                    // 같은 날짜이면서 진입시간 이후인 캔들만
-                    const dayEndEpoch = new Date(year, month - 1, day, 23, 59, 59).getTime() / 1000
-                    const afterEntry = candles5m.filter((c: any) => c.time >= entryEpoch && c.time <= dayEndEpoch)
+                    const [year, month, day] = row.date.split('-').map(Number);
+                    const entryEpoch = new Date(year, month - 1, day, parseInt(hmMatch[1]), parseInt(hmMatch[2]), 0).getTime() / 1000;
+                    const dayEndEpoch = new Date(year, month - 1, day, 23, 59, 59).getTime() / 1000;
+                    const afterEntry = candles5m.filter((c: any) => c.time >= entryEpoch && c.time <= dayEndEpoch);
                     if (afterEntry.length > 0) {
-                        maxHigh = Math.max(...afterEntry.map((c: any) => c.high))
+                        maxHigh = Math.max(...afterEntry.map((c: any) => c.high));
                     }
                 }
             }
-            const maxReturnPct = ((maxHigh - entryPrice) / entryPrice) * 100
+            const maxReturnPct = ((maxHigh - entryPrice) / entryPrice) * 100;
 
-            // ═══ HOLD 정량 평가 및 횡보장(Sideways) vs 추세장(Trend) 알고리즘 ═══
-            // 추세장(Trend): 종가 기준 수익률 절대값 0.5% 이상, 혹은 장중 최대 상승분 1.0% 이상 발생 시.
-            const isTrend = Math.abs(returnPct) >= 0.5 || maxReturnPct >= 1.0
+            // ═══ 정량 평가 및 횡보(Sideways)/추세(Trend) 판별 ═══
+            // 추세장(Trend) 기준: 종가 변동성 절대값 0.5% 이상 OR 최대 변동성 1.0% 이상
+            const isTrend = Math.abs(returnPct) >= 0.5 || maxReturnPct >= 1.0;
 
-            let result: string
-            if (row.predict === 'UP' || row.predict === 'DOWN') {
+            let result: string;
+            if (isUpPos || isDownPos) {
                 if (isTrend) {
-                    // 추세가 터졌을 때 방향이 맞았는가 (수익 0.5% 이상이거나 고점 1.0% 이상)
+                    // 추세가 터졌을 때 내 방향으로 터졌는가 (내 포지션 수익이 >0.5% or Max >1.0%)
                     if (returnPct >= 0.5 || maxReturnPct >= 1.0) {
-                        result = 'HIT'
+                        result = 'HIT';
                     } else {
-                        result = 'MISS'
+                        result = 'MISS';
                     }
                 } else {
-                    // 횡보장인데 UP/DOWN 억지 베팅 -> 기회비용 및 수수료 패배
-                    result = 'MISS'
+                    // 횡보장인데 억지 방향 베팅 -> 수수료 등 패배로 산정
+                    result = 'MISS';
                 }
-            } else { // HOLD (관망)
+            } else { 
+                // HOLD (관망)
                 if (isTrend) {
-                    // 추세가 터졌는데 방관 -> 기회 상실(패배)
-                    result = 'MISS'
+                    // 크게 오르거나 내렸는데 HOLD 하고 기회를 날림 -> MISS
+                    result = 'MISS';
                 } else {
-                    // 변동성 없는 장에서 억지 베팅을 피하고 자산 방어 성공
-                    result = 'HIT'
+                    // 잔파도/횡보장이었으므로 베팅하지 않은 것이 올바른 결정 -> 방어 성공(HIT)
+                    result = 'HIT';
                 }
             }
 
-            const rowK200Info = chartK200Daily.find((c: any) => c.date === row.date) || todayK200Info
+            const rowK200Info = chartK200Daily.find((c: any) => c.date === row.date) || todayK200Info;
+            const isToday = (row.date === dateStr);
 
+            // 주의: 사용자의 position 기록을 이 과정에서 덮어쓰지 않게 필드 제외
             rawDb.prepare(`
                 UPDATE intraday_predictions 
-                SET position = ?, entry_price = ?, close_price = ?, return_pct = ?, 
+                SET entry_price = ?, close_price = ?, return_pct = ?, 
                     max_price = ?, max_return_pct = ?,
                     close_kospi = ?, result = ?
                 WHERE id = ?
-            `).run(position, entryPrice, closePrice, returnPct, maxHigh, maxReturnPct, rowK200Info?.close ?? 0, result, row.id)
+            `).run(entryPrice, closePrice, returnPct, maxHigh, maxReturnPct, rowK200Info?.close ?? 0, result, row.id);
 
-            console.log(`[MCA-Tracker] 장중평가${isToday ? '' : '(소급)'} [${row.date}] ${row.time_slot}: ${position} entry=${entryPrice} 고점=${maxHigh} close=${closePrice} | 결과:${result} (Trend:${isTrend}, 변동:${maxReturnPct.toFixed(2)}%, 종가:${returnPct.toFixed(2)}%)`)
-            evaluated++
+            console.log(`[MCA-Tracker] 장중평가${isToday ? '' : '(소급)'} [${row.date}] ${row.time_slot}: ${actualPosition} entry=${entryPrice} 고점=${maxHigh} close=${closePrice} | 결과:${result} (Trend:${isTrend}, 변동:${maxReturnPct.toFixed(2)}%, 종가:${returnPct.toFixed(2)}%)`);
+            evaluated++;
 
             this.trackPersonaPerformance(row, returnPct, isTrend)
         }

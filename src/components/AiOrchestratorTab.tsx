@@ -123,7 +123,7 @@ const AI_AGENTS = [
         description: 'MA200을 돌파한 장기 우상향 예비 후보들의 활력(Neglect Score)을 관리합니다.',
         gemini: true, trigger: 'CRON' as const,
         schedules: [
-            { time: '16:30', label: '관심종목 활력도 갱신', description: '일일 활성도 감소분 차감 및 IGNITE 승급 평가' },
+            { time: '15:43', label: '관심종목 활력도 갱신', description: '일일 활성도 감소분 차감 및 IGNITE 승급 평가' },
         ],
     },
 ] as const

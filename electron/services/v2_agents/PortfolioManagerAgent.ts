@@ -96,8 +96,8 @@ export class PortfolioManagerAgent {
 
             const promptContext = `[1차 심사 대상 신규 종목 총 ${stockList.length}개]\n\n` + stockList.map(s => s.dossier).join('\n\n');
             const systemPrompt = `너는 차트 분석과 종목 필터링을 담당하는 1차 심사관(Portfolio Manager Phase 1)이다. 오늘은 ${stockList.length}개의 새로운 종목 추천이 올라왔다.
-모든 종목을 살 수는 없다. 차트 이격도가 너무 높거나(과열), 재료가 부실한 종목은 즉시 쳐내라(DROP).
-절대평가를 통해 최대 ${phase1PassLimit}개의 종목만 2차 심사(WATCHLIST)로 올려보내라.
+관심종목(WATCHLIST) 풀을 여유롭게 유지하는 것이 목표다. 차트가 아주 극단적인 고점이거나 상장폐지급 폭락이 아니고, 실적이나 모멘텀 개선의 여지가 약간이라도 보이면 가급적 WATCHLIST에 통과시켜라.
+절대평가를 통해 최대 ${phase1PassLimit}개의 종목을 2차 심사(WATCHLIST)로 올려보내되, 허들을 대폭 낮춰 종류별로 폭넓게 담아내는 데 집중하라.
 
 응답 형식 (JSON):
 \`\`\`json
@@ -682,6 +682,15 @@ ${chartRiskSkill}
                                     ? (reasonMatch.last_signal_reason || 'PM 익/손절 판정')
                                     : '관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락';
                                 this.db.logPortfolioEvent(d.stock_code, d.stock_name, 'DROPPED', d.status, 'CLEARED', reason, d.current_price || 0);
+                                
+                                // DROP된 종목 인큐베이터 강등 처리
+                                this.db.demoteToIncubator({
+                                    stock_code: d.stock_code,
+                                    stock_name: d.stock_name,
+                                    current_price: d.current_price || 0,
+                                    last_signal_reason: reason,
+                                    id: d.id
+                                });
                             });
                         }
 

@@ -124,10 +124,10 @@ export class MarketDataCollectorService {
                                 return '0';
                             };
 
-                            const open = parseInt(getVal(["open", "open_pric", "opn_prc"]));
-                            const high = parseInt(getVal(["high", "high_pric", "hgpr"]));
-                            const low = parseInt(getVal(["low", "low_pric", "lwpr"]));
-                            const close = parseInt(getVal(["close", "cur_prc", "prpr"]));
+                            const open = parseInt(getVal(["open", "open_pric", "opn_prc", "stck_oprc", "oprc"]));
+                            const high = parseInt(getVal(["high", "high_pric", "hg_prc", "stck_hgpr", "hgpr"]));
+                            const low = parseInt(getVal(["low", "low_pric", "lw_prc", "stck_lwpr", "lwpr"]));
+                            const close = parseInt(getVal(["close", "cur_prc", "stck_clpr", "clprc", "prpr"]));
                             const volume = parseInt(getVal(["volume", "trde_qty", "vol", "acml_vol"]));
                             
                             // 거래대금 파싱 (없으면 close * volume 평균치로 대체)

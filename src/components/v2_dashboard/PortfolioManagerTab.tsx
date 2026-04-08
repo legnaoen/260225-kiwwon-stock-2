@@ -83,12 +83,19 @@ function AnalystBadges({ json }: { json?: string }) {
 import { StockChart } from '../../components/StockChart'
 import { StockAiReport } from '../../components/StockAiReport'
 
-function PortfolioStockModal({ stock, watchlist, onClose }: { stock: any; watchlist?: any[]; onClose: () => void }) {
+function PortfolioStockModal({ stock, watchlist, onClose, onUpdateStockPrice }: { stock: any; watchlist?: any[]; onClose: () => void; onUpdateStockPrice?: (code: string, price: number) => void }) {
     const [copied, setCopied] = useState(false);
     const [eventLogs, setEventLogs] = useState<any[]>([]);
+    const [latestPrice, setLatestPrice] = useState<number | null>(null);
 
     let analysts: any[] = []
     try { analysts = typeof stock.analysts_json === 'string' ? JSON.parse(stock.analysts_json) : (stock.analysts_json || []) } catch { }
+
+    useEffect(() => {
+        if (latestPrice !== null && onUpdateStockPrice) {
+            onUpdateStockPrice(stock.stock_code, latestPrice);
+        }
+    }, [latestPrice, stock.stock_code, onUpdateStockPrice]);
 
     useEffect(() => {
         if (stock.stock_code) {
@@ -156,7 +163,7 @@ function PortfolioStockModal({ stock, watchlist, onClose }: { stock: any; watchl
                                 <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">일봉 차트 (Daily)</span>
                             </div>
                             <div className="flex-1 min-h-0 relative p-1 pb-4">
-                                <StockChart stockCode={stock.stock_code} stockName={stock.stock_name} />
+                                <StockChart stockCode={stock.stock_code} stockName={stock.stock_name} onPriceUpdate={setLatestPrice} />
                             </div>
                         </div>
 
@@ -169,7 +176,8 @@ function PortfolioStockModal({ stock, watchlist, onClose }: { stock: any; watchl
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                         {(() => {
                                             const ep = stock.entry_price || stock.actual_entry_price || stock.current_price;
-                                            const pr = stock.profit_rate != null ? Number(stock.profit_rate) : null;
+                                            const displayPrice = latestPrice || stock.current_price;
+                                            const pr = (ep && displayPrice) ? ((displayPrice - ep) / ep) * 100 : (stock.profit_rate != null ? Number(stock.profit_rate) : null);
                                             const hr = (stock.high_price && ep && stock.high_price > ep) ? ((stock.high_price - ep) / ep) * 100 : pr;
 
                                             return [
@@ -607,10 +615,13 @@ export const PortfolioManagerTab: React.FC = () => {
                                     </tr>
                                 ) : buyRows.map(p => {
                                     const signal = p.last_signal || p.status
-                                    const profitRate = p.profit_rate != null ? Number(p.profit_rate) : null
+                                    const ep = p.entry_price || p.actual_entry_price || p.current_price;
+                                    let profitRate = p.profit_rate != null ? Number(p.profit_rate) : null;
+                                    if (ep && p.current_price) {
+                                        profitRate = ((p.current_price - ep) / ep) * 100;
+                                    }
 
                                     // 고점 수익률 및 HIT 판단
-                                    const ep = p.entry_price || p.actual_entry_price || p.current_price;
                                     const highRate = (p.high_price && ep && p.high_price > ep) ? ((p.high_price - ep) / ep) * 100 : profitRate;
                                     const isMegaHit = highRate && highRate >= 30.0;
                                     const isHit = highRate && highRate >= 5.0;
@@ -681,7 +692,7 @@ export const PortfolioManagerTab: React.FC = () => {
                                                 <div className="font-mono">
                                                     <span className="text-xs text-muted-foreground">
                                                         {p.created_at
-                                                            ? p.created_at.substring(5, 10).replace(/-/g, '.')
+                                                            ? p.created_at.substring(5, 16).replace(/-/g, '.')
                                                             : p.entry_date ? p.entry_date.substring(5, 10).replace(/-/g, '.') : '-'}
                                                     </span>
                                                 </div>
@@ -806,7 +817,7 @@ export const PortfolioManagerTab: React.FC = () => {
                                                 <div className="font-mono">
                                                     <span className="text-xs text-muted-foreground">
                                                         {p.created_at
-                                                            ? p.created_at.substring(5, 10).replace(/-/g, '.')
+                                                            ? p.created_at.substring(5, 16).replace(/-/g, '.')
                                                             : p.entry_date ? p.entry_date.substring(5, 10).replace(/-/g, '.') : '-'}
                                                     </span>
                                                 </div>
@@ -1488,7 +1499,21 @@ export const PortfolioManagerTab: React.FC = () => {
             )}
 
             {/* ── Detail Modal ── */}
-            {selected && <PortfolioStockModal stock={selected} watchlist={watchlist} onClose={() => setSelected(null)} />}
+            {selected && (
+                <PortfolioStockModal
+                    stock={selected}
+                    watchlist={watchlist}
+                    onClose={() => setSelected(null)}
+                    onUpdateStockPrice={(code: string, price: number) => {
+                        setPortfolio(prev => prev.map(p => {
+                            if (p.stock_code === code) {
+                                return { ...p, current_price: price };
+                            }
+                            return p;
+                        }));
+                    }}
+                />
+            )}
 
             {/* ── Confirm Modal ── */}
             {confirmModal && (

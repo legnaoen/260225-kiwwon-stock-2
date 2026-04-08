@@ -906,7 +906,17 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             {intradayData.length === 0 ? (
                                 <tr><td colSpan={10} className="py-8 text-center text-muted-foreground text-xs">장중 예측 데이터가 없습니다. (09:30, 11:00, 13:00 자동 실행)</td></tr>
                             ) : intradayData.map((row) => {
-                                const posLabel = row.position || (row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD')
+                                let posLabel = row.position || (row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD')
+                                
+                                // 임시 UI 패치: 훼손된 DB 문자열 복구 처리
+                                if (posLabel.includes('HOLD(KODEX 200 기준)') || posLabel === '- HOLD') {
+                                    if (row.time_slot === '09:45' || row.time_slot === '10:15') {
+                                        posLabel = 'KODEX 200';
+                                    } else {
+                                        posLabel = 'HOLD';
+                                    }
+                                }
+
                                 const posStyle = posLabel.includes('200')
                                     ? 'text-rose-500 bg-rose-500/10 border-rose-500/20'
                                     : posLabel.includes('인버스')

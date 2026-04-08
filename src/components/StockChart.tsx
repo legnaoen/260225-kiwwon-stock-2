@@ -17,9 +17,10 @@ interface StockChartProps {
     stockName: string
     className?: string
     theme?: string
+    onPriceUpdate?: (price: number) => void
 }
 
-export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, className, theme }) => {
+export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, className, theme, onPriceUpdate }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -138,6 +139,7 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
                 if (uniqueData.length > 0) {
                     chartDataRef.current = uniqueData
                     candleSeriesRef.current.setData(uniqueData)
+                    if (onPriceUpdate) onPriceUpdate(uniqueData[uniqueData.length - 1].close)
 
                     // Calculate Disparity and assign Depression Markers
                     const markers: SeriesMarker<Time>[] = []
@@ -229,6 +231,7 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
 
                 chartDataRef.current[data.length - 1] = updatedBar
                 candleSeriesRef.current.update(updatedBar)
+                if (onPriceUpdate) onPriceUpdate(currentPrice)
             }
         })
 

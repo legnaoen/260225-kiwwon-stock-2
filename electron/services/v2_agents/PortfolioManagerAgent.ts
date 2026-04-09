@@ -302,7 +302,12 @@ export class PortfolioManagerAgent {
                         const themes = l.relatedThemes.slice(0, 2).join(', ') || '테마 미분류';
                         marketContextBlock += `${idx + 1}위. ${l.stockName}(${l.stockCode}) — Alpha +${l.marketAlpha.toFixed(1)}% / 누적 ${l.totalChangeRate.toFixed(1)}% [${themes}]\n`;
                     });
-                                // 5-C. Load Dynamic Limits from Store
+                }
+            } catch (e) {
+                console.warn('[PortfolioManager] ⚠️ MarketLeader Alpha 조회 실패:', (e as any).message);
+            }
+
+            // 5-C. Load Dynamic Limits from Store
             const aiSettings: any = store.get('ai_settings') || {};
             const limits = aiSettings.portfolioLimits || {
                 buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
@@ -361,57 +366,6 @@ ${chartRiskSkill}
             "lifespan_days": 20, // BUY 판정시에만 유효
             "analysts_json": ["REPORT", "MOMENTUM"], 
             "last_signal_reason": "알파 Top 5 + 방산. (BUY 이유 혹은 WATCHING 고득점 편성 이유 명시)"
-        }
-    ]
-}
-\`\`\``;              `[종합 심사 대상 팩트시트 리스트 (신규+보유 통합 총 ${stockList.length}개 종목)]\n\n` +
-                stockList.map(s => s.dossier).join('\n\n');
-
-            const systemPrompt = `너는 여의도 최고 수익률을 자랑하는 헤지펀드 매니저(Portfolio Manager) 포지션이다.
-오늘 3개 부서(테마/이슈, 수급/모멘텀, 펀더멘털/리포트)가 올린 종목별 종합 타임라인 리포트를 검토하고, 현재 관리 중인 종목들을 포함해 포지션을 평가해라.
-${sysConditionMsg}
-
-[차트 리스크 분석 교본 (필수 준수 지침)]
-${chartRiskSkill}
-
-[🌐 시장 맥락 활용 원칙 — 반드시 준수]
-프롬프트 최상단에 오늘의 시장 맥락(Alpha 랭킹 + 이슈 수혜/피해 섹터 + 시황 브리핑)이 제공된다.
-1. **Alpha Top 15 교차 확인**: 애널리스트 추천 종목이 Alpha Top 15 안에 있으면 conviction_score +10점 가산. 시장이 실제로 인정한 종목이라는 증거.
-2. **이슈 수혜 섹터 우대**: 이슈AI가 판정한 수혜 섹터 종목은 시장 전체 하락 시에도 역발상 매수 기회. conviction_score +10~15점. 피해 섹터 종목의 반등에는 보수적 판단.
-3. **시황 위험도 반영**: 브리핑의 risk_score가 80 이상이면 BUY 기준을 평소보다 10점 높여 적용. 60 미만이면 적극적 편입.
-4. **Alpha + 이슈 쌍발 신호**: Alpha Top 15 + 이슈 수혜 섹터 동시 해당 시 최우선 편입 대상.
-
-[전략별 판단 기준 — 반드시 구분하여 적용]
-각 종목의 strategy 필드를 확인하고, 전략에 맞는 기준으로 DROP/HOLD/BUY를 판정하라:
-- **MOMENTUM (1~3일)**: 신규 재료와 거래량 폭증이 핵심. 수명 초과 or 재료 소멸 시 신속히 DROP. 추격매수(등락률 +15% 이상) 불허.
-- **PULLBACK (3~7일)**: MA20 위에서 지지 여부가 핵심. 거래량이 줄어드는 것은 긍정 신호(매물 소화 중). MA20 이탈 시에만 DROP.
-- **SWING (5~20일)**: 테마 내러티브의 성장이 핵심. 단기 조정(-5%~-10%)은 HOLD. MA20 이탈 + 테마 소멸 시에만 DROP.
-- **VALUE (본질가치)**: 수급과 거래량이 바닥일 때 인내. 펀더멘털 훼손(적자 전환, 목표주가 대폭 하향) 시에만 DROP.
-
-[펀드매니저 추가 업무 지침]
-1. [독립적 개별 평가]: 종목별로 제공되는 '과거~현재 AI 분석 리포트 타임라인'을 세밀하게 읽어라. 이 종목의 내러티브가 점진적으로 쌓이고 있는지 확인하라.
-2. 타임라인 과거에 등장하던 부정적 평가나 리스크가 최근 타임라인의 뉴스와 수급을 통해 해소되었다면 가산점을 주라. 반대로 과거와 동일한 재료만 앵무새처럼 반복된다면 피로감이 쌓인 것으로 보고 점수를 차감하라.
-3. [차트 분석 교본 최우선 반영]: 위에 주입된 '차트 리스크 분석 교본'의 조건(이격도, 단기 모멘텀, 역배열 등)을 절대적으로 준수하라. 가이드북의 위험 기준에 해당할 경우 스토리가 아무리 좋아도 추격매수(BUY)를 불허한다.
-4. 기존 보유 종목 중 수익률이 부진하고 한 달 이상 모멘텀이 죽었다면 과감히 떨어내라(DROP). 단, strategy가 PULLBACK/VALUE인 종목은 위 전략별 기준을 따른다.
-5. 주도 대장주는 여러 애널리스트(서브 AI)들이 중복으로 추천하거나 타임라인에 등장 빈도가 높을 수밖에 없다. 여러 근거가 합쳐질수록 편입 확신도를 극대화해라.
-6. 각 종목에 대해 팩트시트를 근거로 '최종 확신 점수(conviction_score: 0~100)'와 '요청 시그널(BUY, HOLD, SELL)'을 내려라.
-7. last_signal_reason 서술 시 ①시장 맥락(Alpha 포함 여부, 이슈 수혜/피해 섹터 해당 여부) ②전략별 판단 근거를 반드시 명시하라.
-8. [포지션 용량 하드캡(Capacity Limit) 준수]: ${quotaText} 한도를 초과하면 낮은 점수부터 자동 삭제(SELL) 처리된다. 
-따라서 무의미한 나열을 피하고, 진심으로 확신하는 최상위 종목에만 편입 점수를 높게 주어라. 기준에 미달하는 종목들은 과감히 SELL 처리해야 한다.
-
-응답은 오직 JSON 형식으로만 작성해라:
-\`\`\`json
-{
-    "decisions": [
-        {
-            "stock_code": "000000",
-            "stock_name": "종목명",
-            "last_signal": "BUY | HOLD | SELL",
-            "conviction_score": 95,
-            "strategy": "SWING",
-            "lifespan_days": 20,
-            "analysts_json": ["REPORT", "MOMENTUM"], 
-            "last_signal_reason": "Alpha Top 5 + 방산 이슈 수혜 섹터 일치. 과거 타임라인 내러티브 지속 성장 중. SWING 전략 기준 MA20 지지 확인."
         }
     ]
 }

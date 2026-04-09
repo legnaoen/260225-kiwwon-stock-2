@@ -19,15 +19,15 @@ const AI_AGENTS = [
         description: '로컬 AI 4인방(모멘텀, 역발상, 퀀트, 딜러)이 장중 다수결 평가를 진행합니다.',
         gemini: false, trigger: 'CRON' as const,
         schedules: [
-            { time: '09:45', label: '스웜 A/B 테스트 (1회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '10:15', label: '스웜 A/B 테스트 (2회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '10:45', label: '스웜 A/B 테스트 (3회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '11:15', label: '스웜 A/B 테스트 (4회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '11:45', label: '스웜 A/B 테스트 (5회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '12:15', label: '스웜 A/B 테스트 (6회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '12:45', label: '스웜 A/B 테스트 (7회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '13:15', label: '스웜 A/B 테스트 (8회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '13:45', label: '스웜 A/B 테스트 (최종)', description: '마지막 로컬 예측 스나이핑' },
+            { time: '09:10', label: '스웜 A/B 테스트 (1회차)', description: '로컬 군집 4인 개별투표 및 합의' },
+            { time: '09:25', label: '스웜 A/B 테스트 (2회차)', description: '로컬 군집 4인 개별투표 및 합의' },
+            { time: '09:40', label: '스웜 A/B 테스트 (3회차)', description: '로컬 군집 4인 개별투표 및 합의' },
+            { time: '09:55', label: '스웜 A/B 테스트 (4회차)', description: '로컬 군집 4인 개별투표 및 합의' },
+            { time: '10:10', label: '스웜 A/B 테스트 (5회차)', description: '로컬 군집 4인 개별투표 및 합의' },
+            { time: '10:25', label: '스웜 A/B 테스트 (6회차)', description: '로컬 군집 4인 개별투표 및 합의' },
+            { time: '10:40', label: '스웜 A/B 테스트 (7회차)', description: '로컬 군집 4인 개별투표 및 합의' },
+            { time: '10:55', label: '스웜 A/B 테스트 (8회차)', description: '로컬 군집 4인 개별투표 및 합의' },
+            { time: '11:10', label: '스웜 A/B 테스트 (최종)', description: '마지막 로컬 예측 스나이핑' },
         ],
     },
     {
@@ -72,7 +72,7 @@ const AI_AGENTS = [
         description: '장중/장마감 주도 테마와 섹터를 수집(NaverFlow)하고 모멘텀의 수명(Lifespan)을 예측합니다.',
         gemini: true, trigger: 'CRON' as const,
         schedules: [
-            { time: '09:40', label: '오전 주도테마 요약', description: '09:40 정규 수집 시 연계 분석' },
+            { time: '09:41', label: '오전 주도테마 요약', description: '09:41 정규 수집 시 연계 분석' },
             { time: '15:45', label: '장마감 메가트렌드 요약', description: '15:45 최종 수집 시 연계 분석' },
         ],
     },
@@ -89,7 +89,7 @@ const AI_AGENTS = [
         description: '매일 발행되는 리서치와 실적 속보를 분석해 구조적 증익주를 선별합니다.',
         gemini: true, trigger: 'CRON' as const,
         schedules: [
-            { time: '09:40', label: '핵심 실적/리포트 진단', description: '증권사 리서치 내용 및 실적 뉴스 필터링' },
+            { time: '09:41', label: '핵심 실적/리포트 진단', description: '증권사 리서치 내용 및 실적 뉴스 필터링' },
         ],
     },
     {

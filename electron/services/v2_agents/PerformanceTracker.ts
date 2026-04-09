@@ -39,6 +39,12 @@ export class PerformanceTracker {
     private latestPrices: Record<string, { price: number, open: number }> = {}
     private evalTimeout: NodeJS.Timeout | null = null
 
+    // ── 폴링 최적화: "할 일 없음" 캐시 ──
+    // true이면 오늘 더 이상 채울 pending 행이 없으므로 DB 쿼리 생략
+    private _noPendingIntraday = false
+    private _noPendingDaily    = false
+    private _cacheDate         = ''   // 날짜가 바뀌면 캐시 리셋
+
     private constructor() {
         this.db = DatabaseService.getInstance()
         this.kiwoom = KiwoomService.getInstance()
@@ -168,7 +174,9 @@ export class PerformanceTracker {
 
             // ═══ Step 2: T+1 평가 ═══
             // t1_final이 아직 없거나, 당일 Cycle A거나, 우리가 방금 entry_price를 교정(Overwrite)했다면 다시 채점!
-            if ((row as any).t1_final === null || (row as any).t1_final === undefined || isTodayCycleA || updates.entry_price !== undefined) {
+            // Cycle B의 경우 익일 일봉 데이터가 존재(todayIdx >= 1)하면 WebSocket 임시 0.0 데이터를 덮어쓰기 위해 채점 진행
+            const isFinishedCycleB = row.cycle === 'B' && todayIdx >= 1;
+            if ((row as any).t1_final === null || (row as any).t1_final === undefined || isTodayCycleA || isFinishedCycleB || updates.entry_price !== undefined) {
                 if (row.cycle === 'A' || row.cycle === 'P') {
                     // Cycle A / Cycle P: 당일 시가(또는 장중 실시간 진입가) 진입 → 당일 종가 청산
                     updates.t1_peak = ((todayCandle.high - entryPrice) / entryPrice) * 100
@@ -306,9 +314,48 @@ export class PerformanceTracker {
     }
 
     /**
+     * KST 기준 장중 시간(09:00~15:40)인지 확인
+     */
+    private isMarketHours(): boolean {
+        const now = new Date()
+        const kstHour   = (now.getUTCHours() + 9) % 24
+        const kstMinute = now.getUTCMinutes()
+        const kstTime   = kstHour * 100 + kstMinute
+        return kstTime >= 900 && kstTime <= 1540
+    }
+
+    /**
+     * 날짜 캐시 리셋 (날짜가 바뀌면 pending 캐시 초기화)
+     */
+    private refreshDateCache(): string {
+        const today = new Date()
+        const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+        if (this._cacheDate !== dateStr) {
+            this._cacheDate         = dateStr
+            this._noPendingIntraday = false
+            this._noPendingDaily    = false
+        }
+        return dateStr
+    }
+
+    /**
+     * 외부(새 예측 저장 시)에서 호출해 캐시를 리셋
+     */
+    public invalidatePendingCache() {
+        this._noPendingIntraday = false
+        this._noPendingDaily    = false
+    }
+
+    /**
      * WebSocket 가격 변동 이벤트 수신 핸들러
      */
     private handleRealtimePriceUpdate(data: any) {
+        // ── Guard 1: 장 외 시간이면 스킵 (초당 수십 회 틱 방지) ──
+        if (!this.isMarketHours()) return
+
+        // ── Guard 2: 두 캐시가 모두 "할 일 없음"이면 스킵 ──
+        if (this._noPendingIntraday && this._noPendingDaily) return
+
         const code = String(data.code).replace(/[^0-9]/g, '')
         if (code === '069500' || code === '114800') {
             const currentPrice = Number(data.price)
@@ -333,9 +380,11 @@ export class PerformanceTracker {
         // 둘 다 실시간 데이터가 수집되지 않았으면 조기 반환
         if (!this.latestPrices['069500'] && !this.latestPrices['114800']) return
 
-        const rawDb = (this.db as any).db
-        const today = new Date()
-        const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+        const rawDb  = (this.db as any).db
+        const dateStr = this.refreshDateCache()   // 날짜 변경 시 캐시 자동 리셋
+
+        // ── Guard: 두 캐시가 모두 "할 일 없음"이면 DB 접근 자체를 생략 ──
+        if (this._noPendingIntraday && this._noPendingDaily) return
 
         let evaluated = 0
 
@@ -352,46 +401,62 @@ export class PerformanceTracker {
             }
         }
 
-        // 1. 장중 예측 (Intraday) 중 진입가가 없는 행에 진입가 최초 1회 등록
-        const pendingIntraday = rawDb.prepare(
-            `SELECT id, predict FROM intraday_predictions WHERE date = ? AND (entry_price IS NULL OR entry_price <= 0) AND predict IN ('UP', 'DOWN', 'HOLD')`
-        ).all(dateStr) as any[]
+        // ── 1. 장중 예측(intraday_predictions): 진입가 없는 행 채우기 ──
+        if (!this._noPendingIntraday) {
+            const pendingIntraday = rawDb.prepare(
+                `SELECT id, predict FROM intraday_predictions WHERE date = ? AND (entry_price IS NULL OR entry_price <= 0) AND predict IN ('UP', 'DOWN', 'HOLD')`
+            ).all(dateStr) as any[]
 
-        for (const row of pendingIntraday) {
-            const etfData = row.predict === 'UP' ? this.latestPrices['069500'] : row.predict === 'DOWN' ? this.latestPrices['114800'] : this.latestPrices['069500']
-            if (!etfData || etfData.price <= 0) continue
-
-            rawDb.prepare(`UPDATE intraday_predictions SET entry_price = ? WHERE id = ?`).run(etfData.price, row.id)
-            evaluated++
-        }
-
-        const pendingDaily = rawDb.prepare(
-            `SELECT id, date, predict, cycle, entry_price FROM agent_predictions WHERE (t1_final IS NULL OR entry_price IS NULL OR entry_price <= 0) AND predict IN ('LONG', 'SHORT', 'UP', 'DOWN', 'HOLD')`
-        ).all() as any[]
-        
-        for (const row of pendingDaily) {
-            const etfData = (row.predict === 'LONG' || row.predict === 'UP') ? this.latestPrices['069500'] : (row.predict === 'SHORT' || row.predict === 'DOWN') ? this.latestPrices['114800'] : this.latestPrices['069500']
-            // 시가가 없으면 안전하게 통과 (0으로 나누기 방지)
-            if (!etfData || etfData.open <= 0) continue
-
-            let rowEntryPrice = row.entry_price
-
-            if (!rowEntryPrice || rowEntryPrice <= 0) {
-                rowEntryPrice = row.cycle === 'A' ? etfData.open : etfData.price;
-                rawDb.prepare(`UPDATE agent_predictions SET entry_price = ? WHERE id = ?`).run(rowEntryPrice, row.id)
-                evaluated++
-            }
-
-            // [마감(B) 예측 당일 아침 즉각 채점]
-            if (row.cycle === 'B' && rowEntryPrice > 0 && row.date < dateStr) {
-                const finalReturn = ((etfData.open - rowEntryPrice) / rowEntryPrice) * 100;
-                rawDb.prepare(`UPDATE agent_predictions SET t1_final = ?, t1_peak = ? WHERE id = ?`).run(finalReturn, finalReturn, row.id)
-                evaluated++
-                console.log(`[MCA-Tracker] Cycle B 익일 장전 즉각 평가 확정: ${row.id} return=${finalReturn.toFixed(2)}%`)
+            if (pendingIntraday.length === 0) {
+                this._noPendingIntraday = true  // 오늘은 더 이상 체크 불필요
+            } else {
+                for (const row of pendingIntraday) {
+                    const etfData = row.predict === 'UP' ? this.latestPrices['069500'] : row.predict === 'DOWN' ? this.latestPrices['114800'] : this.latestPrices['069500']
+                    if (!etfData || etfData.price <= 0) continue
+                    rawDb.prepare(`UPDATE intraday_predictions SET entry_price = ? WHERE id = ?`).run(etfData.price, row.id)
+                    evaluated++
+                }
             }
         }
 
-        // 변경사항(최초 진입가 세팅)이 있었을 때만 UI 새로고침 이벤트 발송 (무한 DB/소켓 통신 방지)
+        // ── 2. 일별 예측(agent_predictions): 최근 3일 + entry_price/t1_final 미완성 행 채우기 ──
+        // [개선] WHERE절에 날짜 범위 추가 → 전체 테이블 스캔 방지
+        if (!this._noPendingDaily) {
+            const pendingDaily = rawDb.prepare(`
+                SELECT id, date, predict, cycle, entry_price FROM agent_predictions
+                WHERE date >= date('now', 'localtime', '-3 days')
+                  AND (t1_final IS NULL OR entry_price IS NULL OR entry_price <= 0)
+                  AND predict IN ('LONG', 'SHORT', 'UP', 'DOWN', 'HOLD')
+            `).all() as any[]
+
+            if (pendingDaily.length === 0) {
+                this._noPendingDaily = true  // 최근 3일치 모두 완료됨
+            } else {
+                for (const row of pendingDaily) {
+                    const etfData = (row.predict === 'LONG' || row.predict === 'UP') ? this.latestPrices['069500'] : (row.predict === 'SHORT' || row.predict === 'DOWN') ? this.latestPrices['114800'] : this.latestPrices['069500']
+                    // 시가가 없으면 안전하게 통과 (0으로 나누기 방지)
+                    if (!etfData || etfData.open <= 0) continue
+
+                    let rowEntryPrice = row.entry_price
+
+                    if (!rowEntryPrice || rowEntryPrice <= 0) {
+                        rowEntryPrice = row.cycle === 'A' ? etfData.open : etfData.price;
+                        rawDb.prepare(`UPDATE agent_predictions SET entry_price = ? WHERE id = ?`).run(rowEntryPrice, row.id)
+                        evaluated++
+                    }
+
+                    // [마감(B) 예측 당일 아침 즉각 채점]
+                    if (row.cycle === 'B' && rowEntryPrice > 0 && row.date < dateStr) {
+                        const finalReturn = ((etfData.open - rowEntryPrice) / rowEntryPrice) * 100;
+                        rawDb.prepare(`UPDATE agent_predictions SET t1_final = ?, t1_peak = ? WHERE id = ?`).run(finalReturn, finalReturn, row.id)
+                        evaluated++
+                        console.log(`[MCA-Tracker] Cycle B 익일 장전 즉각 평가 확정: ${row.id} return=${finalReturn.toFixed(2)}%`)
+                    }
+                }
+            }
+        }
+
+        // 변경사항(최초 진입가 세팅)이 있었을 때만 UI 새로고침 이벤트 발송
         if (evaluated > 0) {
             eventBus.emit('INTRADAY_PREDICTION_UPDATED' as any, null)
             eventBus.emit('MARKET_CONDITION_COMPLETE' as any, null)

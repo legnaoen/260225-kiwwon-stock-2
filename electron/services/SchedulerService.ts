@@ -96,63 +96,11 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // 장중 5분봉 CCI 모니터링 및 이벤트 트리거 (09:10 ~ 14:00 사이, 매 5분마다)
-            const intradayCciJob = cron.schedule('*/5 9-14 * * 1-5', async () => {
-                const now = new Date()
-                const timeInt = now.getHours() * 100 + now.getMinutes()
-                if (timeInt < 910 || timeInt > 1400) return
 
-                try {
-                    // 최근 10분 내 군집 AI 또는 기타 예측이 있었는지 통합 체크
-                    const { DatabaseService } = await import('./DatabaseService')
-                    const rawDb = (DatabaseService.getInstance() as any).db;
-                    
-                    // 1. 최근 10분 내 메인 AI(CCI 기반) 실행 이력 스캔
-                    const recentCciRun = rawDb.prepare(`
-                        SELECT id, created_at FROM intraday_predictions 
-                        WHERE id LIKE '%CCI%'
-                          AND created_at >= datetime('now', 'localtime', '-10 minutes')
-                        ORDER BY created_at DESC LIMIT 1
-                    `).get();
 
-                    if (recentCciRun) {
-                        console.log(`[SchedulerService] 🕒 최근 10분 내 CCI 기반 예측 이력 존재(${recentCciRun.id}). 실행 스킵.`);
-                        return;
-                    }
-
-                    // 2. 최근 1분 내 군집 AI(스케줄러 기반) 실행 이력 스캔 (경합/충돌 방지)
-                    const recentSwarmRun = rawDb.prepare(`
-                        SELECT id, created_at FROM intraday_predictions 
-                        WHERE id NOT LIKE '%CCI%'
-                          AND created_at >= datetime('now', 'localtime', '-1 minute')
-                        ORDER BY created_at DESC LIMIT 1
-                    `).get();
-
-                    if (recentSwarmRun) {
-                        console.log(`[SchedulerService] 🕒 최근 1분 내 군집 AI 분석 이력 존재(${recentSwarmRun.id}). 빈번한 실행 방지를 위해 CCI 구동 스킵.`);
-                        return;
-                    }
-
-                    const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
-                    const { TechnicalAnalyzer } = await import('./v2_agents/TechnicalAnalyzer')
-                    const { KiwoomService } = await import('./KiwoomService')
-                    const analyzer = new TechnicalAnalyzer(KiwoomService.getInstance())
-                    const result = await analyzer.checkCCITrigger()
-
-                    if (result.isTriggered) {
-                        const eventSlotStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} (CCI)`
-                        console.log(`[SchedulerService] ⚡ CCI 이벤트 감지: ${result.status} -> AI 긴급 시황 분석 트리거`);
-                        // MarketConditionAgent.runIntraday 15분 내부 쿨다운 무시(force=true)하고 DB 기준 10분 쿨다운 적용
-                        await MarketConditionAgent.getInstance().runIntraday(eventSlotStr, true, result)
-                    }
-                } catch (err: any) {
-                    console.error('[SchedulerService] CCI 이벤트 체크 에러:', err.message)
-                }
-            }, { timezone: 'Asia/Seoul' })
-
-            // 장중 무제한 로컬 스웜 A/B 테스트 (09:45 ~ 13:45 간 30분 단위, 총 9회)
+            // 장중 군집 AI 로컬 스웜 (09:10 ~ 11:10 간 15분 단위, 총 9회)
             const swarmJobs: cron.ScheduledTask[] = []
-            const swarmSlots = ['09:45', '10:15', '10:45', '11:15', '11:45', '12:15', '12:45', '13:15', '13:45']
+            const swarmSlots = ['09:10', '09:25', '09:40', '09:55', '10:10', '10:25', '10:40', '10:55', '11:10']
             for (const slot of swarmSlots) {
                 const [hr, min] = slot.split(':')
                 const job = cron.schedule(`${parseInt(min)} ${parseInt(hr)} * * 1-5`, async () => {
@@ -216,8 +164,8 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Step 2] 09:40 리포트 AI: 증권사 리포트 기반 펀더멘탈 우량주 발굴
-            const fundamentalJob = cron.schedule('40 09 * * 1-5', async () => {
+            // [Step 2] 09:41 리포트 AI: 증권사 리포트 기반 펀더멘탈 우량주 발굴 (스웜 AI 충돌 회피로 1분 지연)
+            const fundamentalJob = cron.schedule('41 09 * * 1-5', async () => {
                 console.log('[Scheduler] 📄 리포트 AI (FundamentalAnalyst) 자동 실행 시작...')
                 try {
                     const { FundamentalAnalystAgent } = await import('./v2_agents/FundamentalAnalystAgent')
@@ -316,7 +264,7 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, intradayCciJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, phase1Job, phase2Job, phase2MiniJob, portfolioJudgeJob, marketDailyJob, incubatorScanJob, ...swarmJobs)
+            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, phase1Job, phase2Job, phase2MiniJob, portfolioJudgeJob, marketDailyJob, incubatorScanJob, ...swarmJobs)
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:40) → 눈림목(09:42) → PM(09:45)`)
             console.log(`[SchedulerService] 📊 장마감 파이프라인: 성과추적(15:35) → 회고(15:38) → 채점(15:41) → 주간(15:44,금) → 월간(15:47,28일) → OHLCV펌프(15:50) → 인큐베이터스캔(16:30)`)
@@ -332,7 +280,7 @@ export class SchedulerService {
         if (nfSettings?.enabled && Array.isArray(nfSettings?.scheduleSlots)) {
             // Collision Avoidance: adjust legacy times
             nfSettings.scheduleSlots.forEach((s: any) => {
-                if (s.time === '09:30') s.time = '09:40';
+                if (s.time === '09:30') s.time = '09:41'; // 스웜 AI 충돌 회피
                 if (s.time === '15:30') s.time = '15:45';
             });
             nfSettings.scheduleSlots.forEach((slot: any) => {

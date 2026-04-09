@@ -181,6 +181,7 @@ export interface IElectronAPI {
     deleteMarketPrediction: (id: string, tableName?: 'agent_predictions' | 'intraday_predictions') => Promise<{ success: boolean, error?: string }>
     getMarketConditionLatest: () => Promise<{ success: boolean, data?: any, error?: string }>
     getMarketConditionStats: () => Promise<{ success: boolean, data?: any, error?: string }>
+    getDetailedMarketConditionStats: () => Promise<{ success: boolean, data?: any, error?: string }>
     getMarketConditionRules: () => Promise<{ success: boolean, data?: string[], error?: string }>
     clearPersonaPerformance: () => Promise<{ success: boolean, error?: string }>
     onMarketConditionComplete: (callback: (data: any) => void) => () => void

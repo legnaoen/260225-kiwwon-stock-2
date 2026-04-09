@@ -253,6 +253,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getThemeRelatedNews: (themeName: string, keywords: string[]) => ipcRenderer.invoke('naverflow:get-theme-news', themeName, keywords),
     searchLiveNews: (keyword: string) => ipcRenderer.invoke('naverflow:search-live-news', keyword),
     getMarketLeaders: (days: number, topN: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN, peakoutSettings }),
+    getCrossPeriodProfile: (topN?: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-cross-period-profile', { topN, peakoutSettings }),
     runThemeOntology: () => ipcRenderer.invoke('v2:run-theme-ontology'),
     // Graph RAG: Knowledge Edges
     getKnowledgeEdgesFrom: (sourceType: string, sourceId: string, targetType?: string) => ipcRenderer.invoke('graph:edges-from', sourceType, sourceId, targetType),
@@ -269,6 +270,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteManyMarketPredictions: (ids: string[], tableName?: 'agent_predictions' | 'intraday_predictions') => ipcRenderer.invoke('agent:market:delete-many', ids, tableName),
     getMarketConditionLatest: () => ipcRenderer.invoke('agent:market:latest'),
     getMarketConditionStats: () => ipcRenderer.invoke('agent:market:stats'),
+    getDetailedMarketConditionStats: () => ipcRenderer.invoke('agent:market:detailed-stats'),
     getMarketConditionRules: () => ipcRenderer.invoke('agent:market:rules'),
     clearPersonaPerformance: () => ipcRenderer.invoke('agent:market:clear-persona'),
     getMarketRetrospectives: (type: 'DAILY' | 'WEEKLY' | 'MONTHLY', limit?: number) => ipcRenderer.invoke('agent:market:retrospectives:get', type, limit),

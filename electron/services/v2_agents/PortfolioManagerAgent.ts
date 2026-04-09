@@ -22,14 +22,13 @@ export class PortfolioManagerAgent {
     }
 
     public async runDailyReview(targetDate?: string) {
-        await this.runPhase1_Screening(targetDate);
-        return await this.runPhase2_Rebalancing(targetDate);
+        const newPicks = await this.runPhase1_Screening(targetDate);
+        return await this.runPhase2_Rebalancing(targetDate, newPicks);
     }
 
     public async runPhase1_Screening(targetDate?: string) {
-        const kiwoomSvc = KiwoomService.getInstance();
         const dateStr = targetDate || this.db.getKstDate();
-        console.log(`[PortfolioManager] 🧑‍💼 ${dateStr} 1차 심사 (루키 오디션) 시작...`);
+        console.log(`[PortfolioManager] 🧑‍💼 ${dateStr} 1차 심사 (신규 후보 수집) 시작...`);
 
         try {
             const todaysPicks = this.db.getAiAnalystPicksByDate(dateStr) as any[];
@@ -38,22 +37,22 @@ export class PortfolioManagerAgent {
                 return null;
             }
 
-            // Remove already active portfolio stocks from Phase 1 evaluation to save tokens (they go straight to Phase 2)
+            // Remove already active portfolio stocks from Phase 1 evaluation to save tokens
             const activePortfolio = this.db.getActivePortfolio() as any[];
             const activeCodeSet = new Set(activePortfolio.map((p: any) => p.stock_code));
+            
+            // 요구사항: 이미 매수하거나 기존 관심종목에 들어있는 종목은 제외
             const newPicks = todaysPicks.filter(p => !activeCodeSet.has(p.stock_code));
 
             if (newPicks.length === 0) {
-                console.log(`[PortfolioManager] 추천주 전원이 이미 포트폴리오에 있습니다. 1차 심사 패스.`);
+                console.log(`[PortfolioManager] 추천주 전원이 이미 포트폴리오에 있습니다. 신규 수집 패스.`);
                 return null;
             }
 
             const evalPool: Record<string, any> = {};
-            const codeMap: Record<string, string> = {};
 
             newPicks.forEach(pick => {
                 if (!evalPool[pick.stock_name]) {
-                    codeMap[pick.stock_name] = pick.stock_code;
                     evalPool[pick.stock_name] = {
                         stock_code: pick.stock_code,
                         stock_name: pick.stock_name,
@@ -62,7 +61,6 @@ export class PortfolioManagerAgent {
                         today_analysts: []
                     };
                 }
-                // Merge reasons
                 if (pick.analyst) {
                     evalPool[pick.stock_name].today_analysts.push({
                         agent: pick.analyst,
@@ -72,126 +70,18 @@ export class PortfolioManagerAgent {
                 }
             });
 
-            // Build dossiers (Simplified for Phase 1)
-            const analyzer = new TechnicalAnalyzer(kiwoomSvc);
             const stockList = Object.values(evalPool);
-
-            for (let i = 0; i < stockList.length; i += 3) {
-                const chunk = stockList.slice(i, i + 3);
-                await Promise.all(chunk.map(async (s: any) => {
-                    try { s.chart_digest = await analyzer.generateStockDigest(s.stock_code, s.stock_name, 200); }
-                    catch (e) { s.chart_digest = '차트 데이터 없음'; }
-
-                    let ds = `[${s.stock_name} (${s.stock_code})]\n`;
-                    ds += `> 차트 리스크 분석:\n${s.chart_digest}\n`;
-                    ds += `> 오늘 애널리스트 추천 근거:\n`;
-                    s.today_analysts.forEach((a: any) => ds += `- [${a.agent}] ${a.reason}\n`);
-                    s.dossier = ds;
-                }));
-                if (i + 3 < stockList.length) await new Promise(r => setTimeout(r, 300));
-            }
-
-            const aiSettings: any = store.get('ai_settings') || {};
-            const phase1PassLimit = aiSettings.phase1PassLimit || 10;
-
-            const promptContext = `[1차 심사 대상 신규 종목 총 ${stockList.length}개]\n\n` + stockList.map(s => s.dossier).join('\n\n');
-            const systemPrompt = `너는 차트 분석과 종목 필터링을 담당하는 1차 심사관(Portfolio Manager Phase 1)이다. 오늘은 ${stockList.length}개의 새로운 종목 추천이 올라왔다.
-관심종목(WATCHLIST) 풀을 여유롭게 유지하는 것이 목표다. 차트가 아주 극단적인 고점이거나 상장폐지급 폭락이 아니고, 실적이나 모멘텀 개선의 여지가 약간이라도 보이면 가급적 WATCHLIST에 통과시켜라.
-절대평가를 통해 최대 ${phase1PassLimit}개의 종목을 2차 심사(WATCHLIST)로 올려보내되, 허들을 대폭 낮춰 종류별로 폭넓게 담아내는 데 집중하라.
-
-응답 형식 (JSON):
-\`\`\`json
-{
-    "decisions": [
-        {
-            "stock_code": "000000",
-            "stock_name": "종목명",
-            "status": "WATCHLIST | DROP",
-            "reason": "차트 이격도 안정적, 모멘텀 우수",
-            "strategy": "SWING"
-        }
-    ]
-}
-\`\`\``;
-
-            console.log(`[PortfolioManager] 1차 심사 요청 전송 중... (후보 ${stockList.length}개, 최대 ${phase1PassLimit}개 통과)`);
-            const response = await AiExecutionQueue.getInstance().enqueue({
-                agentId: 'PORTFOLIO_MANAGER_PHASE1',
-                agentName: '포트폴리오 매니저 (1차)',
-                triggerType: 'CRON',
-                targetType: 'gemini',
-                prompt: promptContext,
-                systemInstruction: systemPrompt
-            });
-
-            let jsonStr = response;
-            const jsonMatch = response.match(/```(?:json)?\n?([\s\S]*?)\n?```/);
-            if (jsonMatch && jsonMatch[1]) jsonStr = jsonMatch[1];
-
-            const parsed = JSON.parse(jsonStr);
-            let passedCount = 0;
-
-            if (parsed.decisions) {
-                const passed = parsed.decisions.filter((d: any) => d.status === 'WATCHLIST').slice(0, phase1PassLimit);
-                for (const dec of passed) {
-                    const finalCode = codeMap[dec.stock_name] || dec.stock_code;
-                    if (!finalCode || finalCode === 'N/A') continue;
-
-                    this.db.upsertPortfolioWatchlist({
-                        stock_code: finalCode,
-                        stock_name: dec.stock_name,
-                        status: 'WATCHLIST',
-                        strategy: dec.strategy || 'SWING',
-                        conviction_score: 50, // 기본 점수
-                        last_signal: 'WATCHLIST',
-                        last_signal_reason: `[1차 심사 통과] ${dec.reason}`,
-                        theme: '',
-                        analysts_json: ['PHASE1_PASS'],
-                        lifespan_days: null,
-                        entry_date: dateStr,
-                        created_at: this.db.getKstTimestamp(),
-                        raw_context: '1차 풀 통과',
-                        current_price: 0,
-                        entry_price: 0
-                    });
-
-                    // 신규 관심종목 포트폴리오 편입 로그
-                    this.db.logPortfolioEvent(finalCode, p.stock_name, 'WATCHLIST_ADDED', null, 'WATCHLIST', p.reason || '1차 풀 지정 조건 통과', 0);
-
-                    passedCount++;
-                }
-            }
-            console.log(`[PortfolioManager] 1차 심사 완료: ${stockList.length}개 후보 중 ${passedCount}개 종목이 2차 심사로 진출(WATCHLIST 편입).`);
-
-            // --- Phase 1 텔레그램 스냅샷 발송 ---
-            try {
-                const { TelegramService } = await import('../TelegramService');
-                const topPassed = (parsed.evaluations || [])
-                    .filter((e: any) => e.status === 'PASS')
-                    .sort((a: any, b: any) => (b.score || 0) - (a.score || 0))
-                    .slice(0, 3);
-
-                let tgMsg = `🧑‍💼 [PM 1차 평가 완료] 루키 오디션\n총 ${stockList.length}개 후보 중 ${passedCount}종목 2차 진출`;
-                if (topPassed.length > 0) {
-                    tgMsg += `\n\n📌 [대표 진출 종목 Top 3]`;
-                    topPassed.forEach((p: any, idx: number) => {
-                        tgMsg += `\n${idx + 1}. ${p.stock_name} (${p.score}점)\n   👉 ${p.reason}`;
-                    });
-                } else {
-                    tgMsg += `\n\n⚠️ 지정된 허들을 넘은 신규 관심 종목이 없습니다.`;
-                }
-                TelegramService.getInstance().sendMessage(tgMsg);
-            } catch (tgErr) {
-                console.error(`[PortfolioManager] 1차 텔레그램 발송 오류:`, tgErr);
-            }
-
-            return parsed;
+            console.log(`[PortfolioManager] 1차 심사 단순 통합 수집 완료: ${stockList.length}개 종목을 2차 통합 리뷰로 넘깁니다.`);
+            
+            // AI 평가 없이 전체를 반환하여 2차에서 통합 평가 및 스코어링 (Cut-off 기반) 진행
+            return stockList;
         } catch (e) {
-            console.error(`[PortfolioManager] 1차 심사 에러:`, e);
+            console.error(`[PortfolioManager] 1차 데이터 취합 에러:`, e);
+            return null;
         }
     }
 
-    public async runPhase2_Rebalancing(targetDate?: string) {
+    public async runPhase2_Rebalancing(targetDate?: string, newPicksParams?: any[]) {
         const kiwoomSvc = KiwoomService.getInstance();
 
         // --- Resilience Phase 3: 핵심 배치 크론들의 서스펜드(Suspend) & 자동 복구 ---
@@ -239,12 +129,11 @@ export class PortfolioManagerAgent {
                 console.warn(`[PortfolioManager] 정리 스크립트 실행 중 에러 (무시): ${e.message}`);
             }
 
-            // 1. Phase 2는 오직 Active Portfolio(위치: maiis_portfolio)만 평가합니다. (Phase 1을 방금 통과한 종목 포함)
-
-            // 2. Fetch existing active portfolio
+            // 1. Fetch existing active portfolio
             const activePortfolio = this.db.getActivePortfolio() as any[];
 
-            // 3. Group ALL stocks for evaluation (Dossier Pool)
+            // 2. Group ALL stocks for evaluation (Dossier Pool)
+            // 통함 풀 구성: 기존 보유 + 기존 관심 + 1차 취합 신규 추천주
             const evalPool: Record<string, any> = {};
             const codeMap: Record<string, string> = {}; // To sanitize LLM hallucinations
 
@@ -263,6 +152,22 @@ export class PortfolioManagerAgent {
                     };
                 }
             });
+
+            // Add 신규 추천주 (newPicksParams)
+            if (newPicksParams && newPicksParams.length > 0) {
+                newPicksParams.forEach(p => {
+                    codeMap[p.stock_name] = p.stock_code;
+                    evalPool[p.stock_name] = {
+                        stock_code: p.stock_code,
+                        stock_name: p.stock_name,
+                        source: 'NEW_PICK',
+                        status: 'NEW',
+                        profit_rate: 0,
+                        conviction_score: 50,
+                        analysts: p.today_analysts || []
+                    };
+                });
+            }
 
             // ─── P3-4: IGNITE 종목 강제 주입 ────────────────────────────────────
             // neglect_score 80+ 달성 후 READY_TO_IGNITE 상태인 인큐베이터 종목을 evalPool에 강제 삽입
@@ -397,49 +302,7 @@ export class PortfolioManagerAgent {
                         const themes = l.relatedThemes.slice(0, 2).join(', ') || '테마 미분류';
                         marketContextBlock += `${idx + 1}위. ${l.stockName}(${l.stockCode}) — Alpha +${l.marketAlpha.toFixed(1)}% / 누적 ${l.totalChangeRate.toFixed(1)}% [${themes}]\n`;
                     });
-                    marketContextBlock += `\n> Alpha Top 15 안에 포함된 종목이 오늘 애널리스트 추천을 받았다면 conviction_score +10점 가산.\n> Alpha Top 15 종목이 오늘 조정(-3%~-8%)이면 눌림목 진입 타점 고려.\n\n`;
-                    console.log(`[PortfolioManager] ✅ Alpha 주도주 Top ${leaders.length} 수집 완료`);
-                }
-            } catch (e) {
-                console.warn('[PortfolioManager] ⚠️ Alpha 데이터 수집 실패 (무시하고 계속):', (e as any).message);
-            }
-
-            // 5-B. 이슈AI / 시황AI 맥락 수집
-            try {
-                const { IssueLedgerDB } = await import('./IssueLedgerDB');
-                const issueDb = IssueLedgerDB.getInstance();
-
-                const briefing = issueDb.getLatestBriefing();
-                if (briefing) {
-                    marketContextBlock += `#### 📋 오늘의 시황 브리핑 (위험도: ${briefing.risk_score}/100)\n`;
-                    marketContextBlock += `${briefing.summary_markdown}\n\n`;
-                }
-
-                const activeIssues = issueDb.getActiveIssues();
-                const criticalIssues = activeIssues
-                    .filter(i => ['CRITICAL', 'HIGH'].includes(i.severity))
-                    .slice(0, 5);
-
-                if (criticalIssues.length > 0) {
-                    marketContextBlock += `#### 🚨 활성 핵심 이슈 & 섹터 영향\n`;
-                    criticalIssues.forEach(issue => {
-                        marketContextBlock += `\n**[${issue.severity}] ${issue.name}**\n`;
-                        marketContextBlock += `> ${issue.current_stance || issue.summary || '분석 없음'}\n`;
-                        if (issue.goodSectors?.length > 0) {
-                            marketContextBlock += `- ✅ 수혜 섹터: ${issue.goodSectors.map(s => `${s.name}(${s.reason})`).join(' / ')}\n`;
-                        }
-                        if (issue.badSectors?.length > 0) {
-                            marketContextBlock += `- ❌ 피해 섹터: ${issue.badSectors.map(s => `${s.name}(${s.reason})`).join(' / ')}\n`;
-                        }
-                    });
-                    marketContextBlock += '\n';
-                }
-                console.log(`[PortfolioManager] ✅ 이슈 맥락 수집 완료 (${criticalIssues.length}개)`);
-            } catch (e) {
-                console.warn('[PortfolioManager] ⚠️ 이슈 맥락 수집 실패 (무시하고 계속):', (e as any).message);
-            }
-
-            // 5-C. Load Dynamic Limits from Store
+                                // 5-C. Load Dynamic Limits from Store
             const aiSettings: any = store.get('ai_settings') || {};
             const limits = aiSettings.portfolioLimits || {
                 buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
@@ -447,9 +310,8 @@ export class PortfolioManagerAgent {
             };
             const totalBuy = Object.values(limits.buy).reduce((a: any, b: any) => a + Number(b), 0);
             const totalWatch = Object.values(limits.watchlist).reduce((a: any, b: any) => a + Number(b), 0);
-            const quotaText = `시스템상 HELD(매수 보유) 포지션 총 한도는 ${totalBuy}개 (MOMENTUM ${limits.buy.MOMENTUM}, PULLBACK ${limits.buy.PULLBACK}, SWING ${limits.buy.SWING}, VALUE ${limits.buy.VALUE}), WATCHING(관심 대기) 종목 총 한도는 ${totalWatch}개 (MOMENTUM ${limits.watchlist.MOMENTUM}, PULLBACK ${limits.watchlist.PULLBACK}, SWING ${limits.watchlist.SWING}, VALUE ${limits.watchlist.VALUE})까지만 유지 가능하다.`;
-
-            // 6. Construct System Prompt Context (맥락 블록 앞에 삽입)
+            
+            // 6. Construct System Prompt Context
             const marketContextHeader = marketContextBlock
                 ? `[🌐 오늘의 시장 맥락 — 종목 판단 전 반드시 숙지]\n\n${marketContextBlock}\n---\n\n`
                 : '';
@@ -457,6 +319,52 @@ export class PortfolioManagerAgent {
             const promptContext =
                 marketContextHeader +
                 `[종합 심사 대상 팩트시트 리스트 (신규+보유 통합 총 ${stockList.length}개 종목)]\n\n` +
+                stockList.map(s => s.dossier).join('\n\n');
+
+            const systemPrompt = `너는 여의도 최고 수익률을 자랑하는 헤지펀드 매니저(Portfolio Manager) 포지션이다.
+오늘 1) 당일 신규 추천주, 2) 기존 관심종목, 3) 보유종목(매수포지션)이 하나로 통합된 거대한 풀을 심사한다.
+${sysConditionMsg}
+
+[차트 리스크 분석 교본 (필수 준수 지침)]
+${chartRiskSkill}
+
+[🌐 시장 맥락 활용 원칙 — 반드시 준수]
+프롬프트 최상단에 오늘의 시장 맥락(Alpha 랭킹 + 이슈 수혜/피해 섹터 + 시황 브리핑)이 제공된다.
+1. **Alpha Top 15 교차 확인**: 애널리스트 추천 종목이 Alpha Top 15 안에 있으면 conviction_score 상향.
+2. **이슈 수혜 섹터 우대**: 이슈AI가 판정한 수혜 섹터 종목은 역발상 매수 기회. conviction_score 상향.
+3. **Alpha + 이슈 쌍발 신호**: Alpha Top 15 + 이슈 수혜 섹터 동시 해당 시 최강의 매수 신호.
+
+[매수 및 관심종목 판단 이원화 원칙 — 이 지침이 규칙의 알파이자 오메가다]
+1. **[매수(HELD) 포지션 엄격 분리]**: 지금 당장 "실제 현금으로 매수"할 만한 초A급 주도주에만 "BUY" 또는 기존 매수종목 유지 시 "HOLD" 판정을 내려라. 매수 조건은 극도로 엄격하게 적용하며, 상단 저항, 재료 소멸, 추격매수 시에는 가차없이 제외한다. (매도는 "SELL" 지시)
+2. **[강제 T/O 서바이벌 스코어링]**: 매수(BUY / HOLD / SELL)로 판정된 최상위 종목 혹은 청산종목을 제외한 >>나머지 모든 종목<<(기존 관심종목 + 새로 올라온 추천주 전체)에 대해서는 무단으로 탈락(DROP)시키지 마라.
+대신에, 이들을 관심종목 후보(WATCHING)로 두고 각각 해당하는 전략(strategy) 내에서 0점~100점의 **매력도 점수(conviction_score)** 를 매우 촘촘하게(상대적인 랭킹을 매긴다는 느낌으로) 평가하라.
+시스템적으로 각 전략 바스켓당 최대 허용 개수가 정해져 있으며, 네가 매긴 점수순으로 정렬한 뒤 시스템(코드)이 하위권 종목들을 자동으로 탈락(DROP) 처리할 것이다. 즉, 너의 역할은 후보 종목 간의 성적표(등수별 점수)를 냉정하게 매기는 것이다!
+
+[전략 지정 기준]
+각 종목의 strategy를 반드시 지정해야 하며(MOMENTUM, PULLBACK, SWING, VALUE 중 택1), 점수는 이 전략 바스켓 내에서의 경쟁력을 의미한다.
+- MOMENTUM: 당일/초단기 재료와 거래량
+- PULLBACK: 단기 눌림목 및 MA20 지지
+- SWING: 중기 모멘텀 유지 (테마 내러티브 성장 가능성)
+- VALUE: 저점 가치투자
+
+[응답 가이드]
+결과는 반드시 JSON 형식이어야 하며, 풀에 있는 모든 종목을 누락 없이 반환하여야 한다.
+\`\`\`json
+{
+    "decisions": [
+        {
+            "stock_code": "000000",
+            "stock_name": "종목명",
+            "last_signal": "BUY | HOLD | SELL | WATCHING", // 매수/보유는 BUY/HOLD, 보유하다 매도할땐 SELL, 나머지 관심종목 후보들은 모두 WATCHING
+            "conviction_score": 95, // WATCHING 종목일수록 이 점수가 랭킹 서바이벌의 결정적 요인이 됨 (100점에 가까울수록 생존률 높음)
+            "strategy": "SWING",
+            "lifespan_days": 20, // BUY 판정시에만 유효
+            "analysts_json": ["REPORT", "MOMENTUM"], 
+            "last_signal_reason": "알파 Top 5 + 방산. (BUY 이유 혹은 WATCHING 고득점 편성 이유 명시)"
+        }
+    ]
+}
+\`\`\``;              `[종합 심사 대상 팩트시트 리스트 (신규+보유 통합 총 ${stockList.length}개 종목)]\n\n` +
                 stockList.map(s => s.dossier).join('\n\n');
 
             const systemPrompt = `너는 여의도 최고 수익률을 자랑하는 헤지펀드 매니저(Portfolio Manager) 포지션이다.
@@ -532,105 +440,143 @@ ${chartRiskSkill}
             try {
                 const parsed = JSON.parse(jsonStr);
                 if (parsed.decisions && Array.isArray(parsed.decisions)) {
+
+                    // [추가] 매수 및 대기(WATCHING) 슬롯 분리 처리 배열
+                    const buysAndSells: any[] = [];
+                    const groupedWatchlist: Record<string, any[]> = { MOMENTUM: [], PULLBACK: [], SWING: [], VALUE: [] };
+                    const validDecisions: any[] = [];
+
                     for (const dec of parsed.decisions) {
-                        // Sanitize stock_code to prevent LLM hallucination (like "N/A" or swapping name with code)
                         const realCode = codeMap[dec.stock_name];
                         const finalCode = (realCode && dec.stock_code !== realCode) ? realCode : dec.stock_code;
 
                         if (!finalCode || finalCode === 'N/A' || finalCode === dec.stock_name) {
-                            console.warn(`[PortfolioManager] 유효하지 않은 종목코드 무시: ${dec.stock_name} / ${finalCode}`);
                             continue;
                         }
 
-                        const specificContext = dossiersMap[dec.stock_name] || `[담당 AI 추천 기초근거]\n데이터 누락 (단순 참조용)`;
-
-                        // ★ PM AI 확정 시점에 키움 REST API로 실시간 현재가 조회 (텍스트 정규식 파싱 대신)
-                        let curPrice = 0;
-                        let upperLimitPrice = 0;
-                        const isBuySignal = dec.last_signal === 'BUY';
-                        const isSellSignal = dec.last_signal === 'SELL' || dec.last_signal === 'DROP';
-                        
-                        // ★ 기존 포트폴리오 상태 보존 및 전이 로직
+                        dec.finalCode = finalCode;
                         const previousInfo = activePortfolio.find(p => p.stock_code === finalCode);
+                        const isHeld = previousInfo && (previousInfo.status === 'HELD' || previousInfo.status === 'IMMEDIATE_BUY');
+                        
                         let finalStatus = 'WATCHING';
                         
-                        if (previousInfo) {
-                            if (previousInfo.status === 'HELD' || previousInfo.status === 'IMMEDIATE_BUY') {
-                                if (isSellSignal) {
-                                    finalStatus = 'DROPPED';
-                                } else {
-                                    finalStatus = 'HELD'; // HOLD or BUY maintains HELD state
-                                }
+                        if (isHeld) {
+                            if (dec.last_signal === 'SELL' || dec.last_signal === 'DROP') {
+                                dec.finalStatus = 'DROPPED';
                             } else {
-                                // Was WATCHING or WATCHLIST
-                                if (isBuySignal) finalStatus = 'HELD';
-                                else if (isSellSignal) finalStatus = 'DROPPED';
-                                else finalStatus = 'WATCHING';
+                                dec.finalStatus = 'HELD';
                             }
+                            buysAndSells.push(dec);
                         } else {
-                            if (isBuySignal) finalStatus = 'HELD';
-                            else if (isSellSignal) finalStatus = 'DROPPED';
-                            else finalStatus = 'WATCHING';
+                            if (dec.last_signal === 'BUY' || dec.last_signal === 'HELD') {
+                                dec.finalStatus = 'HELD';
+                                buysAndSells.push(dec);
+                            } else if (dec.last_signal === 'SELL' || dec.last_signal === 'DROP') {
+                                // AI가 아주 의도적으로 버린 쓰레기
+                                dec.finalStatus = 'DROPPED';
+                                dec.conviction_score = -1; 
+                                validDecisions.push(dec);
+                            } else {
+                                // WATCHING 후보군 (나머지 전부)
+                                dec.finalStatus = 'WATCHING';
+                                const s = dec.strategy || 'SWING';
+                                if (!groupedWatchlist[s]) groupedWatchlist[s] = [];
+                                groupedWatchlist[s].push(dec);
+                            }
                         }
-                        
-                        const isImmediateBuy = finalStatus === 'HELD';
+                    }
 
+                    // 카테고리별 Cut-Off 실행 (T/O 강제 충원 및 하위권 서바이벌 탈락 적용)
+                    const watchLimits = limits.watchlist || { MOMENTUM: 3, PULLBACK: 3, SWING: 6, VALUE: 3 };
+                    const cutOffDropped: any[] = [];
+                    const survivedWatchlist: any[] = [];
+
+                    for (const [strategy, items] of Object.entries(groupedWatchlist)) {
+                        // 리뷰 대상 종목들을 점수순 정렬
+                        items.sort((a, b) => (b.conviction_score || 0) - (a.conviction_score || 0));
+                        
+                        const limit = watchLimits[strategy as keyof typeof watchLimits] || 0;
+                        const passed = items.slice(0, limit);
+                        const failed = items.slice(limit);
+                        
+                        survivedWatchlist.push(...passed);
+                        failed.forEach(item => {
+                            item.finalStatus = 'DROPPED';
+                            cutOffDropped.push(item);
+                        });
+                    }
+
+                    const finalProcessed = [...buysAndSells, ...survivedWatchlist, ...cutOffDropped, ...validDecisions];
+
+                    // DB 기록 실행 루프
+                    for (const dec of finalProcessed) {
+                        // AI가 직접 DROP한 것도 처리 (컷오프 서바이벌로 밀려난 종목들도 포함)
+                        if (dec.finalStatus === 'DROPPED') {
+                            const previousInfo = activePortfolio.find(p => p.stock_code === dec.finalCode);
+                            if (previousInfo) {
+                                // 기존에 포트폴리오에 있었던 종목이 밀려난 거라면 DB 상태 변경
+                                this.db.updatePortfolioStatus(dec.finalCode, 'DROPPED', dec.last_signal_reason || '관심종목 서바이벌 컷오프 탈락');
+                            }
+                            continue; // 그 외 신규 픽이었다가 탈락한 건 DB에 넣을 필요 없으므로 생략
+                        }
+
+                        const specificContext = dossiersMap[dec.stock_name] || `[담당 AI 추천 근거 요약]`;
+
+                        // 현재가 처리
+                        let curPrice = 0;
+                        let upperLimitPrice = 0;
+                        const isImmediateBuy = dec.finalStatus === 'HELD';
+                        
                         try {
-                            const priceInfo = await kiwoomSvc.getStockBasicInfo(finalCode);
+                            const priceInfo = await kiwoomSvc.getStockBasicInfo(dec.finalCode);
                             const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
                             const rawCur = String(body.stk_prc || body.cur_prc || body.stck_prpr || body.currentPrice || 0).replace(/[^0-9-]/g, '');
                             const rawUpper = String(body.upl_pric || body.stck_mxpr || body.uplPric || 0).replace(/[^0-9-]/g, '');
                             curPrice = Math.abs(parseInt(rawCur, 10)) || 0;
                             upperLimitPrice = Math.abs(parseInt(rawUpper, 10)) || 0;
                         } catch (apiErr) {
-                            // API 조회 실패 시 차트 텍스트 폴백
-                            console.warn(`[PortfolioManager] ${dec.stock_name} 현재가 API 조회 실패, 텍스트 파싱으로 폴백`);
                             const match = specificContext.match(/현재가: ([0-9,]+)원/);
                             if (match && match[1]) curPrice = parseInt(match[1].replace(/,/g, ''), 10);
                         }
 
-                        // ★ HELD 종목이 상한가에 도달해 있으면 실제 매수 불가 → 건너뜀 (매수 시그널일 때만, 홀딩은 넘겨야함 판단 필요)
-                        if (isBuySignal && previousInfo?.status !== 'HELD' && upperLimitPrice > 0 && curPrice > 0 && curPrice >= upperLimitPrice) {
-                            console.log(`[PortfolioManager] ⛔ ${dec.stock_name}(${finalCode}) 상한가 도달(${curPrice}원 ≥ ${upperLimitPrice}원). 매수불가 종목 편입 제외.`);
+                        const previousInfo = activePortfolio.find(p => p.stock_code === dec.finalCode);
+                        if (isImmediateBuy && previousInfo?.status !== 'HELD' && upperLimitPrice > 0 && curPrice > 0 && curPrice >= upperLimitPrice) {
+                            console.log(`[PortfolioManager] ⛔ ${dec.stock_name}(${dec.finalCode}) 상한가 도달(${curPrice}원). 매수불가 승급 제외`);
+                            // 매수불가면 아까운대로 관심종목 T/O에 밀어넣거나 그냥 스킵 
                             continue;
                         }
 
-                        // 키움 API Rate Limit 방지 딜레이 (200ms)
                         await new Promise(r => setTimeout(r, 200));
 
                         this.db.upsertPortfolioWatchlist({
-                            stock_code: finalCode,
+                            stock_code: dec.finalCode,
                             stock_name: dec.stock_name,
-                            status: finalStatus,
+                            status: dec.finalStatus,
                             strategy: dec.strategy || 'SWING',
                             conviction_score: dec.conviction_score,
-                            theme: dec.analysts_json.join(', '),
+                            theme: (dec.analysts_json || []).join(', '),
                             last_signal: dec.last_signal,
                             last_signal_reason: dec.last_signal_reason,
-                            analysts_json: dec.analysts_json,
-                            // 수명은 IMMEDIATE_BUY 전환 시에만 확정 (관심종목은 PM이 매일 재검토하므로 수명 불필요)
+                            analysts_json: dec.analysts_json || [],
                             lifespan_days: isImmediateBuy ? (dec.lifespan_days || null) : null,
                             entry_date: dateStr,
                             created_at: this.db.getKstTimestamp(),
                             raw_context: specificContext,
                             current_price: curPrice,
-                            entry_price: curPrice  // upsert 내부에서 WAIT_DIP/HOLD/WATCHLIST면 0으로 처리됨
+                            entry_price: curPrice 
                         });
 
-                        // 장중 파이프라인의 경우 IMMEDIATE_BUY 종목의 추천종목 테이블 기준가도 업데이트
                         if (isImmediateBuy && curPrice > 0) {
                             try {
                                 this.db.getDb().prepare(`
                                     UPDATE ai_analyst_picks 
                                     SET entry_price = ? 
                                     WHERE stock_code = ? AND date = ? AND (entry_price IS NULL OR entry_price = 0)
-                                `).run(curPrice, finalCode, dateStr);
-                            } catch (err) {
-                                console.error(`[PortfolioManager] 기준가 후행 업데이트 실패:`, err);
-                            }
+                                `).run(curPrice, dec.finalCode, dateStr);
+                            } catch (err) { }
                         }
                     }
-                    console.log(`[PortfolioManager] ✅ 총 ${parsed.decisions.length}개의 종목 풀 리뷰 완료.`);
+                    console.log(`[PortfolioManager] ✅ 통합 서바이벌 리뷰 및 DB 반영 완료.`);
 
                     // --- Phase 2 텔레그램 스냅샷 발송 ---
                     try {
@@ -681,9 +627,14 @@ ${chartRiskSkill}
                                 const reason = (reasonMatch && (reasonMatch.last_signal === 'SELL' || reasonMatch.last_signal === 'DROP'))
                                     ? (reasonMatch.last_signal_reason || 'PM 익/손절 판정')
                                     : '관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락';
-                                this.db.logPortfolioEvent(d.stock_code, d.stock_name, 'DROPPED', d.status, 'CLEARED', reason, d.current_price || 0);
+
+                                // ✅ 실제 매수(HELD) 포지션이었던 종목만 이벤트 로그 기록
+                                // WATCHING → DROPPED 종목은 성적표/이벤트 로그 대상 아님
+                                if (d.status === 'HELD' || d.status === 'IMMEDIATE_BUY') {
+                                    this.db.logPortfolioEvent(d.stock_code, d.stock_name, 'DROPPED', d.status, 'CLEARED', reason, d.current_price || 0);
+                                }
                                 
-                                // DROP된 종목 인큐베이터 강등 처리
+                                // 인큐베이터 강등은 WATCHING/HELD 모두 대상
                                 this.db.demoteToIncubator({
                                     stock_code: d.stock_code,
                                     stock_name: d.stock_name,

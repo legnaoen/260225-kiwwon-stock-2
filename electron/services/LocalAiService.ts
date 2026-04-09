@@ -14,7 +14,7 @@ export class LocalAiService {
     private defaultBaseUrl = 'http://127.0.0.1:1234/v1';
     
     // 권장 모델 명 (향후 모델 변경 시 유연한 연동)
-    private defaultModelName = 'qwen/qwen3-4b-2507';
+    private defaultModelName = 'lmstudio-community/gemma-4-E4B-it-GGUF';
 
     private constructor() { }
 

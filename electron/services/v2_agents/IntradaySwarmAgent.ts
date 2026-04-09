@@ -328,6 +328,8 @@ ${votes.map(v => {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
             `).run(predId, dateStr, slot, predict, confidence, totalRationale, position, entryPrice, JSON.stringify(sourcesArr), JSON.stringify(enrichedComments), swarmSentiment);
 
+            PerformanceTracker.getInstance().invalidatePendingCache()
+
             // 6. UI 이벤트 발송
             const resultPayload = { 
                 id: predId, date: dateStr, time_slot: slot, predict, confidence, rationale: totalRationale, 

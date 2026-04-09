@@ -50,11 +50,11 @@ export class MarketDataCollectorService {
                 if (name.includes('스팩')) return false;
                 
                 // 2. ETF / ETN 펀드 및 파생상품 브랜드
-                const etfBrands = ['KODEX', 'TIGER', 'KBSTAR', 'KINDEX', 'ARIRANG', 'KOSEF', 'HANARO', 'ACE', 'SOL', 'TIMEFOLIO', '히어로즈', '마이티', 'TREX', 'FOCUS', 'HK', '파워'];
+                const etfBrands = ['KODEX', 'TIGER', 'KBSTAR', 'KINDEX', 'ARIRANG', 'KOSEF', 'HANARO', 'ACE', 'SOL', 'TIMEFOLIO', '히어로즈', '마이티', 'TREX', 'FOCUS', 'HK', '파워', 'PLUS', 'RISE'];
                 for (const brand of etfBrands) {
                     if (name.startsWith(brand)) return false;
                 }
-                if (name.includes('ETN') || name.includes('선물') || name.includes('인버스') || name.includes('레버리지')) return false;
+                if (name.includes('ETN') || name.includes('ETF') || name.includes('선물') || name.includes('인버스') || name.includes('레버리지')) return false;
                 
                 // 3. 리츠 및 인프라 (부동산)
                 if (name.includes('리츠') || name.includes('맥쿼리인프라') || name.includes('맵스')) return false;

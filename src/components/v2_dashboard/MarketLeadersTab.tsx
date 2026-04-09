@@ -5,6 +5,7 @@ import { twMerge } from 'tailwind-merge'
 import { StockDetailModal } from '../common/StockDetailModal'
 import { StockChart } from '../StockChart'
 import { StockAiReport } from '../StockAiReport'
+import { CrossPeriodTab } from './CrossPeriodTab'
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
 
@@ -231,10 +232,11 @@ export const MarketLeadersTab: React.FC = () => {
             {/* ── 최상단 트랙 탭 ── */}
             <div className="shrink-0 flex items-center gap-1 px-3 pt-2.5 pb-0 border-b border-border/50 bg-muted/5">
                 {([
-                    { id: 'track-a-theme', label: 'Track A — 대장 테마',  icon: Activity,   badge: 'NEW' },
-                    { id: 'track-a-stock', label: 'Track A — 대장 종목',  icon: Target,     badge: '예정' },
-                    { id: 'track-b-new',   label: 'Track B — 알파 역상관', icon: Shield,     badge: '알파' },
-                    { id: 'track-b',       label: '주도주 (기존)',        icon: TrendingUp, badge: null },
+                    { id: 'track-a-theme',    label: 'Track A — 대장 테마',  icon: Activity,   badge: 'NEW' },
+                    { id: 'track-a-stock',    label: 'Track A — 대장 종목',  icon: Target,     badge: '예정' },
+                    { id: 'track-b-new',      label: 'Track B — 알파 역상관', icon: Shield,     badge: '알파' },
+                    { id: 'track-b-cross',    label: '🎯 추천 종목',          icon: TrendingUp, badge: 'NEW' },
+                    { id: 'track-b',          label: '주도주 (기존)',          icon: TrendingUp, badge: null },
                 ] as const).map(tab => (
                     <button
                         key={tab.id}
@@ -268,6 +270,11 @@ export const MarketLeadersTab: React.FC = () => {
             {/* ── Track A: 대장 종목 ── */}
             {activeTrack === 'track-a-stock' && (
                 <TrackAStockPanel />
+            )}
+
+            {/* ── Track B: 추천 종목 (Layer 2) ── */}
+            {activeTrack === 'track-b-cross' && (
+                <CrossPeriodTab />
             )}
 
             {/* ── Track B: 주도주 (기존 화면) & Track B New ── */}

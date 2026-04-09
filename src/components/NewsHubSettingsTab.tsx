@@ -71,19 +71,20 @@ const DEFAULT_SETTINGS: NewsHubSettings = {
     aiCronTimes: [
         '08:30', // 이슈관리 AI (IssueManagementAgent)
         '08:50', // 시황 AI Cycle A - 장전 예측 (MarketConditionAgent)
+        '09:10', // 장중 스웜 ① (IntradaySwarmAgent - Local AI)
+        '09:25', // 장중 스웜 ②
         '09:26', // NaverFlow 수집 + 테마 AI (ThemeIntelligenceAgent)
         '09:30', // 시황 AI Cycle P - 개장 검증 (MarketConditionAgent)
         '09:35', // 📈 수급 AI (MomentumAnalystAgent) ← 신규
-        '09:40', // 📄 리포트 AI (FundamentalAnalystAgent) ← 신규
-        '09:45', // 🧑‍💼 포트폴리오 매니저 (PortfolioManagerAgent) ← 신규 (스웜과 동시, 충돌 없음)
-        '10:15', // 장중 스웜 ② (IntradaySwarmAgent - Local AI)
-        '10:45', // 장중 스웜 ③
-        '11:15', // 장중 스웜 ④
-        '11:45', // 장중 스웜 ⑤
-        '12:15', // 장중 스웜 ⑥
-        '12:45', // 장중 스웜 ⑦
-        '13:15', // 장중 스웜 ⑧
-        '13:45', // 장중 스웜 ⑨
+        '09:40', // 장중 스웜 ③ (IntradaySwarmAgent - Local AI)
+        '09:41', // 📄 리포트 AI (FundamentalAnalystAgent), 테마 AI (ThemeIntelligenceAgent)
+        '09:45', // 🧑‍💼 포트폴리오 매니저 (PortfolioManagerAgent)
+        '09:55', // 장중 스웜 ④
+        '10:10', // 장중 스웜 ⑤
+        '10:25', // 장중 스웜 ⑥
+        '10:40', // 장중 스웜 ⑦
+        '10:55', // 장중 스웜 ⑧
+        '11:10', // 장중 스웜 ⑨
         '15:00', // 장마감 전 피드백 (MarketReviewAgent)
         '15:10', // 시황 AI Cycle B - 마감 예측 (MarketConditionAgent)
         '15:35', // PerformanceTracker (수익률·장중 평가)

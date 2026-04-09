@@ -60,6 +60,27 @@ export class MarketLeaderDiscoveryService {
         return MarketLeaderDiscoveryService.instance;
     }
 
+    /** 
+     * KODEX 200 (069500)을 기준으로 실제 영업일(캔들 기준) n봉 전의 날짜를 계산
+     */
+    public getTradingDateCutoff(targetCandles: number): string {
+        const db = (this.dbService as any).db;
+        try {
+            const rows = db.prepare(`
+                SELECT date FROM market_ohlcv_history 
+                WHERE stock_code = '069500' 
+                ORDER BY date DESC LIMIT ?
+            `).all(targetCandles) as { date: string }[];
+            
+            if (rows && rows.length > 0) {
+                return rows[rows.length - 1].date;
+            }
+        } catch (e) {
+            console.error("Failed to get trading date cutoff", e);
+        }
+        return getPastDateKst(targetCandles); // fallback (최소한의 달력일 보장)
+    }
+
     /**
      * JSON 배열 문자열 형태의 태그 필드를 파싱하고 노이즈를 필터링하는 유틸리티
      */
@@ -108,7 +129,7 @@ export class MarketLeaderDiscoveryService {
         topN: number = 30,
         peakoutSettings: PeakoutSettings = DEFAULT_PEAKOUT_SETTINGS
     ): MarketLeaderItem[] {
-        const targetDate = getPastDateKst(targetDays);
+        const targetDate = this.getTradingDateCutoff(targetDays);
         const db = (this.dbService as any).db;
 
         // 1. OHLCV 데이터 로드 — open/high/low 포함
@@ -151,7 +172,7 @@ export class MarketLeaderDiscoveryService {
         });
 
         // 1.5 60일(장기) 저점 + 20일 고점 데이터 로드 (heat_60 및 drawdown20 산출용)
-        const targetDate60 = getPastDateKst(60);
+        const targetDate60 = this.getTradingDateCutoff(60);
         const low60Rows = db.prepare(`
             SELECT stock_code, MIN(close) as min_close
             FROM market_ohlcv_history
@@ -163,7 +184,7 @@ export class MarketLeaderDiscoveryService {
         low60Rows.forEach(r => min60Map.set(r.stock_code, r.min_close));
 
         // 최근 20일 고점 (drawdown20: 고점 대비 현재가 하락률 계산용)
-        const targetDate20 = getPastDateKst(20);
+        const targetDate20 = this.getTradingDateCutoff(20);
         const high20Rows = db.prepare(`
             SELECT stock_code, MAX(close) as max_close
             FROM market_ohlcv_history
@@ -274,6 +295,29 @@ export class MarketLeaderDiscoveryService {
         for (const [stockCode, data] of stockMap.entries()) {
             // 충분한 데이터가 없거나 시작 가격이 0인 오류 종목 제외
             if (data.count < 1 || data.firstClose <= 0) continue;
+
+            const meta = themeMap.get(stockCode);
+            let stockName = meta?.name;
+            if (!stockName || stockName === stockCode || stockName === '') {
+                stockName = masterNamesMap.get(stockCode) || stockCode;
+            }
+
+            // --- 엄격한 스팩/파생/부동산/우선주 필터링 (DB 찌꺼기 방어벽) ---
+            const upperName = stockName.toUpperCase();
+            if (
+                upperName.includes('스팩') || upperName.includes('SPAC') ||
+                upperName.includes('ETN') || upperName.includes('ETF') ||
+                upperName.includes('레버리지') || upperName.includes('인버스') || upperName.includes('선물') ||
+                upperName.includes('리츠') || upperName.includes('맥쿼리인프라') || upperName.includes('맵스') ||
+                /우[A-Z]?$|우\(기\)$|우\(전환\)$/i.test(upperName)
+            ) {
+                continue;
+            }
+            
+            // 기존 전통 ETF 브랜드 추가 방어
+            const etfBrands = ['KODEX', 'TIGER', 'KBSTAR', 'KINDEX', 'ARIRANG', 'KOSEF', 'HANARO', 'ACE', 'SOL', 'TIMEFOLIO', '히어로즈', '마이티', 'TREX', 'FOCUS', 'HK', '파워', 'PLUS', 'RISE'];
+            const isEtfBrand = etfBrands.some(brand => upperName.startsWith(brand));
+            if (isEtfBrand) continue;
             
             // 누적 변동률 = (현재가 - 최초기준가) / 최초기준가 * 100
             const totalChangeRate = ((data.lastClose - data.firstClose) / data.firstClose) * 100;
@@ -342,12 +386,6 @@ export class MarketLeaderDiscoveryService {
             // ─── 피크아웃 의심 배지 (Add-on) ───
             // 조건: 기간 내 고점 대비 -15% 이상 하락 AND 최근 추세도 DOWN/FLAT
             const peakoutWarning = drawdownFromPeak >= 15 && recentTrend !== 'UP';
-
-            const meta = themeMap.get(stockCode);
-            let stockName = meta?.name;
-            if (!stockName || stockName === stockCode || stockName === '') {
-                stockName = masterNamesMap.get(stockCode) || stockCode;
-            }
 
             leaders.push({
                 stockCode,

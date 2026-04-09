@@ -735,6 +735,21 @@ ipcMain.handle('v2:get-market-leaders', async (_event, { days, topN, peakoutSett
     }
 })
 
+// ═══ V2 CrossPeriod 추천 종목 프로파일 ═══
+ipcMain.handle('v2:get-cross-period-profile', async (_event, { topN, peakoutSettings } = {}) => {
+    try {
+        const { CrossPeriodAnalyzer } = await import('./services/v2_pipeline/CrossPeriodAnalyzer');
+        const { DEFAULT_PEAKOUT_SETTINGS } = await import('./services/v2_pipeline/MarketLeaderDiscoveryService');
+        const settings = peakoutSettings ?? DEFAULT_PEAKOUT_SETTINGS;
+        const result = CrossPeriodAnalyzer.getInstance().getCrossPeriodProfile(topN ?? 60, settings);
+        console.log(`[CrossPeriod] candidates=${result.candidates?.length}, stats=`, result.stats);
+        return result;
+    } catch (error: any) {
+        console.error('[CrossPeriod] get-cross-period-profile error:', error);
+        return { success: false, error: error.message, candidates: [], themes: [], stats: { total: 0, byCategory: {} } };
+    }
+})
+
 // ═══ V2 Theme Ontology Agent (수동 트리거) ═══
 ipcMain.handle('v2:run-theme-ontology', async () => {
     try {
@@ -1100,6 +1115,16 @@ ipcMain.handle('agent:market:stats', async () => {
     try {
         const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
         const result = MarketConditionAgent.getInstance().getStats()
+        return { success: true, data: result }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+})
+
+ipcMain.handle('agent:market:detailed-stats', async () => {
+    try {
+        const { MarketConditionAgent } = await import('./services/v2_agents/MarketConditionAgent')
+        const result = MarketConditionAgent.getInstance().getDetailedStats()
         return { success: true, data: result }
     } catch (error: any) {
         return { success: false, error: error.message }

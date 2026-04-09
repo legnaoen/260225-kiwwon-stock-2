@@ -996,6 +996,8 @@ export class DatabaseService {
         try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN evaluation_status TEXT DEFAULT 'PENDING'") } catch (e) { }
         // entry_price 확정 시각 (PM AI 실행 완료 시점의 실시간 현재가 스탬프)
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN entry_price_at TEXT") } catch (e) { }
+        // was_held: 실제 매수 포지션(HELD)에 진입한 적 있는 종목 마킹 → 성적표 필터 기준
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN was_held INTEGER DEFAULT 0") } catch (e) { }
 
         // Ensure macro_indicators_json exists in world state
         try {
@@ -2041,11 +2043,11 @@ export class DatabaseService {
             INSERT INTO maiis_portfolio (
                 stock_code, stock_name, status, strategy, conviction_score, theme, 
                 entry_date, last_signal, last_signal_reason, analysts_json, lifespan_days,
-                last_reviewed_at, created_at, updated_at, raw_context, current_price, entry_price, entry_price_at
+                last_reviewed_at, created_at, updated_at, raw_context, current_price, entry_price, entry_price_at, was_held
             ) VALUES (
                 @stock_code, @stock_name, @status, @strategy, @conviction_score, @theme,
                 @entry_date, @last_signal, @last_signal_reason, @analysts_json, @lifespan_days,
-                @last_reviewed_at, @created_at, @updated_at, @raw_context, @current_price, @entry_price, @entry_price_at
+                @last_reviewed_at, @created_at, @updated_at, @raw_context, @current_price, @entry_price, @entry_price_at, @was_held
             )
             ON CONFLICT(stock_code) DO UPDATE SET
                 status = excluded.status,
@@ -2073,9 +2075,7 @@ export class DatabaseService {
                 entry_price = CASE
                     WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
                     THEN excluded.entry_price
-                    WHEN excluded.entry_price > 0 AND maiis_portfolio.entry_price = 0
-                    THEN excluded.entry_price
-                    ELSE maiis_portfolio.entry_price
+                    ELSE maiis_portfolio.entry_price  -- WATCHING 등 비매수 상태에서는 절대 덮어쓰지 않음
                 END,
                 entry_date = CASE
                     WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
@@ -2086,6 +2086,10 @@ export class DatabaseService {
                     WHEN excluded.entry_price > 0 AND maiis_portfolio.entry_price = 0
                     THEN excluded.entry_price_at
                     ELSE maiis_portfolio.entry_price_at
+                END,
+                was_held = CASE
+                    WHEN excluded.status = 'HELD' THEN 1  -- HELD 전환 시 영구 마킹
+                    ELSE maiis_portfolio.was_held           -- 기존 값 보존 (한 번 매수한 종목은 영원히 was_held = 1)
                 END
         `);
         stmt.run({
@@ -2098,7 +2102,8 @@ export class DatabaseService {
             current_price: item.current_price || 0,
             lifespan_days: safeLifespanDays,
             entry_price: safeEntryPrice,
-            entry_price_at: safeEntryPrice > 0 ? (item.entry_price_at || this.getKstTimestamp()) : null
+            entry_price_at: safeEntryPrice > 0 ? (item.entry_price_at || this.getKstTimestamp()) : null,
+            was_held: isHeldStatus ? 1 : 0  // INSERT 신규 등록 시 초기값
         });
 
         // [추가] 관심종목 및 매수포지션 캡(Quota) 적용
@@ -2184,7 +2189,8 @@ export class DatabaseService {
     }
 
     public getPortfolioHistory() {
-        return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status IN ('DROPPED', 'HIT') AND entry_price > 0 ORDER BY updated_at DESC LIMIT 100").all();
+        // was_held = 1 인 종목만 반환 — 관심종목(WATCHING)에서 탈락한 종목은 성적표 제외
+        return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status IN ('DROPPED', 'HIT') AND was_held = 1 ORDER BY updated_at DESC LIMIT 100").all();
     }
 
     /**
@@ -2490,11 +2496,21 @@ export class DatabaseService {
 
     public updatePortfolioStatus(stockCode: string, status: string, reason?: string) {
         const now = new Date().toISOString();
-        return this.db.prepare(`
-            UPDATE maiis_portfolio 
-            SET status = ?, last_signal = ?, last_signal_reason = ?, updated_at = ?
-            WHERE stock_code = ?
-        `).run(status, status, reason || '', now, stockCode);
+        // HELD 상태로 전환될 때 was_held = 1 마킹 (한 번 매수 포지션이었던 종목임을 영구 기록)
+        if (status === 'HELD') {
+            this.db.prepare(`
+                UPDATE maiis_portfolio
+                SET status = ?, last_signal = ?, last_signal_reason = ?, updated_at = ?, was_held = 1
+                WHERE stock_code = ?
+            `).run(status, status, reason || '', now, stockCode);
+        } else {
+            // DROPPED/HIT 등 다른 상태 전환 시에는 was_held를 건드리지 않음
+            this.db.prepare(`
+                UPDATE maiis_portfolio
+                SET status = ?, last_signal = ?, last_signal_reason = ?, updated_at = ?
+                WHERE stock_code = ?
+            `).run(status, status, reason || '', now, stockCode);
+        }
     }
 
     public logPortfolioEvent(stockCode: string, stockName: string, eventType: string, oldStatus: string | null, newStatus: string, reason: string, price: number) {

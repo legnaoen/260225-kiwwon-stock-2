@@ -546,6 +546,10 @@ export class MarketConditionAgent {
             p.t20_target_return ?? null,
             p.entry_price ?? null
         )
+        
+        // 새로 추가된 예측은 entry_price 누락일 수 있으므로 캐시 초기화
+        PerformanceTracker.getInstance().invalidatePendingCache()
+
         console.log(`[MCA] 예측 저장 완료: ${p.id} (entryPrice=${p.entry_price || 'N/A'})`)
     }
 
@@ -641,6 +645,55 @@ export class MarketConditionAgent {
             }
         } catch {
             return { total: 0, wins: 0, winRate: 0, totalReturn: 0 }
+        }
+    }
+
+    public getDetailedStats(): any {
+        try {
+            const rawDb = (this.db as any).db;
+            const cycles = ['A', 'P', 'B'];
+            const periods = [
+                { name: 'T+1', col: 't1_final' },
+                { name: 'T+5', col: 't5_final' },
+                { name: 'T+20', col: 't20_final' }
+            ];
+
+            const result: any = {};
+
+            cycles.forEach(cycle => {
+                result[cycle] = {};
+                periods.forEach(p => {
+                    const total = (rawDb.prepare(`
+                        SELECT COUNT(*) as cnt 
+                        FROM agent_predictions 
+                        WHERE cycle = ? AND ${p.col} IS NOT NULL AND predict != 'HOLD'
+                    `).get(cycle) as any)?.cnt || 0;
+
+                    const wins = (rawDb.prepare(`
+                        SELECT COUNT(*) as cnt 
+                        FROM agent_predictions 
+                        WHERE cycle = ? AND ${p.col} IS NOT NULL AND ${p.col} > 0 AND predict != 'HOLD'
+                    `).get(cycle) as any)?.cnt || 0;
+
+                    const sumReturn = (rawDb.prepare(`
+                        SELECT SUM(${p.col}) as total 
+                        FROM agent_predictions 
+                        WHERE cycle = ? AND predict != 'HOLD' AND ${p.col} IS NOT NULL
+                    `).get(cycle) as any)?.total || 0;
+
+                    result[cycle][p.name] = {
+                        total,
+                        wins,
+                        winRate: total > 0 ? (wins / total) : 0,
+                        totalReturn: sumReturn
+                    };
+                });
+            });
+
+            return result;
+        } catch (e) {
+            console.error('[MCA] getDetailedStats Error:', e);
+            return null;
         }
     }
 
@@ -830,6 +883,9 @@ ${timeContext}
                 (id, date, time_slot, predict, confidence, rationale, position, entry_price, sources_json, comments_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
             `).run(predId, dateStr, slot, predict, confidence, assembledRationale, position, entryPrice, JSON.stringify(sourcesArr), JSON.stringify(initialComments))
+
+            // 장중 예측도 저장될 경우 캐시 초기화 고려
+            PerformanceTracker.getInstance().invalidatePendingCache()
 
             const result = { 
                 id: predId, date: dateStr, time_slot: slot, predict, confidence, 

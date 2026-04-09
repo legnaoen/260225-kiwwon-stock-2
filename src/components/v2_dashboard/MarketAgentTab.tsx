@@ -149,6 +149,8 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
     const [selectedTrade, setSelectedTrade] = useState<any | null>(null)
     const [showKnowledgeBase, setShowKnowledgeBase] = useState(false)
     const [showSettings, setShowSettings] = useState(false)
+    const [showPerformancePopup, setShowPerformancePopup] = useState(false)
+    const [detailedStats, setDetailedStats] = useState<any>(null)
     const [showDigestModal, setShowDigestModal] = useState(false)
     const [digestContent, setDigestContent] = useState('')
     const [isDigestLoading, setIsDigestLoading] = useState(false)
@@ -337,12 +339,15 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
     }, [])
 
     const [history, setHistory] = useState<any[]>([])
+    const [historyFilter, setHistoryFilter] = useState<'ALL' | 'A' | 'P' | 'B'>('ALL')
     const [latest, setLatest] = useState<any | null>(null)
     const [stats, setStats] = useState({ total: 0, wins: 0, winRate: 0, totalReturn: 0 })
     const [activeRules, setActiveRules] = useState<string[]>([])
     const [isRunning, setIsRunning] = useState(false)
     const [decisionTab, setDecisionTab] = useState<'classic' | 'intraday'>('classic')
     const [intradayData, setIntradayData] = useState<any[]>([])
+    const [intradayFilters, setIntradayFilters] = useState<string[]>(['UP', 'DOWN', 'HOLD'])
+    const [showIntradayFilterMenu, setShowIntradayFilterMenu] = useState(false)
     const [selectedIntraday, setSelectedIntraday] = useState<any | null>(null)
     const livePrices = useLivePriceStore(state => state.prices)
     // Graph RAG: 시장에 영향을 주는 이슈 edges
@@ -366,10 +371,11 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
         let wins = 0;
         let totalReturn = 0;
 
-        history.forEach(t => {
+        history.filter(t => historyFilter === 'ALL' || t.cycle === historyFilter).forEach(t => {
             if (t.predict === 'HOLD') return;
 
             let finalReturn: number | null = null;
+
             if (returnView === 'T+1') {
                 finalReturn = t.t1_final;
                 if (finalReturn === null && t.entry_price && t.entry_price > 0) {
@@ -399,21 +405,66 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
             winRate: total > 0 ? wins / total : 0,
             totalReturn
         }
-    }, [history, returnView, livePrices]);
+    }, [historyFilter, history, returnView, livePrices]);
+
+    const filteredIntradayData = useMemo(() => {
+        return intradayData.filter(t => {
+            const actualPos = (t.position || t.predict || '').toUpperCase();
+            const isUp = actualPos.includes('UP') || actualPos.includes('LONG') || (actualPos.includes('200') && !actualPos.includes('HOLD') && !actualPos.includes('인버스'));
+            const isDown = actualPos.includes('DOWN') || actualPos.includes('SHORT') || (actualPos.includes('인버스') && !actualPos.includes('HOLD'));
+            const isHold = !isUp && !isDown;
+
+            if (isUp && !intradayFilters.includes('UP')) return false;
+            if (isDown && !intradayFilters.includes('DOWN')) return false;
+            if (isHold && !intradayFilters.includes('HOLD')) return false;
+            return true;
+        });
+    }, [intradayData, intradayFilters]);
+
+    const intradayStats = useMemo(() => {
+        let total = 0;
+        let wins = 0;
+        let totalReturn = 0;
+
+        filteredIntradayData.forEach(t => {
+            const actualPos = (t.position || t.predict || '').toUpperCase();
+            const isHold = actualPos.includes('HOLD') || actualPos === '- HOLD' || !actualPos || actualPos === '관망';
+            // 승패는 관망(HOLD)을 포함한 모든 평가(result)가 완료된 건수를 대상으로 셈
+            if (t.result) {
+                total++;
+                if (t.result === 'HIT') {
+                    wins++;
+                }
+                // 수익률은 실제 포지션(롱/숏)에 진입한 경우에만 최종 합산.
+                if (!isHold && t.return_pct !== null && t.return_pct !== undefined) {
+                    totalReturn += t.return_pct;
+                }
+            }
+        });
+
+        return {
+            total,
+            wins,
+            winRate: total > 0 ? wins / total : 0,
+            totalReturn
+        }
+    }, [intradayData]);
 
     const fetchData = async () => {
         try {
-            const [histRes, latRes, statRes, rulesRes, setRes] = await Promise.all([
+            const [histRes, latRes, statRes, rulesRes, setRes, detStatRes] = await Promise.all([
                 window.electronAPI.getMarketConditionHistory(30),
                 window.electronAPI.getMarketConditionLatest(),
                 window.electronAPI.getMarketConditionStats(),
                 window.electronAPI.getMarketConditionRules(),
-                window.electronAPI.getMarketConditionSettings()
+                window.electronAPI.getMarketConditionSettings(),
+                window.electronAPI.getDetailedMarketConditionStats()
             ])
             if (histRes.success && histRes.data) setHistory(histRes.data)
             if (latRes.success && latRes.data) setLatest(latRes.data)
             if (statRes.success && statRes.data) setStats(statRes.data)
             if (rulesRes.success && rulesRes.data) setActiveRules(rulesRes.data)
+            if (detStatRes?.success && detStatRes.data) setDetailedStats(detStatRes.data)
             if (setRes.success && setRes.data) {
                 setTelegramEnabled(setRes.data.telegramEnabled !== false)
                 setAutoWeeklyReview(setRes.data.autoWeeklyReview !== false)
@@ -526,6 +577,9 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             await fetchData(); 
                         }} className="px-2 py-1 bg-violet-500/10 hover:bg-violet-500/20 text-violet-500 border border-violet-500/30 rounded text-xs font-bold transition-colors" title="과거 기록을 최신 5분봉 기준으로 다시 채점하여 비어있는 고점 기록을 복구합니다.">
                             🔄 성과 재평가
+                        </button>
+                        <button onClick={() => setShowPerformancePopup(true)} className="px-2 py-1 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 text-fuchsia-500 border border-fuchsia-500/30 rounded text-xs font-bold transition-colors" title="주기별 상세 성적 평가 리포트">
+                            📊 성적 평가
                         </button>
                         <button onClick={async () => { await window.electronAPI.runIntradayPrediction('09:30'); await new Promise(r => setTimeout(r, 300)); await fetchData() }} className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded text-xs font-bold transition-colors" title="기존 09:30 장중 예측 실행">
                             ⚡ 09:30
@@ -739,17 +793,76 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                         </button>
                                     ))}
                                 </div>
+                                <div className="flex bg-muted/30 rounded p-0.5 ml-1" title="표시 사이클 선택">
+                                    {['ALL', 'A', 'P', 'B'].map(opt => {
+                                        const labelMap = { 'ALL': '전체', 'A': 'A(장전)', 'P': 'P(장중)', 'B': 'B(마감)' };
+                                        return (
+                                        <button
+                                            key={opt}
+                                            onClick={() => setHistoryFilter(opt as any)}
+                                            className={cn(
+                                                "px-2.5 py-1 text-[10px] font-bold rounded transition-colors",
+                                                historyFilter === opt ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            {(labelMap as any)[opt]}
+                                        </button>
+                                    )})}
+                                </div>
                             </>
                         )}
                         {decisionTab === 'intraday' && (
-                            <button
-                                onClick={handleFetchDigest}
-                                disabled={isDigestLoading}
-                                className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50"
-                            >
-                                {isDigestLoading ? <span className="animate-spin text-[10px]">⚙</span> : <Activity className="w-3.5 h-3.5" />}
-                                전처리 다이제스트
-                            </button>
+                            <>
+                                <div className="flex items-center gap-4 px-3 py-1 bg-muted/30 rounded border border-border/50 text-xs">
+                                    <div><span className="text-muted-foreground uppercase font-bold mr-1.5">Win</span><span className="font-mono font-bold">{(intradayStats.winRate * 100).toFixed(1)}%</span> <span className="opacity-50">({intradayStats.wins}/{intradayStats.total})</span></div>
+                                    <div className="w-px h-3 bg-border/60" />
+                                    <div><span className="text-muted-foreground uppercase font-bold mr-1.5">Return</span><span className={cn("font-mono font-bold", intradayStats.totalReturn > 0 ? "text-rose-500" : intradayStats.totalReturn < 0 ? "text-blue-500" : "")}>{intradayStats.totalReturn > 0 ? '+' : ''}{intradayStats.totalReturn.toFixed(2)}%</span></div>
+                                </div>
+                                
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setShowIntradayFilterMenu(v => !v)}
+                                        className="flex items-center gap-1.5 px-3 py-1 bg-muted/30 hover:bg-muted/50 border border-border/50 rounded text-[10px] font-bold transition-colors"
+                                    >
+                                        상태 필터 <span className="text-[9px] opacity-60">▼</span>
+                                    </button>
+                                    {showIntradayFilterMenu && (
+                                        <div 
+                                            className="absolute right-0 top-full mt-1 z-[100] bg-background dark:bg-[#0f172a] shadow-lg border border-border/60 rounded-lg w-32 py-1"
+                                            onMouseLeave={() => setShowIntradayFilterMenu(false)}
+                                        >
+                                            {['UP', 'DOWN', 'HOLD'].map(opt => {
+                                                const labelMap = { 'UP': '상승 (LONG)', 'DOWN': '하락 (SHORT)', 'HOLD': '관망 (HOLD)' };
+                                                const isActive = intradayFilters.includes(opt);
+                                                return (
+                                                    <button
+                                                        key={opt}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setIntradayFilters(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
+                                                        }}
+                                                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center gap-2 transition-colors"
+                                                    >
+                                                        <div className={cn("w-3 h-3 rounded-sm border flex items-center justify-center transition-colors", isActive ? "bg-indigo-500 border-indigo-500" : "border-border/60")}>
+                                                            {isActive && <span className="text-[8px] text-white">✓</span>}
+                                                        </div>
+                                                        <span className="font-medium">{(labelMap as any)[opt]}</span>
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <button
+                                    onClick={handleFetchDigest}
+                                    disabled={isDigestLoading}
+                                    className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50"
+                                >
+                                    {isDigestLoading ? <span className="animate-spin text-[10px]">⚙</span> : <Activity className="w-3.5 h-3.5" />}
+                                    전처리 다이제스트
+                                </button>
+                            </>
                         )}
                         <div className="relative flex items-center" ref={moreMenuRef}>
                             <button
@@ -797,7 +910,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             </tr>
                         </thead>
                         <tbody>
-                            {history.map((t) => (
+                            {history.filter(t => historyFilter === 'ALL' || t.cycle === historyFilter).map((t) => (
                                 <tr key={t.id} onClick={() => setSelectedTrade(t)} className="border-b border-border/20 hover:bg-accent/30 cursor-pointer transition-colors group">
                                     <td className="py-2 pr-4 font-mono text-muted-foreground">{t.date}</td>
                                     <td className="py-2 pr-4 text-center text-xs font-medium">{t.cycle === 'A' ? '장전(A)' : t.cycle === 'P' ? '장중(P)' : '마감(B)'}</td>
@@ -903,9 +1016,9 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             </tr>
                         </thead>
                         <tbody>
-                            {intradayData.length === 0 ? (
-                                <tr><td colSpan={10} className="py-8 text-center text-muted-foreground text-xs">장중 예측 데이터가 없습니다. (09:30, 11:00, 13:00 자동 실행)</td></tr>
-                            ) : intradayData.map((row) => {
+                            {filteredIntradayData.length === 0 ? (
+                                <tr><td colSpan={10} className="py-8 text-center text-muted-foreground text-xs">선택한 조건의 장중 예측 데이터가 없습니다.</td></tr>
+                            ) : filteredIntradayData.map((row) => {
                                 let posLabel = row.position || (row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD')
                                 
                                 // 임시 UI 패치: 훼손된 DB 문자열 복구 처리
@@ -1682,6 +1795,60 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                     선택 삭제 ({selectedDeleteIds.size}건)
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showPerformancePopup && detailedStats && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="bg-background border border-border/80 rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col m-4 max-h-[90vh]">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-muted/20">
+                            <h2 className="text-sm font-bold flex items-center gap-2">
+                                <Target className="w-4 h-4 text-fuchsia-500" />
+                                시황 AI 사이클별 상세 성적 평가
+                            </h2>
+                            <button onClick={() => setShowPerformancePopup(false)} className="text-muted-foreground hover:text-foreground">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                        <div className="p-4 overflow-y-auto space-y-6">
+                            {(['A', 'P', 'B'] as const).map(cycle => {
+                                const titleMap = { 'A': '장전 예측 (시초가 진입)', 'P': '장중 단기예측 (수급 추세 진입)', 'B': '장마감 예측 (종가 베팅)' };
+                                const iconMap = { 'A': '🌅', 'P': '⚡', 'B': '🌇' };
+                                const results = detailedStats[cycle];
+                                if (!results) return null;
+                                return (
+                                    <div key={cycle} className="border border-border/40 bg-muted/5 rounded-lg p-4">
+                                        <h3 className="text-sm font-bold mb-3 flex items-center gap-1.5"><span className="text-lg">{iconMap[cycle]}</span> {titleMap[cycle]}</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                            {Object.entries(results).map(([period, data]: [string, any]) => (
+                                                <div key={period} className="bg-background border border-border/50 rounded p-4 flex flex-col gap-2 relative overflow-hidden">
+                                                    <div className="flex items-center justify-between border-b border-border/30 pb-2 mb-1">
+                                                        <span className="text-sm font-bold text-muted-foreground">{period === 'T+1' ? '당일 (T+1)' : period} 대상</span>
+                                                        <span className="text-xs text-muted-foreground font-mono bg-muted/30 px-1.5 py-0.5 rounded">{data.wins}/{data.total} 성공</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center px-1">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[10px] uppercase text-muted-foreground">누적 적중률</span>
+                                                            <span className="font-mono text-[1.4rem] tracking-tight font-bold">{(data.winRate * 100).toFixed(1)}%</span>
+                                                        </div>
+                                                        <div className="flex flex-col text-right">
+                                                            <span className="text-[10px] uppercase text-muted-foreground">누적 수익률</span>
+                                                            <span className={cn("font-mono text-[1.4rem] tracking-tight font-bold", data.totalReturn > 0 ? "text-rose-500" : data.totalReturn < 0 ? "text-blue-500" : "")}>
+                                                                {data.totalReturn > 0 ? '+' : ''}{data.totalReturn.toFixed(2)}%
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-full bg-muted/50 rounded-full h-1.5 mt-2 overflow-hidden border border-border/10">
+                                                        <div className={cn("h-full transition-all", data.winRate >= 0.5 ? "bg-emerald-500" : "bg-rose-500")} style={{ width: `${Math.max(2, data.winRate * 100)}%` }} />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )
+                            })}
                         </div>
                     </div>
                 </div>

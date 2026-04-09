@@ -35,13 +35,12 @@ export default function IntradayChart({
             },
             localization: {
                 timeFormatter: (time: number) => {
+                    const d = new Date(time * 1000);
                     if (timeframe === 'D') {
-                        // For daily charts, just string format YYYY-MM-DD (TradingView usually wants unix timestamp, we handle below)
-                        const d = new Date(time * 1000);
-                        return d.toISOString().split('T')[0];
+                        // toISOString()의 UTC 보정 문제로 하루 전날이 표시되는 것 수정 (한국시간 기준 강제)
+                        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
                     }
-                    const date = new Date(time * 1000);
-                    return date.toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+                    return d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
                 }
             },
             grid: {
@@ -56,8 +55,13 @@ export default function IntradayChart({
                 secondsVisible: false,
                 tickMarkFormatter: (time: number) => {
                     const date = new Date(time * 1000);
-                    if (timeframe === 'D') return `${date.getMonth() + 1}/${date.getDate()}`;
-                    return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                    if (timeframe === 'D') {
+                        // 한국시간 기준으로 월/일 포맷
+                        const m = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', month: 'numeric' }).format(date);
+                        const d = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', day: 'numeric' }).format(date);
+                        return `${m}/${d}`;
+                    }
+                    return date.toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false });
                 }
             },
             watermark: { visible: false }

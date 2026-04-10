@@ -20,6 +20,7 @@ import { AgentCycle, AgentPrediction, DataContext, ParsedDecision, PipelineSlot 
 import { buildSystemPrompt, buildUserPrompt } from './prompts/market_condition'
 import { IntradaySwarmAgent } from './IntradaySwarmAgent'
 import { TechnicalAnalyzer } from './TechnicalAnalyzer'
+import { PerformanceTracker } from './PerformanceTracker'
 
 // ═══ 유연한 파이프라인 레지스트리 ═══
 // 새 파이프라인 추가 시 여기에 한 줄만 추가하면 자동 통합

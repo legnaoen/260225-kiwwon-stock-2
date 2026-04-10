@@ -220,39 +220,28 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Step 4] 15:41 장마감 채점: 종가 기준 수익률·수명 심사 (일간 회고 3분 후)
+            // [Step 4] 15:41 장마감 채점: 종가 기준 수익률·수명 심사
             const portfolioJudgeJob = cron.schedule('41 15 * * 1-5', async () => {
                 console.log('[Scheduler] ⚖️ 포트폴리오 장마감 채점 자동 실행 시작...')
                 try {
                     const { PortfolioJudgeScheduler } = await import('./v2_pipeline/PortfolioJudgeScheduler')
                     await PortfolioJudgeScheduler.getInstance().runDailyJudgement()
-                    this.telegram.sendMessage('⚖️ [15:41] 장마감 포트폴리오 채점 완료\n종가 기준 수익률·수명 심사 정상 완료\n확인: 종목AI 탭 > 포트폴리오 리스트')
+
+                    // [Track B] 모의매매 성과 채점 연동
+                    const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
+                    const trackBResult = TrackBBuyAgent.getInstance().scoreDailyPerformance()
+                    const trackBMsg = trackBResult.closed > 0
+                        ? `\n🎯 모의매매: ${trackBResult.updated}개 갱신, ${trackBResult.closed}개 청산`
+                        : trackBResult.updated > 0 ? `\n🎯 모의매매: ${trackBResult.updated}개 보유중 갱신` : ''
+
+                    this.telegram.sendMessage(`⚖️ [15:41] 장마감 포트폴리오 채점 완료\n종가 기준 수익률·수명 심사 정상 완료\n확인: 종목AI 탭 > 포트폴리오 리스트${trackBMsg}`)
                 } catch (e: any) {
                     console.error('[Scheduler] 장마감 채점 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:41] 장마감 채점 실패\n오류: ${e.message}`)
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Step 5] 15:50 전 종목 60봉 데이터 수집 펌프 구동
-            // 15:35~15:47 구간 AI 작업 (성과추적→회고→채점→주간→월간) 3분 텀 완료 후 시작 → DB 락 경합 완전 차단
-            const marketDailyJob = cron.schedule('50 15 * * 1-5', async () => {
-                const startTime = new Date()
-                const fmt = (d: Date) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
-                this.telegram.sendMessage(`🚀 [${fmt(startTime)}] OHLCV 전 종목 수집 시작\n코스피/코스닥 전 종목 60일봉 수집 시작.\n완료 시 다시 알림 예정 (약 25~30분 소요)`)
-                console.log('[Scheduler] 🚀 전 종목 데이터 수집 펌프 자동 실행 시작 (15:50, 모든 장마감 AI 완료 후)...')
-                try {
-                    const { MarketDataCollectorService } = await import('./v2_pipeline/MarketDataCollectorService')
-                    await MarketDataCollectorService.getInstance().runDailyCollection(60)
-                    const endTime = new Date()
-                    const elapsed = Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60)
-                    this.telegram.sendMessage(`✅ [${fmt(endTime)}] OHLCV 전 종목 수집 완료\n코스피/코스닥 전 종목 60일봉 수집 완료\n소요 시간: 약 ${elapsed}분\n내일 09:45 Alpha 랭킹에 자동 반영`)
-                } catch (e: any) {
-                    console.error('[Scheduler] 데이터 수집 펌프 오류:', e.message)
-                    this.telegram.sendMessage(`❌ [OHLCV] 전 종목 수집 실패\n오류: ${e.message}\n→ 주도주 탭에서 수동 실행 필요`)
-                }
-            }, { timezone: 'Asia/Seoul' })
-
-            // [Step 6] 15:43 인큐베이터 스캔: Pool B neglect_score 갱신
+            // [Step 5] 인큐베이터 스캔: Pool B neglect_score 갱신 (15:43)
             const incubatorScanJob = cron.schedule('43 15 * * 1-5', async () => {
                 console.log('[Scheduler] 🧪 인큐베이터 neglect_score 스캔 자동 실행 시작...')
                 try {
@@ -264,15 +253,62 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, phase1Job, phase2Job, phase2MiniJob, portfolioJudgeJob, marketDailyJob, incubatorScanJob, ...swarmJobs)
+            // ─────────────────────────────────────────────────────────────────
+            // [Step 6 + Track B 통합] 15:05 전 종목 60봉 수집 → 즉시 모의매매 AI 선정
+            // ─────────────────────────────────────────────────────────────────
+            // 수집 타이밍: 15:05 시작 → ~15:23 완료 (실측 20분 이내)
+            // 수집 데이터: 장 마감 약 15~25분 전 가격 (오늘 종가와 오차 < 1%)
+            // CrossPeriodAnalyzer는 이 오늘 데이터를 포함한 60봉을 기반으로 분석
+            // 진입가 최종 보정은 15:32에 실제 동시호가 확정 종가로 덮어쓰기
+            const marketDailyJob = cron.schedule('05 15 * * 1-5', async () => {
+                const startTime = new Date()
+                const fmt = (d: Date) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+                this.telegram.sendMessage(`🚀 [${fmt(startTime)}] OHLCV 전 종목 수집 시작\n코스피/코스닥 전 종목 60일봉 수집 시작.\n수집 완료 후 → AI 모의매매 매수 선정 자동 실행 예정`)
+                console.log('[Scheduler] 🚀 전 종목 데이터 수집 펌프 자동 실행 시작 (15:05, 장중 마지막 수집)...')
+                try {
+                    const { MarketDataCollectorService } = await import('./v2_pipeline/MarketDataCollectorService')
+                    await MarketDataCollectorService.getInstance().runDailyCollection(60)
+                    const endTime = new Date()
+                    const elapsed = Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60)
+                    this.telegram.sendMessage(`✅ [${fmt(endTime)}] OHLCV 전 종목 수집 완료\n소요 시간: 약 ${elapsed}분\n→ AI 모의매매 매수 선정 시작...`)
+
+                    // ─── 수집 완료 직후 TrackBBuyAgent 즉시 연계 실행 ───
+                    console.log('[Scheduler] 🎯 수집 완료 → TrackB 모의매매 AI 매수 선정 연계 실행...')
+                    const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
+                    const pickResult = await TrackBBuyAgent.getInstance().run()
+                    if (pickResult.success) {
+                        this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n매수 후보 ${pickResult.saved}개 저장 (상한가 제외: ${pickResult.skipped}개)\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정`)
+                    } else {
+                        this.telegram.sendMessage(`⚠️ 모의매매 AI 선정 미실행\n사유: ${pickResult.error ?? '후보 없음'}`)
+                    }
+                } catch (e: any) {
+                    console.error('[Scheduler] 데이터 수집 / TrackB 선정 오류:', e.message)
+                    this.telegram.sendMessage(`❌ [15:05] OHLCV 수집 또는 모의매매 선정 실패\n오류: ${e.message}\n→ 주도주 탭에서 수동 실행 필요`)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            // [Track B] 15:32 진입가 최종 보정 (동시호가 종료 2분 후)
+            // 15:05~15:23 수집 시의 근사 종가 → 실제 확정 종가(동시호가 결과)로 덮어쓰기
+            // market_ohlcv_history에 15:30 이후 정확한 close가 들어오면 entry_price 갱신
+            // PENDING → ACTIVE
+            const trackBEntryJob = cron.schedule('32 15 * * 1-5', async () => {
+                console.log('[Scheduler] 💰 TrackB 모의매매 진입가 최종 확정...')
+                try {
+                    const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
+                    const updated = TrackBBuyAgent.getInstance().updateEntryPrices()
+                    if (updated > 0) {
+                        this.telegram.sendMessage(`💰 [15:32] 모의매매 진입가 최종 확정\n${updated}개 종목 → 동시호가 확정 종가로 진입가 기록 (ACTIVE)`)
+                    }
+                } catch (e: any) {
+                    console.error('[Scheduler] TrackB 진입가 확정 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, phase1Job, phase2Job, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackBEntryJob, ...swarmJobs)
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
-            console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:40) → 눈림목(09:42) → PM(09:45)`)
-            console.log(`[SchedulerService] 📊 장마감 파이프라인: 성과추적(15:35) → 회고(15:38) → 채점(15:41) → 주간(15:44,금) → 월간(15:47,28일) → OHLCV펌프(15:50) → 인큐베이터스캔(16:30)`)
-
-
-
-
-
+            console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:40) → 눌림목(09:42) → PM(09:45)`)
+            console.log(`[SchedulerService] 📊 장중 파이프라인: OHLCV수집+모의매매선정(15:05) → 진입가확정(15:32)`)
+            console.log(`[SchedulerService] 📊 장마감 파이프라인: 성과추적(15:35) → 회고(15:38) → 채점(15:41) → 인큐베이터(15:43) → 주간(15:44,금) → 월간(15:47,28일)`)
         }
 
         // ═══ [Step 3] NaverFlow 크론 등록 ═══

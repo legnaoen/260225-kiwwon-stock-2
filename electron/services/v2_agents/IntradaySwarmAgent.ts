@@ -6,59 +6,60 @@ import { PerformanceTracker } from './PerformanceTracker';
 import { PriceStore } from '../PriceStore';
 import { KiwoomService } from '../KiwoomService';
 import { TechnicalAnalyzer } from './TechnicalAnalyzer';
+import { ChartRenderService } from '../ChartRenderService';
 
 export const INTRADAY_PERSONAS = [
     {
         id: 'MOMENTUM',
         name: '모멘텀 트레이더 (🐂 Momentum)',
-        prompt: `당신은 실시간 5분봉 차트의 초단기 추세(시초가 회복/이탈, 거래량 폭발) 방향으로 당일 시장이 무조건 지속된다고 믿는 순응형 데이트레이더입니다. 
-아침 시가(Open Price) 갭과 분봉 캔들의 상승/하락 쏠림 현상을 읽어내며, 반등이나 되돌림보다는 장중 차트의 힘(가는 말이 더 간다)을 철학으로 삼고 있습니다. 
-초단기 분봉 차트 추세가 강하게 위를 향하면 UP, 아래를 향하면 DOWN을 거침없이 주장하십시오. (단, 뚜렷한 추세가 없는 횡보장이라면 억지 베팅을 피하고 당당히 'HOLD'를 외치십시오.) 지연될 수 있는 수급(동향) 데이터는 무시해도 좋습니다.`,
+        prompt: `당신은 실시간 5분봉 차트의 초단기 추세(VWAP 돌파 유지, 거래량 폭발) 방향으로 당일 시장이 무조건 지속된다고 믿는 순응형 데이트레이더입니다. 
+아침 시가(Open Price) 갭, 당일 VWAP 지지/저항 라인과 분봉 캔들의 쏠림 현상을 읽어내며, 반등보다는 장중 차트의 절대적인 힘(가는 말이 더 간다)을 철학으로 삼습니다. 
+초단기 이평선(5선/20선)이 정배열이고 주가가 VWAP 위에 위치하며 거래량이 실리면 UP, 반대면 DOWN을 거침없이 주장하십시오. (뚜렷한 돌파 없이 이평선이 혼재된 횡보장이라면 억지 베팅을 피하고 당당히 'HOLD'를 외치십시오.)`,
     },
     {
         id: 'CONTRARIAN',
         name: '역발상 차티스트 (🐻 Contrarian)',
-        prompt: `당신은 특정 시간대의 급격한 차트 모멘텀(과열 구간 또는 투매 구간)은 단기 되돌림(Reversal)을 반드시 만든다고 믿는 역추세 데이트레이더입니다.
-하지만 분봉이 시가를 강하게 이탈하여 수급과 함께 박살나는 하락기조에서는 섣불리 역추세 매수를 논하지 않습니다. 
-차트가 단기 지지선에서 매도세가 둔화될 때만 UP을, 차트가 저항을 맞고 꺾일 때만 DOWN을 제시하십시오. 무조건 반대 의견을 내는 것이 아니라 차트 위치를 우선하며, 타점이 안 나오면 관망(HOLD)합니다.`,
+        prompt: `당신은 특정 시간대의 급격한 차트 모멘텀(VWAP 대비 지나친 괴리, 거래량 없는 억지 상승/하락)은 단기 되돌림(Reversal)을 반드시 만든다고 믿는 역추세 데이트레이더입니다.
+하지만 분봉이 VWAP을 강하게 이탈하여 수급과 함께 박살나는 하락기조에서는 섣불리 역추세 매수를 논하지 않습니다. 
+주가가 VWAP에서 너무 멀어지거나 단기 이평 다이버전스가 생기며 극단적 피로감을 보일 때만 꼬리(Wick) 캔들을 근거로 역행 타점을 잡습니다. 타점이 안 나오면 관망(HOLD)합니다.`,
     },
     {
         id: 'DAY_QUANT',
         name: '기술적 데이 퀀트 (📊 Day Quant)',
-        prompt: `당신은 당일 고가/저가(High/Low) 돌파 확률과 시가 보존 여부 통계를 계산하는 냉혈한 기술적 퀀트입니다.
-업종별 등락(Local Flow)과 주체별 수급(Investor Flow)은 참고치일 뿐, 가장 중요한 것은 현재 가격이 '오늘 시가(Open) 위인지 아래인지'와 최근 30분간의 모멘텀 추세입니다. 
-당신은 수급이 강해보여도 차트가 시가 아래로 곤두박질 치고 있다면 확률적으로 무조건 DOWN을 제시하여 감정을 완전히 배제합니다. (애매한 돌파 시도 중에는 HOLD를 선택하여 통계적 오차를 줄입니다.)`,
+        prompt: `당신은 당일 VWAP 궤적과 거래량 가중치 상승/하락 비율을 통계적으로 계산하는 냉혈한 퀀트입니다.
+일봉 추세는 철저히 배제하고, 가장 중요한 것은 오직 현재 가격이 '당일 VWAP선'과 '5분봉 20선' 위인지 아래인지입니다.
+VWAP을 하향 이탈하고 5분봉 20선이 꺾이면 어떤 호재에도 무조건 DOWN을 제시하여 감정을 완전히 배제합니다. (애매한 돌파 시도 중에는 HOLD를 선택하여 통계적 오차를 줄입니다.)`,
     },
     {
         id: 'DEALER',
         name: '기관 딜러 (🏦 Dealer)',
         prompt: `당신은 리스크 관리에 가장 민감하며 철저한 승률 위주로 진입 타점을 잡는 보수적인 기관 딜러입니다.
-만약 현재 주가가 시가(Open)를 밑돌고 분봉 모멘텀이 짓눌려 있다면 강력하게 하방(DOWN) 뷰를 견지하며 보수적으로 대응합니다.
-상승 근거가 '단기 분봉 차트'와 '외국인/기관 쌍끌이 수급' 양쪽에서 완벽히 교집합을 이루고 시가를 시원하게 돌파한 상태여야만 UP에 투표합니다. 애매하면 홀딩(HOLD)을 선호합니다.`,
+만약 현재 주가가 VWAP을 밑돌고 5분 선이 짓눌려 있다면 강력하게 하방(DOWN) 뷰를 견지하며 보수적으로 대응합니다.
+상승 근거가 '단기 정배열/VWAP 지지'와 '외국인/기관 쌍끌이 수급' 양쪽에서 완벽히 교집합을 이룬 상태여야만 진입(UP/DOWN)에 투표합니다. 하나라도 엇갈리면 100% 홀딩(HOLD)을 선호합니다.`,
     },
     {
         id: 'PRICE_ACTION',
         name: '프라이스 액션 스캘퍼 (🕯️ PA Sniper)',
-        prompt: `당신은 이동평균선 등 일반적인 보조지표를 무시하고 캔들의 모양(밑꼬리 여부, 윗꼬리 저항)에만 집착하는 프라이스 액션 스캘퍼입니다.
-거시적 지표가 하락을 가리켜도 "최근 5분봉 캔들에서 강력한 지지선(긴 밑꼬리)"이 보이면 즉시 UP을 투표하여 미세 타점을 포착합니다. 반대로 단기고점에서 윗꼬리가 포착되면 가차없이 DOWN을 투표합니다. 특별한 캔들 섀도우가 발생하지 않은 잔잔한 캔들에서는 'HOLD'를 선언합니다.`,
+        prompt: `당신은 복잡한 지표보다 캔들의 모양(밑꼬리 지지, 윗꼬리 저항)과 당일 거래량 폭발(Volume Spike)에만 집착하는 프라이스 액션 스캘퍼입니다.
+VWAP이나 단기 지지선 근처에서 "강력한 매수세(긴 밑꼬리 캔들과 거래량 급증)"가 보이면 즉시 UP을 투표하여 미세 타점을 포착합니다. 반대로 저항선에서 윗꼬리가 길게 달리고 거래량이 터지면 가차없이 DOWN을 투표합니다. 잔잔하고 거래량 없는 캔들에서는 'HOLD'를 선언합니다.`,
     },
     {
         id: 'OSCILLATOR_FANATIC',
         name: '보조지표 맹신론자 (📊 Oscillator Fanatic)',
-        prompt: `당신은 감정을 완전히 배제하고 CCI(20) 등 오실레이터 보조지표 수치만을 기계적으로 추종하는 시스템 트레이더입니다.
-차트의 방향성이 아무리 좋아보여도 CCI 지표가 '과매수 진입'을 가리키면 DOWN을 투표하고, 투매가 쏟아져도 CCI가 '과매도 이탈' 시그널을 보내면 이유를 막론하고 UP을 외칩니다. 보조지표가 0 기준선 근처에서 평행을 그리면 주저 없이 'HOLD'를 외치십시오.`,
+        prompt: `당신은 감정을 배제하고 CCI(20) 및 단기 이동평균선 크로스 수치만을 기계적으로 추종하는 시스템 트레이더입니다.
+차트 방향성이 좋아보여도 CCI가 '과매수 유지/이탈'을 가리키고 5/20 이평이 데드크로스를 내면 DOWN을, 투매가 쏟아져도 CCI '과매도 이탈' 및 거래량 동반 골든크로스가 생기면 이유 불문 UP을 외칩니다. 지표들이 상충하거나 0 기준선 근방 횡보면 주저 없이 'HOLD'를 외치십시오.`,
     },
     {
         id: 'DOOM_SAYER',
         name: '레드팀 비관론자 (🐻 Doom Sayer)',
         prompt: `당신은 태생적으로 주식 시장의 하락(Short) 베팅을 선호하는 폭락론자입니다.
-모두가 강력한 V자 반등을 외치고 상승 모멘텀을 주장할 때, 홀로 "V자 폭등 후의 데드캣 바운스/차익실현 빔"을 경계합니다. 압도적인 돌파 시그널이 발생하지 않는 한 모든 미세한 저항선을 핑계로 DOWN에 투표하며 시장의 리스크를 방어하는 역할을 합니다. (단, 폭락 이후 하락세가 완전히 진정되어 옆으로 횡보할 때는 억지 DOWN 대신 HOLD를 선택합니다.)`,
+모두가 V자 반등을 외칠 때, 홀로 "VWAP 아래에서의 데드캣 바운스나, 거래량 터진 음봉"을 경계합니다. 압도적인 VWAP 상향 돌파 시그널 및 대량 매수세가 확인되지 않는 한, 모든 저항선을 핑계로 DOWN에 투표하며 리스크를 방어합니다. (단, 폭락 이후 하락세가 완전히 진정되어 투매가 멈추면 억지 DOWN 대신 HOLD를 선택합니다.)`,
     },
     {
         id: 'BREAKOUT_PIRATE',
         name: '돌파 해적 (🏴‍☠️ Breakout Pirate)',
-        prompt: `당신은 주가가 지루한 박스권에서 횡보하는 것을 극도로 혐오하는 돌파 매매 전문가입니다.
-당일 변동성이 터지며 전고점이나 시가를 '엄청난 기세로 돌파'하는 찰나의 순간에만 환호하며 UP/DOWN을 외칩니다. 추세가 명확하지 않고 상승과 하락이 모호하게 핑퐁을 치는 휩소 장세에서는 무조건 "HOLD"(판단 보류)를 외치며 난전에 참여하지 않습니다.`,
+        prompt: `당신은 주가가 VWAP이나 20선 주변에서 지루하게 박스권 횡보하는 것을 극도로 혐오하는 돌파 매매 전문가입니다.
+당일 엄청난 거래량(Volume Spike)이 터지면서 전고점이나 시가, VWAP을 '확실하게 돌파'하는 찰나의 순간에만 환호하며 편승(UP/DOWN)합니다. 추세가 모호하고 거래량 없이 핑퐁을 치는 휩소 장세에서는 무조건 "HOLD"(판단 보류)를 외치며 난전에 참여하지 않습니다.`,
     }
 ];
 
@@ -88,20 +89,16 @@ export class IntradaySwarmAgent {
         const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         const predId = `INTRADAY_${dateStr}_${slot.replace(':', '')}`;
 
-        console.log(`[IntradaySwarm] 🧠 ${slot} 군집 시황 분석 시작... (테스트: 차트 강제 주입)`);
+        console.log(`[IntradaySwarm] 🧠 ${slot} 군집 시황 분석 시작...`);
 
         try {
-            // 1. 장중 데이터 수집 (시황 AI와 동일하게 수급 위주)
-            const [localResult, investorResult] = await Promise.allSettled([
-                this.pipeline.runPipeline('PL-LocalFlow' as any),
-                this.pipeline.runPipeline('PL-InvestorFlow' as any)
-            ]);
+            // 1. 장중 데이터 수집 (외국인/기관 수급만 반영, 업종단위는 배제)
+            const investorResult = await this.pipeline.runPipeline('PL-InvestorFlow' as any);
 
-            // 차트 브리핑 (Daily 일봉 + Intraday 5분봉) 가져오기
+            // 차트 브리핑 (Daily 1줄 요약 + Intraday VWAP/변동성/거래량) 가져오기
             let chartDigest = '[오류] 분봉 차트 데이터를 불러오지 못했습니다.';
             try {
                 const analyzer = new TechnicalAnalyzer(KiwoomService.getInstance());
-                // 일봉(매크로) + 분봉(초단기 타점) 순차 확보 (Kiwoom API 동시 호출 제한 방지)
                 const dailyDigest = await analyzer.generateDailyTechnicalDigest();
                 const intraDigest = await analyzer.generateIntradayTechnicalDigest();
                 
@@ -112,13 +109,20 @@ export class IntradaySwarmAgent {
             }
 
             const dataParts: string[] = [];
-            dataParts.push(`[🔥실시간 일봉/5분봉 종합 차트 추세 (수급 무시 테스트 중)🔥]\n${chartDigest}`);
-            // 테스트용으로 수급 데이터를 의도적으로 누락시킴:
-            // if (investorResult.status === 'fulfilled') dataParts.push(`[PL-InvestorFlow (참고용 - 거래소 집계 지연 가능성 높음)]\n${investorResult.value.aggregatedMarkdown}`);
-            // if (localResult.status === 'fulfilled') dataParts.push(`[PL-LocalFlow (업종별 등락)]\n${localResult.value.aggregatedMarkdown}`);
+            dataParts.push(`[📈 실시간 종합 차트 추세]\n${chartDigest}`);
+            if (investorResult.status === 'fulfilled') dataParts.push(`[PL-InvestorFlow (외인/기관 수급 동향 - 장중 집계용)]\n${investorResult.value.aggregated_markdown}`);
             const contextData = dataParts.join('\n\n---\n\n');
 
-            // 2. 4인방 블라인드 개별 투표 집행 (병렬이 아닌 AiExecutionQueue를 통한 직렬 큐잉)
+            // --- 실시간 차트 이미지 캡처 (상하단 분할) ---
+            let base64Image = null;
+            try {
+                const imageBuffer = await ChartRenderService.captureChart('069500', 'KODEX 200', 'dark');
+                base64Image = imageBuffer.toString('base64');
+            } catch(e) {
+                console.error('[IntradaySwarm] 이미지 캡처 실패:', e);
+            }
+
+            // 2. 8인방 블라인드 개별 투표 집행 (병렬이 아닌 AiExecutionQueue를 통한 직렬 큐잉)
             const queue = AiExecutionQueue.getInstance();
             const votes: Array<{ id: string, name: string, predict: string, rationale: string }> = [];
 
@@ -134,15 +138,15 @@ export class IntradaySwarmAgent {
             `).all(kstDate) as any[];
 
             let curK200 = 0; let curInv = 0;
-            if (pastPreds.length > 0) {
-                try {
-                    const k200Chart = await KiwoomService.getInstance().getOhlcv5m('069500', 1);
-                    if (k200Chart.length > 0) curK200 = k200Chart[k200Chart.length - 1].close;
-                    const invChart = await KiwoomService.getInstance().getOhlcv5m('114800', 1);
-                    if (invChart.length > 0) curInv = invChart[invChart.length - 1].close;
-                } catch(e) {
-                    console.error('[IntradaySwarm] 실시간 피드백을 위한 현재가 조회 실패', e);
-                }
+            try {
+                // 실시간 피드백 및 최종 진입가를 위해 차트의 가장 최근 종가를 확보
+                const k200Chart = await KiwoomService.getInstance().getOhlcv5m('069500', 1);
+                if (k200Chart.length > 0) curK200 = k200Chart[k200Chart.length - 1].close;
+                
+                const invChart = await KiwoomService.getInstance().getOhlcv5m('114800', 1);
+                if (invChart.length > 0) curInv = invChart[invChart.length - 1].close;
+            } catch(e) {
+                console.error('[IntradaySwarm] 실시간 피드백을 위한 현재가 조회 실패', e);
             }
             // -----------------------------------------------------------
 
@@ -176,7 +180,20 @@ export class IntradaySwarmAgent {
                     }
                 }
 
-                const prompt = `[${slot} KST 기준 실시간 시장 데이터]\n${contextData}\n${feedbackPrompt}\n위 데이터를 바탕으로 오늘 장마감 코스피 종가의 최종 방향성을 예측하시오. 수급 데이터는 고의로 누락되었으므로, **반드시 분봉 차트 시가 지지/이탈 및 단기 파동 모멘텀 추세만을 절대적인 근거로** 삼아서 결론을 내리십시오.\n\n[중요 룰셋]: 방향성에 대한 확신이 부족하거나 변동성이 적은 횡보/박스권 장세라면 억지로 예측하지 말고 반드시 'HOLD(관망)'를 선택하세요. 확실할 때만 UP/DOWN을 선택해야 누적 승률을 방어할 수 있습니다.\n\n논리가 단호하고 통찰력 있는 1~2문장의 아주 짧은 근거(50자 내외)와 최종 판단 방향(UP, DOWN, HOLD)을 아래 JSON 포맷으로 제출하시오. 길게 쓰면 감점입니다.\n\n{ "predict": "UP" | "DOWN" | "HOLD", "argument": "단호하고 짧은 차트 모멘텀 기반 핵심 근거 (50자 이내)" }`;
+                const prompt = `[${slot} KST 기준 실시간 시장 데이터]\n${contextData}\n${feedbackPrompt}\n위 데이터 및 첨부된 차트 이미지(위:일봉, 아래:5분봉)를 함께 바탕으로 오늘 장마감 코스피 종가의 최종 방향성을 예측하시오. 외국인/기관의 장중 수급 동향(건수/대금)과 분봉 차트의 형태(시가 지지/이탈, 거래량 등)를 종합적으로 고려하여 결론을 내리십시오.\n\n[중요 룰셋]: 당신은 당신 특유의 매매 철학(페르소나)에 입각하여 판단해야 합니다. 방향성에 대한 확신이 부족하거나 수급과 차트가 서로 엇갈리는 애매한 횡보장이라면 억지로 예측하지 말고 반드시 'HOLD(관망)'를 선택하세요. 확실할 때만 UP/DOWN을 선택해야 누적 승률을 방어할 수 있습니다.\n\n논리가 단호하고 통찰력 있는 1~2문장의 아주 짧은 근거(50자 내외)와 최종 판단 방향(UP, DOWN, HOLD)을 아래 JSON 포맷으로 제출하시오. 길게 쓰면 감점입니다.\n\n{ "predict": "UP" | "DOWN" | "HOLD", "argument": "수급 및 차트 형태 기반 핵심 근거 (50자 이내)" }`;
+
+                let customMessages = undefined;
+                if (base64Image) {
+                    customMessages = [
+                        {
+                            role: "user",
+                            content: [
+                                { type: "text", text: prompt },
+                                { type: "image_url", image_url: { url: `data:image/png;base64,${base64Image}` } }
+                            ]
+                        }
+                    ];
+                }
 
                 try {
                     const answerText = await queue.enqueue({
@@ -184,7 +201,8 @@ export class IntradaySwarmAgent {
                         agentName: `${persona.name}`,
                         triggerType: 'CRON',
                         targetType: 'local',
-                        prompt: prompt,
+                        prompt: base64Image ? "" : prompt, // customMessages가 있으면 prompt는 무효화되므로 빈 문자열로 넘기기
+                        customMessages: customMessages,
                         systemInstruction: persona.prompt
                     });
 
@@ -303,30 +321,44 @@ ${votes.map(v => {
             const code = predict === 'DOWN' ? '114800' : '069500';
             let entryPrice = 0;
             
-            // 1차: 실시간 WebSocket 연동된 PriceStore 확인
-            entryPrice = PriceStore.getInstance().getPrice(code) || 0;
+            // 1순위: 위에서 방금 긁어온 5분봉의 가장 최근 종가를 사용하여 차트와 완벽히 일치시킴
+            if (code === '069500' && curK200 > 0) {
+                entryPrice = curK200;
+            } else if (code === '114800' && curInv > 0) {
+                entryPrice = curInv;
+            }
+
+            // 2순위: 혹시라도 5분봉 조회에 실패했다면 REST API 직접 조회 강제 호출 (PriceStore 의존성 회피)
             if (!entryPrice || entryPrice <= 0) {
-                // 2차: REST API로 현재가 백업 조회
                 try {
                     const res = await KiwoomService.getInstance().getCurrentPrice(code);
                     const body = res?.Body || res?.output || res;
                     const p = body?.stck_prpr || body?.cur_prc || body?.prpr || body?.close;
                     if (p) {
                         entryPrice = Math.abs(Number(p));
-                        PriceStore.getInstance().setPrice(code, entryPrice);
                     }
                 } catch (e) {
-                    console.error('[IntradaySwarm] 진입가 조회 실패:', e);
+                    console.error('[IntradaySwarm] 진입가 직접 백업 조회 실패:', e);
                 }
+            }
+
+            // 3순위: REST 호출마저 실패하면 최종 수단으로 웹소켓 캐시(PriceStore) 값 사용. 단, 오래된 값일 수 있음.
+            if (!entryPrice || entryPrice <= 0) {
+                entryPrice = PriceStore.getInstance().getPrice(code) || 0;
+            }
+
+            // 저장소 동기화 (웹소켓 연결이 끊겼더라도 UI 상에 올바른 가격을 보여주도록 덮어쓰기)
+            if (entryPrice > 0) {
+                PriceStore.getInstance().setPrice(code, entryPrice);
             }
 
             const sourcesArr: string[] = ['SWARM_LOCAL'];
 
             rawDb.prepare(`
                 INSERT OR REPLACE INTO intraday_predictions 
-                (id, date, time_slot, predict, confidence, rationale, position, entry_price, sources_json, comments_json, swarm_sentiment, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-            `).run(predId, dateStr, slot, predict, confidence, totalRationale, position, entryPrice, JSON.stringify(sourcesArr), JSON.stringify(enrichedComments), swarmSentiment);
+                (id, date, time_slot, predict, confidence, rationale, position, entry_price, sources_json, comments_json, swarm_sentiment, image_base64, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            `).run(predId, dateStr, slot, predict, confidence, totalRationale, position, entryPrice, JSON.stringify(sourcesArr), JSON.stringify(enrichedComments), swarmSentiment, base64Image || null);
 
             PerformanceTracker.getInstance().invalidatePendingCache()
 

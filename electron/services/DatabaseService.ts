@@ -818,6 +818,7 @@ export class DatabaseService {
         this.db.exec(createIntradayPredictionsTable)
         try { this.db.exec("ALTER TABLE intraday_predictions ADD COLUMN max_price REAL;"); } catch { }
         try { this.db.exec("ALTER TABLE intraday_predictions ADD COLUMN max_return_pct REAL;"); } catch { }
+        try { this.db.exec("ALTER TABLE intraday_predictions ADD COLUMN image_base64 TEXT;"); } catch { }
 
         // Phase 2: Persona Performance (AI 댓글 적중률 채점용)
         try {
@@ -1181,6 +1182,42 @@ export class DatabaseService {
         `);
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_incubator_status ON maiis_incubator(status);");
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_incubator_score  ON maiis_incubator(neglect_score DESC);");
+
+        // ═══ Track B: 모의매매 (AI 매수 후보 성과 추적) ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS track_b_buy_picks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pick_date TEXT NOT NULL,
+                pick_rank INTEGER NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                signals_json TEXT,
+                buy_score INTEGER DEFAULT 0,
+                reason TEXT,
+                risk TEXT,
+                related_themes_json TEXT,
+                theme_lifespan TEXT,
+                entry_price REAL DEFAULT 0,
+                exit_price REAL DEFAULT 0,
+                current_price REAL DEFAULT 0,
+                holding_days INTEGER DEFAULT 0,
+                target_days INTEGER DEFAULT 5,
+                target_return_pct REAL DEFAULT 15.0,
+                peak_return REAL,
+                peak_date TEXT,
+                final_return REAL,
+                status TEXT DEFAULT 'PENDING',
+                result TEXT,
+                entry_date TEXT,
+                exit_date TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(pick_date, stock_code)
+            );
+        `);
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_track_b_picks_date ON track_b_buy_picks(pick_date DESC);");
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_track_b_picks_status ON track_b_buy_picks(status);");
     }
 
 

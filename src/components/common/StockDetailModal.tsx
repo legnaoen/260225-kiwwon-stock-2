@@ -9,10 +9,12 @@ interface StockDetailModalProps {
     stockName: string;
     relatedTheme?: { type: string; name: string };
     relatedIssues?: any[];
+    aiReason?: string;
+    aiRisk?: string;
     onClose: () => void;
 }
 
-export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIssues, onClose }: StockDetailModalProps) {
+export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIssues, aiReason, aiRisk, onClose }: StockDetailModalProps) {
     // 팝업 띄워질 때 스크롤 방지 등 처리
     useEffect(() => {
         const originalStyle = window.getComputedStyle(document.body).overflow;  
@@ -79,6 +81,29 @@ export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIs
                         <div className="p-6 space-y-8 max-w-4xl mx-auto">
                             {/* 상단 맥락 (이슈 -> 테마/섹터) */}
                             <div className="space-y-4 bg-muted/5 border border-border/50 p-4 rounded-xl">
+                                {/* 모의매매 AI 추천 근거 (있을 경우만 렌더링) */}
+                                {(aiReason || aiRisk) && (
+                                    <div className="space-y-2 mb-2 pb-4 border-b border-border/40">
+                                        <h4 className="text-[11px] font-bold text-indigo-500 flex items-center gap-1.5 uppercase tracking-wider">
+                                            <Sparkles size={13} /> 모의매매 AI 선정 사유
+                                        </h4>
+                                        <div className="flex flex-col gap-2">
+                                            {aiReason && (
+                                                <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+                                                    <div className="text-xs font-bold text-indigo-400 mb-1">👍 추천 근거</div>
+                                                    <div className="text-sm font-semibold">{aiReason}</div>
+                                                </div>
+                                            )}
+                                            {aiRisk && (
+                                                <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+                                                    <div className="text-xs font-bold text-red-400 mb-1">⚠️ 리스크 인지</div>
+                                                    <div className="text-[13px] text-muted-foreground font-medium">{aiRisk}</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* 연관 이슈 섹션 */}
                                 <div className="space-y-2">
                                     <h4 className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">

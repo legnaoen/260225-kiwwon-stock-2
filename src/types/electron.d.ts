@@ -121,6 +121,7 @@ export interface IElectronAPI {
     
     // Market Condition Agent V2
     getIntradayTechnicalDigest: () => Promise<string>
+    runImageAnalysisTest: () => Promise<string>
 
     // Rising Stocks Report
     onBatchProgress: (callback: (data: any) => void) => () => void

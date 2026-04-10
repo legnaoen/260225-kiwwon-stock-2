@@ -53,6 +53,7 @@ export class ChartRenderService {
 
         const cleanup = () => {
             if (timeout) clearTimeout(timeout);
+            if (fallbackTimeout) clearTimeout(fallbackTimeout);
             ipcMain.removeListener('chart-render-complete', onComplete);
             if (this.win && !this.win.isDestroyed()) {
                 this.win.destroy();
@@ -61,18 +62,25 @@ export class ChartRenderService {
             this.isCapturing = false;
         };
 
+        let fallbackTimeout: NodeJS.Timeout;
+
         try {
             timeout = setTimeout(() => {
                 cleanup();
                 reject(new Error('차트 렌더링 시간 초과'));
                 this.processQueue();
-            }, 10000); // 10s wait
+            }, 12000); // Increased bounds to 12s
+
+            fallbackTimeout = setTimeout(() => {
+                console.log('[ChartRenderService] 8초 경과: chart-render-complete 미수신, 강제 캡처 시도');
+                executeCapture();
+            }, 8000);
 
             ipcMain.on('chart-render-complete', onComplete);
 
             this.win = new BrowserWindow({
                 width: 800,
-                height: 600,
+                height: 900,
                 show: false,
                 webPreferences: {
                     preload: path.join(__dirname, 'preload.js'),

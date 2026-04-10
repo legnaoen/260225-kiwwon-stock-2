@@ -153,6 +153,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // Market Condition Agent V2
     getIntradayTechnicalDigest: () => ipcRenderer.invoke('mca:get-technical-digest'),
+    runImageAnalysisTest: () => ipcRenderer.invoke('run-image-analysis-test'),
 
     // YouTube
     saveYoutubeApiKey: (key: string) => ipcRenderer.invoke('youtube:save-key', key),
@@ -254,6 +255,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     searchLiveNews: (keyword: string) => ipcRenderer.invoke('naverflow:search-live-news', keyword),
     getMarketLeaders: (days: number, topN: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN, peakoutSettings }),
     getCrossPeriodProfile: (topN?: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-cross-period-profile', { topN, peakoutSettings }),
+    getSimTradePicks: () => ipcRenderer.invoke('v2:get-sim-trade-picks'),
+    runTrackBBuyAgent: (date?: string) => ipcRenderer.invoke('track-b:run-buy-agent', date),
+    updateTrackBEntryPrices: (date?: string) => ipcRenderer.invoke('track-b:update-entry-prices', date),
+    scoreTrackBPerformance: (date?: string) => ipcRenderer.invoke('track-b:score-performance', date),
     runThemeOntology: () => ipcRenderer.invoke('v2:run-theme-ontology'),
     // Graph RAG: Knowledge Edges
     getKnowledgeEdgesFrom: (sourceType: string, sourceId: string, targetType?: string) => ipcRenderer.invoke('graph:edges-from', sourceType, sourceId, targetType),

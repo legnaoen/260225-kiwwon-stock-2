@@ -240,39 +240,32 @@ export class NaverFlowAggregator implements IBaseAggregator {
                 
                 for (const stock of alphaStocks) {
                     try {
-                        const chartUrl = `https://m.stock.naver.com/api/stock/${stock.stock_code}/chart/day?count=15`;
-                        const res = await axios.get(this.proxyJsonUrl, { params: { url: chartUrl }, timeout: 10000 });
-                        
-                        let chartData = res.data;
-                        if (chartData && !Array.isArray(chartData)) {
-                             // 방어적 파싱: 내부 필드 대응
-                             if (Array.isArray(chartData.result)) chartData = chartData.result;
-                             else if (Array.isArray(chartData.chartData)) chartData = chartData.chartData;
-                             else if (Array.isArray(chartData.prices)) chartData = chartData.prices;
-                        }
+                        // 사용자 피드백 반영: 네이버/키움 API 대신 이미 수집된 로컬 DB(market_ohlcv_history) 활용
+                        const rows = this.dbService.db.prepare(`
+                            SELECT date, close
+                            FROM market_ohlcv_history
+                            WHERE stock_code = ? AND date <= ?
+                            ORDER BY date DESC
+                            LIMIT 16
+                        `).all(stock.stock_code, dateStr) as { date: string; close: number }[];
 
-                        if (Array.isArray(chartData)) {
+                        if (rows && rows.length > 1) {
                             fetchSuccess = true;
-                            for (const day of chartData) {
-                                // yyyymmdd -> yyyy-mm-dd
-                                const rawDate = day.localDate || day.date;
-                                if (!rawDate) continue;
-                                
-                                let formattedDate = rawDate;
-                                if (rawDate.length === 8 && !rawDate.includes('-')) {
-                                    formattedDate = `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}`;
+                            // ASC(과거->현재) 정렬로 뒤집기
+                            rows.reverse();
+                            for (let i = 1; i < rows.length; i++) {
+                                const prev = rows[i - 1];
+                                const curr = rows[i];
+                                if (prev.close > 0) {
+                                    const ratio = ((curr.close - prev.close) / prev.close) * 100;
+                                    if (!changesByDate[curr.date]) changesByDate[curr.date] = [];
+                                    changesByDate[curr.date].push(ratio);
                                 }
-                                
-                                const ratioRaw = day.fluctuationsRatio || day.changeRate || '0';
-                                const ratio = parseFloat(ratioRaw);
-                                
-                                if (!changesByDate[formattedDate]) changesByDate[formattedDate] = [];
-                                changesByDate[formattedDate].push(ratio);
                             }
                         }
                     } catch (e: any) {
                          // 하나 실패해도 나머지 종목들 평균으로 대체 가능
-                         console.warn(`[NaverFlowAggregator] Chart fetch failed for ${stock.stock_code}: ${e.message}`);
+                         console.warn(`[NaverFlowAggregator] DB history fetch failed for ${stock.stock_code}: ${e.message}`);
                     }
                 }
 

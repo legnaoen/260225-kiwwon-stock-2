@@ -17,10 +17,11 @@ interface StockChartProps {
     stockName: string
     className?: string
     theme?: string
+    timeframe?: 'daily' | '5m'
     onPriceUpdate?: (price: number) => void
 }
 
-export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, className, theme, onPriceUpdate }) => {
+export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, className, theme, timeframe = 'daily', onPriceUpdate }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -102,46 +103,74 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
         setIsLoading(true)
         setError(null)
         try {
-            const result = await window.electronAPI.getChartData({ stk_cd: stockCode })
-            if (result.success) {
-                const rawData = result.data?.stk_dt_pole_chart_qry || result.data?.output2 || result.data?.Body || result.data?.list || []
+            const is5m = timeframe === '5m';
+            let uniqueData: ChartDataPoint[] = [];
 
-                const processed: ChartDataPoint[] = rawData.reverse().map((day: any) => {
-                    const close = Number(day.cur_prc || day.stck_clpr || day.clpr || day.stck_clsprc || day.cls_prc || day.close || 0)
-                    let open = Number(day.open_pric || day.stck_opnprc || day.opn_prc || day.open || 0)
-                    let high = Number(day.high_pric || day.stck_hgprc || day.hg_prc || day.high || 0)
-                    let low = Number(day.low_pric || day.stck_lwprc || day.low_prc || day.low || 0)
+            if (is5m) {
+                // getChart5m returns array of {time, open, high, low, close, volume} directly
+                const result = await window.electronAPI.getChart5m(stockCode);
+                if (Array.isArray(result) && result.length > 0) {
+                    uniqueData = result.map((d: any) => ({
+                        time: d.time as Time,
+                        open: Number(d.open),
+                        high: Number(d.high),
+                        low: Number(d.low),
+                        close: Number(d.close)
+                    })).filter(d => d.close > 0);
+                } else {
+                    setError('5분봉 차트 데이터가 없습니다.');
+                }
+            } else {
+                const result = await window.electronAPI.getChartData({ stk_cd: stockCode })
+                if (result.success) {
+                    const rawData = result.data?.stk_dt_pole_chart_qry || result.data?.output2 || result.data?.Body || result.data?.list || []
 
-                    if (open === 0) open = close
-                    if (high === 0 || high < Math.max(open, close)) high = Math.max(open, close)
-                    low = (low === 0 || low > Math.min(open, close)) ? Math.min(open, close) : low
+                    const processed: ChartDataPoint[] = rawData.reverse().map((day: any) => {
+                        const close = Number(day.cur_prc || day.stck_clpr || day.clpr || day.stck_clsprc || day.cls_prc || day.close || 0)
+                        let open = Number(day.open_pric || day.stck_opnprc || day.opn_prc || day.open || 0)
+                        let high = Number(day.high_pric || day.stck_hgprc || day.hg_prc || day.high || 0)
+                        let low = Number(day.low_pric || day.stck_lwprc || day.low_prc || day.low || 0)
 
-                    // Format date to YYYY-MM-DD which lightweight-charts expects
-                    let dateStr = String(day.dt || day.stck_bsop_date || day.date || '')
-                    if (dateStr.length === 8) {
-                        dateStr = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`
-                    }
+                        if (open === 0) open = close
+                        if (high === 0 || high < Math.max(open, close)) high = Math.max(open, close)
+                        low = (low === 0 || low > Math.min(open, close)) ? Math.min(open, close) : low
 
-                    return {
-                        time: dateStr as Time,
-                        open,
-                        high,
-                        low,
-                        close
-                    }
-                }).filter((d: ChartDataPoint) => d.close > 0)
+                        // Format date to YYYY-MM-DD which lightweight-charts expects
+                        let dateStr = String(day.dt || day.stck_bsop_date || day.date || '')
+                        if (dateStr.length === 8) {
+                            dateStr = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`
+                        }
 
-                // Remove duplicates by time
-                const uniqueData = processed.filter((v, i, a) => a.findIndex(t => (t.time === v.time)) === i)
-                // Sort by time
-                uniqueData.sort((a, b) => (a.time as string).localeCompare(b.time as string))
+                        return {
+                            time: dateStr as Time,
+                            open,
+                            high,
+                            low,
+                            close
+                        }
+                    }).filter((d: ChartDataPoint) => d.close > 0)
 
-                if (uniqueData.length > 0) {
-                    chartDataRef.current = uniqueData
-                    candleSeriesRef.current.setData(uniqueData)
-                    if (onPriceUpdate) onPriceUpdate(uniqueData[uniqueData.length - 1].close)
+                    // Remove duplicates by time
+                    uniqueData = processed.filter((v, i, a) => a.findIndex(t => (t.time === v.time)) === i)
+                    // Sort by time
+                    uniqueData.sort((a, b) => {
+                        if (typeof a.time === 'string' && typeof b.time === 'string') {
+                            return a.time.localeCompare(b.time);
+                        }
+                        return (a.time as number) - (b.time as number);
+                    })
+                } else {
+                    setError(result.error?.return_msg || '차트 데이터를 불러올 수 없습니다.')
+                }
+            }
 
-                    // Calculate Disparity and assign Depression Markers
+            if (uniqueData.length > 0) {
+                chartDataRef.current = uniqueData
+                candleSeriesRef.current.setData(uniqueData)
+                if (onPriceUpdate) onPriceUpdate(uniqueData[uniqueData.length - 1].close)
+
+                // Calculate Disparity and assign Depression Markers (ONLY FOR DAILY)
+                if (!is5m) {
                     const markers: SeriesMarker<Time>[] = []
                     for (let i = 0; i < uniqueData.length; i++) {
                         if (i < 19) continue
@@ -171,29 +200,26 @@ export const StockChart: React.FC<StockChartProps> = ({ stockCode, stockName, cl
                     // Store the sum of the last 19 complete days for other components
                     if (uniqueData.length >= 20) {
                         let sum = 0
-                        // Since uniqueData is sorted oldest to newest, the last one is today (index: length - 1)
-                        // So the previous 19 days are from (length - 20) to (length - 2)
                         for (let j = uniqueData.length - 20; j < uniqueData.length - 1; j++) {
                             sum += uniqueData[j].close
                         }
                         useSignalStore.getState().setPrevious19DaysSum(stockCode, sum)
                     }
+                }
 
-                    const totalPoints = uniqueData.length
-                    if (totalPoints > 80) {
-                        chartRef.current.timeScale().setVisibleLogicalRange({
-                            from: totalPoints - 80, // 약 4개월치 영업일
-                            to: totalPoints - 1,
-                        })
-                    } else {
-                        chartRef.current.timeScale().fitContent()
-                    }
+                const totalPoints = uniqueData.length
+                if (totalPoints > 80) {
+                    chartRef.current.timeScale().setVisibleLogicalRange({
+                        from: totalPoints - 80, // 약 4개월치 영업일
+                        to: totalPoints - 1,
+                    })
                 } else {
-                    setError('차트 데이터가 없습니다.')
+                    chartRef.current.timeScale().fitContent()
                 }
             } else {
-                setError(result.error?.return_msg || '차트 데이터를 불러올 수 없습니다.')
+                setError('차트 데이터가 없습니다.')
             }
+
         } catch (err) {
             console.error('Chart fetch error:', err)
             setError('차트 데이터를 요청하는 중 오류가 발생했습니다.')

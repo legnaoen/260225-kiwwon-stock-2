@@ -401,10 +401,11 @@ export class PerformanceTracker {
             }
         }
 
-        // ── 1. 장중 예측(intraday_predictions): 진입가 없는 행 채우기 ──
+        // ── 1. 장중 예측(intraday_predictions): 실시간 수익률 갱신 ──
         if (!this._noPendingIntraday) {
+            // 결론이 나지 않은 당일 예측 건들을 가져옴
             const pendingIntraday = rawDb.prepare(
-                `SELECT id, predict FROM intraday_predictions WHERE date = ? AND (entry_price IS NULL OR entry_price <= 0) AND predict IN ('UP', 'DOWN', 'HOLD')`
+                `SELECT id, predict, entry_price, max_price FROM intraday_predictions WHERE date = ? AND (result IS NULL OR result = 'RUNNING' OR result = 'WAITING') AND predict IN ('UP', 'DOWN', 'HOLD')`
             ).all(dateStr) as any[]
 
             if (pendingIntraday.length === 0) {
@@ -413,7 +414,25 @@ export class PerformanceTracker {
                 for (const row of pendingIntraday) {
                     const etfData = row.predict === 'UP' ? this.latestPrices['069500'] : row.predict === 'DOWN' ? this.latestPrices['114800'] : this.latestPrices['069500']
                     if (!etfData || etfData.price <= 0) continue
-                    rawDb.prepare(`UPDATE intraday_predictions SET entry_price = ? WHERE id = ?`).run(etfData.price, row.id)
+
+                    let entryPrice = row.entry_price
+                    let isEntryUpdated = false
+                    if (!entryPrice || entryPrice <= 0) {
+                        entryPrice = etfData.price
+                        isEntryUpdated = true
+                    }
+
+                    // 수익률 및 고점 갱신
+                    const returnPct = ((etfData.price - entryPrice) / entryPrice) * 100
+                    const currentMax = row.max_price || 0
+                    const newMax = etfData.price > currentMax ? etfData.price : currentMax
+                    const maxReturnPct = ((newMax - entryPrice) / entryPrice) * 100
+
+                    rawDb.prepare(`
+                        UPDATE intraday_predictions 
+                        SET entry_price = ?, close_price = ?, return_pct = ?, max_price = ?, max_return_pct = ?, result = 'RUNNING'
+                        WHERE id = ?
+                    `).run(entryPrice, etfData.price, returnPct, newMax, maxReturnPct, row.id)
                     evaluated++
                 }
             }
@@ -496,11 +515,27 @@ export class PerformanceTracker {
         const today = new Date()
         const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
-        // 최근 5일 중 max_price가 없는 것들을 소급 평가 (과거 날짜 포함)
+        // 장 운영중인지 확인 (09:00 ~ 15:30)
+        let isMarketClosed = false
+        const kstHour = (today.getUTCHours() + 9) % 24
+        const kstMin = today.getUTCMinutes()
+        const timeInt = kstHour * 100 + kstMin
+        if (timeInt >= 1530 || timeInt < 900) {
+            isMarketClosed = true
+        }
+
+        let dateCondition = `date >= date('now', 'localtime', '-5 days')`
+        if (!isMarketClosed) {
+            // 장 운영 중이면 과거 날짜만 최종 결과 판정 (당일 건은 조기 종료 방지)
+            dateCondition = `(date >= date('now', 'localtime', '-5 days') AND date < date('now', 'localtime'))`
+        }
+
+        // 결과가 확정되지 않은 것들을 소급 평가
         const pending = rawDb.prepare(`
             SELECT * FROM intraday_predictions 
-            WHERE date >= date('now', 'localtime', '-5 days')
+            WHERE ${dateCondition}
               AND predict IN ('UP', 'DOWN', 'HOLD')
+              AND (result IS NULL OR result = 'RUNNING' OR result = 'WAITING')
             ORDER BY date ASC, time_slot ASC
         `).all() as any[]
 
@@ -575,7 +610,7 @@ export class PerformanceTracker {
             // 추세장(Trend) 기준: 종가 변동성 절대값 0.5% 이상 OR 최대 변동성 1.0% 이상
             const isTrend = Math.abs(returnPct) >= 0.5 || maxReturnPct >= 1.0;
 
-            let result: string;
+            let result: string = 'RUNNING';
             if (isUpPos || isDownPos) {
                 if (isTrend) {
                     // 추세가 터졌을 때 내 방향으로 터졌는가 (내 포지션 수익이 >0.5% or Max >1.0%)
@@ -599,8 +634,13 @@ export class PerformanceTracker {
                 }
             }
 
-            const rowK200Info = chartK200Daily.find((c: any) => c.date === row.date) || todayK200Info;
+            // 장중에는 최종 판정을 RUNNING으로 유지하여 장 마감 시까지 업데이트 허용
             const isToday = (row.date === dateStr);
+            if (isToday && !isMarketClosed) {
+                result = 'RUNNING';
+            }
+
+            const rowK200Info = chartK200Daily.find((c: any) => c.date === row.date) || todayK200Info;
 
             // 주의: 사용자의 position 기록을 이 과정에서 덮어쓰지 않게 필드 제외
             rawDb.prepare(`

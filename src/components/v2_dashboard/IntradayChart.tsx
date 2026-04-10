@@ -17,6 +17,11 @@ export default function IntradayChart({
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
+    // 마커 변동(시간대, 방향)이 있을 때만 차트를 새로 그리기 위해 Hash 생성
+    const markerHash = React.useMemo(() => {
+        return JSON.stringify(intradayData?.map(d => `${d.date}_${d.time_slot}_${d.predict}`) || []);
+    }, [intradayData]);
+
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
@@ -165,7 +170,7 @@ export default function IntradayChart({
             window.removeEventListener('resize', handleResize);
             chart.remove();
         };
-    }, [ticker, intradayData, timeframe]);
+    }, [ticker, markerHash, timeframe]);
 
     return (
         <div ref={chartContainerRef} className="w-full h-full" />

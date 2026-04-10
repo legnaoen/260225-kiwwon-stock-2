@@ -581,8 +581,16 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                         <button onClick={() => setShowPerformancePopup(true)} className="px-2 py-1 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 text-fuchsia-500 border border-fuchsia-500/30 rounded text-xs font-bold transition-colors" title="주기별 상세 성적 평가 리포트">
                             📊 성적 평가
                         </button>
-                        <button onClick={async () => { await window.electronAPI.runIntradayPrediction('09:30'); await new Promise(r => setTimeout(r, 300)); await fetchData() }} className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded text-xs font-bold transition-colors" title="기존 09:30 장중 예측 실행">
-                            ⚡ 09:30
+                        <button onClick={async () => {
+                            try {
+                                alert("이미지 분석 테스트 파이프라인을 백그라운드에서 백엔드 콘솔로 실행합니다. 터미널을 확인하세요!");
+                                const res = await window.electronAPI.runImageAnalysisTest();
+                                alert("분석 결과:\n\n" + res);
+                            } catch(e: any) {
+                                alert("이미지 분석 테스트 중 오류가 발생했습니다: \n" + e.message);
+                            }
+                        }} className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded text-xs font-bold transition-colors" title="로컬 AI(Gemma등) Vision을 통한 5분봉 차트 분석 테스트">
+                            📸 이미지 테스트
                         </button>
                         
                         {/* 수동 군집 테스트 버튼 */}
@@ -1333,6 +1341,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             <div className="flex items-center gap-2 border-b border-border/40 pb-3">
                                 <button onClick={() => document.getElementById('intraday-rationale')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">🧠 메인 AI 분석</button>
                                 {selectedIntraday.comments_json && <button onClick={() => document.getElementById('intraday-swarm')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">👥 군집 AI 의견</button>}
+                                {selectedIntraday.image_base64 && <button onClick={() => document.getElementById('intraday-chart')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">📸 차트 스냅샷</button>}
                                 <button onClick={() => document.getElementById('intraday-source')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">📊 소스 데이터</button>
                                 <div className="flex-1"></div>
                                 <button onClick={() => handleCopyFullContext(selectedIntraday)} className="px-3 py-1.5 text-xs font-bold flex items-center gap-1.5 bg-muted/20 border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-all shadow-sm" title="AI 판단 근거 및 분석 전문 클립보드 복사">
@@ -1405,6 +1414,15 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                             ));
                                         } catch { return <div className="text-xs text-muted-foreground opacity-50 p-2">댓글 파싱 오류 발생</div> }
                                     })()}
+                                </div>
+                            </div>
+                            )}
+
+                            {selectedIntraday.image_base64 && (
+                            <div id="intraday-chart" className="scroll-mt-4 pt-4 border-t border-border/20">
+                                <div className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Chart Snapshot</div>
+                                <div className="p-1 bg-[#0d0d0d] border border-black/50 rounded-lg flex justify-center items-center overflow-hidden">
+                                    <img src={`data:image/png;base64,${selectedIntraday.image_base64}`} alt="Intraday Chart Snapshot" className="max-w-full h-auto rounded opacity-90 object-contain" style={{ maxHeight: '600px' }} />
                                 </div>
                             </div>
                             )}

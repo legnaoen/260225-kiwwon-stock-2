@@ -27,7 +27,7 @@ import { useAutoTradeStore } from './store/useAutoTradeStore'
 import { Clock, Play, Square } from 'lucide-react'
 
 // ─── V1 Legacy Components (보존: 재활용 가능성) ──────────────────────────────
-// import CapturePage from './components/CapturePage'          // 종목 캡처/공유 기능 (스크린샷 뷰어)
+import CapturePage from './components/CapturePage'          // 종목 캡처/공유 기능 (스크린샷 뷰어)
 // import AutoTrade from './components/AutoTrade'              // 조건검색 기반 자동매매 UI (키움 OCX 의존)
 // import Schedule from './components/Schedule'                // 일정/알림 스케줄러 UI
 // import RisingStocksReport from './components/RisingStocksReport' // 키움 급등주 스캐너 (수급AI에 통합 예정)

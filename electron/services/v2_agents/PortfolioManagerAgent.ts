@@ -71,9 +71,21 @@ export class PortfolioManagerAgent {
             });
 
             const stockList = Object.values(evalPool);
-            console.log(`[PortfolioManager] 1차 심사 단순 통합 수집 완료: ${stockList.length}개 종목을 2차 통합 리뷰로 넘깁니다.`);
+            console.log(`[PortfolioManager] 1차 심사 단순 통합 수집 완료: ${stockList.length}개 종목을 2차 통합 리뷰 대기열(WATCHLIST)에 저장합니다.`);
             
-            // AI 평가 없이 전체를 반환하여 2차에서 통합 평가 및 스코어링 (Cut-off 기반) 진행
+            // AI 평가 없이 곧바로 DB에 WATCHLIST 형태로 임시 저장해 두면 3분 뒤 2차(PM2)에서 일괄 수집하여 통합 평가함
+            stockList.forEach((pick: any) => {
+                this.db.upsertPortfolioWatchlist({
+                    stock_code: pick.stock_code,
+                    stock_name: pick.stock_name,
+                    status: 'WATCHLIST',
+                    strategy: 'SWING', // 기본 전략, 뒤이은 PM 2차에서 재분류됨
+                    conviction_score: 50,
+                    analysts_json: pick.today_analysts.map((a: any) => a.agent),
+                    last_signal_reason: '[PM 1차 오디션 수집] 2차 통합 심사 대기 중'
+                });
+            });
+
             return stockList;
         } catch (e) {
             console.error(`[PortfolioManager] 1차 데이터 취합 에러:`, e);

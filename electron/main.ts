@@ -750,6 +750,59 @@ ipcMain.handle('v2:get-cross-period-profile', async (_event, { topN, peakoutSett
     }
 })
 
+// ═══ Track B: 모의매매 데이터 조회 ═══
+ipcMain.handle('v2:get-sim-trade-picks', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        const picks = db.prepare(`
+            SELECT * FROM track_b_buy_picks
+            ORDER BY pick_date DESC, pick_rank ASC
+            LIMIT 500
+        `).all();
+        return { picks };
+    } catch (error: any) {
+        console.error('[SimTrade] get-sim-trade-picks error:', error);
+        return { picks: [] };
+    }
+})
+
+// [Track B] 모의매매 AI 수동 실행
+ipcMain.handle('track-b:run-buy-agent', async (_event, date?: string) => {
+    try {
+        const { TrackBBuyAgent } = await import('./services/v2_agents/TrackBBuyAgent');
+        const result = await TrackBBuyAgent.getInstance().run(date);
+        return { success: result.success, saved: result.saved, skipped: result.skipped, error: result.error };
+    } catch (error: any) {
+        console.error('[TrackBBuyAgent] manual run error:', error);
+        return { success: false, error: error.message };
+    }
+})
+
+// [Track B] 진입가 수동 확정 (장 마감 후 테스트용)
+ipcMain.handle('track-b:update-entry-prices', async (_event, date?: string) => {
+    try {
+        const { TrackBBuyAgent } = await import('./services/v2_agents/TrackBBuyAgent');
+        const updated = TrackBBuyAgent.getInstance().updateEntryPrices(date);
+        return { success: true, updated };
+    } catch (error: any) {
+        console.error('[TrackBBuyAgent] update-entry-prices error:', error);
+        return { success: false, error: error.message };
+    }
+})
+
+// [Track B] 모의매매 성과 수동 채점
+ipcMain.handle('track-b:score-performance', async (_event, date?: string) => {
+    try {
+        const { TrackBBuyAgent } = await import('./services/v2_agents/TrackBBuyAgent');
+        const result = TrackBBuyAgent.getInstance().scoreDailyPerformance(date);
+        return { success: true, ...result };
+    } catch (error: any) {
+        console.error('[TrackBBuyAgent] score-performance error:', error);
+        return { success: false, error: error.message };
+    }
+})
+
 // ═══ V2 Theme Ontology Agent (수동 트리거) ═══
 ipcMain.handle('v2:run-theme-ontology', async () => {
     try {
@@ -1859,6 +1912,69 @@ ipcMain.handle('mca:get-technical-digest', async () => {
         return `[오류] 다이제스트 생성 실패: ${err.message}`
     }
 })
+
+ipcMain.handle('run-image-analysis-test', async () => {
+    try {
+        const { ChartRenderService } = await import('./services/ChartRenderService');
+        const { LocalAiService } = await import('./services/LocalAiService');
+
+        console.log('[ImageTest] 📸 KODEX 200 차트 이미지 캡처 렌더링 시작...');
+        const imageBuffer = await ChartRenderService.captureChart('069500', 'KODEX 200', 'dark');
+        
+        // 디버깅용으로 이미지 파일 저장
+        const fs = await import('node:fs/promises');
+        const path = await import('node:path');
+        const debugImgPath = path.join(process.cwd(), 'debug_chart_capture.png');
+        await fs.writeFile(debugImgPath, imageBuffer);
+        const clickableLink = `file:///${debugImgPath.replace(/\\/g, '/')}`;
+        console.log(`[ImageTest] 🛠️ 디버깅용 캡처 이미지 저장 완료! (Ctrl+Click으로 열기)`);
+        console.log(`🔗 링크: ${clickableLink}`);
+
+        const base64Image = imageBuffer.toString('base64');
+        console.log('[ImageTest] ✅ 차트 캡처 완료 (Base64 길이: ' + base64Image.length + ')');
+
+        const prompt = `이 이미지는 주식(KODEX 200)의 차트 시각화 화면 캡처본입니다.
+화면은 위아래 두 개의 차트로 분할되어 있습니다:
+- 상단 차트: **일간 추세 (Daily)**
+- 하단 차트: **장중 당일 흐름 (5-Min)**
+
+우리는 오늘 당일 1~2% 단기 수익을 목표로 하는 '장중 단기 트레이딩'을 진행합니다.
+다음 내용들을 중점적으로 확인하고 한글로 팩트만 짧고 날카롭게 브리핑하십시오:
+
+1. [일봉(Daily) 관점 - 20% 비중]
+   - 캔들이 이동평균선(기준선) 위에서 지지받고 있는지, 역배열 폭락중인지?
+
+2. [5분봉(5-Min) 관점 - 80% 비중 (가장 중요함)]
+   - 오늘 장 시작 후 당일 추세가 상승(돌파)중인지, 저항에 막혀 하락중인지?
+   - 5분봉 하단에 폭발적인 대량 거래량이 터지면서 누군가(세력)가 개입한 흔적이 있는지?
+   - 총평: 현재 이 종목을 '장중 매수(LONG)' 하는 것이 유리한지, 아니면 '관망(HOLD) / 매도(SHORT)'가 유리한지 당신의 직관적인 판단은?`;
+
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: prompt },
+                    { type: "image_url", image_url: { url: `data:image/png;base64,${base64Image}` } }
+                ]
+            }
+        ];
+
+        console.log('[ImageTest] 🤖 Local AI(Gemma Vision API) 타겟으로 데이터 전송 중...');
+        // askLocalAi의 4번째 인자 customMessages를 사용하여 멀티모달 객체 전송
+        const result = await LocalAiService.getInstance().askLocalAi(
+            "", 
+            "당신은 엘리트 프라이스액션 차트 분석가입니다. 차트 캡처본의 패턴을 시각적으로 읽어냅니다.", 
+            undefined, 
+            messages
+        );
+
+        console.log('[ImageTest] 🎯 분석 완료:\n', result);
+        return result;
+    } catch (err: any) {
+        console.error('[ImageTest] Error:', err);
+        throw new Error(`이미지 테스트 파이프라인 에러: ${err.message}`);
+    }
+});
 
 // === Naver API Handlers ===
 ipcMain.handle('naver:save-keys', (_event, keys: { clientId: string, clientSecret: string }) => {

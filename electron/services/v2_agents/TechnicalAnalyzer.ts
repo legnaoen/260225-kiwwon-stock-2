@@ -20,7 +20,9 @@ export class TechnicalAnalyzer {
                 return '[데이터 오류] 일봉 차트 데이터를 불러올 수 없어 기술적 분석(일봉)을 수행할 수 없습니다.';
             }
 
-            const currentPriceText = dailyData[0].close || 'N/A';
+            // dailyData는 오름차순(과거->현재) 정렬되어 있으므로 배열의 마지막 요소가 최신입니다.
+            const latestIndex = dailyData.length - 1;
+            const currentPriceText = dailyData[latestIndex].close || 'N/A';
             const currentPriceNum = Math.abs(Number(String(currentPriceText).replace(/[^0-9\-\.]/g, '')));
             
             if (!currentPriceNum || currentPriceNum <= 0) {
@@ -30,7 +32,8 @@ export class TechnicalAnalyzer {
             const calculateMA = (days: number): number | null => {
                 if (dailyData.length < days) return null;
                 let sum = 0;
-                for (let i = 0; i < days; i++) {
+                // 가장 최근의 days 갯수만큼 종가를 합산합니다.
+                for (let i = dailyData.length - days; i < dailyData.length; i++) {
                     sum += Math.abs(Number(String(dailyData[i].close).replace(/[^0-9\-\.]/g, '')));
                 }
                 return sum / days;
@@ -48,18 +51,10 @@ export class TechnicalAnalyzer {
             }
 
             const digest = `
-[시장 기술적 지표 브리핑 (일봉 - KOSPI 200 기준)]
-1. 현재가 및 일봉 중장기 이격도 현황
-* 현재가격: ${currentPriceNum.toLocaleString()}
-* 20일 이동평균: ${ma20 ? Math.floor(ma20).toLocaleString() : 'N/A'} (이격: ${getDisparityPerc(ma20)})
-* 60일 이동평균: ${ma60 ? Math.floor(ma60).toLocaleString() : 'N/A'} (이격: ${getDisparityPerc(ma60)})
-* 100일 이동평균: ${ma100 ? Math.floor(ma100).toLocaleString() : '데이터 부족'} (이격: ${getDisparityPerc(ma100)})
-* 200일 이동평균: ${ma200 ? Math.floor(ma200).toLocaleString() : '데이터 부족'} (이격: ${getDisparityPerc(ma200)})
-
-[평가/결론 유의사항 - 일봉 거시 분석]
-* 이격이 크면(+), 거시적인 매물대 또는 고점 저항대 도달 시 매입보다는 관망/매도를 암시합니다.
-* 이격이 마이너스(-)면 거시적인 낙폭과대, 장기적 추세 역배열 바닥권 지지구간 도달 등을 시사합니다.
-* 당신은 현재 지수의 사이클이 당일 상승/하락 중 어느 곳에 어깨를 대고 서있는지 거시적(매크로) 환경만 참고하십시오.
+[거시적 일봉 추세 (단순 참고용)]
+* 현재가: ${currentPriceNum.toLocaleString()}
+* 20/60일선 이격: ${getDisparityPerc(ma20)} / ${getDisparityPerc(ma60)}
+* 거시 추세 요약: ${ma20 && ma60 ? (currentPriceNum > ma20 && currentPriceNum > ma60 ? '강세장 (단기·중기 이평선 위)' : currentPriceNum < ma20 && currentPriceNum < ma60 ? '약세장 (단기·중기 이평선 아래)' : '확고한 방향성 부재 (이평선 혼조세)') : '데이터 부족'} 
 `.trim();
 
             return digest;
@@ -282,24 +277,68 @@ export class TechnicalAnalyzer {
                 }
             }
 
+            // ── 추가 지표: VWAP (거래량 가중 평균 단가) 당일 기준
+            let totalVolumePrice = 0;
+            let totalVolume = 0;
+            for (const c of todaysCandles) {
+                const cPrice = Math.abs(Number(String(c.close).replace(/[^0-9\-\.]/g, '')));
+                const cVol = Math.abs(Number(String(c.volume || 0).replace(/[^0-9\-\.]/g, '')));
+                const typicalPrice = (Math.abs(Number(String(c.high).replace(/[^0-9\-\.]/g, ''))) + Math.abs(Number(String(c.low).replace(/[^0-9\-\.]/g, ''))) + cPrice) / 3;
+                totalVolumePrice += (typicalPrice * cVol);
+                totalVolume += cVol;
+            }
+            const vwap = totalVolume > 0 ? totalVolumePrice / totalVolume : currentPriceNum;
+            const vwapGap = ((currentPriceNum - vwap) / vwap) * 100;
+            const vwapStr = vwapGap >= 0 ? `+${vwapGap.toFixed(2)}% (매수 우위/상승 추세)` : `${vwapGap.toFixed(2)}% (매도 우위/하락 압력)`;
+
+            // ── 추가 지표: 5분봉 단기 이동평균선 (정배열/역배열 판독)
+            const calcIntradayMA = (n: number) => {
+                if (intradayData.length < n) return null;
+                const slice = intradayData.slice(intradayData.length - n);
+                let sum = 0;
+                for (let c of slice) sum += Math.abs(Number(String(c.close).replace(/[^0-9\-\.]/g, '')));
+                return sum / n;
+            };
+            const ma5_5m = calcIntradayMA(5);
+            const ma20_5m = calcIntradayMA(20);
+            let intradayMaTrend = '판단 불가';
+            if (ma5_5m && ma20_5m) {
+                if (currentPriceNum > ma5_5m && ma5_5m > ma20_5m) intradayMaTrend = '강력한 정배열 상승 (현재가 > 선봉 > 20선)';
+                else if (currentPriceNum < ma5_5m && ma5_5m < ma20_5m) intradayMaTrend = '강력한 역배열 하락 (현재가 < 5선 < 20선)';
+                else intradayMaTrend = '이평선 혼조세 (수렴/발산 진행 혹은 휩소 구간)';
+            }
+
+            // ── 추가 지표: 거래량 폭발 (Volume Spike) 확인
+            const averageDayVolume = totalVolume / (todaysCandles.length || 1);
+            let volumeSpikeStr = "일반적인 거래량";
+            const recentVols = last5.map(c => Math.abs(Number(String(c.volume || 0).replace(/[^0-9\-\.]/g, ''))));
+            const recentMaxVol = Math.max(...recentVols, 0);
+            if (recentMaxVol > averageDayVolume * 2.5) {
+                volumeSpikeStr = "⚠️ 거래량 2.5배 이상 폭발 (강한 방향성 신호 또는 투매/차익실현 출회)";
+            } else if (recentMaxVol > averageDayVolume * 1.5) {
+                volumeSpikeStr = "단기 거래량 유입 중";
+            }
+
             const digest = `
-[초단기(장중 타점) 5분봉 차트 핵심 데이터]
+[초단기(장중 타점) 5분봉 차트 핵심 추세 데이터]
 * 현 시간대: ${String(hour).padStart(2,'0')}:${String(nowTime.getMinutes()).padStart(2,'0')} (${timePhase})
-* 단가 위치: 고가(${highPrice.toLocaleString()}) | 시가(${openPrice.toLocaleString()}) | 저가(${lowPrice.toLocaleString()}) | 현재가(${currentPriceNum.toLocaleString()})
+* 단가 위치: 등락폭 (고가 ${highPrice.toLocaleString()} ~ 저가 ${lowPrice.toLocaleString()}) | 현재가(${currentPriceNum.toLocaleString()})
 * 시가 대비 위치: ${gapFromOpen >= 0 ? '+' : ''}${gapFromOpen.toFixed(2)}%
+* 일일 거래량 가중평균가(VWAP): ${vwap.toFixed(0)}원 | VWAP 대비 현재가: ${vwapStr}
 
 [차트 알고리즘 렌더링 결과]
-1. 오늘 파동 궤적: ${waveStory}
-2. 최근 1시간 지지선 형태: ${consolidationStr}
-3. 고/저점 대비 추세: 고점에서 ${drawdownFromHigh.toFixed(2)}% 밀렸고, 저점대비 +${reboundFromLow.toFixed(2)}% 올랐음.
-4. 최근 5개 분봉 스캔: ${microPattern}
-5. CCI(20) 보조지표: ${cciAnalysis}
+1. 오늘 파동 궤적: ${waveStory} / (최근 1시간: ${consolidationStr})
+2. 단기 이평선(5선/20선) 추세: ${intradayMaTrend}
+3. 고/저점 대비 추세: 고점에서 ${drawdownFromHigh.toFixed(2)}% 하락, 저점대비 +${reboundFromLow.toFixed(2)}% 상승. (${reversalContext})
+4. 최근 15분 미시 패턴 스캔: ${microPattern}
+5. 최근 15분 거래량 분석: ${volumeSpikeStr} (최근캔들 평균거래량 대비 돌파 여부)
+6. 단기 모멘텀 지표 (CCI 20): ${cciAnalysis}
 
 [🚨 AI 추론 절대 규칙 🚨]
-* 이 정보들은 진짜 차트의 수식을 백엔드가 대신 읽고 번역해준 "절대적 팩트"입니다.
-* 만약 [5번] CCI 지표에서 '⭐과매도선 위로 이탈⭐' 등 매수 시그널이 발생했고, 60분간 횡보하며 바닥 다지기가 확인된다면 일봉이 하락장이라도 당당하게 스윙/리바운드 타점(UP)으로 예측하십시오!
-* 반대로 강한 지지가 없고 매도 시그널이 발생했다면 어떠한 작은 꼬리 반등에 속지 말고 DOWN을 외치십시오.
-* 장황한 문장을 배제하고 팩트만 글머리 기호(•)로 짧고 간결하게 출력하세요.
+* 이 정보들은 백엔드 알고리즘 산출 결과입니다.
+* 장중 스캘핑의 핵심 파라미터는 [VWAP 돌파 여부], [단기 이평선 배위], 그리고 [거래량(Volume) 상승 여부] 입니다. 단기 추세를 따르십시오.
+* 만약 주가가 장중 VWAP과 5선을 깨고 내려가면 매도 시그널(DOWN/HOLD)이 강하며, 돌파 후 지지 시 단기 상방(UP) 확률이 높습니다.
+* 장황한 문장 없이 결론적 팩트만 글머리(•)로 짧고 간결하게 출력하세요. 일봉 같은 먼 과거는 가중치를 크게 낮추어 참고만 하십시오.
 `.trim();
 
             return digest;

@@ -28,30 +28,69 @@ export class PortfolioManagerAgent {
 
     public async runPhase1_Screening(targetDate?: string) {
         const dateStr = targetDate || this.db.getKstDate();
-        console.log(`[PortfolioManager] 🧑‍💼 ${dateStr} 1차 심사 (신규 후보 수집) 시작...`);
+        const fs = require('fs');
+        const logPath = require('path').join(require('electron').app.getPath('userData'), 'pm1_debug.log');
+        const log = (msg: string) => {
+            const line = `[${new Date().toISOString()}] ${msg}\n`;
+            console.log(msg);
+            try { fs.appendFileSync(logPath, line); } catch (_) {}
+        };
+
+        log(`===== PM1 시작: dateStr=${dateStr} =====`);
 
         try {
             const todaysPicks = this.db.getAiAnalystPicksByDate(dateStr) as any[];
+            log(`[1] getAiAnalystPicksByDate(${dateStr}) = ${todaysPicks?.length ?? 'null'}개`);
+
             if (!todaysPicks || todaysPicks.length === 0) {
-                console.warn(`[PortfolioManager] 1차 심사 대상이 없습니다 (당일 추천주 없음).`);
+                log('[1-EARLY] 추천주 없음, 종료');
                 return null;
             }
 
-            // Remove already active portfolio stocks from Phase 1 evaluation to save tokens
             const activePortfolio = this.db.getActivePortfolio() as any[];
+            log(`[2] getActivePortfolio() = ${activePortfolio.length}개 (${activePortfolio.map((p:any)=>p.stock_code).join(',')})`);
+
             const activeCodeSet = new Set(activePortfolio.map((p: any) => p.stock_code));
-            
-            // 요구사항: 이미 매수하거나 기존 관심종목에 들어있는 종목은 제외
-            const newPicks = todaysPicks.filter(p => !activeCodeSet.has(p.stock_code));
+            const newPicks = todaysPicks.filter((p: any) => !activeCodeSet.has(p.stock_code));
+            log(`[3] newPicks(기존 제외 후) = ${newPicks.length}개`);
 
             if (newPicks.length === 0) {
-                console.log(`[PortfolioManager] 추천주 전원이 이미 포트폴리오에 있습니다. 신규 수집 패스.`);
+                log('[3-EARLY] 신규 종목 없음, 종료');
                 return null;
             }
 
-            const evalPool: Record<string, any> = {};
+            const aiSettings: any = store.get('ai_settings') || {};
+            const phase1PassLimit: number = aiSettings.phase1PassLimit ?? 10;
+            log(`[4] phase1PassLimit = ${phase1PassLimit}`);
 
-            newPicks.forEach(pick => {
+            const byCategory: Record<string, any[]> = {};
+            newPicks.forEach((pick: any) => {
+                const cat = pick.agent_type || 'MOMENTUM';
+                if (!byCategory[cat]) byCategory[cat] = [];
+                byCategory[cat].push(pick);
+            });
+            Object.values(byCategory).forEach(arr =>
+                arr.sort((a: any, b: any) => (b.confidence || 0) - (a.confidence || 0))
+            );
+            log(`[5] byCategory keys = ${Object.keys(byCategory).join(',')}`);
+
+            const selectedPicks: any[] = [];
+            const categories = Object.keys(byCategory);
+            let changed = true;
+            while (selectedPicks.length < phase1PassLimit && changed) {
+                changed = false;
+                for (const cat of categories) {
+                    if (selectedPicks.length >= phase1PassLimit) break;
+                    if (byCategory[cat].length > 0) {
+                        selectedPicks.push(byCategory[cat].shift());
+                        changed = true;
+                    }
+                }
+            }
+            log(`[6] selectedPicks = ${selectedPicks.length}개 (${selectedPicks.map((p:any)=>p.stock_code).join(',')})`);
+
+            const evalPool: Record<string, any> = {};
+            selectedPicks.forEach((pick: any) => {
                 if (!evalPool[pick.stock_name]) {
                     evalPool[pick.stock_name] = {
                         stock_code: pick.stock_code,
@@ -61,34 +100,43 @@ export class PortfolioManagerAgent {
                         today_analysts: []
                     };
                 }
-                if (pick.analyst) {
-                    evalPool[pick.stock_name].today_analysts.push({
-                        agent: pick.analyst,
-                        reason: pick.reason,
-                        confidence: pick.confidence
-                    });
-                }
-            });
-
-            const stockList = Object.values(evalPool);
-            console.log(`[PortfolioManager] 1차 심사 단순 통합 수집 완료: ${stockList.length}개 종목을 2차 통합 리뷰 대기열(WATCHLIST)에 저장합니다.`);
-            
-            // AI 평가 없이 곧바로 DB에 WATCHLIST 형태로 임시 저장해 두면 3분 뒤 2차(PM2)에서 일괄 수집하여 통합 평가함
-            stockList.forEach((pick: any) => {
-                this.db.upsertPortfolioWatchlist({
-                    stock_code: pick.stock_code,
-                    stock_name: pick.stock_name,
-                    status: 'WATCHLIST',
-                    strategy: 'SWING', // 기본 전략, 뒤이은 PM 2차에서 재분류됨
-                    conviction_score: 50,
-                    analysts_json: pick.today_analysts.map((a: any) => a.agent),
-                    last_signal_reason: '[PM 1차 오디션 수집] 2차 통합 심사 대기 중'
+                evalPool[pick.stock_name].today_analysts.push({
+                    agent: pick.agent_type,
+                    reason: pick.reason,
+                    confidence: pick.confidence
                 });
             });
 
+            const stockList = Object.values(evalPool);
+            log(`[7] evalPool = ${stockList.length}개, 저장 시작`);
+
+            let savedCount = 0;
+            for (const pick of stockList as any[]) {
+                try {
+                    this.db.upsertPortfolioWatchlist({
+                        stock_code: pick.stock_code,
+                        stock_name: pick.stock_name,
+                        status: 'WATCHLIST',
+                        strategy: 'SWING',
+                        conviction_score: 50,
+                        analysts_json: pick.today_analysts.map((a: any) => a.agent),
+                        last_signal_reason: '[PM 1차 오디션 수집] 2차 통합 심사 대기 중'
+                    });
+                    savedCount++;
+                    log(`[7-OK] upsert 성공: ${pick.stock_code} ${pick.stock_name}`);
+                } catch (upsertErr: any) {
+                    log(`[7-ERR] upsert 실패: ${pick.stock_code} ${pick.stock_name} → ${upsertErr.message}`);
+                }
+            }
+
+            log(`[8] PM1 완료: ${savedCount}/${stockList.length}개 저장 성공`);
             return stockList;
-        } catch (e) {
-            console.error(`[PortfolioManager] 1차 데이터 취합 에러:`, e);
+        } catch (e: any) {
+            log(`[ERROR] PM1 전체 에러: ${e.message}\n${e.stack}`);
+            try {
+                const { TelegramService } = await import('../TelegramService');
+                TelegramService.getInstance().sendMessage(`❌ [PM1] 1차 스크리닝 실패: ${e.message}`);
+            } catch (_) {}
             return null;
         }
     }
@@ -165,9 +213,10 @@ export class PortfolioManagerAgent {
                 }
             });
 
-            // Add 신규 추천주 (newPicksParams)
+            // ─── 신규 추천주 주입 ────────────────────────────────────────────────
+            // (A) runDailyReview()로 순차 실행 시 PM1 결과물이 직접 전달됨
             if (newPicksParams && newPicksParams.length > 0) {
-                newPicksParams.forEach(p => {
+                newPicksParams.forEach((p: any) => {
                     codeMap[p.stock_name] = p.stock_code;
                     evalPool[p.stock_name] = {
                         stock_code: p.stock_code,
@@ -179,6 +228,36 @@ export class PortfolioManagerAgent {
                         analysts: p.today_analysts || []
                     };
                 });
+            } else {
+                // (B) Fallback: 스케줄러 단독 호출 또는 PM1 실패 시 DB에서 직접 당일 WATCHLIST 종목 조회
+                // getActivePortfolio()가 이미 WATCHLIST를 포함하므로 source만 NEW_PICK으로 교정
+                const activeCodes = new Set(activePortfolio.map((p: any) => p.stock_code));
+                const todayPicksFallback = this.db.getAiAnalystPicksByDate(dateStr) as any[];
+                const newPicksFallback = todayPicksFallback.filter((p: any) => !activeCodes.has(p.stock_code));
+
+                if (newPicksFallback.length > 0) {
+                    const byCode: Record<string, any> = {};
+                    newPicksFallback.forEach((p: any) => {
+                        if (!byCode[p.stock_code]) {
+                            byCode[p.stock_code] = {
+                                stock_code: p.stock_code,
+                                stock_name: p.stock_name,
+                                source: 'NEW_PICK',
+                                status: 'NEW',
+                                profit_rate: 0,
+                                conviction_score: p.confidence || 50,
+                                analysts: [{ agent: p.agent_type, reason: p.reason, confidence: p.confidence }]
+                            };
+                        }
+                    });
+                    Object.values(byCode).forEach((p: any) => {
+                        if (!evalPool[p.stock_name]) {
+                            codeMap[p.stock_name] = p.stock_code;
+                            evalPool[p.stock_name] = p;
+                        }
+                    });
+                    console.log(`[PortfolioManager] 📥 PM1 Fallback: DB에서 신규 추천주 ${Object.keys(byCode).length}개 직접 로드`);
+                }
             }
 
             // ─── P3-4: IGNITE 종목 강제 주입 ────────────────────────────────────
@@ -290,15 +369,15 @@ export class PortfolioManagerAgent {
                 sysConditionMsg = "\n[🚨시스템 상태: 실시간 시세 및 차트 서버 연결 장애 발동 중]\n현재 증권사 API 장애로 인해 최신 호가와 차트 데이터를 받아올 수 없습니다. 따라서 무리하게 공격적인 IMMEDIATE_BUY 신호를 내리는 것을 지양하고, 관망(WATCHLIST) 또는 HOLD 위주로 보수적인(Defensive) 판정을 내리십시오.\n";
             }
 
-            // --- AI Skill Injection: 차트 리스크 분석 지침서 (SKILL.md) ---
+            // --- AI Skill Injection: 대장주 추천 가이드 (구 SKILL.md) ---
             let chartRiskSkill = '';
             try {
                 const fs = require('fs');
                 const path = require('path');
-                chartRiskSkill = fs.readFileSync(path.join(process.cwd(), '.agents/skills/chart_risk_analysis/SKILL.md'), 'utf-8');
+                chartRiskSkill = fs.readFileSync(path.join(process.cwd(), '.agents/skills/leader_stock_guide/대장주_추천_가이드.md'), 'utf-8');
             } catch (e) {
-                console.warn('[PortfolioManager] ⚠️ 차트 리스크 분석 가이드북(SKILL.md)을 읽을 수 없습니다. 기본 룰 적용.');
-                chartRiskSkill = "MA20 이격도가 극심하게 높을 경우 IMMEDIATE_BUY를 금지하라.";
+                console.warn('[PortfolioManager] ⚠️ 대장주 추천 가이드(대장주_추천_가이드.md)를 읽을 수 없습니다. 기본 룰 적용.');
+                chartRiskSkill = "대장주 위주의 초강세 모멘텀 매매를 지향하라.";
             }
 
             // 5. 시장 맥락 데이터 수집 (Alpha + 이슈 브리핑)
@@ -453,7 +532,7 @@ ${chartRiskSkill}
                     }
 
                     // 카테고리별 Cut-Off 실행 (T/O 강제 충원 및 하위권 서바이벌 탈락 적용)
-                    const watchLimits = limits.watchlist || { MOMENTUM: 3, PULLBACK: 3, SWING: 6, VALUE: 3 };
+                    const watchLimits = limits.watchlist || { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 };
                     const cutOffDropped: any[] = [];
                     const survivedWatchlist: any[] = [];
 
@@ -550,10 +629,16 @@ ${chartRiskSkill}
                         const afterPortfolio = this.db.getActivePortfolio() as any[];
 
                         // 신규 매수 (Before에는 HELD가 아니었는데 After에 HELD가 된 것)
-                        const newBuys = afterPortfolio.filter(a => a.status === 'HELD' && !activePortfolio.find(b => b.stock_code === a.stock_code && (b.status === 'HELD' || b.status === 'IMMEDIATE_BUY')));
+                        const newBuys = afterPortfolio.filter(a => 
+                            (a.status === 'HELD' || a.status === 'IMMEDIATE_BUY') && 
+                            !activePortfolio.find(b => b.stock_code === a.stock_code && (b.status === 'HELD' || b.status === 'IMMEDIATE_BUY'))
+                        );
 
-                        // 탈락 종목 (Before에는 있었으나 지금은 afterPortfolio에서 안 보이는 것)
-                        const droppedList = activePortfolio.filter(b => !afterPortfolio.find(a => a.stock_code === b.stock_code));
+                        // 탈락 종목 (Before에는 HELD 매수 포지션이었으나 지금은 유지되지 못한 경우만)
+                        const droppedList = activePortfolio.filter(b => 
+                            (b.status === 'HELD' || b.status === 'IMMEDIATE_BUY') && 
+                            !afterPortfolio.find(a => a.stock_code === b.stock_code && (a.status === 'HELD' || a.status === 'IMMEDIATE_BUY'))
+                        );
                         const watchCount = afterPortfolio.filter(a => a.status === 'WATCHING' || a.status === 'WATCHLIST').length;
                         const buyCount = afterPortfolio.filter(a => a.status === 'HELD' || a.status === 'IMMEDIATE_BUY').length;
 

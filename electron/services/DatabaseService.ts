@@ -512,12 +512,12 @@ export class DatabaseService {
             );
         `
 
-        // PL-NaverFlow: 마켓 주도주 자동 태깅 테이블
         const createStockThemeTagsTable = `
             CREATE TABLE IF NOT EXISTS stock_theme_tags (
                 stock_code TEXT NOT NULL,
                 stock_name TEXT NOT NULL,
                 tag_name TEXT NOT NULL,
+                tag_type TEXT DEFAULT 'THEME',
                 is_auto_tagged INTEGER DEFAULT 0,
                 change_rate REAL DEFAULT 0,
                 added_date TEXT NOT NULL,
@@ -605,11 +605,21 @@ export class DatabaseService {
         } catch (e: any) {
             // Ignore error if column already exists
         }
+        try {
+            this.db.exec('ALTER TABLE stock_theme_tags ADD COLUMN tag_type TEXT DEFAULT "THEME";');
+        } catch (e: any) {
+            // Ignore error if column already exists
+        }
         this.db.exec(createThemeIntelligenceTable)
         this.db.exec(createThemePriceIndexTable)
         this.db.exec(createNaverNewsFlowTable)
         try {
             this.db.exec('ALTER TABLE naver_news_flow ADD COLUMN body_snippet TEXT;');
+        } catch (e: any) {
+            // Ignore error if column already exists
+        }
+        try {
+            this.db.exec('ALTER TABLE naver_news_flow ADD COLUMN search_keyword TEXT;');
         } catch (e: any) {
             // Ignore error if column already exists
         }
@@ -1218,7 +1228,161 @@ export class DatabaseService {
         `);
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_track_b_picks_date ON track_b_buy_picks(pick_date DESC);");
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_track_b_picks_status ON track_b_buy_picks(status);");
+
+        // ═══ Track A: 대장주 ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS track_a_buy_picks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pick_date TEXT NOT NULL,
+                pick_rank INTEGER NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                signals_json TEXT,
+                buy_score INTEGER DEFAULT 0,
+                reason TEXT,
+                risk TEXT,
+                related_themes_json TEXT,
+                theme_lifespan TEXT,
+                entry_price REAL DEFAULT 0,
+                exit_price REAL DEFAULT 0,
+                current_price REAL DEFAULT 0,
+                holding_days INTEGER DEFAULT 0,
+                target_days INTEGER DEFAULT 5,
+                target_return_pct REAL DEFAULT 15.0,
+                peak_return REAL,
+                peak_date TEXT,
+                final_return REAL,
+                status TEXT DEFAULT 'PENDING',
+                result TEXT,
+                entry_date TEXT,
+                exit_date TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(pick_date, stock_code)
+            );
+        `);
+
+        // ═══ Track C: 눌림목 ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS track_c_buy_picks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pick_date TEXT NOT NULL,
+                pick_rank INTEGER NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                signals_json TEXT,
+                buy_score INTEGER DEFAULT 0,
+                reason TEXT,
+                risk TEXT,
+                related_themes_json TEXT,
+                theme_lifespan TEXT,
+                entry_price REAL DEFAULT 0,
+                exit_price REAL DEFAULT 0,
+                current_price REAL DEFAULT 0,
+                holding_days INTEGER DEFAULT 0,
+                target_days INTEGER DEFAULT 5,
+                target_return_pct REAL DEFAULT 15.0,
+                peak_return REAL,
+                peak_date TEXT,
+                final_return REAL,
+                status TEXT DEFAULT 'PENDING',
+                result TEXT,
+                entry_date TEXT,
+                exit_date TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(pick_date, stock_code)
+            );
+        `);
+
+        // ═══ Track D: 당일 급등주 종가베팅 ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS track_d_buy_picks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pick_date TEXT NOT NULL,
+                pick_rank INTEGER NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                signals_json TEXT,
+                buy_score INTEGER DEFAULT 0,
+                reason TEXT,
+                risk TEXT,
+                related_themes_json TEXT,
+                theme_lifespan TEXT,
+                entry_price REAL DEFAULT 0,
+                exit_price REAL DEFAULT 0,
+                current_price REAL DEFAULT 0,
+                holding_days INTEGER DEFAULT 0,
+                target_days INTEGER DEFAULT 5,
+                target_return_pct REAL DEFAULT 15.0,
+                peak_return REAL,
+                peak_date TEXT,
+                final_return REAL,
+                status TEXT DEFAULT 'PENDING',
+                result TEXT,
+                entry_date TEXT,
+                exit_date TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(pick_date, stock_code)
+            );
+        `);
+
+        // ═══ Track B: 종목별 Gemma 4 리서치 리포트 (Phase 3 분석 결과 + 로데이터) ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS stock_research_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                agent_source TEXT NOT NULL DEFAULT 'TRACK_B_GEMMA',
+                market_theme_link TEXT,
+                theme_durability TEXT,
+                catalyst_summary TEXT,
+                risk_factors TEXT,
+                upside_probability TEXT,
+                buy_score INTEGER DEFAULT 0,
+                preliminary_decision TEXT,
+                reasoning TEXT,
+                injected_context_json TEXT,
+                system_prompt TEXT,
+                raw_ai_response TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(date, stock_code, agent_source)
+            );
+        `);
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_stock_research_date ON stock_research_reports(date DESC);");
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_stock_research_code ON stock_research_reports(stock_code);");
+
+        // ═══ Mega Theme Ledger (ThemeContextBuilder) ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS mega_theme_ledger (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                mega_theme_name         TEXT NOT NULL UNIQUE,
+                sub_themes_json         TEXT,
+                core_narrative          TEXT,
+                catalyst_type           TEXT DEFAULT 'EVENT',
+                first_seen_date         TEXT,
+                last_seen_date          TEXT,
+                alive_days              INTEGER DEFAULT 1,
+                peak_combined_power     REAL DEFAULT 0,
+                current_combined_power  REAL DEFAULT 0,
+                current_top_rank        INTEGER DEFAULT 999,
+                ranking_score           INTEGER DEFAULT 0,
+                entry_timing            TEXT DEFAULT 'WATCH',
+                selected_stocks_json    TEXT DEFAULT '[]',
+                status                  TEXT DEFAULT 'NEW',
+                daily_log_json          TEXT DEFAULT '[]',
+                updated_at              TEXT
+            );
+        `);
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_mega_theme_status ON mega_theme_ledger(status);");
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_mega_theme_score  ON mega_theme_ledger(ranking_score DESC);");
     }
+
 
 
     private ensureV1Strategy() {
@@ -2130,7 +2294,15 @@ export class DatabaseService {
                 END
         `);
         stmt.run({
-            ...item,
+            stock_code: item.stock_code,
+            stock_name: item.stock_name,
+            status: item.status || 'WATCHLIST',
+            strategy: item.strategy || 'SWING',
+            conviction_score: item.conviction_score || 50,
+            theme: item.theme || null,
+            entry_date: item.entry_date || null,
+            last_signal: item.last_signal || null,
+            last_signal_reason: item.last_signal_reason || null,
             analysts_json: typeof item.analysts_json === 'string' ? item.analysts_json : JSON.stringify(item.analysts_json || []),
             created_at: item.created_at || this.getKstTimestamp(),
             updated_at: this.getKstTimestamp(),
@@ -2140,7 +2312,7 @@ export class DatabaseService {
             lifespan_days: safeLifespanDays,
             entry_price: safeEntryPrice,
             entry_price_at: safeEntryPrice > 0 ? (item.entry_price_at || this.getKstTimestamp()) : null,
-            was_held: isHeldStatus ? 1 : 0  // INSERT 신규 등록 시 초기값
+            was_held: isHeldStatus ? 1 : (item.was_held || 0)
         });
 
         // [추가] 관심종목 및 매수포지션 캡(Quota) 적용
@@ -2152,7 +2324,7 @@ export class DatabaseService {
             const aiSettings: any = store.get('ai_settings') || {};
             const limits = aiSettings.portfolioLimits || {
                 buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
-                watchlist: { MOMENTUM: 3, PULLBACK: 3, SWING: 6, VALUE: 3 }
+                watchlist: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 }
             };
 
             const strategies = ['MOMENTUM', 'PULLBACK', 'SWING', 'VALUE'];
@@ -2742,20 +2914,31 @@ export class DatabaseService {
         const prevDate = dates.length > 1 ? dates[1].date : null;
         
         // 2) Load history data
-        const historyData = this.db.prepare(`
+        const historyDataRaw = this.db.prepare(`
             SELECT * FROM naver_market_flow 
             WHERE type = ? AND date IN (${dates.map(()=>'?').join(',')})
             ORDER BY date DESC, rank_num ASC
         `).all(type, ...dates.map(d => d.date)) as any[];
 
-        // 3) Calculate current vs prev
-        const latestItems = historyData.filter(d => d.date === latestDate);
-        const prevItems = prevDate ? historyData.filter(d => d.date === prevDate) : [];
-
-        // Load theme intelligence for the latest date
+        // Load theme intelligence for ALL fetched dates
         const intelligences = this.db.prepare(`
-            SELECT * FROM theme_intelligence WHERE date = ? AND type = ?
-        `).all(latestDate, type) as any[];
+            SELECT * FROM theme_intelligence 
+            WHERE type = ? AND date IN (${dates.map(()=>'?').join(',')})
+        `).all(type, ...dates.map(d => d.date)) as any[];
+
+        const historyData = historyDataRaw.map((item: any) => {
+            const aiData = intelligences.find(ai => ai.date === item.date && ai.name === item.name);
+            return {
+                ...item,
+                reason: aiData ? aiData.reason : null,
+                lifespan_type: aiData ? aiData.lifespan_type : null,
+                lifespan_reasoning: aiData ? aiData.lifespan_reasoning : null
+            };
+        });
+
+        // 3) Calculate current vs prev
+        const latestItems = historyData.filter((d: any) => d.date === latestDate);
+        const prevItems = prevDate ? historyData.filter((d: any) => d.date === prevDate) : [];
 
         // Prepare statement for fetching top stocks
         const getAlphaStocks = this.db.prepare(`
@@ -2764,16 +2947,14 @@ export class DatabaseService {
             ORDER BY change_rate DESC
         `);
 
-        const currentWithChange = latestItems.map(item => {
-            const prevItem = prevItems.find(p => p.name === item.name);
+        const currentWithChange = latestItems.map((item: any) => {
+            const prevItem = prevItems.find((p: any) => p.name === item.name);
             let change = 'NEW';
             let changeNum = 0;
             if (prevItem) {
                 changeNum = prevItem.rank_num - item.rank_num; // positive means went up
                 change = changeNum > 0 ? `▲${changeNum}` : changeNum < 0 ? `▼${Math.abs(changeNum)}` : '-';
             }
-            
-            const aiData = intelligences.find(ai => ai.name === item.name);
             
             // Fetch leading stocks from DB
             const alphaStocks = getAlphaStocks.all(item.name, latestDate) as {stock_name: string, stock_code: string}[];
@@ -2789,9 +2970,6 @@ export class DatabaseService {
                 ...item,
                 changeStr: change,
                 changeNum,
-                reason: aiData ? aiData.reason : null,
-                lifespan_type: aiData ? aiData.lifespan_type : null,
-                lifespan_reasoning: aiData ? aiData.lifespan_reasoning : null,
                 top_stocks: alphaStocks,
                 price_index_history: priceIndexHistory
             };
@@ -2851,10 +3029,82 @@ export class DatabaseService {
         return this.db.prepare('SELECT * FROM theme_intelligence WHERE date = ?').all(date) as any[]
     }
 
-    public upsertStockThemeTags(tags: { stock_code: string, stock_name: string, tag_name: string, is_auto_tagged: number, change_rate?: number, added_date: string }[]) {
+    // ─── Mega Theme Ledger ──────────────────────────────────────────────────
+
+    public getMegaThemeLedger(): any[] {
+        return this.db.prepare(`
+            SELECT * FROM mega_theme_ledger
+            ORDER BY
+                CASE status
+                    WHEN 'DOMINANT' THEN 0
+                    WHEN 'REVIVAL'  THEN 1
+                    WHEN 'STRONG'   THEN 2
+                    WHEN 'NEW'      THEN 3
+                    WHEN 'FADING'   THEN 4
+                    WHEN 'DORMANT'  THEN 5
+                    ELSE 6
+                END ASC,
+                ranking_score DESC
+        `).all() as any[];
+    }
+
+
+    public getMegaThemeByName(name: string): any | null {
+        return this.db.prepare('SELECT * FROM mega_theme_ledger WHERE mega_theme_name = ?').get(name) as any | null;
+    }
+
+    public upsertMegaThemeLedger(row: {
+        mega_theme_name: string;
+        sub_themes_json: string;
+        core_narrative: string;
+        catalyst_type: string;
+        first_seen_date: string;
+        last_seen_date: string;
+        alive_days: number;
+        peak_combined_power: number;
+        current_combined_power: number;
+        current_top_rank: number;
+        ranking_score: number;
+        entry_timing: string;
+        selected_stocks_json: string;
+        status: string;
+        daily_log_json: string;
+        updated_at: string;
+    }) {
+        this.db.prepare(`
+            INSERT INTO mega_theme_ledger (
+                mega_theme_name, sub_themes_json, core_narrative, catalyst_type,
+                first_seen_date, last_seen_date, alive_days,
+                peak_combined_power, current_combined_power, current_top_rank,
+                ranking_score, entry_timing, selected_stocks_json, status, daily_log_json, updated_at
+            ) VALUES (
+                @mega_theme_name, @sub_themes_json, @core_narrative, @catalyst_type,
+                @first_seen_date, @last_seen_date, @alive_days,
+                @peak_combined_power, @current_combined_power, @current_top_rank,
+                @ranking_score, @entry_timing, @selected_stocks_json, @status, @daily_log_json, @updated_at
+            )
+            ON CONFLICT(mega_theme_name) DO UPDATE SET
+                sub_themes_json        = excluded.sub_themes_json,
+                core_narrative         = excluded.core_narrative,
+                catalyst_type          = excluded.catalyst_type,
+                last_seen_date         = excluded.last_seen_date,
+                alive_days             = excluded.alive_days,
+                peak_combined_power    = MAX(mega_theme_ledger.peak_combined_power, excluded.peak_combined_power),
+                current_combined_power = excluded.current_combined_power,
+                current_top_rank       = excluded.current_top_rank,
+                ranking_score          = excluded.ranking_score,
+                entry_timing           = excluded.entry_timing,
+                selected_stocks_json   = excluded.selected_stocks_json,
+                status                 = excluded.status,
+                daily_log_json         = excluded.daily_log_json,
+                updated_at             = excluded.updated_at
+        `).run(row);
+    }
+
+    public upsertStockThemeTags(tags: { stock_code: string, stock_name: string, tag_name: string, tag_type?: string, is_auto_tagged: number, change_rate?: number, added_date: string }[]) {
         const stmt = this.db.prepare(`
-            INSERT OR REPLACE INTO stock_theme_tags (stock_code, stock_name, tag_name, is_auto_tagged, change_rate, added_date)
-            VALUES (@stock_code, @stock_name, @tag_name, @is_auto_tagged, @change_rate, @added_date)
+            INSERT OR REPLACE INTO stock_theme_tags (stock_code, stock_name, tag_name, tag_type, is_auto_tagged, change_rate, added_date)
+            VALUES (@stock_code, @stock_name, @tag_name, IFNULL(@tag_type, 'THEME'), @is_auto_tagged, @change_rate, @added_date)
         `)
         const insertMany = this.db.transaction((items) => {
             for (const item of items) {
@@ -2865,7 +3115,7 @@ export class DatabaseService {
     }
 
     public getStockThemeTags(stockCode: string) {
-        return this.db.prepare('SELECT * FROM stock_theme_tags WHERE stock_code = ?').all(stockCode) as any[]
+        return this.db.prepare('SELECT * FROM stock_theme_tags WHERE stock_code = ? ORDER BY added_date DESC').all(stockCode) as any[]
     }
 
     // PL-NewsFlow: 뉴스 저장
@@ -2975,6 +3225,103 @@ export class DatabaseService {
             systemInstruction: r.system_instruction,
             result: r.result
         }));
+    }
+
+    // ═══ Track B: 종목별 Gemma 리서치 리포트 ═══
+
+    public saveStockResearchReport(report: {
+        date: string;
+        stock_code: string;
+        stock_name: string;
+        agent_source?: string;
+        market_theme_link?: string;
+        theme_durability?: string;
+        catalyst_summary?: string;
+        risk_factors?: string;
+        upside_probability?: string;
+        buy_score?: number;
+        preliminary_decision?: string;
+        reasoning?: string;
+        injected_context_json?: string;
+        system_prompt?: string;
+        raw_ai_response?: string;
+    }) {
+        try {
+            this.db.prepare(`
+                INSERT OR REPLACE INTO stock_research_reports (
+                    date, stock_code, stock_name, agent_source,
+                    market_theme_link, theme_durability, catalyst_summary,
+                    risk_factors, upside_probability, buy_score,
+                    preliminary_decision, reasoning,
+                    injected_context_json, system_prompt, raw_ai_response,
+                    created_at
+                ) VALUES (
+                    @date, @stock_code, @stock_name, @agent_source,
+                    @market_theme_link, @theme_durability, @catalyst_summary,
+                    @risk_factors, @upside_probability, @buy_score,
+                    @preliminary_decision, @reasoning,
+                    @injected_context_json, @system_prompt, @raw_ai_response,
+                    @created_at
+                )
+            `).run({
+                date: report.date,
+                stock_code: report.stock_code,
+                stock_name: report.stock_name,
+                agent_source: report.agent_source ?? 'TRACK_B_GEMMA',
+                market_theme_link: report.market_theme_link ?? null,
+                theme_durability: report.theme_durability ?? null,
+                catalyst_summary: report.catalyst_summary ?? null,
+                risk_factors: report.risk_factors ?? null,
+                upside_probability: report.upside_probability ?? null,
+                buy_score: report.buy_score ?? 0,
+                preliminary_decision: report.preliminary_decision ?? null,
+                reasoning: report.reasoning ?? null,
+                injected_context_json: report.injected_context_json ?? null,
+                system_prompt: report.system_prompt ?? null,
+                raw_ai_response: report.raw_ai_response ?? null,
+                created_at: new Date().toISOString(),
+            });
+        } catch (e: any) {
+            console.error('[DB] saveStockResearchReport Error:', e.message);
+        }
+    }
+
+    public getStockResearchReports(stock_code: string, limit = 30): any[] {
+        try {
+            return this.db.prepare(`
+                SELECT * FROM stock_research_reports
+                WHERE stock_code = ?
+                ORDER BY date DESC, created_at DESC
+                LIMIT ?
+            `).all(stock_code, limit) as any[];
+        } catch (e: any) {
+            console.error('[DB] getStockResearchReports Error:', e.message);
+            return [];
+        }
+    }
+
+    public getStockResearchReportsByDate(date: string): any[] {
+        try {
+            return this.db.prepare(`
+                SELECT * FROM stock_research_reports
+                WHERE date = ?
+                ORDER BY buy_score DESC
+            `).all(date) as any[];
+        } catch (e: any) {
+            return [];
+        }
+    }
+
+    public deleteTrackBDataByDate(date: string): void {
+        try {
+            this.db.prepare('DELETE FROM track_a_buy_picks WHERE pick_date = ?').run(date);
+            this.db.prepare('DELETE FROM track_b_buy_picks WHERE pick_date = ?').run(date);
+            this.db.prepare('DELETE FROM track_c_buy_picks WHERE pick_date = ?').run(date);
+            this.db.prepare('DELETE FROM track_d_buy_picks WHERE pick_date = ?').run(date);
+            this.db.prepare('DELETE FROM stock_research_reports WHERE date = ?').run(date);
+        } catch (e: any) {
+            console.error('[DB] deleteTrackBDataByDate Error:', e.message);
+        }
     }
 
     // ────────────────────────────────────────────────────────────────

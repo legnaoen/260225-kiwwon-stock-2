@@ -16,13 +16,8 @@ interface StockAiReportProps {
 export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvents }: StockAiReportProps) {
     const [reports, setReports] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
-    const [tagInput, setTagInput] = useState('')
-    const [showTagInput, setShowTagInput] = useState(false)
 
     const numericCode = symbol?.replace(/[^0-9]/g, '') || symbol || ''
-    const { tags, addTag, removeTag, getAllTags } = useTagStore()
-    const stockTags = useMemo(() => tags[numericCode] || [], [tags, numericCode])
-    const allExistingTags = useMemo(() => getAllTags(), [tags])
 
     useEffect(() => {
         const fetchReports = async () => {
@@ -31,15 +26,7 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
                 const result = await (window as any).electronAPI.getStockAnalysis(symbol)
                 if (result.success && result.data) {
                     setReports(result.data)
-                    // AI가 생성한 태그 동기화 (가장 최신 리포트 기준)
-                    if (result.data.length > 0 && result.data[0].tags) {
-                        try {
-                            const aiTags: string[] = typeof result.data[0].tags === 'string'
-                                ? JSON.parse(result.data[0].tags)
-                                : result.data[0].tags
-                            aiTags.forEach(t => addTag(numericCode, t))
-                        } catch {}
-                    }
+                    setReports(result.data)
                 } else {
                     setReports([])
                 }
@@ -52,12 +39,7 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
         fetchReports()
     }, [symbol, refreshTrigger])
 
-    const handleAddTag = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter' && tagInput.trim()) {
-            tagInput.split(',').map(t => t.trim()).filter(Boolean).forEach(t => addTag(numericCode, t))
-            setTagInput('')
-        }
-    }
+
 
     const [filterType, setFilterType] = useState<'ALL'|'AI_REPORT'|'PM_EVENT'>('ALL')
 
@@ -110,21 +92,8 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
             <div className="relative">
                 <div className="flex flex-wrap items-center gap-4 mb-2">
                     {!hideTitle && <h3 className="text-3xl font-black tracking-tighter text-foreground">{name}</h3>}
-                    <div className="flex-1 min-w-[200px]">
-                        <TagPanel
-                            stockTags={stockTags}
-                            allExistingTags={allExistingTags}
-                            tagInput={tagInput}
-                            setTagInput={setTagInput}
-                            showInput={showTagInput}
-                            setShowInput={setShowTagInput}
-                            onAddTag={handleAddTag}
-                            onRemoveTag={(t) => removeTag(numericCode, t)}
-                            onQuickAdd={(t) => addTag(numericCode, t)}
-                        />
-                    </div>
                 </div>
-                <div className="h-[1px] w-full bg-border/40 mb-8" />
+                {!hideTitle && <div className="h-[1px] w-full bg-border/40 mb-8" />}
             </div>
 
             {/* 타임라인 필터 */}
@@ -133,7 +102,7 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
                     onClick={() => setFilterType('ALL')}
                     className={cn("px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border", filterType === 'ALL' ? "bg-primary/10 text-primary border-primary/30" : "bg-transparent text-muted-foreground border-transparent hover:bg-muted/50")}
                 >
-                    전체 보기
+                    전체 타임라인
                 </button>
                 <button 
                     onClick={() => setFilterType('PM_EVENT')}
@@ -324,94 +293,4 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
     )
 }
 
-// ─── 태그 패널 서브 컴포넌트 ────────────────────────────────────────────────────
-interface TagPanelProps {
-    stockTags: string[]
-    allExistingTags: string[]
-    tagInput: string
-    setTagInput: (v: string) => void
-    showInput: boolean
-    setShowInput: (v: boolean) => void
-    onAddTag: (e: React.KeyboardEvent<HTMLInputElement>) => void
-    onRemoveTag: (tag: string) => void
-    onQuickAdd: (tag: string) => void
-}
 
-function TagPanel({ stockTags, allExistingTags, tagInput, setTagInput, showInput, setShowInput, onAddTag, onRemoveTag, onQuickAdd }: TagPanelProps) {
-    const suggestedTags = allExistingTags.filter(t => !stockTags.includes(t) && t.toLowerCase().includes(tagInput.toLowerCase())).slice(0, 6)
-
-    return (
-        <div className="flex flex-wrap items-center gap-1.5 relative">
-            {stockTags.map(tag => (
-                <span
-                    key={tag}
-                    className="flex items-center gap-1 bg-muted/60 text-muted-foreground border border-border/40 px-2 py-0.5 rounded-md text-[10px] font-bold transition-all hover:bg-muted"
-                >
-                    #{tag}
-                    <button
-                        onClick={() => onRemoveTag(tag)}
-                        className="opacity-40 hover:opacity-100 hover:text-destructive transition-colors ml-0.5"
-                    >
-                        <X size={8} />
-                    </button>
-                </span>
-            ))}
-            
-            <button 
-                onClick={() => setShowInput(!showInput)}
-                className={cn(
-                    "w-5 h-5 flex items-center justify-center rounded-md border transition-all hover:bg-primary/10 hover:border-primary/50 text-muted-foreground hover:text-primary",
-                    showInput ? "bg-primary border-primary text-white" : "border-border/60"
-                )}
-            >
-                <Plus size={10} />
-            </button>
-
-            {/* Popover 입럭 폼 */}
-            {showInput && (
-                <div className="absolute top-7 left-0 z-[100] w-64 bg-background border border-border rounded-xl shadow-2xl p-4 animate-in fade-in zoom-in-95 duration-200">
-                    <div className="flex items-center gap-2 mb-3">
-                        <Tag size={12} className="text-primary" />
-                        <span className="text-[10px] font-bold">태그 추가</span>
-                        <button onClick={() => setShowInput(false)} className="ml-auto opacity-40 hover:opacity-100"><X size={12} /></button>
-                    </div>
-                    
-                    <input
-                        type="text"
-                        autoFocus
-                        placeholder="태그 입력 (Enter)"
-                        className="w-full px-3 py-1.5 bg-muted/30 border border-border rounded-lg text-xs outline-none focus:border-primary transition-all mb-3 text-foreground"
-                        value={tagInput}
-                        onChange={e => setTagInput(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                onAddTag(e);
-                                setShowInput(false);
-                            }
-                        }}
-                    />
-
-                    {suggestedTags.length > 0 && (
-                        <div className="space-y-1.5">
-                            <span className="text-[9px] font-bold text-muted-foreground uppercase opacity-50">자주 쓰는 테그</span>
-                            <div className="flex flex-wrap gap-1">
-                                {suggestedTags.map(t => (
-                                    <button
-                                        key={t}
-                                        onClick={() => {
-                                            onQuickAdd(t);
-                                            setShowInput(false);
-                                        }}
-                                        className="text-[10px] px-2 py-0.5 rounded bg-muted/50 border border-border/40 hover:bg-primary/10 hover:border-primary/30 transition-all text-muted-foreground hover:text-primary"
-                                    >
-                                        {t}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-    )
-}

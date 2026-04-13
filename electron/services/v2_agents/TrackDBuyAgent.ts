@@ -1,5 +1,5 @@
 /**
- * TrackBBuyAgent
+ * TrackDBuyAgent
  * ─────────────────────────────────────────────────────────────────
  * [역할] 모의매매 AI 매수 후보 선정 에이전트 (4단계 파이프라인)
  *
@@ -13,7 +13,7 @@
  *   Phase 3: runStockResearch()    → Gemma 4 종목별 심층 분석 + 1차 BUY/WATCH 판단
  *                                    → stock_research_reports 저장 (로데이터 3종 포함)
  *   Phase 4: runAiAnalysis()       → Gemini 1회, 24개 팩트시트 기반 포트폴리오 최종 선발
- *   → track_b_buy_picks 저장 (PENDING 상태)
+ *   → track_d_buy_picks 저장 (PENDING 상태)
  *   → 15:30 장 마감 후 entry_price = 당일 종가로 자동 업데이트 (ACTIVE)
  *
  * [필터 규칙]
@@ -34,9 +34,9 @@ import { DEFAULT_PEAKOUT_SETTINGS } from '../v2_pipeline/MarketLeaderDiscoverySe
 import { getKstDate } from '../../utils/DateUtils';
 
 // ── 상수 ───────────────────────────────────────────────────────
-const BUY_CATEGORIES = ['EMERGING_STAR'];
+const BUY_CATEGORIES = ['INTRADAY_SURGE'];
 const TARGET_PICKS = 5;
-const TARGET_DAYS = 20;
+const TARGET_DAYS = 5;
 const TARGET_RETURN_PCT = 15.0;
 
 // 상한가 임계값 (코스피/코스닥 공통 30%)
@@ -86,8 +86,8 @@ interface GemmaStockReport {
 }
 
 // ──────────────────────────────────────────────────────────────
-export class TrackBBuyAgent {
-    private static instance: TrackBBuyAgent;
+export class TrackDBuyAgent {
+    private static instance: TrackDBuyAgent;
     private db: DatabaseService;
     private isRunning = false;
     private naverCollector = new NaverSearchCollector();
@@ -96,11 +96,11 @@ export class TrackBBuyAgent {
         this.db = DatabaseService.getInstance();
     }
 
-    public static getInstance(): TrackBBuyAgent {
-        if (!TrackBBuyAgent.instance) {
-            TrackBBuyAgent.instance = new TrackBBuyAgent();
+    public static getInstance(): TrackDBuyAgent {
+        if (!TrackDBuyAgent.instance) {
+            TrackDBuyAgent.instance = new TrackDBuyAgent();
         }
-        return TrackBBuyAgent.instance;
+        return TrackDBuyAgent.instance;
     }
 
     // ─────────────────────────────────────────────────────────
@@ -108,59 +108,68 @@ export class TrackBBuyAgent {
     // ─────────────────────────────────────────────────────────
     public async run(pickDate?: string): Promise<{ success: boolean; saved: number; skipped: number; error?: string }> {
         if (this.isRunning) {
-            console.log('[TrackBBuyAgent] 이미 실행 중. 중복 실행 방지.');
+            console.log('[TrackDBuyAgent] 이미 실행 중. 중복 실행 방지.');
             return { success: false, saved: 0, skipped: 0, error: 'Already running' };
         }
 
         this.isRunning = true;
         const today = pickDate || getKstDate();
-        console.log(`[TrackBBuyAgent] ▶ 4단계 모의매매 AI 파이프라인 시작: ${today}`);
+        console.log(`[TrackDBuyAgent] ▶ 4단계 모의매매 AI 파이프라인 시작: ${today}`);
 
         try {
             // ── Phase 1: 후보 선별 ──────────────────────────────
             const profile = CrossPeriodAnalyzer.getInstance().getCrossPeriodProfile(80, DEFAULT_PEAKOUT_SETTINGS);
             if (!profile.success || profile.candidates.length === 0) {
-                console.log('[TrackBBuyAgent] CrossPeriod 후보 없음. 종료.');
+                console.log('[TrackDBuyAgent] CrossPeriod 후보 없음. 종료.');
                 return { success: false, saved: 0, skipped: 0, error: 'No cross-period candidates' };
             }
 
             const categoryFiltered = profile.candidates.filter(c => BUY_CATEGORIES.includes(c.category));
-            console.log(`[TrackBBuyAgent] Phase1 카테고리 필터 후: ${categoryFiltered.length}개`);
+            console.log(`[TrackDBuyAgent] Phase1 카테고리 필터 후: ${categoryFiltered.length}개`);
 
             const todayOhlcv = this.loadTodayOhlcv(today);
             const { filtered: buyableList, skipped } = this.filterUpperLimit(categoryFiltered, todayOhlcv);
-            console.log(`[TrackBBuyAgent] Phase1 상한가 제외 후: ${buyableList.length}개 (제외: ${skipped.length}개)`);
+            console.log(`[TrackDBuyAgent] Phase1 상한가 제외 후: ${buyableList.length}개 (제외: ${skipped.length}개)`);
 
-            if (buyableList.length === 0) {
+            // ── Phase 1.5: 폭증 방지 (상승률 기준 Top 15 캡 적용) ──────────────
+            buyableList.sort((a, b) => {
+                const aPct = todayOhlcv.get(a.stockCode)?.change_rate || 0;
+                const bPct = todayOhlcv.get(b.stockCode)?.change_rate || 0;
+                return bPct - aPct;
+            });
+            const cappedBuyableList = buyableList.slice(0, 15);
+            console.log(`[TrackDBuyAgent] Phase1.5 상승률 Top 15 캡 적용 후: ${cappedBuyableList.length}개`);
+
+            if (cappedBuyableList.length === 0) {
                 return { success: false, saved: 0, skipped: skipped.length, error: 'All candidates filtered (upper limit)' };
             }
 
             // ── Phase 2: 뉴스 온디맨드 리서치 ─────────────────
-            console.log(`[TrackBBuyAgent] Phase2 뉴스 리서치 시작...`);
-            await this.enrichCandidateNews(buyableList, today);
+            console.log(`[TrackDBuyAgent] Phase2 뉴스 리서치 시작...`);
+            await this.enrichCandidateNews(cappedBuyableList, today);
 
             // ── Phase 3: Gemma 4 종목별 심층 분석 ─────────────
-            console.log(`[TrackBBuyAgent] Phase3 Gemma4 종목별 분석 시작 (${buyableList.length}개)...`);
-            const gemmaReports = await this.runStockResearch(buyableList, today);
-            console.log(`[TrackBBuyAgent] Phase3 완료: ${gemmaReports.length}개 분석됨`);
+            console.log(`[TrackDBuyAgent] Phase3 Gemma4 종목별 분석 시작 (${cappedBuyableList.length}개)...`);
+            const gemmaReports = await this.runStockResearch(cappedBuyableList, today);
+            console.log(`[TrackDBuyAgent] Phase3 완료: ${gemmaReports.length}개 분석됨`);
 
             // ── Phase 4: Gemini 최종 포트폴리오 선발 ──────────
-            console.log(`[TrackBBuyAgent] Phase4 Gemini 최종 선발 시작...`);
-            const aiPicks = await this.runAiAnalysis(buyableList, gemmaReports, today);
+            console.log(`[TrackDBuyAgent] Phase4 Gemini 최종 선발 시작...`);
+            const aiPicks = await this.runAiAnalysis(cappedBuyableList, gemmaReports, today);
             if (!aiPicks || aiPicks.length === 0) {
-                console.log('[TrackBBuyAgent] AI 분석 결과 없음. 종료.');
+                console.log('[TrackDBuyAgent] AI 분석 결과 없음. 종료.');
                 return { success: false, saved: 0, skipped: skipped.length, error: 'AI analysis returned no picks' };
             }
 
             // ── 저장 ──────────────────────────────────────────
             const buyPicks = aiPicks.filter(p => p.decision === 'BUY').slice(0, TARGET_PICKS);
-            const saved = this.savePicks(buyPicks, buyableList, gemmaReports, today);
+            const saved = this.savePicks(buyPicks, cappedBuyableList, gemmaReports, today);
 
-            console.log(`[TrackBBuyAgent] ✅ 파이프라인 완료: ${saved}개 저장`);
+            console.log(`[TrackDBuyAgent] ✅ 파이프라인 완료: ${saved}개 저장`);
             return { success: true, saved, skipped: skipped.length };
 
         } catch (err: any) {
-            console.error('[TrackBBuyAgent] 에러:', err);
+            console.error('[TrackDBuyAgent] 에러:', err);
             return { success: false, saved: 0, skipped: 0, error: err.message };
         } finally {
             this.isRunning = false;
@@ -175,7 +184,7 @@ export class TrackBBuyAgent {
         const rawDb = (this.db as any).db;
 
         const pendingPicks = rawDb.prepare(`
-            SELECT id, stock_code FROM track_b_buy_picks
+            SELECT id, stock_code FROM track_d_buy_picks
             WHERE pick_date = ? AND status = 'PENDING'
         `).all(today) as { id: number; stock_code: string }[];
 
@@ -191,7 +200,7 @@ export class TrackBBuyAgent {
             if (!ohlcv || !ohlcv.close) continue;
 
             rawDb.prepare(`
-                UPDATE track_b_buy_picks
+                UPDATE track_d_buy_picks
                 SET entry_price = ?,
                     current_price = ?,
                     status = 'ACTIVE',
@@ -203,7 +212,7 @@ export class TrackBBuyAgent {
             updated++;
         }
 
-        console.log(`[TrackBBuyAgent] entry_price 업데이트: ${updated}/${pendingPicks.length}개`);
+        console.log(`[TrackDBuyAgent] entry_price 업데이트: ${updated}/${pendingPicks.length}개`);
         return updated;
     }
 
@@ -215,7 +224,7 @@ export class TrackBBuyAgent {
         const rawDb = (this.db as any).db;
 
         const activePicks = rawDb.prepare(`
-            SELECT * FROM track_b_buy_picks WHERE status = 'ACTIVE'
+            SELECT * FROM track_d_buy_picks WHERE status = 'ACTIVE'
         `).all() as any[];
 
         let updated = 0;
@@ -247,7 +256,7 @@ export class TrackBBuyAgent {
                     : currentReturn >= 0 ? 'PARTIAL' : 'LOSS';
 
                 rawDb.prepare(`
-                    UPDATE track_b_buy_picks
+                    UPDATE track_d_buy_picks
                     SET current_price = ?,
                         exit_price = ?,
                         holding_days = ?,
@@ -267,7 +276,7 @@ export class TrackBBuyAgent {
                 closed++;
             } else {
                 rawDb.prepare(`
-                    UPDATE track_b_buy_picks
+                    UPDATE track_d_buy_picks
                     SET current_price = ?,
                         holding_days = ?,
                         peak_return = ?,
@@ -282,7 +291,7 @@ export class TrackBBuyAgent {
             }
         }
 
-        console.log(`[TrackBBuyAgent] 성과 채점: 갱신 ${updated}개, 청산 ${closed}개`);
+        console.log(`[TrackDBuyAgent] 성과 채점: 갱신 ${updated}개, 청산 ${closed}개`);
         return { updated, closed };
     }
 
@@ -343,7 +352,7 @@ export class TrackBBuyAgent {
                     ohlcv.high === ohlcv.close;
 
                 if (isUpperLimit) {
-                    console.log(`[TrackBBuyAgent] 상한가 제외: ${c.stockName}(${c.stockCode}) +${ohlcv.change_rate.toFixed(1)}%`);
+                    console.log(`[TrackDBuyAgent] 상한가 제외: ${c.stockName}(${c.stockCode}) +${ohlcv.change_rate.toFixed(1)}%`);
                     skipped.push(c);
                     continue;
                 }
@@ -412,17 +421,17 @@ export class TrackBBuyAgent {
                 }
 
                 fetched++;
-                console.log(`[TrackBBuyAgent] Phase2 뉴스 수집: ${c.stockName} → ${articles.length}건`);
+                console.log(`[TrackDBuyAgent] Phase2 뉴스 수집: ${c.stockName} → ${articles.length}건`);
 
                 // API Rate Limit 방어 (200ms 딜레이)
                 await new Promise(r => setTimeout(r, 200));
 
             } catch (e: any) {
-                console.warn(`[TrackBBuyAgent] Phase2 뉴스 수집 실패 (${c.stockName}): ${e.message}`);
+                console.warn(`[TrackDBuyAgent] Phase2 뉴스 수집 실패 (${c.stockName}): ${e.message}`);
             }
         }
 
-        console.log(`[TrackBBuyAgent] Phase2 완료: ${fetched}개 종목 신규 뉴스 수집`);
+        console.log(`[TrackDBuyAgent] Phase2 완료: ${fetched}개 종목 신규 뉴스 수집`);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -440,7 +449,7 @@ export class TrackBBuyAgent {
         // 1. 가이드라인 로드
         let guidelineContent = '';
         try {
-            const guidelinePath = path.join(process.cwd(), 'guidelines', 'track_b_phase1.md');
+            const guidelinePath = path.join(process.cwd(), 'guidelines', 'track_d_phase1.md');
             if (fs.existsSync(guidelinePath)) {
                 guidelineContent = fs.readFileSync(guidelinePath, 'utf-8');
             }
@@ -506,7 +515,7 @@ ${newsSection}
 
 ${marketContext}
 
-위 정보를 바탕으로 이 종목의 20영업일(약 한 달) 내 +15% 달성 가능성을 분석하십시오.`;
+위 정보를 바탕으로 이 종목의 5영업일 내 +15% 달성 가능성을 분석하십시오.`;
 
             try {
                 const rawResponse = await AiExecutionQueue.getInstance().enqueue({
@@ -521,7 +530,7 @@ ${marketContext}
                 // JSON 파싱
                 const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
                 if (!jsonMatch) {
-                    console.warn(`[TrackBBuyAgent] Phase3 JSON 파싱 실패 (${c.stockName})`);
+                    console.warn(`[TrackDBuyAgent] Phase3 JSON 파싱 실패 (${c.stockName})`);
                     // 파싱 실패 시 기본 리포트 생성
                     const fallback: GemmaStockReport = {
                         stock_code: c.stockCode,
@@ -575,10 +584,10 @@ ${marketContext}
                     raw_ai_response: rawResponse,
                 });
 
-                console.log(`[TrackBBuyAgent] Phase3 분석: ${c.stockName} → 점수:${parsed.buy_score} / ${parsed.preliminary_decision}`);
+                console.log(`[TrackDBuyAgent] Phase3 분석: ${c.stockName} → 점수:${parsed.buy_score} / ${parsed.preliminary_decision}`);
 
             } catch (e: any) {
-                console.warn(`[TrackBBuyAgent] Phase3 Gemma 호출 실패 (${c.stockName}): ${e.message}`);
+                console.warn(`[TrackDBuyAgent] Phase3 Gemma 호출 실패 (${c.stockName}): ${e.message}`);
                 // 오류 시 기본 WATCH 처리
                 const fallback: GemmaStockReport = {
                     stock_code: c.stockCode,
@@ -668,9 +677,9 @@ ${marketContext}
             return !r || (r.buy_score >= GEMMA_MIN_SCORE_CUTOFF);
         });
 
-        console.log(`[TrackBBuyAgent] Phase4 대상: ${eligibleCandidates.length}개 (컷오프 ${GEMMA_MIN_SCORE_CUTOFF}점 미만 제외)`);
+        console.log(`[TrackDBuyAgent] Phase4 대상: ${eligibleCandidates.length}개 (컷오프 ${GEMMA_MIN_SCORE_CUTOFF}점 미만 제외)`);
 
-        // 테마 밀집도(Tally) 산출 (Track B: 기존 시장 주도 테마 회피 목적)
+        // 테마 밀집도(Tally) 산출 (Track C: 조정을 받고 있는 다양한 테마 확인 목적)
         const themeTally = new Map<string, number>();
         eligibleCandidates.forEach(c => {
             if (c.relatedThemes && c.relatedThemes.length > 0) {
@@ -681,15 +690,14 @@ ${marketContext}
         });
 
         const sortedThemes = Array.from(themeTally.entries())
-            .filter(([, count]) => count > 1) 
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5); // 기존 대장 테마 상위 5개
+            .filter(([, count]) => count >= 3) // 3개 종목 이상 포진된 핵심 테마만 추려냄
+            .sort((a, b) => b[1] - a[1]);
 
         let themeDensityText = '';
         if (sortedThemes.length > 0) {
-            themeDensityText = `[현재 시장을 장악한 기존 대장주 테마 밀집도 현황]\n` +
-                sortedThemes.map((t, idx) => `${['🥇','🥈','🥉','4️⃣','5️⃣'][idx] || '-'} ${t[0]} (${t[1]}개 종목 포진)`).join('\n') +
-                `\n*주의사항: 위 테마들은 이미 시장을 장악하여 시세가 분출된 '기존 주도 테마'들입니다. 신흥 성장주 발굴 시 가급적 위 테마들에 뒤늦게 속한 후발주(짜투리)는 회피하고, 새로운 모멘텀을 형성하는 신선한 테마의 종목에 가산점을 부여하십시오.*\n\n`;
+            themeDensityText = `[종합 분석 기준 시장 주요 테마 풀(Pool) 현황]\n` +
+                sortedThemes.map((t, idx) => `${idx + 1}위 ${t[0]} (${t[1]}개)`).join(' / ') +
+                `\n\n*참고사항: 위 풀(Pool) 정보는 참고 데이터일 뿐 주된 의사결정 요인이 되어서는 안 됩니다. 눌림목 선발 시 가장 중요한 기준은 '상승을 이끌었던 호재(Catalyst)가 아직 유효하여 재상승 가능성이 높은가'입니다. 주도 테마 정보를 제공하는 이유는 이 시장 주도 테마에 해당할수록 수급이 몰려 재상승할 확률이 통계적으로 높기 때문입니다. 호재의 유효성을 최우선으로, 테마 가중치를 보조로 활용하십시오.*\n\n`;
         }
 
         // 팩트시트 텍스트 조립
@@ -709,7 +717,7 @@ ${marketContext}
         // 2차 가이드라인 로드
         let phase2Guideline = '';
         try {
-            const guidelinePath = path.join(process.cwd(), 'guidelines', 'track_b_phase2.md');
+            const guidelinePath = path.join(process.cwd(), 'guidelines', 'track_d_phase2.md');
             if (fs.existsSync(guidelinePath)) {
                 phase2Guideline = fs.readFileSync(guidelinePath, 'utf-8');
             }
@@ -740,17 +748,17 @@ decision: "BUY" | "WATCH"
 theme_lifespan: "SHORT"(3일 미만) | "MEDIUM"(1~2주) | "LONG"(1달+) | "UNKNOWN"`;
 
         const userPrompt = `[오늘 날짜: ${date}]
-[분석 대상: ${eligibleCandidates.length}개 신흥 성장주 후보 종목]
+[분석 대상: ${eligibleCandidates.length}개 당일 급등주 종가베팅 후보 종목]
 
 ${themeDensityText}${factSheets}
 
 ---
-위 팩트시트를 기반으로 20영업일(약 한 달) 내 +15% 달성 가능성 기준으로
+위 팩트시트를 기반으로 5영업일 내 +15% 달성 가능성 기준으로
 최종 Top ${TARGET_PICKS}개를 BUY로 선정하고, 나머지는 WATCH로 처리하십시오.`;
 
         try {
             const result = await AiExecutionQueue.getInstance().enqueue({
-                agentId: 'TRACK_B_BUY_AGENT',
+                agentId: 'TRACK_D_BUY_AGENT',
                 agentName: '모의매매 매수 선정 AI',
                 triggerType: 'CRON',
                 prompt: userPrompt,
@@ -758,22 +766,22 @@ ${themeDensityText}${factSheets}
             });
 
             if (!result) {
-                console.error('[TrackBBuyAgent] Phase4 AI 응답 없음');
+                console.error('[TrackDBuyAgent] Phase4 AI 응답 없음');
                 return [];
             }
 
             const jsonMatch = result.match(/\[[\s\S]*\]/);
             if (!jsonMatch) {
-                console.error('[TrackBBuyAgent] Phase4 JSON 추출 실패:', result.slice(0, 200));
+                console.error('[TrackDBuyAgent] Phase4 JSON 추출 실패:', result.slice(0, 200));
                 return [];
             }
 
             const picks: AiBuyPick[] = JSON.parse(jsonMatch[0]);
-            console.log(`[TrackBBuyAgent] Phase4 결과: BUY ${picks.filter(p => p.decision === 'BUY').length}개, WATCH ${picks.filter(p => p.decision === 'WATCH').length}개`);
+            console.log(`[TrackDBuyAgent] Phase4 결과: BUY ${picks.filter(p => p.decision === 'BUY').length}개, WATCH ${picks.filter(p => p.decision === 'WATCH').length}개`);
             return picks;
 
         } catch (err: any) {
-            console.error('[TrackBBuyAgent] Phase4 AI 분석 오류:', err.message);
+            console.error('[TrackDBuyAgent] Phase4 AI 분석 오류:', err.message);
             return [];
         }
     }
@@ -795,7 +803,7 @@ ${themeDensityText}${factSheets}
         let saved = 0;
 
         const insertStmt = rawDb.prepare(`
-            INSERT OR IGNORE INTO track_b_buy_picks (
+            INSERT OR IGNORE INTO track_d_buy_picks (
                 pick_date, pick_rank, stock_code, stock_name,
                 category, signals_json, buy_score, reason, risk,
                 related_themes_json, theme_lifespan,
@@ -846,7 +854,7 @@ ${themeDensityText}${factSheets}
                 );
                 if (info.changes > 0) saved++;
             } catch (e: any) {
-                console.error(`[TrackBBuyAgent] 저장 실패 (${pick.stock_code}):`, e.message);
+                console.error(`[TrackDBuyAgent] 저장 실패 (${pick.stock_code}):`, e.message);
             }
         }
 

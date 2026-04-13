@@ -134,6 +134,14 @@ function createWindow() {
         }
     })
 
+    // Forward Mega Theme Builder Progress (단계별 진행 상태)
+    eventBus.on('MEGA_THEME_PROGRESS' as any, (data: { step: string; detail: string }) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('mega-theme:progress', data)
+        }
+    })
+
+
     // Forward YouTube Progress
     eventBus.on(SystemEvent.YOUTUBE_PROGRESS, (data) => {
         if (win && !win.isDestroyed()) {
@@ -443,7 +451,17 @@ ipcMain.handle('maiis:run-portfolio-review', async () => {
     }
 })
 
-// ======================
+// === Tags =========================================================================
+ipcMain.handle('naverflow:get-stock-theme-tags', async (_event, stockCode: string) => {
+    try {
+        return DatabaseService.getInstance().getStockThemeTags(stockCode);
+    } catch (e: any) {
+        console.error('[IPC] get-stock-theme-tags err:', e);
+        return [];
+    }
+})
+
+// === DART 공시 수집 테스트 ==========================================================
 // Phase 2.5: AI Analysts & Portfolio Manager Test Hooks
 // ======================
 ipcMain.handle('ai-analyst:run-momentum', async () => {
@@ -756,14 +774,42 @@ ipcMain.handle('v2:get-sim-trade-picks', async () => {
         const { DatabaseService } = await import('./services/DatabaseService');
         const db = DatabaseService.getInstance().getDb();
         const picks = db.prepare(`
-            SELECT * FROM track_b_buy_picks
-            ORDER BY pick_date DESC, pick_rank ASC
+            SELECT * FROM (
+                SELECT * FROM track_a_buy_picks
+                UNION ALL
+                SELECT * FROM track_b_buy_picks
+                UNION ALL
+                SELECT * FROM track_c_buy_picks
+                UNION ALL
+                SELECT * FROM track_d_buy_picks
+            )
+            ORDER BY pick_date DESC, 
+            CASE category 
+                WHEN 'TRUE_LEADER' THEN 1 
+                WHEN 'INTRADAY_SURGE' THEN 2 
+                WHEN 'EMERGING_STAR' THEN 3 
+                WHEN 'PULLBACK_DIP' THEN 4 
+                ELSE 5 
+            END ASC, 
+            pick_rank ASC
             LIMIT 500
         `).all();
         return { picks };
     } catch (error: any) {
         console.error('[SimTrade] get-sim-trade-picks error:', error);
         return { picks: [] };
+    }
+})
+
+// [Track A] 대장주 모의매매 AI 수동 실행
+ipcMain.handle('track-a:run-buy-agent', async (_event, date?: string) => {
+    try {
+        const { TrackABuyAgent } = await import('./services/v2_agents/TrackABuyAgent');
+        const result = await TrackABuyAgent.getInstance().run(date);
+        return { success: result.success, saved: result.saved, skipped: result.skipped, error: result.error };
+    } catch (error: any) {
+        console.error('[TrackABuyAgent] manual run error:', error);
+        return { success: false, error: error.message };
     }
 })
 
@@ -775,6 +821,30 @@ ipcMain.handle('track-b:run-buy-agent', async (_event, date?: string) => {
         return { success: result.success, saved: result.saved, skipped: result.skipped, error: result.error };
     } catch (error: any) {
         console.error('[TrackBBuyAgent] manual run error:', error);
+        return { success: false, error: error.message };
+    }
+})
+
+// [Track C] 모의매매 AI 수동 실행 (눌림목)
+ipcMain.handle('track-c:run-buy-agent', async (_event, date?: string) => {
+    try {
+        const { TrackCBuyAgent } = await import('./services/v2_agents/TrackCBuyAgent');
+        const result = await TrackCBuyAgent.getInstance().run(date);
+        return { success: result.success, saved: result.saved, skipped: result.skipped, error: result.error };
+    } catch (error: any) {
+        console.error('[TrackCBuyAgent] manual run error:', error);
+        return { success: false, error: error.message };
+    }
+})
+
+// [Track D] 당일 급등주 종가베팅 AI 수동 실행
+ipcMain.handle('track-d:run-buy-agent', async (_event, date?: string) => {
+    try {
+        const { TrackDBuyAgent } = await import('./services/v2_agents/TrackDBuyAgent');
+        const result = await TrackDBuyAgent.getInstance().run(date);
+        return { success: result.success, saved: result.saved, skipped: result.skipped, error: result.error };
+    } catch (error: any) {
+        console.error('[TrackDBuyAgent] manual run error:', error);
         return { success: false, error: error.message };
     }
 })
@@ -802,6 +872,58 @@ ipcMain.handle('track-b:score-performance', async (_event, date?: string) => {
         return { success: false, error: error.message };
     }
 })
+
+// [Track B] 종목별 Gemma 리서치 리포트 조회 (종목 상세 모달 타임라인용)
+ipcMain.handle('track-b:get-research-reports', async (_event, stock_code: string) => {
+    try {
+        const db = DatabaseService.getInstance();
+        const reports = db.getStockResearchReports(stock_code, 30);
+        return { success: true, reports };
+    } catch (error: any) {
+        console.error('[TrackB] get-research-reports error:', error);
+        return { success: false, reports: [], error: error.message };
+    }
+})
+
+// [Track B] 특정 일자의 데이터 전체 삭제
+ipcMain.handle('track-b:delete-by-date', async (_event, date: string) => {
+    try {
+        const db = DatabaseService.getInstance();
+        db.deleteTrackBDataByDate(date);
+        return { success: true };
+    } catch (error: any) {
+        console.error('[TrackB] delete-by-date error:', error);
+        return { success: false, error: error.message };
+    }
+})
+
+// [Track B] 가이드라인 문서 읽기/쓰기
+ipcMain.handle('track-b:get-guideline', async (_event, fileName: string) => {
+    try {
+        const filePath = path.join(process.cwd(), 'guidelines', fileName || 'track_b_phase1.md');
+        if (require('fs').existsSync(filePath)) {
+            const content = require('fs').readFileSync(filePath, 'utf-8');
+            return { success: true, content };
+        }
+        return { success: true, content: '' };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('track-b:save-guideline', async (_event, data: { fileName: string, content: string }) => {
+    try {
+        const { fileName, content } = data;
+        const dir = path.join(process.cwd(), 'guidelines');
+        if (!require('fs').existsSync(dir)) {
+            require('fs').mkdirSync(dir, { recursive: true });
+        }
+        require('fs').writeFileSync(path.join(dir, fileName || 'track_b_phase1.md'), content, 'utf-8');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
 
 // ═══ V2 Theme Ontology Agent (수동 트리거) ═══
 ipcMain.handle('v2:run-theme-ontology', async () => {
@@ -943,6 +1065,17 @@ ipcMain.handle('naverflow:analyze-themes', async (_event, date: string) => {
     }
 })
 
+ipcMain.handle('naverflow:reset-themes', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const rawDb = (DatabaseService.getInstance() as any).db;
+        rawDb.prepare('DELETE FROM mega_theme_ledger').run();
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
 ipcMain.handle('naverflow:search-live-news', async (_event, keyword: string) => {
     try {
         const { NaverSearchCollector } = await import('./services/v2_pipeline/collectors/NaverSearchCollector')
@@ -1034,8 +1167,10 @@ ipcMain.handle('graph:edges-from', async (_event, sourceType: string, sourceId: 
 ipcMain.handle('graph:edges-to', async (_event, targetType: string, targetId: string) => {
     try {
         const { IssueLedgerDB } = await import('./services/v2_agents/IssueLedgerDB')
-        const data = IssueLedgerDB.getInstance().getEdgesTo(targetType, targetId)
-        return { success: true, data }
+        const allEdges = IssueLedgerDB.getInstance().getEdgesTo(targetType, targetId)
+        // ISSUE 섹션에는 오직 ISSUE → 테마 연결만 표시 (THEME→THEME RELATE 엣지는 별도 섹션용)
+        const issueEdges = allEdges.filter((e: any) => e.source_type === 'ISSUE')
+        return { success: true, data: issueEdges }
     } catch (err: any) {
         return { success: false, error: err.message }
     }
@@ -2525,3 +2660,128 @@ ipcMain.handle('ai-analyst:sync-entry-price', async (_event, stock_code: string,
         return { success: false, error: e.message }
     }
 })
+
+// ═══ Mega Theme Ledger IPC Handlers ═══
+
+ipcMain.handle('mega-theme:get-ledger', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const rows = DatabaseService.getInstance().getMegaThemeLedger()
+        // JSON 필드 파싱
+        return rows.map((r: any) => ({
+            ...r,
+            sub_themes:      tryParse(r.sub_themes_json, []),
+            selected_stocks: tryParse(r.selected_stocks_json, []),
+            daily_log:       tryParse(r.daily_log_json, []),
+        }))
+    } catch (e: any) {
+        return []
+    }
+})
+
+ipcMain.handle('mega-theme:get-detail', async (_event, name: string) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const db = DatabaseService.getInstance()
+        const row = db.getMegaThemeByName(name)
+        if (!row) return null
+        const subThemes = tryParse(row.sub_themes_json, []) as any[]
+        // 각 하위 테마의 최신 theme_intelligence 조회
+        const rawDb = (db as any).db
+        const enriched = subThemes.map((st: any) => {
+            const intel = rawDb.prepare(`
+                SELECT reason, lifespan_type FROM theme_intelligence
+                WHERE name = ? ORDER BY date DESC LIMIT 1
+            `).get(st.name)
+            return { ...st, intel }
+        })
+        return {
+            ...row,
+            sub_themes:      enriched,
+            selected_stocks: tryParse(row.selected_stocks_json, []),
+            daily_log:       tryParse(row.daily_log_json, []),
+        }
+    } catch (e: any) {
+        return null
+    }
+})
+
+ipcMain.handle('mega-theme:run-builder', async (_event, _mode?: string) => {
+    // 진행 상태를 렌더러로 push하는 헬퍼
+    const sendProgress = (step: string, detail?: string) => {
+        const sender = _event.sender
+        if (!sender.isDestroyed()) {
+            sender.send('mega-theme:progress', { step, detail, ts: Date.now() })
+        }
+    }
+
+    try {
+        sendProgress('STARTING', '당일 메가 테마 분석 시작...')
+        const { ThemeContextBuilder } = await import('./services/v2_agents/ThemeContextBuilder')
+        const builder = ThemeContextBuilder.getInstance()
+
+        sendProgress('DB_QUERY', '시장 데이터 수집 중...')
+        // v2: 항상 당일 데이터만 분석 (Backfill 폐지)
+        const result = await builder.runDaily()
+        sendProgress('DONE', `메가 테마 집계 완료 (${result.processed}건)`)
+        return { success: true, ...result }
+    } catch (e: any) {
+        sendProgress('ERROR', e.message)
+        return { success: false, error: e.message }
+    }
+})
+
+ipcMain.handle('mega-theme:get-ai-config', async () => {
+    try {
+        const { getMegaThemeAiConfig } = await import('./services/v2_agents/ThemeContextBuilder')
+        return getMegaThemeAiConfig()
+    } catch (e: any) {
+        return { targetType: 'gemini' }
+    }
+})
+
+ipcMain.handle('mega-theme:set-ai-config', async (_event, config: { targetType: 'gemini' | 'local' }) => {
+    try {
+        const { setMegaThemeAiConfig } = await import('./services/v2_agents/ThemeContextBuilder')
+        setMegaThemeAiConfig(config)
+        return { success: true }
+    } catch (e: any) {
+        return { success: false, error: e.message }
+    }
+})
+
+ipcMain.handle('mega-theme:check-local-ai', async () => {
+    try {
+        const { LocalAiService } = await import('./services/LocalAiService')
+        return await LocalAiService.getInstance().checkServerStatus()
+    } catch (e: any) {
+        return { isOnline: false, models: [], error: e.message }
+    }
+})
+
+
+ipcMain.handle('mega-theme:get-briefing', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        const db = DatabaseService.getInstance()
+        const rows = db.getMegaThemeLedger()
+        const active = rows
+            .filter((r: any) => !['DORMANT', 'FADING'].includes(r.status))
+            .slice(0, 5)
+        const lines = active.map((r: any, i: number) =>
+            `${i + 1}. [${r.status}] ${r.mega_theme_name} — ${r.core_narrative?.slice(0, 60) ?? ''}...`
+        )
+        return {
+            briefing: lines.join('\n'),
+            updated_at: active[0]?.updated_at ?? null,
+            count: active.length,
+        }
+    } catch (e: any) {
+        return { briefing: '', count: 0, error: e.message }
+    }
+})
+
+function tryParse<T>(str: string, fallback: T): T {
+    try { return JSON.parse(str) as T } catch { return fallback }
+}
+

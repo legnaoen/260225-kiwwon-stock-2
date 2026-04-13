@@ -109,6 +109,7 @@ export class NaverFlowAggregator implements IBaseAggregator {
                                             stock_code: stockCode,
                                             stock_name: stockName,
                                             tag_name: topItem.name,
+                                            tag_type: type,
                                             is_auto_tagged: 1,
                                             change_rate: changeRate,
                                             added_date: dateStr

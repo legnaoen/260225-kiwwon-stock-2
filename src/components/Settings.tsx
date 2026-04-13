@@ -52,7 +52,7 @@ export default function Settings() {
         phase1PassLimit: 10,
         portfolioLimits: {
             buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
-            watchlist: { MOMENTUM: 3, PULLBACK: 3, SWING: 6, VALUE: 3 }
+            watchlist: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 }
         }
     })
     const [isSavingTg, setIsSavingTg] = useState(false)
@@ -170,7 +170,7 @@ export default function Settings() {
                     phase1PassLimit: savedAiSettings.phase1PassLimit ?? 10,
                     portfolioLimits: savedAiSettings.portfolioLimits || {
                         buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
-                        watchlist: { MOMENTUM: 3, PULLBACK: 3, SWING: 6, VALUE: 3 }
+                        watchlist: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 }
                     }
                 })
             }

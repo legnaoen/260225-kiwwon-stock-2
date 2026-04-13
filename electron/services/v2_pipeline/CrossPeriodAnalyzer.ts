@@ -17,7 +17,7 @@ export type CrossCategory =
     | 'EMERGING_STAR'
     | 'PULLBACK_REBOUND'
     | 'PULLBACK_DIP'
-    | 'PULLBACK_DIP'
+    | 'INTRADAY_SURGE'
     | 'UNCLASSIFIED';
 
 /** 시그널: 주 카테고리와 독립적으로 복수 부여 가능한 보조 특성 */
@@ -212,7 +212,7 @@ export class CrossPeriodAnalyzer {
 
             // 9. 정렬: EXHAUSTED 모소두 맞, 이외는 충실도 기준 (PRIORITY는 디스플레이 순서만, 슬라이스 기준 아님)
             const DISPLAY_ORDER: Record<CrossCategory, number> = {
-                EMERGING_STAR: 6, PULLBACK_REBOUND: 5, PULLBACK_DIP: 4,
+                INTRADAY_SURGE: 7, EMERGING_STAR: 6, PULLBACK_REBOUND: 5, PULLBACK_DIP: 4,
                 TRUE_LEADER: 3, EXHAUSTED: 0, UNCLASSIFIED: -1,
             };
             candidates.sort((a, b) => {
@@ -243,7 +243,7 @@ export class CrossPeriodAnalyzer {
 
             // 12. 통계
             const byCategory = {} as Record<CrossCategory, number>;
-            const cats: CrossCategory[] = ['EXHAUSTED','TRUE_LEADER','EMERGING_STAR','PULLBACK_REBOUND','PULLBACK_DIP','UNCLASSIFIED'];
+            const cats: CrossCategory[] = ['EXHAUSTED','TRUE_LEADER','INTRADAY_SURGE','EMERGING_STAR','PULLBACK_REBOUND','PULLBACK_DIP','UNCLASSIFIED'];
             cats.forEach(c => { byCategory[c] = filtered.filter(x => x.category === c).length; });
 
             return { success: true, candidates: filtered, themes, stats: { total: filtered.length, byCategory } };
@@ -324,6 +324,36 @@ export class CrossPeriodAnalyzer {
             let score = total - (p5.peakoutScore ?? 0) * 3;
             if (seg.consistencyScore >= 0.8) score += 5;
             return { category: 'TRUE_LEADER', convictionScore: score, reason: this.reasonTruLeader(p5, total, seg) };
+        }
+
+        // ── 3. INTRADAY_SURGE (당일 급등주 종가베팅 대상)
+        // 조건: 10% <= 당일 상승률 < 25%, 최소 거래대금 확보, 윗꼬리가 너무 길지 않은 방어 성공
+        let intradaySurgePct = 0;
+        let p3Reason = '';
+        if (ohlcvRows && ohlcvRows.length >= 2) {
+            const lastRow = ohlcvRows[ohlcvRows.length - 1];   // 오늘
+            const prevRow = ohlcvRows[ohlcvRows.length - 2];   // 어제
+            
+            if (prevRow.close > 0) {
+                intradaySurgePct = ((lastRow.close - prevRow.close) / prevRow.close) * 100;
+                
+                // 오늘 너무 심하게 고점에서 밀리지 않았는지 방어력 평가 (꼬리가 아니라 몸통상단 유지)
+                const bodyTop = Math.max(lastRow.open, lastRow.close);
+                const high = lastRow.high || bodyTop;
+                const low = lastRow.low || Math.min(lastRow.open, lastRow.close);
+                const range = high - low;
+                // 현재가가 저가 대비 최소 60% 이상 위치에 방어 중
+                const closePositionRatio = range > 0 ? (lastRow.close - low) / range : 1.0;
+
+                // 거래대금 최소조건: 오늘 300억 이상이거나 평균 대비 폭증
+                const hasVolumeSpike = lastRow.tradingValue >= 30000000000 || (lastRow.tradingValue > (p5.avgTradingValue * 2));
+
+                if (intradaySurgePct >= 10 && intradaySurgePct <= 24.9 && closePositionRatio >= 0.5 && hasVolumeSpike) {
+                    p3Reason = `[당일 급등] 전일비 +${intradaySurgePct.toFixed(1)}% 슈팅 | 윗꼬리 방어 (${(closePositionRatio*100).toFixed(0)}%) | 대량 수급 포착`;
+                    let paScore = intradaySurgePct * 2 + (closePositionRatio * 10) + (Math.log10(lastRow.tradingValue) * 2);
+                    return { category: 'INTRADAY_SURGE', convictionScore: paScore, reason: p3Reason };
+                }
+            }
         }
 
 
@@ -556,20 +586,20 @@ export class CrossPeriodAnalyzer {
 
     // ─── 60일 OHLCV 로드 (DB 단 1회 조회) ────────────────────
 
-    private load60dOhlcv(): Map<string, { date: string; close: number; tradingValue: number }[]> {
+    private load60dOhlcv(): Map<string, { date: string; open: number; high: number; low: number; close: number; tradingValue: number }[]> {
         const db = (this.db as any).db;
         const targetDate = this.svc.getTradingDateCutoff(60);
         const rows = db.prepare(
-            `SELECT stock_code, date, close, trading_value
+            `SELECT stock_code, date, open, high, low, close, trading_value
              FROM market_ohlcv_history
              WHERE date >= ?
              ORDER BY stock_code, date ASC`
         ).all(targetDate) as any[];
 
-        const map = new Map<string, { date: string; close: number; tradingValue: number }[]>();
+        const map = new Map<string, { date: string; open: number; high: number; low: number; close: number; tradingValue: number }[]>();
         for (const r of rows) {
             const list = map.get(r.stock_code) ?? [];
-            list.push({ date: r.date, close: r.close, tradingValue: r.trading_value || 0 });
+            list.push({ date: r.date, open: r.open || r.close, high: r.high || r.close, low: r.low || r.close, close: r.close, tradingValue: r.trading_value || 0 });
             map.set(r.stock_code, list);
         }
         return map;

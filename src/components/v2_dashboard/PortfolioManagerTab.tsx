@@ -664,9 +664,19 @@ export const PortfolioManagerTab: React.FC = () => {
 
                                             {/* 전략 */}
                                             <td className="py-2 pr-4 text-center">
-                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] uppercase font-bold text-muted-foreground bg-muted/20 whitespace-nowrap">
-                                                    {p.strategy || 'SWING'}
-                                                </span>
+                                                {p.strategy === 'MOMENTUM' ? (
+                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-rose-500 bg-rose-500/10 border-rose-500/30 whitespace-nowrap">
+                                                        🚀 메가테마 대장주
+                                                    </span>
+                                                ) : p.strategy === 'PULLBACK' ? (
+                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-orange-500 bg-orange-500/10 border-orange-500/30 whitespace-nowrap">
+                                                        🔥 주도주 눌림목
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] uppercase font-bold text-muted-foreground bg-muted/20 whitespace-nowrap">
+                                                        {p.strategy || 'SWING'}
+                                                    </span>
+                                                )}
                                             </td>
 
                                             {/* 시그널 + 매수 매력도 점수 */}

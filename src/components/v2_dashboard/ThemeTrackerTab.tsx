@@ -2,15 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
-import { RefreshCw, TrendingUp, Calendar, AlertCircle, X, ExternalLink, Sparkles, Link2 } from 'lucide-react';
+import { RefreshCw, TrendingUp, Calendar, AlertCircle, X, ExternalLink, Sparkles, Link2, Flame } from 'lucide-react';
 import { StockDetailModal } from '../common/StockDetailModal';
+import { MegaThemeTab } from './MegaThemeTab';
+
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
 export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?: string) => void; initialSelection?: string }> = ({ onNavigate, initialSelection }) => {
-    const [viewType, setViewType] = useState<string>('BOTH'); // Just for internal consistency if needed, though completely removing it might be better. Let's remove the selector and load both.
+    const [activeTab, setActiveTab] = useState<'trend' | 'mega'>('trend');
+    const [viewType, setViewType] = useState<string>('BOTH');
     const [themeData, setThemeData] = useState<any>(null);
     const [sectorData, setSectorData] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -35,6 +38,7 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
     
     // 수동 이슈 연결 상태
     const [showLinkForm, setShowLinkForm] = useState(false);
+    const [showAllIssues, setShowAllIssues] = useState(false);
     const [activeIssues, setActiveIssues] = useState<any[]>([]);
     const [selectedIssueId, setSelectedIssueId] = useState('');
     const [manualLogicalPath, setManualLogicalPath] = useState('');
@@ -44,6 +48,10 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
     const [showRawLogModal, setShowRawLogModal] = useState(false);
     const [rawLogContent, setRawLogContent] = useState<string>('');
     const [isRawLogLoading, setIsRawLogLoading] = useState(false);
+    
+    // 바텀 팝업 상태
+    const [showCopilotPopup, setShowCopilotPopup] = useState(false);
+    const [showNewsPopup, setShowNewsPopup] = useState(false);
 
     const [targetDate, setTargetDate] = useState<string>('');
     
@@ -380,7 +388,8 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
         // determine if theme or sector based on where it came from
         const isSector = selectedItem.type === 'SECTOR';
         const dataSource = isSector ? sectorData : themeData;
-        const itemHistory = (dataSource?.historyData || []).filter((d: any) => d.name === selectedItem.name).reverse();
+        const itemHistory = (dataSource?.historyData || [])
+            .filter((d: any) => d.name.includes(selectedItem.name) || selectedItem.name.includes(d.name));
             
         return (
             <>
@@ -406,12 +415,12 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                                 {isSector ? '섹터' : '테마'} 트래킹 리포트
                             </div>
                         </div>
-                        <button onClick={() => { setSelectedItem(null); setUserOpinion(''); setCopilotFeedback(''); }} className="p-1.5 hover:bg-muted rounded text-muted-foreground">
+                        <button onClick={() => { setSelectedItem(null); setUserOpinion(''); setCopilotFeedback(''); setShowCopilotPopup(false); setShowNewsPopup(false); }} className="p-1.5 hover:bg-muted rounded text-muted-foreground">
                             <X size={16} />
                         </button>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                    <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-24">
                         {/* 듀얼 차트 영역 */}
                         <div className="space-y-4">
                             {/* 1. 모멘텀 궤적 (순위) */}
@@ -609,51 +618,13 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                             );
                         })()}
 
-                        {selectedItem.reason && (
-                            <div className="space-y-4 pt-2">
-                                <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
-                                    <Sparkles size={14} className="text-amber-500" /> AI 브리핑
-                                </h3>
-                                
-                                <div className="space-y-3">
-                                    <div className="bg-muted/30 border rounded-lg p-3.5 space-y-2 relative overflow-hidden">
-                                        <div className="absolute top-0 left-0 w-1 h-full bg-primary/40"></div>
-                                        <p className="text-[13px] leading-relaxed text-foreground">
-                                            {selectedItem.reason}
-                                        </p>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 gap-2">
-                                        <div className="flex items-start gap-3 bg-muted/20 border border-border/50 rounded-lg p-3">
-                                            <div className="shrink-0 mt-0.5">
-                                                <div className={cn(
-                                                    "w-2 h-2 rounded-full",
-                                                    selectedItem.lifespan_type?.includes('메가트렌드') ? "bg-purple-500" :
-                                                    selectedItem.lifespan_type?.includes('중기') ? "bg-blue-500" :
-                                                    selectedItem.lifespan_type?.includes('단기') ? "bg-orange-500" : "bg-muted-foreground"
-                                                )} />
-                                            </div>
-                                            <div className="flex-1 space-y-1">
-                                                <div className="text-xs font-bold text-foreground">
-                                                    예상 생명력: <span className="text-primary">{selectedItem.lifespan_type}</span>
-                                                </div>
-                                                <div className="text-xs leading-relaxed text-muted-foreground">
-                                                    {selectedItem.lifespan_reasoning}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Graph RAG: 원인 이슈 연결 카드 */}
+                        {/* 연결된 이슈 (Flat style) */}
                         <div className="space-y-3 pt-4 border-t border-border/50">
                             <div className="flex items-center justify-between">
-                                <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
-                                    <Link2 size={13} className="text-indigo-400" /> 연결된 거시 이슈
+                                <h3 className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                                    <Link2 size={13} className="text-indigo-400" /> ISSUE
                                 </h3>
-                                <button onClick={handleAddLinkClick} className="flex items-center gap-1 text-[10px] font-semibold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 px-2 py-1 rounded transition-colors border border-indigo-500/20">
+                                <button onClick={handleAddLinkClick} className="flex items-center gap-1 text-[10px] font-semibold text-indigo-500 hover:text-indigo-400 transition-colors">
                                     {showLinkForm ? '닫기' : '+ 연결 추가'}
                                 </button>
                             </div>
@@ -698,76 +669,122 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                             )}
 
                             {linkedEdges.length > 0 ? (
-                                <div className="flex flex-col gap-2">
-                                    {linkedEdges.map((edge: any, i: number) => {
-                                        // logical_path를 '→' 기준으로 분리해 체인 노드 배열로 만들기
+                                <div className="flex flex-col gap-1">
+                                    {(showAllIssues ? linkedEdges : linkedEdges.slice(0, 2)).map((edge: any, i: number) => {
                                         const chainNodes: string[] = edge.logical_path
                                             ? edge.logical_path.split(/→|->/).map((s: string) => s.trim()).filter(Boolean)
                                             : [];
-                                        return (
-                                            <button
-                                                key={i}
-                                                onClick={() => onNavigate?.('issue-agent', edge.source_id)}
-                                                className="group w-full text-left flex flex-col gap-2 p-3 rounded-xl border border-indigo-500/25 bg-indigo-500/5 hover:bg-indigo-500/12 hover:border-indigo-500/40 transition-all shadow-sm"
-                                            >
-                                                {/* 상단: 이슈명 + 배지 */}
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
-                                                        <span className="text-[13px] font-bold text-indigo-500 dark:text-indigo-300 leading-tight">
-                                                            {edge.issue_name || edge.source_id}
-                                                        </span>
-                                                    </div>
-                                                    <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 bg-indigo-500/15 text-indigo-400 rounded-full border border-indigo-500/20 group-hover:bg-indigo-500/25 transition-colors">
-                                                        이슈 보기 →
-                                                    </span>
-                                                </div>
+                                        
+                                        const updateDate = edge.issue_updated_date ? edge.issue_updated_date.split('T')[0] : '';
+                                        const dateStr = updateDate || edge.source_id;
 
-                                                {/* 인과 체인 (전체 표시, 잘림 없음) */}
-                                                {chainNodes.length > 0 && (
-                                                    <div className="flex flex-wrap items-center gap-1.5 pl-4">
-                                                        {chainNodes.map((node, ni) => (
-                                                            <React.Fragment key={ni}>
-                                                                <span className="text-[11px] font-semibold text-foreground/80 bg-background/60 border border-border/50 px-2 py-0.5 rounded-md">
-                                                                    {node}
-                                                                </span>
-                                                                {ni < chainNodes.length - 1 && (
-                                                                    <span className="text-indigo-400/60 text-[11px] font-bold">→</span>
-                                                                )}
-                                                            </React.Fragment>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </button>
+                                        return (
+                                            <div key={i} className="flex flex-col justify-center">
+                                                <button
+                                                    onClick={() => onNavigate?.('issue-agent', edge.source_id)}
+                                                    className="group flex flex-col items-start gap-0.5 py-1.5 px-2 rounded-lg hover:bg-muted/30 transition-all text-left"
+                                                >
+                                                    <span className="text-[11px] font-bold text-muted-foreground group-hover:text-primary transition-colors">
+                                                        {dateStr}
+                                                    </span>
+                                                    {chainNodes.length > 0 ? (
+                                                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                                            {chainNodes.map((node: string, ni: number) => (
+                                                                <React.Fragment key={ni}>
+                                                                    <span className="text-[13px] font-medium text-foreground">
+                                                                        {node}
+                                                                    </span>
+                                                                    {ni < chainNodes.length - 1 && (
+                                                                        <span className="text-muted-foreground/50 text-[10px]">→</span>
+                                                                    )}
+                                                                </React.Fragment>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-[13px] font-medium text-foreground">{edge.source_name || edge.source_id}</span>
+                                                    )}
+                                                </button>
+                                            </div>
                                         );
                                     })}
+
+                                    {linkedEdges.length > 2 && (
+                                        <div className="flex items-center justify-between text-[11px] text-muted-foreground mt-1 px-2 pb-1">
+                                            <span>과거 이슈 ({linkedEdges.length - 2})</span>
+                                            <button 
+                                                onClick={() => setShowAllIssues(!showAllIssues)}
+                                                className="text-[10px] text-indigo-500 hover:text-indigo-400 font-semibold transition-colors"
+                                            >
+                                                {showAllIssues ? '접기 ▲' : '더보기 ▼'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 !showLinkForm && (
-                                    <div className="text-[11.5px] text-muted-foreground italic px-3 py-4 bg-muted/20 rounded-lg border border-dashed border-border/60 text-center">
-                                        현재 연관된 거시 이슈가 없습니다.<br/>
-                                        <span className="text-[10.5px]">우측 상단의 '+ 연결 추가' 버튼을 눌러보세요.</span>
+                                    <div className="text-[11.5px] text-muted-foreground italic px-3 py-4 text-center">
+                                        현재 연관된 거시 이슈가 없습니다.
                                     </div>
                                 )
                             )}
                         </div>
 
-                        {/* Copilot Verification Block */}
-                        <div className="space-y-4 pt-4 border-t border-border/50">
-                            <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
-                                <Sparkles size={14} className="text-purple-500" /> 코파일럿 심층 검증
+                        {/* AI 역대 브리핑 (타임라인) */}
+                        <div className="space-y-3 pt-4 border-t border-border/50">
+                            <h3 className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5 tracking-wider uppercase">
+                                <Sparkles size={13} className="text-amber-500" /> 타임라인
                             </h3>
+                            
                             <div className="space-y-3">
-                                <div className="text-[11px] text-muted-foreground leading-relaxed">
-                                    AI 분석에 아쉬움이 있나요? 반박하고 싶은 개인 의견(팩트)과 함께 실시간 서치/검증을 요청해보세요.
-                                </div>
+                                {itemHistory.filter((i:any) => i.reason).slice(0, 5).map((history: any, idx: number) => {
+                                    const displayDate = history.date ? history.date.substring(5).replace('-', '/') : '';
+                                    return (
+                                        <div key={idx} className="flex flex-col gap-1 pb-3 border-b border-border/10 last:border-0 last:pb-0">
+                                            <span className="font-bold text-[12px] text-blue-500 mb-0.5">{displayDate}</span>
+                                            {(() => {
+                                                const match = String(history.reason || '').match(/^\[(.*?)\]\s*(.*)$/s);
+                                                if (match) {
+                                                    return (
+                                                        <>
+                                                            <div className="font-bold text-[13px] text-foreground">{match[1].trim()}</div>
+                                                            <div className="text-[12px] text-muted-foreground leading-relaxed whitespace-pre-wrap mt-0.5">
+                                                                {match[2].trim()}
+                                                            </div>
+                                                        </>
+                                                    );
+                                                }
+                                                return (
+                                                    <div className="text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">
+                                                        {history.reason}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Copilot Popup */}
+                    {showCopilotPopup && (
+                        <div className="absolute bottom-16 left-0 right-0 bg-card border-t shadow-lg border-x mx-0 px-4 py-4 z-20 animate-in slide-in-from-bottom-5">
+                            <div className="flex justify-between items-center mb-3">
+                                <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5 uppercase">
+                                    <Sparkles size={14} className="text-purple-500" /> 코파일럿 심층 검증
+                                </h3>
+                                <button onClick={() => setShowCopilotPopup(false)} className="text-muted-foreground hover:text-foreground">
+                                    <X size={14} />
+                                </button>
+                            </div>
+                            <div className="space-y-3">
                                 <div className="flex flex-col gap-2 relative">
                                     <textarea
                                         value={userOpinion}
                                         onChange={e => setUserOpinion(e.target.value)}
-                                        placeholder="예: 플라스틱 원자재 공급 우려 때문 아닌지 뉴스 검색해서 다시 원인과 수명을 판단해봐."
+                                        placeholder="반박하고 싶은 개인 의견이나 팩트를 적어주세요."
                                         disabled={isVerifying}
-                                        className="w-full h-20 bg-background border border-border/80 rounded font-sans text-xs p-2.5 outline-none focus:border-primary/50 resize-none"
+                                        className="w-full h-20 bg-background border border-border/80 rounded text-xs p-2.5 outline-none focus:border-primary/50 resize-none"
                                     />
                                     <button 
                                         onClick={handleVerify} 
@@ -775,12 +792,11 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                                         className="self-end px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary border border-primary/20 rounded font-bold text-xs disabled:opacity-50 transition-colors flex items-center gap-1.5"
                                     >
                                         {isVerifying ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                                        {isVerifying ? '팩트체크 및 재검증 중...' : '💡 팩트체크'}
+                                        {isVerifying ? '팩트체크 재검증 중...' : '확인'}
                                     </button>
                                 </div>
-                                
                                 {copilotFeedback && (
-                                    <div className="mt-2 bg-gradient-to-br from-purple-500/10 to-blue-500/5 border border-purple-500/20 rounded-lg p-3 text-xs text-foreground leading-relaxed animate-in fade-in slide-in-from-top-2">
+                                    <div className="mt-2 bg-gradient-to-br from-purple-500/10 to-blue-500/5 border border-purple-500/20 rounded-lg p-3 text-xs text-foreground leading-relaxed">
                                         <div className="font-bold text-purple-600 mb-1 flex items-center gap-1.5">
                                             <Sparkles size={12} /> 피드백 결과
                                         </div>
@@ -789,27 +805,33 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                                 )}
                             </div>
                         </div>
+                    )}
 
-                        {/* Related News Block */}
-                        <div className="space-y-4 pt-4 border-t border-border/50 pb-8">
-                            <div className="flex items-center justify-between">
-                                <h3 className="text-xs font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                    {/* News Popup */}
+                    {showNewsPopup && (
+                        <div className="absolute bottom-16 left-0 right-0 h-[300px] overflow-y-auto bg-card border-t shadow-lg border-x mx-0 px-4 py-4 z-20 animate-in slide-in-from-bottom-5">
+                            <div className="flex justify-between items-center mb-3">
+                                <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5 uppercase">
                                     <ExternalLink size={14} className="text-blue-500" /> 연관 뉴스
                                 </h3>
-                                <button 
-                                    onClick={handleLiveSearch} 
-                                    disabled={isNewsLoading || !selectedItem?.top_stocks?.length}
-                                    className="px-2.5 py-1 text-[10px] font-bold bg-muted hover:bg-muted/80 text-foreground border rounded transition-colors disabled:opacity-50 flex items-center gap-1 shadow-sm"
-                                    title="주도주 키워드로 네이버 실시간 뉴스 검색"
-                                >
-                                    {isNewsLoading ? <RefreshCw size={10} className="animate-spin text-primary" /> : <Sparkles size={10} className="text-amber-500" />}
-                                    실시간 검색
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <button 
+                                        onClick={handleLiveSearch} 
+                                        disabled={isNewsLoading || !selectedItem?.top_stocks?.length}
+                                        className="px-2.5 py-1 text-[10px] font-bold bg-muted hover:bg-muted/80 text-foreground border rounded transition-colors disabled:opacity-50 flex items-center gap-1 shadow-sm"
+                                    >
+                                        {isNewsLoading ? <RefreshCw size={10} className="animate-spin text-primary" /> : <Sparkles size={10} className="text-amber-500" />}
+                                        실시간 검색
+                                    </button>
+                                    <button onClick={() => setShowNewsPopup(false)} className="text-muted-foreground hover:text-foreground">
+                                        <X size={14} />
+                                    </button>
+                                </div>
                             </div>
-                            <div className="space-y-2 relative min-h-[50px]">
+                            <div className="space-y-2 relative">
                                 {isNewsLoading ? (
                                     <div className="text-xs text-muted-foreground flex items-center justify-center h-20 gap-2">
-                                        <RefreshCw size={14} className="animate-spin text-primary" /> NewsHub 알고리즘 추출 중...
+                                        <RefreshCw size={14} className="animate-spin text-primary" /> 로딩 중...
                                     </div>
                                 ) : relatedNews.length > 0 ? (
                                     <div className="flex flex-col gap-2">
@@ -834,13 +856,37 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                                 ) : (
                                     <div className="text-[11px] text-muted-foreground text-center py-6 bg-muted/10 rounded-lg border border-dashed flex flex-col items-center gap-2">
                                         <AlertCircle size={14} className="opacity-50" />
-                                        현재 NewsHub 캐시에서 발견된 종목/테마 관련 뉴스가 없습니다.
+                                        뉴스가 없습니다. 실시간 검색을 눌러보세요.
                                     </div>
                                 )}
                             </div>
                         </div>
+                    )}
 
+                    {/* 하단 고정 버튼 */}
+                    <div className="absolute bottom-0 left-0 right-0 border-t bg-card/95 backdrop-blur-md p-3 flex gap-2 z-30">
+                        <button 
+                            onClick={() => { setShowCopilotPopup(!showCopilotPopup); setShowNewsPopup(false); }}
+                            className={cn(
+                                "flex-1 py-2.5 rounded-lg text-[12px] font-bold border transition-colors flex items-center justify-center gap-1.5",
+                                showCopilotPopup ? "bg-purple-500 border-purple-500 text-white" : "bg-background hover:bg-muted text-foreground border-border/80"
+                            )}
+                        >
+                            <Sparkles size={14} className={showCopilotPopup ? "text-white" : "text-purple-500"} />
+                            AI 코파일럿 검증
+                        </button>
+                        <button 
+                            onClick={() => { setShowNewsPopup(!showNewsPopup); setShowCopilotPopup(false); }}
+                            className={cn(
+                                "flex-1 py-2.5 rounded-lg text-[12px] font-bold border transition-colors flex items-center justify-center gap-1.5",
+                                showNewsPopup ? "bg-blue-500 border-blue-500 text-white" : "bg-background hover:bg-muted text-foreground border-border/80"
+                            )}
+                        >
+                            <ExternalLink size={14} className={showNewsPopup ? "text-white" : "text-blue-500"} />
+                            연관 뉴스
+                        </button>
                     </div>
+
                 </div>
             </>
         );
@@ -964,127 +1010,167 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
 
     return (
         <div className="flex w-full h-full bg-background overflow-hidden text-sm relative">
-            
+
             <div className={cn("flex-1 flex flex-col min-w-0 transition-all duration-300")}>
-                
-                <div className="px-5 py-3 border-b flex items-center justify-between bg-muted/5 z-0 shrink-0">
-                    <div className="flex items-center gap-4">
-                        <h1 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-3">
-                            <TrendingUp size={18} className="text-primary" />
-                            시장 주도 트렌드
-                        </h1>
-                    </div>
 
-                    <div className="flex items-center gap-4">
+                {/* ─── 탭 네비게이션 바 ─────────────────────────── */}
+                <div className="px-5 py-0 border-b bg-muted/5 flex items-center justify-between shrink-0">
+                    <div className="flex items-center gap-0">
                         <button
-                            onClick={handleViewRawLog}
-                            className="flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-bold transition-colors shadow-sm bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20 hover:border-emerald-500/40"
-                            title="오늘 일자 기준 AI 분석 원본 데이터 보기"
-                        >
-                            <Sparkles size={13} />
-                            AI 데이터 전문
-                        </button>
-                        <div className="flex items-center gap-2 px-3 py-1.5 bg-background border rounded-md text-xs">
-                            <Calendar size={13} className="text-muted-foreground" />
-                            <input 
-                                type="date" 
-                                value={targetDate} 
-                                onChange={(e) => setTargetDate(e.target.value)}
-                                className="bg-transparent border-none outline-none font-mono text-muted-foreground hover:text-foreground focus:text-foreground"
-                            />
-                        </div>
-                        <button 
-                            onClick={handleSyncPipeline}
-                            disabled={isLoading || isAnalyzing}
+                            onClick={() => setActiveTab('trend')}
                             className={cn(
-                                "flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-bold transition-colors shadow-sm",
-                                "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 hover:border-primary/40"
-                            )}
-                            title="네이버 테마/섹터 원본 최신 데이터로 동기화"
-                        >
-                            <RefreshCw size={13} className={isLoading && !isAnalyzing ? "animate-spin" : ""} />
-                            데이터 동기화
-                        </button>
-                        <button 
-                            onClick={handleAnalyze}
-                            disabled={isAnalyzing || isLoading}
-                            className={cn(
-                                "flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-bold transition-colors shadow-sm",
-                                isAnalyzing 
-                                    ? "bg-amber-500/10 text-amber-600 border-amber-500/30 font-semibold" 
-                                    : "bg-gradient-to-r from-amber-500/10 to-orange-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-500/40"
+                                'flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 transition-colors',
+                                activeTab === 'trend'
+                                    ? 'border-primary text-primary'
+                                    : 'border-transparent text-muted-foreground hover:text-foreground'
                             )}
                         >
-                            <Sparkles size={13} className={isAnalyzing ? "animate-pulse" : ""} />
-                            {isAnalyzing ? '분석 중...' : 'AI 분석 실행'}
+                            <TrendingUp size={13} />
+                            시장 주도 트렌드
                         </button>
-                        <button 
-                            onClick={loadData}
-                            disabled={isLoading}
-                            className="p-1.5 border rounded bg-background hover:bg-muted text-muted-foreground transition-colors"
+                        <button
+                            onClick={() => setActiveTab('mega')}
+                            className={cn(
+                                'flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 transition-colors',
+                                activeTab === 'mega'
+                                    ? 'border-red-400 text-red-400'
+                                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                            )}
                         >
-                            <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
+                            <Flame size={13} />
+                            메가 테마 관리
                         </button>
                     </div>
-                </div>
 
-                {isLoading && (!themeData && !sectorData) ? (
-                    <div className="flex-1 flex items-center justify-center p-8 text-muted-foreground">
-                        <RefreshCw className="animate-spin mr-2" size={16} /> 데이터를 불러오는 중...
-                    </div>
-                ) : (
-                    <div className="flex-1 overflow-hidden p-5 flex gap-5">
-                       {renderBoard(themeData, '테마', 'THEME')}
-                       {renderBoard(sectorData, '섹터', 'SECTOR')}
-                    </div>
-                )}
-            </div>
-
-            {renderDetailPanel()}
-
-            {selectedStock && (
-                <StockDetailModal 
-                    stockCode={selectedStock.stockCode} 
-                    stockName={selectedStock.stockName} 
-                    relatedTheme={selectedStock.relatedTheme}
-                    relatedIssues={selectedStock.relatedIssues}
-                    onClose={() => setSelectedStock(null)} 
-                />
-            )}
-
-            {/* AI 원본 로그 모달 */}
-            {showRawLogModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center">
-                    <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={() => setShowRawLogModal(false)} />
-                    <div className="relative w-full max-w-4xl h-[80vh] flex flex-col bg-card border border-border/50 rounded-xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-                        {/* Header */}
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-border/50 bg-muted/10 shrink-0">
-                            <div className="flex items-center gap-2">
-                                <Sparkles className="w-5 h-5 text-emerald-500" />
-                                <h2 className="text-lg font-bold text-foreground">AI 분석 원본 결과 (Raw Response)</h2>
-                                <span className="ml-2 px-2 py-0.5 text-xs font-mono bg-muted text-muted-foreground rounded">{targetDate}</span>
+                    {/* 탭 1 전용 툴바 — 탭 1 활성 시에만 표시 */}
+                    {activeTab === 'trend' && (
+                        <div className="flex items-center gap-4 py-2">
+                            <button
+                                onClick={handleViewRawLog}
+                                className="flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-bold transition-colors shadow-sm bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20 hover:border-emerald-500/40"
+                                title="오늘 일자 기준 AI 분석 원본 데이터 보기"
+                            >
+                                <Sparkles size={13} />
+                                AI 데이터 전문
+                            </button>
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-background border rounded-md text-xs">
+                                <Calendar size={13} className="text-muted-foreground" />
+                                <input
+                                    type="date"
+                                    value={targetDate}
+                                    onChange={(e) => setTargetDate(e.target.value)}
+                                    className="bg-transparent border-none outline-none font-mono text-muted-foreground hover:text-foreground focus:text-foreground"
+                                />
                             </div>
-                            <button onClick={() => setShowRawLogModal(false)} className="p-1.5 hover:bg-muted rounded text-muted-foreground transition-colors">
-                                <X className="w-5 h-5" />
+                            <button
+                                onClick={handleSyncPipeline}
+                                disabled={isLoading || isAnalyzing}
+                                className={cn(
+                                    'flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-bold transition-colors shadow-sm',
+                                    'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 hover:border-primary/40'
+                                )}
+                                title="네이버 테마/섹터 원본 최신 데이터로 동기화"
+                            >
+                                <RefreshCw size={13} className={isLoading && !isAnalyzing ? 'animate-spin' : ''} />
+                                데이터 동기화
+                            </button>
+                            <button
+                                onClick={handleAnalyze}
+                                disabled={isAnalyzing || isLoading}
+                                className={cn(
+                                    'flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-bold transition-colors shadow-sm',
+                                    isAnalyzing
+                                        ? 'bg-amber-500/10 text-amber-600 border-amber-500/30 font-semibold'
+                                        : 'bg-gradient-to-r from-amber-500/10 to-orange-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-500/40'
+                                )}
+                            >
+                                <Sparkles size={13} className={isAnalyzing ? 'animate-pulse' : ''} />
+                                {isAnalyzing ? '분석 중...' : 'AI 분석 실행'}
+                            </button>
+                            <button
+                                onClick={loadData}
+                                disabled={isLoading}
+                                className="p-1.5 border rounded bg-background hover:bg-muted text-muted-foreground transition-colors"
+                            >
+                                <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
                             </button>
                         </div>
-
-                        {/* Content */}
-                        <div className="flex-1 overflow-auto p-5 bg-[#0d1117]">
-                            {isRawLogLoading ? (
-                                <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-                                    <RefreshCw className="w-6 h-6 animate-spin text-emerald-500" />
-                                    <span className="text-sm">원본 데이터를 불러오는 중...</span>
-                                </div>
-                            ) : (
-                                <pre className="text-[12px] font-mono leading-relaxed text-[#c9d1d9] whitespace-pre-wrap break-words">
-                                    {rawLogContent}
-                                </pre>
-                            )}
-                        </div>
-                    </div>
+                    )}
                 </div>
+
+                {/* ─── 탭 1: 시장 주도 트렌드 (기존 뷰) ──────────── */}
+                {activeTab === 'trend' && (
+                    <>
+                        {isLoading && (!themeData && !sectorData) ? (
+                            <div className="flex-1 flex items-center justify-center p-8 text-muted-foreground">
+                                <RefreshCw className="animate-spin mr-2" size={16} /> 데이터를 불러오는 중...
+                            </div>
+                        ) : (
+                            <div className="flex-1 overflow-hidden p-5 flex gap-5">
+                               {renderBoard(themeData, '테마', 'THEME')}
+                               {renderBoard(sectorData, '섹터', 'SECTOR')}
+                            </div>
+                        )}
+                    </>
+                )}
+
+                {/* ─── 탭 2: 메가 테마 관리 (신규) ─────────────────── */}
+                {activeTab === 'mega' && (
+                    <div className="flex-1 overflow-hidden">
+                        <MegaThemeTab onNavigate={onNavigate} />
+                    </div>
+                )}
+
+            </div>
+
+            {/* 탭 1 전용 — 상세 패널 + 모달들 */}
+            {activeTab === 'trend' && (
+                <>
+                    {renderDetailPanel()}
+
+                    {selectedStock && (
+                        <StockDetailModal
+                            stockCode={selectedStock.stockCode}
+                            stockName={selectedStock.stockName}
+                            relatedTheme={selectedStock.relatedTheme}
+                            relatedIssues={selectedStock.relatedIssues}
+                            onClose={() => setSelectedStock(null)}
+                        />
+                    )}
+
+                    {/* AI 원본 로그 모달 */}
+                    {showRawLogModal && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+                            <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={() => setShowRawLogModal(false)} />
+                            <div className="relative w-full max-w-4xl h-[80vh] flex flex-col bg-card border border-border/50 rounded-xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                                <div className="flex items-center justify-between px-5 py-4 border-b border-border/50 bg-muted/10 shrink-0">
+                                    <div className="flex items-center gap-2">
+                                        <Sparkles className="w-5 h-5 text-emerald-500" />
+                                        <h2 className="text-lg font-bold text-foreground">AI 분석 원본 결과 (Raw Response)</h2>
+                                        <span className="ml-2 px-2 py-0.5 text-xs font-mono bg-muted text-muted-foreground rounded">{targetDate}</span>
+                                    </div>
+                                    <button onClick={() => setShowRawLogModal(false)} className="p-1.5 hover:bg-muted rounded text-muted-foreground transition-colors">
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                </div>
+                                <div className="flex-1 overflow-auto p-5 bg-[#0d1117]">
+                                    {isRawLogLoading ? (
+                                        <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+                                            <RefreshCw className="w-6 h-6 animate-spin text-emerald-500" />
+                                            <span className="text-sm">원본 데이터를 불러오는 중...</span>
+                                        </div>
+                                    ) : (
+                                        <pre className="text-[12px] font-mono leading-relaxed text-[#c9d1d9] whitespace-pre-wrap break-words">
+                                            {rawLogContent}
+                                        </pre>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </>
             )}
         </div>
     );
 };
+

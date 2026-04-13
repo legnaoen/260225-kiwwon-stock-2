@@ -250,15 +250,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => ipcRenderer.invoke('v2-pipeline:run', { pipelineId, options }),
     getThemeTrackerData: (type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => ipcRenderer.invoke('naverflow:get-tracker-data', type, date, limitDays, topN),
     analyzeThemes: (date: string) => ipcRenderer.invoke('naverflow:analyze-themes', date),
+    resetThemeLedger: () => ipcRenderer.invoke('naverflow:reset-themes'),
     verifyThemeIntelligence: (params: any) => ipcRenderer.invoke('naverflow:verify-theme', params),
     getThemeRelatedNews: (themeName: string, keywords: string[]) => ipcRenderer.invoke('naverflow:get-theme-news', themeName, keywords),
+    getStockThemeTags: (stockCode: string) => ipcRenderer.invoke('naverflow:get-stock-theme-tags', stockCode),
     searchLiveNews: (keyword: string) => ipcRenderer.invoke('naverflow:search-live-news', keyword),
     getMarketLeaders: (days: number, topN: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN, peakoutSettings }),
     getCrossPeriodProfile: (topN?: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-cross-period-profile', { topN, peakoutSettings }),
     getSimTradePicks: () => ipcRenderer.invoke('v2:get-sim-trade-picks'),
+    runTrackABuyAgent: (date?: string) => ipcRenderer.invoke('track-a:run-buy-agent', date),
     runTrackBBuyAgent: (date?: string) => ipcRenderer.invoke('track-b:run-buy-agent', date),
+    runTrackCBuyAgent: (date?: string) => ipcRenderer.invoke('track-c:run-buy-agent', date),
+    runTrackDBuyAgent: (date?: string) => ipcRenderer.invoke('track-d:run-buy-agent', date),
     updateTrackBEntryPrices: (date?: string) => ipcRenderer.invoke('track-b:update-entry-prices', date),
     scoreTrackBPerformance: (date?: string) => ipcRenderer.invoke('track-b:score-performance', date),
+    deleteTrackBPicksByDate: (date: string) => ipcRenderer.invoke('track-b:delete-by-date', date),
+    getTrackBResearchReports: (stockCode: string) => ipcRenderer.invoke('track-b:get-research-reports', stockCode),
+    getTrackBGuideline: (fileName: string) => ipcRenderer.invoke('track-b:get-guideline', fileName),
+    saveTrackBGuideline: (fileName: string, content: string) => ipcRenderer.invoke('track-b:save-guideline', { fileName, content }),
     runThemeOntology: () => ipcRenderer.invoke('v2:run-theme-ontology'),
     // Graph RAG: Knowledge Edges
     getKnowledgeEdgesFrom: (sourceType: string, sourceId: string, targetType?: string) => ipcRenderer.invoke('graph:edges-from', sourceType, sourceId, targetType),
@@ -379,5 +388,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteAnalystPick: (id: number) => ipcRenderer.invoke('ai-analyst:delete-pick', id),
     deleteEventLog: (id: number) => ipcRenderer.invoke('ai-analyst:delete-event-log', id),
     syncEntryPrice: (stockCode: string, price: number, entryDate: string) => ipcRenderer.invoke('ai-analyst:sync-entry-price', stockCode, price, entryDate),
+
+    // ── Mega Theme Ledger ──
+    getMegaThemeLedger: () => ipcRenderer.invoke('mega-theme:get-ledger'),
+    getMegaThemeDetail: (name: string) => ipcRenderer.invoke('mega-theme:get-detail', name),
+    runThemeContextBuilder: (mode?: 'auto' | 'backfill' | 'incremental') => ipcRenderer.invoke('mega-theme:run-builder', mode || 'auto'),
+    getMegaThemeBriefing: () => ipcRenderer.invoke('mega-theme:get-briefing'),
+    // AI 모델 설정
+    getMegaThemeAiConfig: () => ipcRenderer.invoke('mega-theme:get-ai-config'),
+    setMegaThemeAiConfig: (config: { targetType: 'gemini' | 'local' }) => ipcRenderer.invoke('mega-theme:set-ai-config', config),
+    checkMegaThemeLocalAi: () => ipcRenderer.invoke('mega-theme:check-local-ai'),
 })
+
 

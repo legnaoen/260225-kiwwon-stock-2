@@ -227,14 +227,25 @@ export class SchedulerService {
                     const { PortfolioJudgeScheduler } = await import('./v2_pipeline/PortfolioJudgeScheduler')
                     await PortfolioJudgeScheduler.getInstance().runDailyJudgement()
 
-                    // [Track B] 모의매매 성과 채점 연동
+                    // [Track A, B, C] 모의매매 성과 채점 연동
+                    const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
                     const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
+                    const { TrackABuyAgent } = await import('./v2_agents/TrackABuyAgent')
+                    const trackCResult = TrackCBuyAgent.getInstance().scoreDailyPerformance()
                     const trackBResult = TrackBBuyAgent.getInstance().scoreDailyPerformance()
-                    const trackBMsg = trackBResult.closed > 0
-                        ? `\n🎯 모의매매: ${trackBResult.updated}개 갱신, ${trackBResult.closed}개 청산`
-                        : trackBResult.updated > 0 ? `\n🎯 모의매매: ${trackBResult.updated}개 보유중 갱신` : ''
+                    const trackAResult = TrackABuyAgent.getInstance().scoreDailyPerformance()
 
-                    this.telegram.sendMessage(`⚖️ [15:41] 장마감 포트폴리오 채점 완료\n종가 기준 수익률·수명 심사 정상 완료\n확인: 종목AI 탭 > 포트폴리오 리스트${trackBMsg}`)
+                    const trackCMsg = trackCResult.closed > 0
+                        ? `\n🎣 Track C (눌림목): ${trackCResult.updated}개 갱신, ${trackCResult.closed}개 청산`
+                        : trackCResult.updated > 0 ? `\n🎣 Track C: ${trackCResult.updated}개 보유중 갱신` : ''
+                    const trackBMsg = trackBResult.closed > 0
+                        ? `\n🚀 Track B (신흥성장주): ${trackBResult.updated}개 갱신, ${trackBResult.closed}개 청산`
+                        : trackBResult.updated > 0 ? `\n🚀 Track B: ${trackBResult.updated}개 보유중 갱신` : ''
+                    const trackAMsg = trackAResult.closed > 0
+                        ? `\n👑 Track A (대장주): ${trackAResult.updated}개 갱신, ${trackAResult.closed}개 청산`
+                        : trackAResult.updated > 0 ? `\n👑 Track A: ${trackAResult.updated}개 보유중 갱신` : ''
+
+                    this.telegram.sendMessage(`⚖️ [15:41] 장마감 포트폴리오 채점 완료\n종가 기준 수익률·수명 심사 정상 완료\n확인: 종목AI 탭 > 포트폴리오 리스트${trackAMsg}${trackBMsg}${trackCMsg}`)
                 } catch (e: any) {
                     console.error('[Scheduler] 장마감 채점 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:41] 장마감 채점 실패\n오류: ${e.message}`)
@@ -272,39 +283,70 @@ export class SchedulerService {
                     const elapsed = Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60)
                     this.telegram.sendMessage(`✅ [${fmt(endTime)}] OHLCV 전 종목 수집 완료\n소요 시간: 약 ${elapsed}분\n→ AI 모의매매 매수 선정 시작...`)
 
-                    // ─── 수집 완료 직후 TrackBBuyAgent 즉시 연계 실행 ───
-                    console.log('[Scheduler] 🎯 수집 완료 → TrackB 모의매매 AI 매수 선정 연계 실행...')
+                    // ─── 수집 완료 직후 TrackA, TrackB, TrackC 모의매매 AI 선정 연계 실행 ───
+                    console.log('[Scheduler] 🎯 수집 완료 → Track A, B, C 모의매매 AI 매수 선정 연계 실행...')
+                    const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
                     const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
-                    const pickResult = await TrackBBuyAgent.getInstance().run()
-                    if (pickResult.success) {
-                        this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n매수 후보 ${pickResult.saved}개 저장 (상한가 제외: ${pickResult.skipped}개)\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정`)
-                    } else {
-                        this.telegram.sendMessage(`⚠️ 모의매매 AI 선정 미실행\n사유: ${pickResult.error ?? '후보 없음'}`)
-                    }
+                    const { TrackABuyAgent } = await import('./v2_agents/TrackABuyAgent')
+                    const pickResultC = await TrackCBuyAgent.getInstance().run()
+                    const pickResultB = await TrackBBuyAgent.getInstance().run()
+                    const pickResultA = await TrackABuyAgent.getInstance().run()
+
+                    let trackAMsg = pickResultA.success 
+                        ? `Track A (대장주): 매수 후보 ${pickResultA.saved}개 저장, 제외 ${pickResultA.skipped}개\n`
+                        : `Track A 오류: ${pickResultA.error ?? '후보 없음'}\n`
+                    let trackBMsg = pickResultB.success 
+                        ? `Track B (신흥주): 매수 후보 ${pickResultB.saved}개 저장, 제외 ${pickResultB.skipped}개\n`
+                        : `Track B 오류: ${pickResultB.error ?? '후보 없음'}\n`
+                    let trackCMsg = pickResultC.success 
+                        ? `Track C (눌림목): 매수 후보 ${pickResultC.saved}개 저장, 제외 ${pickResultC.skipped}개`
+                        : `Track C 오류: ${pickResultC.error ?? '후보 없음'}`
+                    
+                    this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정`)
                 } catch (e: any) {
                     console.error('[Scheduler] 데이터 수집 / TrackB 선정 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:05] OHLCV 수집 또는 모의매매 선정 실패\n오류: ${e.message}\n→ 주도주 탭에서 수동 실행 필요`)
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Track B] 15:32 진입가 최종 보정 (동시호가 종료 2분 후)
+            // [Track A, B, C] 15:32 진입가 최종 보정 (동시호가 종료 2분 후)
             // 15:05~15:23 수집 시의 근사 종가 → 실제 확정 종가(동시호가 결과)로 덮어쓰기
             // market_ohlcv_history에 15:30 이후 정확한 close가 들어오면 entry_price 갱신
             // PENDING → ACTIVE
-            const trackBEntryJob = cron.schedule('32 15 * * 1-5', async () => {
-                console.log('[Scheduler] 💰 TrackB 모의매매 진입가 최종 확정...')
+            const trackEntryJob = cron.schedule('32 15 * * 1-5', async () => {
+                console.log('[Scheduler] 💰 Track A, B, C 모의매매 진입가 최종 확정...')
                 try {
+                    const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
                     const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
-                    const updated = TrackBBuyAgent.getInstance().updateEntryPrices()
-                    if (updated > 0) {
-                        this.telegram.sendMessage(`💰 [15:32] 모의매매 진입가 최종 확정\n${updated}개 종목 → 동시호가 확정 종가로 진입가 기록 (ACTIVE)`)
+                    const { TrackABuyAgent } = await import('./v2_agents/TrackABuyAgent')
+                    const updatedC = TrackCBuyAgent.getInstance().updateEntryPrices()
+                    const updatedB = TrackBBuyAgent.getInstance().updateEntryPrices()
+                    const updatedA = TrackABuyAgent.getInstance().updateEntryPrices()
+                    
+                    if (updatedB > 0 || updatedA > 0 || updatedC > 0) {
+                        this.telegram.sendMessage(`💰 [15:32] 모의매매 진입가 최종 확정\nTrack A: ${updatedA}개\nTrack B: ${updatedB}개\nTrack C: ${updatedC}개\n→ 동시호가 확정 종가로 진입가 기록 (ACTIVE)`)
                     }
                 } catch (e: any) {
-                    console.error('[Scheduler] TrackB 진입가 확정 오류:', e.message)
+                    console.error('[Scheduler] Track 진입가 확정 오류:', e.message)
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, phase1Job, phase2Job, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackBEntryJob, ...swarmJobs)
+            // [메가 테마] 임시 비활성화 (개선 작업 중)
+            /*
+            const megaThemeJob = cron.schedule('5 16 * * 1-5', async () => {
+                console.log('[Scheduler] 🔥 ThemeContextBuilder 메가 테마 집계 시작...')
+                try {
+                    const { ThemeContextBuilder } = await import('./v2_agents/ThemeContextBuilder')
+                    await ThemeContextBuilder.getInstance().runDaily()
+                    console.log('[Scheduler] ✅ ThemeContextBuilder 집계 완료')
+                } catch (e: any) {
+                    console.error('[Scheduler] ThemeContextBuilder 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+            */
+
+            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, phase1Job, phase2Job, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, ...swarmJobs)
+
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:40) → 눌림목(09:42) → PM(09:45)`)
             console.log(`[SchedulerService] 📊 장중 파이프라인: OHLCV수집+모의매매선정(15:05) → 진입가확정(15:32)`)

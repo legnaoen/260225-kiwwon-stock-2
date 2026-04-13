@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { TrendingUp, RefreshCw, Target, BarChart2, Award, Clock, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react'
+import { TrendingUp, RefreshCw, Target, BarChart2, Award, Clock, ArrowUpRight, ArrowDownRight, Minus, Trash2, Settings, X, Save } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import { StockDetailModal } from '../common/StockDetailModal'
@@ -41,6 +41,7 @@ const CATEGORY_META: Record<string, { icon: string; label: string; color: string
     PULLBACK_REBOUND:  { icon: '🔥', label: '눌림 반등',   color: 'text-red-500 bg-red-500/10 border-red-500/30' },
     PULLBACK_DIP:      { icon: '📉', label: '눌림목',      color: 'text-amber-500 bg-amber-500/10 border-amber-500/30' },
     TRUE_LEADER:       { icon: '👑', label: '진성 대장',   color: 'text-orange-500 bg-orange-500/10 border-orange-500/30' },
+    INTRADAY_SURGE:    { icon: '🔺', label: '급등주',      color: 'text-rose-500 bg-rose-500/10 border-rose-500/30' },
 }
 
 // ── 상태 배지 ──
@@ -114,11 +115,19 @@ function getDateLabel(dateStr: string): string {
 // ─────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────
+import { PerformanceModal } from './PerformanceModal'
+
 export const SimTradeTab: React.FC = () => {
     const [picks, setPicks] = useState<SimTradePick[]>([])
     const [loading, setLoading] = useState(false)
     const [selectedStock, setSelectedStock] = useState<{ stockCode: string; stockName: string; aiReason?: string; aiRisk?: string } | null>(null)
     const [filterStatus, setFilterStatus] = useState<'all' | 'ACTIVE' | 'CLOSED'>('all')
+    const [filterCategory, setFilterCategory] = useState<string>('all')
+    const [isAiMenuOpen, setIsAiMenuOpen] = useState(false)
+    const [showGuidelineModal, setShowGuidelineModal] = useState(false)
+    const [guidelineContent, setGuidelineContent] = useState('')
+    const [activeGuidelineTab, setActiveGuidelineTab] = useState<'phase1' | 'phase2'>('phase1')
+    const [isPerformanceModalOpen, setIsPerformanceModalOpen] = useState(false)
 
     const fetchPicks = async () => {
         setLoading(true)
@@ -136,11 +145,47 @@ export const SimTradeTab: React.FC = () => {
 
     useEffect(() => { fetchPicks() }, [])
 
+    const loadGuidelineFile = async (tab: 'phase1' | 'phase2') => {
+        try {
+            const fileName = tab === 'phase1' ? 'track_b_phase1.md' : 'track_b_phase2.md';
+            const res = await (window as any).electronAPI.getTrackBGuideline(fileName);
+            if (res.success) {
+                setGuidelineContent(res.content);
+                setActiveGuidelineTab(tab);
+            }
+        } catch (e) {
+            console.error('Failed to load guideline:', e);
+        }
+    }
+
+    const openGuideline = async () => {
+        await loadGuidelineFile('phase1');
+        setShowGuidelineModal(true);
+    }
+
+    const saveGuideline = async () => {
+        try {
+            const fileName = activeGuidelineTab === 'phase1' ? 'track_b_phase1.md' : 'track_b_phase2.md';
+            const res = await (window as any).electronAPI.saveTrackBGuideline(fileName, guidelineContent);
+            if (res.success) {
+                alert('가이드라인이 저장되었습니다.');
+            }
+        } catch (e) {
+            alert('저장 실패: ' + e);
+        }
+    }
+
     // ── 필터 적용 ──
     const filteredPicks = useMemo(() => {
-        if (filterStatus === 'all') return picks
-        return picks.filter(p => p.status === filterStatus)
-    }, [picks, filterStatus])
+        let result = picks;
+        if (filterStatus !== 'all') {
+            result = result.filter(p => p.status === filterStatus);
+        }
+        if (filterCategory !== 'all') {
+            result = result.filter(p => p.category === filterCategory);
+        }
+        return result;
+    }, [picks, filterStatus, filterCategory])
 
     // ── 날짜별 그룹핑 (최신 날짜가 상단) ──
     const groupedByDate = useMemo(() => {
@@ -160,8 +205,20 @@ export const SimTradeTab: React.FC = () => {
         const sortedDates = Array.from(dateMap.keys()).sort((a, b) => b.localeCompare(a))
         for (const date of sortedDates) {
             const datePicks = dateMap.get(date)!
-            // 날짜 내에서는 순위순
-            datePicks.sort((a, b) => a.pick_rank - b.pick_rank)
+            // 날짜 내에서는 카테고리(대장 > 급등 > 신흥 > 눌림)를 먼저, 그다음 순위순으로 정렬
+            const catOrder: Record<string, number> = {
+                'TRUE_LEADER': 1,
+                'INTRADAY_SURGE': 2,
+                'EMERGING_STAR': 3,
+                'PULLBACK_REBOUND': 4,
+                'PULLBACK_DIP': 5
+            }
+            datePicks.sort((a, b) => {
+                const aCat = catOrder[a.category] || 99
+                const bCat = catOrder[b.category] || 99
+                if (aCat !== bCat) return aCat - bCat
+                return a.pick_rank - b.pick_rank
+            })
             groups.push({ date, picks: datePicks })
         }
 
@@ -218,16 +275,43 @@ export const SimTradeTab: React.FC = () => {
                 <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                         <Target className="w-4 h-4 text-amber-400" />
-                        <span className="font-bold text-sm">모의매매 — AI 매수 추천 성과 추적</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-black border border-amber-500/30">
-                            5영업일 · 목표 +15%
-                        </span>
+                        <span className="font-bold text-sm">모의매매</span>
+                        <button
+                            onClick={() => setIsPerformanceModalOpen(true)}
+                            className="text-xs font-bold text-foreground bg-accent border border-border hover:bg-accent/80 px-2.5 py-1 rounded transition-colors shadow-sm ml-2 flex items-center gap-1"
+                        >
+                            📉 성과 측정
+                        </button>
                     </div>
                     <div className="flex items-center gap-2">
-                        {/* 필터 칩 */}
+                        {/* 카테고리 필터 칩 */}
+                        <div className="flex items-center gap-1 bg-muted/30 rounded p-0.5 ml-2 mr-2">
+                            {([
+                                { key: 'all', label: '모든분류' },
+                                { key: 'TRUE_LEADER', label: '대장주' },
+                                { key: 'INTRADAY_SURGE', label: '급등당일' },
+                                { key: 'EMERGING_STAR', label: '신흥성장' },
+                                { key: 'PULLBACK_REBOUND', label: '눌림반등' },
+                            ] as const).map(f => (
+                                <button
+                                    key={f.key}
+                                    onClick={() => setFilterCategory(f.key)}
+                                    className={cn(
+                                        'px-2 py-1 text-xs font-bold rounded transition-colors',
+                                        filterCategory === f.key
+                                            ? 'bg-background text-foreground shadow-sm'
+                                            : 'text-muted-foreground hover:text-foreground'
+                                    )}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* 상태 필터 칩 */}
                         <div className="flex items-center gap-1 bg-muted/30 rounded p-0.5">
                             {([
-                                { key: 'all', label: '전체' },
+                                { key: 'all', label: '상태전체' },
                                 { key: 'ACTIVE', label: '보유중' },
                                 { key: 'CLOSED', label: '완료' },
                             ] as const).map(f => (
@@ -235,7 +319,7 @@ export const SimTradeTab: React.FC = () => {
                                     key={f.key}
                                     onClick={() => setFilterStatus(f.key)}
                                     className={cn(
-                                        'px-3 py-1 text-xs font-bold rounded transition-colors',
+                                        'px-2 py-1 text-xs font-bold rounded transition-colors',
                                         filterStatus === f.key
                                             ? 'bg-background text-foreground shadow-sm'
                                             : 'text-muted-foreground hover:text-foreground'
@@ -245,24 +329,106 @@ export const SimTradeTab: React.FC = () => {
                                 </button>
                             ))}
                         </div>
+                        
+                        {/* 다중 전략 테스트 메뉴 */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsAiMenuOpen(!isAiMenuOpen)}
+                                disabled={loading}
+                                className="text-xs font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-3 py-1.5 rounded transition-colors shadow-sm flex items-center gap-1"
+                            >
+                                🚀 수동 테스트 ▾
+                            </button>
+                            {isAiMenuOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsAiMenuOpen(false)} />
+                                    <div className="absolute right-0 top-full mt-1 w-52 bg-background border border-border/50 rounded-md shadow-xl z-50 py-1 overflow-hidden">
+                                        <button 
+                                            onClick={async () => {
+                                                setIsAiMenuOpen(false);
+                                                setLoading(true);
+                                                try {
+                                                    alert('대장주 전용 파이프라인 (Track A)을 시작합니다. 약 10~20초 소요됩니다.');
+                                                    await (window as any).electronAPI.runTrackABuyAgent();
+                                                    alert('대장주 선정이 완료되었습니다.');
+                                                    await fetchPicks();
+                                                } catch(e: any) {
+                                                    alert('에러 발생: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2 text-xs font-medium hover:bg-muted transition-colors"
+                                        >
+                                            👑 대장주 모멘텀 추종 (A)
+                                        </button>
+                                        <button 
+                                            onClick={async () => {
+                                                setIsAiMenuOpen(false);
+                                                setLoading(true);
+                                                try {
+                                                    alert('신흥 성장주 전용 파이프라인 (Track B)을 시작합니다. 약 10~20초 소요됩니다.');
+                                                    await (window as any).electronAPI.runTrackBBuyAgent();
+                                                    alert('신흥 성장주 선정이 완료되었습니다.');
+                                                    await fetchPicks();
+                                                } catch(e: any) {
+                                                    alert('에러 발생: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2 text-xs font-medium hover:bg-muted transition-colors"
+                                        >
+                                            🚀 신흥 성장주 발굴 (B)
+                                        </button>
+                                        <button 
+                                            onClick={async () => {
+                                                setIsAiMenuOpen(false);
+                                                setLoading(true);
+                                                try {
+                                                    alert('눌림목 스나이핑 전용 파이프라인 (Track C)을 시작합니다. 약 10~20초 소요됩니다.');
+                                                    await (window as any).electronAPI.runTrackCBuyAgent();
+                                                    alert('눌림목 스나이핑 선정이 완료되었습니다.');
+                                                    await fetchPicks();
+                                                } catch(e: any) {
+                                                    alert('에러 발생: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2 text-xs font-medium hover:bg-muted transition-colors"
+                                        >
+                                            🎣 전술적 눌림목 스나이핑 (C)
+                                        </button>
+                                        <button 
+                                            onClick={async () => {
+                                                setIsAiMenuOpen(false);
+                                                setLoading(true);
+                                                try {
+                                                    alert('당일 급등주 종가베팅 파이프라인 (Track D)을 시작합니다. 약 10~20초 소요됩니다.');
+                                                    await (window as any).electronAPI.runTrackDBuyAgent();
+                                                    alert('당일 급등주 종가베팅 선정이 완료되었습니다.');
+                                                    await fetchPicks();
+                                                } catch(e: any) {
+                                                    alert('에러 발생: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2 text-xs font-medium hover:bg-muted transition-colors text-orange-400"
+                                        >
+                                            🔥 당일 급등주 종가베팅 (D)
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                         <button
-                            onClick={async () => {
-                                setLoading(true);
-                                try {
-                                    alert('모의매매 AI 선정을 시작합니다. 약 20~30초 소요됩니다.');
-                                    await (window as any).electronAPI.runTrackBBuyAgent();
-                                    alert('선정이 완료되었습니다.');
-                                    await fetchPicks();
-                                } catch(e: any) {
-                                    alert('에러 발생: ' + e.message);
-                                } finally {
-                                    setLoading(false);
-                                }
-                            }}
-                            disabled={loading}
-                            className="text-xs font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-3 py-1.5 rounded transition-colors shadow-sm"
+                            onClick={openGuideline}
+                            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/30 transition-colors flex items-center gap-1"
                         >
-                            🚀 AI 매수 추천 실행
+                            <Settings className="w-3.5 h-3.5" />
+                            옵션
                         </button>
                         <button
                             onClick={fetchPicks}
@@ -340,6 +506,7 @@ export const SimTradeTab: React.FC = () => {
                             <tr className="text-xs uppercase text-muted-foreground border-b border-border/60">
                                 <th className="py-2 px-3 font-bold w-10 text-center">순위</th>
                                 <th className="py-2 px-3 font-bold">종목명</th>
+                                <th className="py-2 px-3 font-bold">테마</th>
                                 <th className="py-2 px-3 font-bold text-center">카테고리</th>
                                 <th className="py-2 px-3 font-bold text-center">AI점수</th>
                                 <th className="py-2 px-3 font-bold text-right">진입가</th>
@@ -354,15 +521,39 @@ export const SimTradeTab: React.FC = () => {
                             {groupedByDate.map(({ date, picks: datePicks }) => (
                                 <React.Fragment key={date}>
                                     {/* ── 날짜 구분 행 ── */}
-                                    <tr className="bg-muted/30 border-y border-border/40">
-                                        <td colSpan={10} className="py-2 px-3">
-                                            <div className="flex items-center gap-3">
-                                                <span className="font-black text-xs text-foreground">
-                                                    📅 {date} ({getDateLabel(date)})
-                                                </span>
-                                                <span className="text-[10px] text-muted-foreground font-mono">
-                                                    {getDateSummary(datePicks)}
-                                                </span>
+                                    <tr className="bg-muted/30 border-y border-border/40 hover:bg-muted/40 transition-colors group/header">
+                                        <td colSpan={11} className="py-2 px-3">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="font-black text-xs text-foreground">
+                                                        📅 {date} ({getDateLabel(date)})
+                                                    </span>
+                                                    <span className="text-[10px] text-muted-foreground font-mono">
+                                                        {getDateSummary(datePicks)}
+                                                    </span>
+                                                </div>
+                                                
+                                                <button
+                                                    onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        if (window.confirm(`${date} 일자의 모든 추천 기록과 개별 종목 AI 리포트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
+                                                            setLoading(true);
+                                                            try {
+                                                                await (window as any).electronAPI.deleteTrackBPicksByDate(date);
+                                                                await fetchPicks();
+                                                            } catch (err: any) {
+                                                                alert('삭제 중 오류가 발생했습니다: ' + err.message);
+                                                            } finally {
+                                                                setLoading(false);
+                                                            }
+                                                        }
+                                                    }}
+                                                    className="opacity-0 group-hover/header:opacity-100 flex items-center gap-1 text-[10px] font-bold text-red-500/70 hover:text-red-500 hover:bg-red-500/10 px-2 py-1 rounded transition-all"
+                                                    title="해당 일자의 추천 기록 전체 삭제"
+                                                >
+                                                    <Trash2 size={12} />
+                                                    일자 삭제
+                                                </button>
                                             </div>
                                         </td>
                                     </tr>
@@ -407,6 +598,31 @@ export const SimTradeTab: React.FC = () => {
                                                         {pick.stock_name}
                                                     </div>
                                                     <div className="text-[10px] font-mono text-muted-foreground">{pick.stock_code}</div>
+                                                </td>
+
+                                                {/* 테마 */}
+                                                <td className="py-2.5 px-3">
+                                                    <div className="text-xs text-muted-foreground truncate max-w-[120px] sm:max-w-[160px]" title={
+                                                        pick.related_themes_json 
+                                                            ? (() => {
+                                                                try {
+                                                                    return JSON.parse(pick.related_themes_json).join(', ');
+                                                                } catch {
+                                                                    return '알 수 없음';
+                                                                }
+                                                            })()
+                                                            : ''
+                                                    }>
+                                                        {pick.related_themes_json 
+                                                            ? (() => {
+                                                                try {
+                                                                    return JSON.parse(pick.related_themes_json).join(', ');
+                                                                } catch {
+                                                                    return '-';
+                                                                }
+                                                            })()
+                                                            : '-'}
+                                                    </div>
                                                 </td>
 
                                                 {/* 카테고리 */}
@@ -496,6 +712,79 @@ export const SimTradeTab: React.FC = () => {
                     onClose={() => setSelectedStock(null)}
                 />
             )}
+
+            {/* ── 트랙B 1차 가이드라인 모달 ── */}
+            {showGuidelineModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="w-[800px] h-[80vh] bg-background border border-border/50 rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="shrink-0 h-14 px-5 border-b border-border flex items-center justify-between bg-muted/20">
+                            <div>
+                                <h3 className="font-bold text-lg flex items-center gap-2">
+                                    <Settings className="w-5 h-5 text-indigo-400" />
+                                    트랙B 1차 가이드라인 (에디터)
+                                </h3>
+                                <p className="text-xs text-muted-foreground mt-0.5">로컬 AI (Phase 3)의 종목 분류 및 비판적 평가 기준으로 즉시 적용됩니다.</p>
+                            </div>
+                            <button
+                                onClick={() => setShowGuidelineModal(false)}
+                                className="p-1 hover:bg-muted rounded transition-colors text-muted-foreground hover:text-foreground"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+                        
+                        <div className="flex border-b border-border bg-muted/10">
+                            <button
+                                className={cn(
+                                    "flex-1 px-4 py-2.5 text-sm font-bold border-b-2 transition-colors",
+                                    activeGuidelineTab === 'phase1' ? "border-indigo-500 text-indigo-400" : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/20"
+                                )}
+                                onClick={() => loadGuidelineFile('phase1')}
+                            >
+                                1차 분석 가이드 (Gemma 4b)
+                            </button>
+                            <button
+                                className={cn(
+                                    "flex-1 px-4 py-2.5 text-sm font-bold border-b-2 transition-colors",
+                                    activeGuidelineTab === 'phase2' ? "border-indigo-500 text-indigo-400" : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/20"
+                                )}
+                                onClick={() => loadGuidelineFile('phase2')}
+                            >
+                                2차 최종심사 가이드 (Gemini)
+                            </button>
+                        </div>
+                        <div className="flex-1 p-0 overflow-hidden bg-[#1e1e1e]">
+                            <textarea
+                                value={guidelineContent}
+                                onChange={(e) => setGuidelineContent(e.target.value)}
+                                className="w-full h-full bg-transparent text-[#d4d4d4] font-mono text-sm p-5 focus:outline-none resize-none leading-relaxed"
+                                spellCheck={false}
+                            />
+                        </div>
+                        <div className="shrink-0 h-16 border-t border-border bg-muted/20 flex items-center justify-end px-5 gap-3">
+                            <button
+                                onClick={() => setShowGuidelineModal(false)}
+                                className="px-4 py-2 text-sm font-medium rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                            >
+                                취소
+                            </button>
+                            <button
+                                onClick={saveGuideline}
+                                className="px-4 py-2 text-sm font-bold rounded bg-indigo-500 hover:bg-indigo-600 text-white transition-colors flex items-center gap-1.5 shadow-sm"
+                            >
+                                <Save size={16} />
+                                저장 및 적용
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* 성과 측정 팝업 모달 */}
+            <PerformanceModal 
+                isOpen={isPerformanceModalOpen} 
+                onClose={() => setIsPerformanceModalOpen(false)} 
+                picks={picks} 
+            />
         </div>
     )
 }

@@ -262,9 +262,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runTrackBBuyAgent: (date?: string) => ipcRenderer.invoke('track-b:run-buy-agent', date),
     runTrackCBuyAgent: (date?: string) => ipcRenderer.invoke('track-c:run-buy-agent', date),
     runTrackDBuyAgent: (date?: string) => ipcRenderer.invoke('track-d:run-buy-agent', date),
+    runTrackEBuyAgent: (date?: string) => ipcRenderer.invoke('track-e:run-buy-agent', date),
     updateTrackBEntryPrices: (date?: string) => ipcRenderer.invoke('track-b:update-entry-prices', date),
     scoreTrackBPerformance: (date?: string) => ipcRenderer.invoke('track-b:score-performance', date),
     deleteTrackBPicksByDate: (date: string) => ipcRenderer.invoke('track-b:delete-by-date', date),
+    deleteSimTradePickById: (id: number, category: string) => ipcRenderer.invoke('simtrade:delete-pick-by-id', id, category),
     getTrackBResearchReports: (stockCode: string) => ipcRenderer.invoke('track-b:get-research-reports', stockCode),
     getTrackBGuideline: (fileName: string) => ipcRenderer.invoke('track-b:get-guideline', fileName),
     saveTrackBGuideline: (fileName: string, content: string) => ipcRenderer.invoke('track-b:save-guideline', { fileName, content }),
@@ -364,6 +366,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testChartDigest: (code: string, name: string) => ipcRenderer.invoke('ai-analyst:test-chart-digest', code, name),
     // 서브 AI 오답노트 작성 (수동)
     runRetrospectiveManual: () => ipcRenderer.invoke('ai-analyst:run-retrospective'),
+    // PM 성적표 AI 분석 (포트폴리오 매니저 성적 분석 & 개선안)
+    runPortfolioRetrospective: () => ipcRenderer.invoke('portfolio:run-retrospective'),
+    getLatestPortfolioRetrospective: () => ipcRenderer.invoke('portfolio:get-latest-retrospective'),
 
     // AI 수동실행 로그
     saveAiRunLog: (message: string) => ipcRenderer.invoke('ai-run-logs:save', message),

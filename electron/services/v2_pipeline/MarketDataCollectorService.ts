@@ -26,9 +26,105 @@ export class MarketDataCollectorService {
     }
 
     /**
+     * [진입가 보정용] 특정 종목 코드만 최신 OHLCV를 재수집해서 오늘 데이터를 덮어씁니다.
+     * - 15:32 동시호가 확정 종가 보정 직전에 호출 (PENDING 종목 대상)
+     * - 전 종목 수집(runDailyCollection)과 독립적으로 동작 (isCollecting 플래그 미사용)
+     * - getDailyChartData(code, 3) → 최근 3봉만 가져와 오늘 row만 REPLACE
+     * - Kiwoom API TPS 대응: 종목당 200ms 딜레이
+     */
+    public async refreshStocksClose(stockCodes: string[]): Promise<{ refreshed: number; failed: number }> {
+        if (!stockCodes || stockCodes.length === 0) {
+            console.log('[MarketDataCollector] refreshStocksClose: 대상 종목 없음. skip.');
+            return { refreshed: 0, failed: 0 };
+        }
+
+        const today = getKstDate();
+        const db = (this.dbService as any).db;
+        let refreshed = 0;
+        let failed = 0;
+
+        console.log(`[MarketDataCollector] 🔄 진입가 보정용 OHLCV 재수집 시작: ${stockCodes.length}개 종목 (기준일: ${today})`);
+
+        const insertStmt = db.prepare(`
+            INSERT OR REPLACE INTO market_ohlcv_history
+            (stock_code, date, open, high, low, close, volume, trading_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const code of stockCodes) {
+            try {
+                // 최근 3봉만 가져옴 (API 부하 최소화)
+                const rawData = await this.kiwoomService.getDailyChartData(code, 3);
+
+                if (!Array.isArray(rawData) || rawData.length === 0) {
+                    console.warn(`[MarketDataCollector] refreshStocksClose: 데이터 없음 (${code})`);
+                    failed++;
+                    continue;
+                }
+
+                // 오늘 날짜 row만 추출하여 갱신
+                let updatedToday = false;
+                for (const row of rawData) {
+                    const dateStr = String(row.dt || row.stnd_dt || row.stck_bsop_date || row.date || '').replace(/[-]/g, '');
+                    if (dateStr.length !== 8) continue;
+                    const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+
+                    // 오늘 날짜 row만 REPLACE (과거 데이터 불필요)
+                    if (formattedDate !== today) continue;
+
+                    const getVal = (keys: string[]) => {
+                        for (const k of keys) {
+                            if (row[k] !== undefined && String(row[k]).trim() !== '') {
+                                return String(row[k]).replace(/[,]/g, '').replace(/^-$/, '0');
+                            }
+                        }
+                        return '0';
+                    };
+
+                    const open  = parseInt(getVal(['open', 'open_pric', 'opn_prc', 'stck_oprc', 'oprc']));
+                    const high  = parseInt(getVal(['high', 'high_pric', 'hg_prc', 'stck_hgpr', 'hgpr']));
+                    const low   = parseInt(getVal(['low', 'low_pric', 'lw_prc', 'stck_lwpr', 'lwpr']));
+                    const close = parseInt(getVal(['close', 'cur_prc', 'stck_clpr', 'clprc', 'prpr']));
+                    const volume = parseInt(getVal(['volume', 'trde_qty', 'vol', 'acml_vol']));
+                    let tradingValue = parseInt(getVal(['trading_value', 'trde_daeg', 'acml_tr_pbmn']));
+                    if (tradingValue === 0 && volume > 0) {
+                        tradingValue = Math.floor((open + close) / 2 * volume);
+                    }
+
+                    if (close > 0) {
+                        insertStmt.run(code, formattedDate, open, high, low, close, volume, tradingValue);
+                        console.log(`[MarketDataCollector] ✅ 종가 갱신: ${code} → ${close.toLocaleString()}원`);
+                        updatedToday = true;
+                        refreshed++;
+                    }
+                }
+
+                if (!updatedToday) {
+                    // 오늘 데이터가 없는 경우 (장 비개장일 등) - 가장 최근 봉을 오늘 날짜로 저장
+                    const latest = rawData[0];
+                    if (latest) {
+                        console.warn(`[MarketDataCollector] refreshStocksClose: ${code} 오늘 데이터 없음 (최신봉 사용)`);
+                    }
+                    failed++;
+                }
+
+                // Kiwoom API TPS 대응 (200ms 딜레이)
+                await new Promise(r => setTimeout(r, 200));
+
+            } catch (err: any) {
+                console.error(`[MarketDataCollector] refreshStocksClose 실패 (${code}):`, err.message);
+                failed++;
+            }
+        }
+
+        console.log(`[MarketDataCollector] 🔄 진입가 보정용 재수집 완료: 갱신 ${refreshed}개 / 실패 ${failed}개`);
+        return { refreshed, failed };
+    }
+
+    /**
      * 전 종목 코스피/코스닥 60일치 일봉 데이터를 수집합니다.
      */
-    public async runDailyCollection(days: number = 60): Promise<void> {
+    public async runDailyCollection(days: number = 100): Promise<void> {
         if (this.isCollecting) {
             console.log('[MarketDataCollector] 이미 전 종목 수집이 진행 중입니다.');
             return;

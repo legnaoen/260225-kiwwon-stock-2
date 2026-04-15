@@ -401,8 +401,8 @@ export class PortfolioManagerAgent {
             // 5-C. Load Dynamic Limits from Store
             const aiSettings: any = store.get('ai_settings') || {};
             const limits = aiSettings.portfolioLimits || {
-                buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
-                watchlist: { MOMENTUM: 3, PULLBACK: 3, SWING: 6, VALUE: 3 }
+                buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },      // 합계 10개
+                watchlist: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 } // 합계 10개 (DatabaseService enforcePortfolioCaps 기본값과 일치)
             };
             const totalBuy = Object.values(limits.buy).reduce((a: any, b: any) => a + Number(b), 0);
             const totalWatch = Object.values(limits.watchlist).reduce((a: any, b: any) => a + Number(b), 0);
@@ -531,11 +531,14 @@ ${chartRiskSkill}
                         }
                     }
 
-                    // 카테고리별 Cut-Off 실행 (T/O 강제 충원 및 하위권 서바이벌 탈락 적용)
+                    // BUG FIX #2: 전략별 Cut-Off + 총 10개 글로벌 강제 트리밍
+                    // 기본값 합계 = 2+2+4+2 = 10개 (이전에 aiSettings undefined 시 3+3+6+3=15개 버그 방어)
+                    const TOTAL_WATCH_LIMIT = 10;
                     const watchLimits = limits.watchlist || { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 };
                     const cutOffDropped: any[] = [];
                     const survivedWatchlist: any[] = [];
 
+                    // Step A: 전략별 1차 Cut-Off (각 전략 내 과잉 제거)
                     for (const [strategy, items] of Object.entries(groupedWatchlist)) {
                         // 리뷰 대상 종목들을 점수순 정렬
                         items.sort((a, b) => (b.conviction_score || 0) - (a.conviction_score || 0));
@@ -549,6 +552,17 @@ ${chartRiskSkill}
                             item.finalStatus = 'DROPPED';
                             cutOffDropped.push(item);
                         });
+                    }
+
+                    // Step B: 총 10개 글로벌 강제 트리밍 (절대 한도 보장)
+                    survivedWatchlist.sort((a, b) => (b.conviction_score || 0) - (a.conviction_score || 0));
+                    if (survivedWatchlist.length > TOTAL_WATCH_LIMIT) {
+                        const globalFailed = survivedWatchlist.splice(TOTAL_WATCH_LIMIT);
+                        globalFailed.forEach(item => {
+                            item.finalStatus = 'DROPPED';
+                            cutOffDropped.push(item);
+                        });
+                        console.log(`[PortfolioManager] ✂️ WATCHING 글로벌 트리밍: ${globalFailed.length}개 DROP (잔류 ${survivedWatchlist.length}개 유지)`);
                     }
 
                     const finalProcessed = [...buysAndSells, ...survivedWatchlist, ...cutOffDropped, ...validDecisions];
@@ -622,6 +636,42 @@ ${chartRiskSkill}
                         }
                     }
                     console.log(`[PortfolioManager] ✅ 통합 서바이벌 리뷰 및 DB 반영 완료.`);
+
+                    // BUG FIX #3: AI 응답 누락 좀비 종목 정리 + DB 최종 10개 보장
+                    try {
+                        const processedCodes = new Set(finalProcessed.map((d: any) => d.finalCode).filter(Boolean));
+                        const zombieRows = rawDb.prepare(
+                            "SELECT stock_code, stock_name FROM maiis_portfolio WHERE status IN ('WATCHING', 'WATCHLIST')"
+                        ).all() as any[];
+                        let zombieCount = 0;
+                        for (const zombie of zombieRows) {
+                            if (!processedCodes.has(zombie.stock_code)) {
+                                // evalPool에 있었으나 AI가 응답에서 돌려주지 않은 종목 자동 DROP
+                                rawDb.prepare(
+                                    "UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ? WHERE stock_code = ? AND status IN ('WATCHING', 'WATCHLIST')"
+                                ).run('PM2 응답 누락 종목 — 자동 정리', this.db.getKstTimestamp(), zombie.stock_code);
+                                console.log(`[PortfolioManager] 🧹 좀비 정리: ${zombie.stock_name}(${zombie.stock_code})`);
+                                zombieCount++;
+                            }
+                        }
+                        if (zombieCount > 0) console.log(`[PortfolioManager] 🧹 좀비 종목 총 ${zombieCount}개 정리 완료`);
+
+                        // DB 기준 WATCHING 최종 10개 초과 시 하위 종목 추가 제거 (2중 폴세이프)
+                        const finalWatching = rawDb.prepare(
+                            "SELECT stock_code FROM maiis_portfolio WHERE status = 'WATCHING' ORDER BY conviction_score DESC"
+                        ).all() as any[];
+                        if (finalWatching.length > 10) {
+                            const excess = finalWatching.slice(10);
+                            excess.forEach((s: any) => {
+                                rawDb.prepare(
+                                    "UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ? WHERE stock_code = ?"
+                                ).run('WATCHING 10개 한도 초과 — DB 최종 트리밍', this.db.getKstTimestamp(), s.stock_code);
+                            });
+                            console.log(`[PortfolioManager] ✂️ DB 최종 확인: WATCHING 10개 초과 ${excess.length}개 제거 완료`);
+                        }
+                    } catch (cleanupErr: any) {
+                        console.warn(`[PortfolioManager] 좀비/트리밍 정리 중 오류 (무시):`, cleanupErr.message);
+                    }
 
                     // --- Phase 2 텔레그램 스냅샷 발송 ---
                     try {

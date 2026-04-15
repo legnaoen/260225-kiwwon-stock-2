@@ -18,6 +18,7 @@ export type CrossCategory =
     | 'PULLBACK_REBOUND'
     | 'PULLBACK_DIP'
     | 'INTRADAY_SURGE'
+    | 'SHORT_TERM_CONSOLIDATION'
     | 'UNCLASSIFIED';
 
 /** 시그널: 주 카테고리와 독립적으로 복수 부여 가능한 보조 특성 */
@@ -115,7 +116,7 @@ export class CrossPeriodAnalyzer {
             const mkts = this.calcMarketChanges([5, 10, 20, 60]);
 
             // 2. 4개 기간 동시 조회 (기존 서비스 재활용)
-            const leaders5  = this.svc.getMarketLeaders(5,  mkts[5],  300, peakoutSettings);
+            const leaders5 = this.svc.getMarketLeaders(5, mkts[5], 300, peakoutSettings);
             const leaders10 = this.svc.getMarketLeaders(10, mkts[10], 300, peakoutSettings);
             const leaders20 = this.svc.getMarketLeaders(20, mkts[20], 300, peakoutSettings);
             const leaders60 = this.svc.getMarketLeaders(60, mkts[60], 300, peakoutSettings);
@@ -129,7 +130,7 @@ export class CrossPeriodAnalyzer {
             ]);
 
             // 4. 종목별 맵 구성 (O(1) 조회)
-            const map5  = new Map(leaders5.map(l  => [l.stockCode, l]));
+            const map5 = new Map(leaders5.map(l => [l.stockCode, l]));
             const map10 = new Map(leaders10.map(l => [l.stockCode, l]));
             const map20 = new Map(leaders20.map(l => [l.stockCode, l]));
             const map60 = new Map(leaders60.map(l => [l.stockCode, l]));
@@ -140,6 +141,30 @@ export class CrossPeriodAnalyzer {
             // 6. 전 종목 중 60일 기간의 총 유효종목 수 파악 (랭크 계산 기준)
             const totalStocks = ohlcv60.size;
 
+            // [거래정지 종목 필터링 로직 추가]
+            // 전체 시장 OHLCV 중 '가장 최근 거래일(today)'을 추출
+            let latestMarketDate = '';
+            for (const rows of ohlcv60.values()) {
+                if (rows.length > 0 && rows[rows.length - 1].date > latestMarketDate) {
+                    latestMarketDate = rows[rows.length - 1].date;
+                }
+            }
+
+            // allCodes(5/10/20/60일 리더 후보) 중 현재 거래정지 상태인 종목 파기
+            for (const code of Array.from(allCodes)) {
+                const rows = ohlcv60.get(code);
+                if (!rows || rows.length === 0) {
+                    allCodes.delete(code);
+                    continue;
+                }
+                const lastRow = rows[rows.length - 1];
+                // 1) 오늘 날짜 데이터 누락 (상장폐지 등)
+                // 2) 오늘 거래대금 0 (거래정지)
+                if (lastRow.date !== latestMarketDate || !lastRow.tradingValue || lastRow.tradingValue === 0) {
+                    allCodes.delete(code);
+                }
+            }
+
             // 7. 종목별 세그먼트 프로파일 생성 (5일×12 + 10일×6)
             const segMap = this.buildAllSegmentProfiles(ohlcv60, mkts, totalStocks);
 
@@ -147,7 +172,7 @@ export class CrossPeriodAnalyzer {
             const candidates: CrossPeriodCandidate[] = [];
 
             for (const code of allCodes) {
-                const p5  = map5.get(code);
+                const p5 = map5.get(code);
                 const p10 = map10.get(code);
                 const p20 = map20.get(code);
                 const p60 = map60.get(code);
@@ -157,7 +182,7 @@ export class CrossPeriodAnalyzer {
 
                 // 없는 기간은 실제 OHLCV에서 알파 계산 (nullProfile의 0% 표시 문제 해결)
                 const ohlcvRows = ohlcv60.get(code);
-                const safe5  = p5  ?? this.liteProfile(code, ohlcvRows, 5,  mkts[5]);
+                const safe5 = p5 ?? this.liteProfile(code, ohlcvRows, 5, mkts[5]);
                 const safe10 = p10 ?? this.liteProfile(code, ohlcvRows, 10, mkts[10]);
                 const safe20 = p20 ?? this.liteProfile(code, ohlcvRows, 20, mkts[20]);
                 const safe60 = p60 ?? this.liteProfile(code, ohlcvRows, 60, mkts[60]);
@@ -165,7 +190,7 @@ export class CrossPeriodAnalyzer {
                 const stockName = [p5, p10, p20, p60]
                     .filter((p): p is MarketLeaderItem => !!p && p.stockName !== p.stockCode)
                     .map(p => p.stockName)[0] ?? code;
-                const themes    = Array.from(new Set([
+                const themes = Array.from(new Set([
                     ...safe5.relatedThemes,
                     ...safe10.relatedThemes,
                     ...safe20.relatedThemes,
@@ -212,7 +237,7 @@ export class CrossPeriodAnalyzer {
 
             // 9. 정렬: EXHAUSTED 모소두 맞, 이외는 충실도 기준 (PRIORITY는 디스플레이 순서만, 슬라이스 기준 아님)
             const DISPLAY_ORDER: Record<CrossCategory, number> = {
-                INTRADAY_SURGE: 7, EMERGING_STAR: 6, PULLBACK_REBOUND: 5, PULLBACK_DIP: 4,
+                INTRADAY_SURGE: 8, SHORT_TERM_CONSOLIDATION: 7, EMERGING_STAR: 6, PULLBACK_REBOUND: 5, PULLBACK_DIP: 4,
                 TRUE_LEADER: 3, EXHAUSTED: 0, UNCLASSIFIED: -1,
             };
             candidates.sort((a, b) => {
@@ -224,12 +249,12 @@ export class CrossPeriodAnalyzer {
             // 10. EXHAUSTED를 뎒기고, 나머지 카테고리는 모두 포함
             //     topN은 EMERGING_STAR 안에서만 제한 (TRUE_LEADER 같은 핵심 카테고리가 슬라이스되는 문제 방지)
             const nonExhausted = candidates.filter(c => !['UNCLASSIFIED', 'EXHAUSTED'].includes(c.category));
-            const exhausted    = candidates.filter(c => c.category === 'EXHAUSTED');
+            const exhausted = candidates.filter(c => c.category === 'EXHAUSTED');
 
             // EMERGING_STAR만 topN으로 제한하되, 타 카테고리가 폭증하더라도 최소 30종목(T/O)은 고정 보장되도록 방어벽 구축
             const starCapped = nonExhausted.filter(c => c.category !== 'EMERGING_STAR');
-            const stars      = nonExhausted.filter(c => c.category === 'EMERGING_STAR').slice(0, Math.max(30, topN - starCapped.length));
-            const filtered   = [...starCapped, ...stars, ...exhausted.slice(0, 5)];
+            const stars = nonExhausted.filter(c => c.category === 'EMERGING_STAR').slice(0, Math.max(30, topN - starCapped.length));
+            const filtered = [...starCapped, ...stars, ...exhausted.slice(0, 5)];
 
             // 11. 테마 집계
             const themeCounter: Record<string, number> = {};
@@ -243,7 +268,7 @@ export class CrossPeriodAnalyzer {
 
             // 12. 통계
             const byCategory = {} as Record<CrossCategory, number>;
-            const cats: CrossCategory[] = ['EXHAUSTED','TRUE_LEADER','INTRADAY_SURGE','EMERGING_STAR','PULLBACK_REBOUND','PULLBACK_DIP','UNCLASSIFIED'];
+            const cats: CrossCategory[] = ['EXHAUSTED', 'TRUE_LEADER', 'INTRADAY_SURGE', 'SHORT_TERM_CONSOLIDATION', 'EMERGING_STAR', 'PULLBACK_REBOUND', 'PULLBACK_DIP', 'UNCLASSIFIED'];
             cats.forEach(c => { byCategory[c] = filtered.filter(x => x.category === c).length; });
 
             return { success: true, candidates: filtered, themes, stats: { total: filtered.length, byCategory } };
@@ -262,36 +287,36 @@ export class CrossPeriodAnalyzer {
         p60: MarketLeaderItem,
         seg: SegmentProfile,
         has5dData: boolean = true,
-        ohlcvRows?: { date: string; close: number; tradingValue: number }[]
+        ohlcvRows?: { date: string; open: number; high: number; low: number; close: number; tradingValue: number }[]
     ): { category: CrossCategory; convictionScore: number; reason: string } {
 
-        const phase5  = p5.phase;
+        const phase5 = p5.phase;
         const phase10 = p10.phase;
         const phase20 = p20.phase;
         const phase60 = p60.phase;
         const pkLevel = p5.peakoutLevel ?? 'NONE';
-        const ddp     = p60.drawdownFromPeak ?? p20.drawdownFromPeak ?? p10.drawdownFromPeak ?? p5.drawdownFromPeak ?? 0;
+        const ddp = p60.drawdownFromPeak ?? p20.drawdownFromPeak ?? p10.drawdownFromPeak ?? p5.drawdownFromPeak ?? 0;
 
         let paScore = 0;
         let pDipReason = '';
         let isPriceActionPullback = false;
-        
+        const isBloodlineLeader = phase60 === 'LEADER' || phase20 === 'LEADER';
+
         if (ohlcvRows && ohlcvRows.length >= 20) {
             const min60 = Math.min(...ohlcvRows.map(r => r.close));
             const max60 = Math.max(...ohlcvRows.map(r => r.close));
             const riseFromBottom = min60 > 0 ? ((max60 - min60) / min60) * 100 : 0;
-            
+
             const recent5 = ohlcvRows.slice(-5);
             const min5 = Math.min(...recent5.map(r => r.close));
             const max5 = Math.max(...recent5.map(r => r.close));
             const volatility5 = min5 > 0 ? ((max5 - min5) / min5) * 100 : 0;
             const avgVol5 = recent5.reduce((s, r) => s + r.tradingValue, 0) / recent5.length;
-            
+
             const recent20 = ohlcvRows.slice(-20);
             const avgVol20 = recent20.length > 0 ? recent20.reduce((s, r) => s + r.tradingValue, 0) / recent20.length : 0;
-            
+
             // 1. 대장주 혈통 검증 (과거 한 번이라도 시장 주도주였는가)
-            const isBloodlineLeader = phase60 === 'LEADER' || phase20 === 'LEADER';
 
             // [정통 Price Action 3필터 + 혈통 필터]
             // 2. 저점대비 30% 이상 급등 (대시세 이력)
@@ -308,7 +333,7 @@ export class CrossPeriodAnalyzer {
         const longLeader = phase60 === 'LEADER' || phase20 === 'LEADER';
         const recentNone = !phase5 && !phase10;
         if (longLeader && recentNone && pkLevel === 'CONFIRMED') {
-            const score = -(( p5.peakoutScore ?? 0) * 5 + ddp);
+            const score = -((p5.peakoutScore ?? 0) * 5 + ddp);
             return { category: 'EXHAUSTED', convictionScore: score, reason: this.reasonExhausted(p60, p5) };
         }
         // CONFIRMED 2기간 이상이면 EXHAUSTED (ALERT만으로는 눌림목 후보까지 흡수되는 문제 방지)
@@ -318,12 +343,26 @@ export class CrossPeriodAnalyzer {
             return { category: 'EXHAUSTED', convictionScore: score, reason: this.reasonExhausted(p60, p5) };
         }
 
-        // ── 2. TRUE_LEADER (4기간 모두 LEADER)
-        if (phase5 === 'LEADER' && phase10 === 'LEADER' && phase20 === 'LEADER' && phase60 === 'LEADER') {
-            const total = p5.marketAlpha + p10.marketAlpha + p20.marketAlpha + p60.marketAlpha;
-            let score = total - (p5.peakoutScore ?? 0) * 3;
-            if (seg.consistencyScore >= 0.8) score += 5;
-            return { category: 'TRUE_LEADER', convictionScore: score, reason: this.reasonTruLeader(p5, total, seg) };
+        // ── 2. TRUE_LEADER (4기간 가중 랜크 점수제)
+        // 공식: score = Σ (1 - rank/300) × weight × 100
+        // 5d:40점 / 10d:30점 / 20d:20점 / 60d:10점 (합계 최대 100점)
+        // 임계값 70점: 평균적으로 각 구간 상위 30% 이상 유지
+        // → 5d=NONE이면 최대 60점(10d+20d+60d 전부 1위)\uc73c로 자동 탈락
+        {
+            const rankScore = (rank: number | undefined) =>
+                rank != null ? Math.max(0, (300 - rank) / 300) : 0;
+
+            const weightedScore =
+                rankScore(p5.rank)  * 40 +   // 5d: 최대 40점
+                rankScore(p10.rank) * 30 +   // 10d: 최대 30점
+                rankScore(p20.rank) * 20 +   // 20d: 최대 20점
+                rankScore(p60.rank) * 10;    // 60d: 최대 10점
+
+            if (weightedScore >= 70) {
+                let score = weightedScore - (p5.peakoutScore ?? 0) * 3;
+                if (seg.consistencyScore >= 0.8) score += 5;
+                return { category: 'TRUE_LEADER', convictionScore: score, reason: this.reasonTruLeader(p5, weightedScore, seg) };
+            }
         }
 
         // ── 3. INTRADAY_SURGE (당일 급등주 종가베팅 대상)
@@ -333,10 +372,10 @@ export class CrossPeriodAnalyzer {
         if (ohlcvRows && ohlcvRows.length >= 2) {
             const lastRow = ohlcvRows[ohlcvRows.length - 1];   // 오늘
             const prevRow = ohlcvRows[ohlcvRows.length - 2];   // 어제
-            
+
             if (prevRow.close > 0) {
                 intradaySurgePct = ((lastRow.close - prevRow.close) / prevRow.close) * 100;
-                
+
                 // 오늘 너무 심하게 고점에서 밀리지 않았는지 방어력 평가 (꼬리가 아니라 몸통상단 유지)
                 const bodyTop = Math.max(lastRow.open, lastRow.close);
                 const high = lastRow.high || bodyTop;
@@ -349,7 +388,7 @@ export class CrossPeriodAnalyzer {
                 const hasVolumeSpike = lastRow.tradingValue >= 30000000000 || (lastRow.tradingValue > (p5.avgTradingValue * 2));
 
                 if (intradaySurgePct >= 10 && intradaySurgePct <= 24.9 && closePositionRatio >= 0.5 && hasVolumeSpike) {
-                    p3Reason = `[당일 급등] 전일비 +${intradaySurgePct.toFixed(1)}% 슈팅 | 윗꼬리 방어 (${(closePositionRatio*100).toFixed(0)}%) | 대량 수급 포착`;
+                    p3Reason = `[당일 급등] 전일비 +${intradaySurgePct.toFixed(1)}% 슈팅 | 윗꼬리 방어 (${(closePositionRatio * 100).toFixed(0)}%) | 대량 수급 포착`;
                     let paScore = intradaySurgePct * 2 + (closePositionRatio * 10) + (Math.log10(lastRow.tradingValue) * 2);
                     return { category: 'INTRADAY_SURGE', convictionScore: paScore, reason: p3Reason };
                 }
@@ -362,9 +401,9 @@ export class CrossPeriodAnalyzer {
         // ※ LONG_RUNNER 조건 통과 후 → 5d만 LEADER인 신흥 진입주
         if (phase5 === 'LEADER' && pkLevel === 'NONE' && phase60 !== 'LEADER' &&
             p5.marketAlpha > p20.marketAlpha) {
-            
+
             let score = (p5.marketAlpha * 2) + (p10.marketAlpha * 0.5) +
-                        Math.log10(Math.max(p5.avgTradingValue, 1)) * 3;
+                Math.log10(Math.max(p5.avgTradingValue, 1)) * 3;
             if (seg.trend === 'LATE_STRONG') score += 5;
 
             // 추가 조건: 60일 내 고점에서 15% 이상 크게 무너진 이력이 있다면 '신흥'이 아니라 '눌림 반등'으로 격리
@@ -378,6 +417,51 @@ export class CrossPeriodAnalyzer {
         // ── 5. PULLBACK_DIP (눌림목 - 절대 가격 차트 / 거래량 기준)
         if (isPriceActionPullback) {
             return { category: 'PULLBACK_DIP', convictionScore: paScore, reason: pDipReason };
+        }
+
+        // ── 6. SHORT_TERM_CONSOLIDATION (단기 눌림목)
+        // 조건: D-1 ~ D-4 에 15% 이상 첫 급등봉 발생, 종가 대비 10% 이내 횡보, 10일선 지지, 혈통대장(TrackA,C) 아님
+        if (ohlcvRows && ohlcvRows.length >= 10 && !isBloodlineLeader) {
+            const todayIdx = ohlcvRows.length - 1;
+            let spikeIdx = -1;
+            let spikePct = 0;
+            // D-4 to D-1 (인덱스: length-5 ~ length-2)
+            for (let i = todayIdx - 4; i < todayIdx; i++) {
+                if (i <= 0) continue;
+                const prev = ohlcvRows[i - 1];
+                const curr = ohlcvRows[i];
+                const pct = prev.close > 0 ? ((curr.close - prev.close) / prev.close) * 100 : 0;
+                const bodyPct = curr.open > 0 ? ((curr.close - curr.open) / curr.open) * 100 : 0;
+
+                if (pct >= 15 || bodyPct >= 15) {
+                    if (pct > spikePct || bodyPct > spikePct) {
+                        spikePct = Math.max(pct, bodyPct);
+                        spikeIdx = i;
+                    }
+                }
+            }
+
+            if (spikeIdx !== -1) {
+                const spikeDay = ohlcvRows[spikeIdx];
+                const today = ohlcvRows[todayIdx];
+                const diffFromSpikeClose = spikeDay.close > 0 ? ((today.close - spikeDay.close) / spikeDay.close) * 100 : 0;
+
+                // 단기 이동평균선(최근 10일)
+                const recent10 = ohlcvRows.slice(-10);
+                const ma10 = recent10.reduce((s, r) => s + r.close, 0) / recent10.length;
+
+                if (
+                    diffFromSpikeClose >= -10 && diffFromSpikeClose <= 10 && // 급등봉 종가 대비 ±10% 내
+                    today.close >= spikeDay.open && // 시가 훼손 금지 (음봉 투매 금지)
+                    today.close >= ma10 * 0.98 // 10일선 살짝 깨는 것까지는 용인 (종가 기준)
+                ) {
+                    const daysAgo = todayIdx - spikeIdx;
+                    const pEReason = `[단기 눌림목] ${daysAgo}일 전 첫 급등(+${spikePct.toFixed(1)}%) | 기준봉 종가대비 ${diffFromSpikeClose > 0 ? '+' : ''}${diffFromSpikeClose.toFixed(1)}% 횡보 | 중장기대장주 이력 없음`;
+                    const score = spikePct * 1.5 + (10 - Math.abs(diffFromSpikeClose));
+
+                    return { category: 'SHORT_TERM_CONSOLIDATION', convictionScore: score, reason: pEReason };
+                }
+            }
         }
 
         return { category: 'UNCLASSIFIED', convictionScore: 0, reason: '분류 기준 미달' };
@@ -446,32 +530,32 @@ export class CrossPeriodAnalyzer {
         // 10일 단위 6구간 경계 (시각화용)
         const seg10Boundaries = this.calcSegBoundaries(sortedDates, 6);
         // 5일 단위 12구간 경계 (RANK_CLIMBER 감지용)
-        const seg5Boundaries  = this.calcSegBoundaries(sortedDates, 12);
+        const seg5Boundaries = this.calcSegBoundaries(sortedDates, 12);
 
         // 각 구간별 전 종목 알파 계산 → 구간 랭킹 산출
         const rankMaps10 = this.buildSegmentAlphaRanks(ohlcv60, seg10Boundaries);
-        const rankMaps5  = this.buildSegmentAlphaRanks(ohlcv60, seg5Boundaries);
+        const rankMaps5 = this.buildSegmentAlphaRanks(ohlcv60, seg5Boundaries);
 
         // 종목별 프로파일 생성
         for (const [code, rows] of ohlcv60.entries()) {
             // 10일 단위 segments (시각화)
             const segments: SegmentSlot[] = seg10Boundaries.map((bounds, idx) => {
                 const rankMap = rankMaps10[idx];
-                const rank    = rankMap.get(code) ?? totalStocks;
-                const alpha   = this.calcSegAlpha(rows, bounds.startDate, bounds.endDate);
+                const rank = rankMap.get(code) ?? totalStocks;
+                const alpha = this.calcSegAlpha(rows, bounds.startDate, bounds.endDate);
                 const pctTile = rank / totalStocks;
                 const phase: 'LEADER' | 'CANDIDATE' | 'NONE' =
                     rank <= totalStocks / 3 ? 'LEADER' :
-                    rank <= totalStocks * 2 / 3 ? 'CANDIDATE' : 'NONE';
+                        rank <= totalStocks * 2 / 3 ? 'CANDIDATE' : 'NONE';
                 return { index: idx + 1, phase, alpha };
             });
 
             // 5일 단위 rank trajectory (RANK_CLIMBER 감지)
             const rankTrajectory: RankSlot[] = seg5Boundaries.map((bounds, idx) => {
-                const rankMap    = rankMaps5[idx];
-                const rank       = rankMap.get(code) ?? totalStocks;
+                const rankMap = rankMaps5[idx];
+                const rank = rankMap.get(code) ?? totalStocks;
                 const percentile = (rank / totalStocks) * 100;
-                const alpha      = this.calcSegAlpha(rows, bounds.startDate, bounds.endDate);
+                const alpha = this.calcSegAlpha(rows, bounds.startDate, bounds.endDate);
                 return { index: idx + 1, rank, percentile, alpha };
             });
 
@@ -516,7 +600,7 @@ export class CrossPeriodAnalyzer {
                 trend = 'CONSISTENT';
             } else {
                 const earlyLeaders = segments.slice(0, 3).filter(s => s.phase === 'LEADER').length;
-                const lateLeaders  = segments.slice(3).filter(s => s.phase === 'LEADER').length;
+                const lateLeaders = segments.slice(3).filter(s => s.phase === 'LEADER').length;
                 if (earlyLeaders >= 2 && lateLeaders === 0) trend = 'EARLY_STRONG';
                 else if (earlyLeaders === 0 && lateLeaders >= 2) trend = 'LATE_STRONG';
             }
@@ -537,8 +621,7 @@ export class CrossPeriodAnalyzer {
 
     // ─── 세그먼트 구간 경계 계산 ────────────────────────────
 
-    private calcSegBoundaries(sortedDates: string[], numSegments: number):
-        { startDate: string; endDate: string }[] {
+    private calcSegBoundaries(sortedDates: string[], numSegments: number): { startDate: string; endDate: string }[] {
         const total = sortedDates.length;
         if (total === 0) return [];
 
@@ -547,7 +630,7 @@ export class CrossPeriodAnalyzer {
 
         for (let i = 0; i < numSegments; i++) {
             const start = i * segSize;
-            const end   = i === numSegments - 1 ? total - 1 : (i + 1) * segSize - 1;
+            const end = i === numSegments - 1 ? total - 1 : (i + 1) * segSize - 1;
             boundaries.push({ startDate: sortedDates[start], endDate: sortedDates[end] });
         }
         return boundaries;
@@ -580,7 +663,7 @@ export class CrossPeriodAnalyzer {
         const seg = rows.filter(r => r.date >= startDate && r.date <= endDate);
         if (seg.length < 2) return 0;
         const first = seg[0].close;
-        const last  = seg[seg.length - 1].close;
+        const last = seg[seg.length - 1].close;
         return first > 0 ? ((last - first) / first) * 100 : 0;
     }
 
@@ -645,7 +728,7 @@ export class CrossPeriodAnalyzer {
             ssYY += (values[i] - yMean) ** 2;
         }
 
-        const slope    = ssXX !== 0 ? ssXY / ssXX : 0;
+        const slope = ssXX !== 0 ? ssXY / ssXX : 0;
         const rSquared = ssXX !== 0 && ssYY !== 0 ? (ssXY ** 2) / (ssXX * ssYY) : 0;
         return { slope, rSquared };
     }
@@ -656,9 +739,9 @@ export class CrossPeriodAnalyzer {
         return `과거 대장주(60d α+${p60.marketAlpha.toFixed(1)}%)이나 최근 5일 랭킹 이탈 + 피크아웃 ${p5.peakoutScore ?? 0}점 확정. 추가 하락 위험`;
     }
 
-    private reasonTruLeader(p5: MarketLeaderItem, total: number, seg: SegmentProfile): string {
+    private reasonTruLeader(p5: MarketLeaderItem, weightedScore: number, seg: SegmentProfile): string {
         const consistency = `일관성 ${(seg.consistencyScore * 100).toFixed(0)}%`;
-        return `4기간 최상위 대장주. 전 기간 합산 α+${total.toFixed(1)}% | ${consistency}`;
+        return `가중 랜크 점수 ${weightedScore.toFixed(1)}점 (5d×40+10d×30+20d×20+60d×10, 최대100) | ${consistency}`;
     }
 
     private reasonEmergingStar(p5: MarketLeaderItem, p20: MarketLeaderItem, seg: SegmentProfile): string {
@@ -714,12 +797,12 @@ export class CrossPeriodAnalyzer {
         if (seg.length < 2) return this.nullProfile(stockCode);
 
         const first = seg[0].close;
-        const last  = seg[seg.length - 1].close;
+        const last = seg[seg.length - 1].close;
         const maxClose = seg.reduce((m, r) => Math.max(m, r.close), 0);
         const drawdownFromPeak = maxClose > 0 ? ((maxClose - last) / maxClose) * 100 : 0;
-        
+
         const totalChangeRate = first > 0 ? ((last - first) / first) * 100 : 0;
-        const marketAlpha    = totalChangeRate - mktChange;
+        const marketAlpha = totalChangeRate - mktChange;
         const avgTradingValue = seg.reduce((s, r) => s + (r.tradingValue || 0), 0) / seg.length;
         const recentTrend: 'UP' | 'DOWN' | 'FLAT' =
             totalChangeRate > 1 ? 'UP' : totalChangeRate < -1 ? 'DOWN' : 'FLAT';
@@ -748,4 +831,18 @@ export class CrossPeriodAnalyzer {
             segments: [], trend: 'INCONSISTENT', consistencyScore: 0,
         };
     }
+}
+peakoutLevel: 'NONE',
+    drawdownFromPeak,
+    recentTrend,
+    validAlphaDays: seg.length,
+        };
+    }
+
+    private nullSegmentProfile(): SegmentProfile {
+    return {
+        rankTrajectory: [], rankSlope: 0, rankRSquared: 0, isRankClimber: false,
+        segments: [], trend: 'INCONSISTENT', consistencyScore: 0,
+    };
+}
 }

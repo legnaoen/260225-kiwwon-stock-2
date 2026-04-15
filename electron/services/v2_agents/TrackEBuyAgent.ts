@@ -1,11 +1,11 @@
 /**
- * TrackABuyAgent
+ * TrackEBuyAgent
  * ─────────────────────────────────────────────────────────────────
  * [역할] 모의매매 AI 매수 후보 선정 에이전트 (4단계 파이프라인)
  *
  * [실행 트리거]
  *   - SchedulerService → 15:05 CRON (전 종목 수집 완료 직후)
- *   - 수동 IPC: 'track-a:run-buy-agent'
+ *   - 수동 IPC: 'track-b:run-buy-agent'
  *
  * [데이터 흐름]
  *   Phase 1: CrossPeriodAnalyzer → 후보 필터링 (카테고리 + 상한가 제외)
@@ -13,7 +13,7 @@
  *   Phase 3: runStockResearch()    → Gemma 4 종목별 심층 분석 + 1차 BUY/WATCH 판단
  *                                    → stock_research_reports 저장 (로데이터 3종 포함)
  *   Phase 4: runAiAnalysis()       → Gemini 1회, 24개 팩트시트 기반 포트폴리오 최종 선발
- *   → track_a_buy_picks 저장 (PENDING 상태)
+ *   → track_e_buy_picks 저장 (PENDING 상태)
  *   → 15:30 장 마감 후 entry_price = 당일 종가로 자동 업데이트 (ACTIVE)
  *
  * [필터 규칙]
@@ -34,14 +34,10 @@ import { DEFAULT_PEAKOUT_SETTINGS } from '../v2_pipeline/MarketLeaderDiscoverySe
 import { getKstDate } from '../../utils/DateUtils';
 
 // ── 상수 ───────────────────────────────────────────────────────
-const BUY_CATEGORIES = ['TRUE_LEADER'];
+const BUY_CATEGORIES = ['SHORT_TERM_CONSOLIDATION'];
 const TARGET_PICKS = 5;
-const TARGET_DAYS = 20;
-const TARGET_RETURN_PCT = 20.0;
-
-// Gemma 투입 시 최대 종목 수 (리소스 최적화: 시간/API 부하 제어)
-// convictionScore 내림순으로 정렬된 후 상위 N개만 뉴스 수집
-const MAX_GEMMA_POOL = 20;
+const TARGET_DAYS = 10;
+const TARGET_RETURN_PCT = 15.0;
 
 // 상한가 임계값 (코스피/코스닥 공통 30%)
 const UPPER_LIMIT_THRESHOLD = 29.5;
@@ -78,7 +74,7 @@ interface GemmaStockReport {
     market_theme_link: string;
     theme_durability: string;
     catalyst_summary: string;
-    price_action_analysis: string;  // 피크아웃 감별 분석 (알고리즘 지표 기반)
+    price_action_analysis: string;
     risk_factors: string;
     upside_probability: 'HIGH' | 'MEDIUM' | 'LOW' | 'VERY_LOW';
     buy_score: number;
@@ -91,8 +87,8 @@ interface GemmaStockReport {
 }
 
 // ──────────────────────────────────────────────────────────────
-export class TrackABuyAgent {
-    private static instance: TrackABuyAgent;
+export class TrackEBuyAgent {
+    private static instance: TrackEBuyAgent;
     private db: DatabaseService;
     private isRunning = false;
     private naverCollector = new NaverSearchCollector();
@@ -101,11 +97,11 @@ export class TrackABuyAgent {
         this.db = DatabaseService.getInstance();
     }
 
-    public static getInstance(): TrackABuyAgent {
-        if (!TrackABuyAgent.instance) {
-            TrackABuyAgent.instance = new TrackABuyAgent();
+    public static getInstance(): TrackEBuyAgent {
+        if (!TrackEBuyAgent.instance) {
+            TrackEBuyAgent.instance = new TrackEBuyAgent();
         }
-        return TrackABuyAgent.instance;
+        return TrackEBuyAgent.instance;
     }
 
     // ─────────────────────────────────────────────────────────
@@ -113,63 +109,86 @@ export class TrackABuyAgent {
     // ─────────────────────────────────────────────────────────
     public async run(pickDate?: string): Promise<{ success: boolean; saved: number; skipped: number; error?: string }> {
         if (this.isRunning) {
-            console.log('[TrackABuyAgent] 이미 실행 중. 중복 실행 방지.');
+            console.log('[TrackEBuyAgent] 이미 실행 중. 중복 실행 방지.');
             return { success: false, saved: 0, skipped: 0, error: 'Already running' };
         }
 
         this.isRunning = true;
         const today = pickDate || getKstDate();
-        console.log(`[TrackABuyAgent] ▶ 4단계 모의매매 AI 파이프라인 시작: ${today}`);
+        console.log(`[TrackEBuyAgent] ▶ 4단계 모의매매 AI 파이프라인 시작: ${today}`);
 
         try {
             // ── Phase 1: 후보 선별 ──────────────────────────────
             const profile = CrossPeriodAnalyzer.getInstance().getCrossPeriodProfile(80, DEFAULT_PEAKOUT_SETTINGS);
             if (!profile.success || profile.candidates.length === 0) {
-                console.log('[TrackABuyAgent] CrossPeriod 후보 없음. 종료.');
+                console.log('[TrackEBuyAgent] CrossPeriod 후보 없음. 종료.');
                 return { success: false, saved: 0, skipped: 0, error: 'No cross-period candidates' };
             }
 
             const categoryFiltered = profile.candidates.filter(c => BUY_CATEGORIES.includes(c.category));
-            console.log(`[TrackABuyAgent] Phase1 카테고리 필터 후: ${categoryFiltered.length}개`);
+            console.log(`[TrackEBuyAgent] Phase1 카테고리 필터 후: ${categoryFiltered.length}개`);
 
             const todayOhlcv = this.loadTodayOhlcv(today);
-            const { filtered: buyableListAll, skipped } = this.filterUpperLimit(categoryFiltered, todayOhlcv);
+            const { filtered: buyableList, skipped } = this.filterUpperLimit(categoryFiltered, todayOhlcv);
+            console.log(`[TrackEBuyAgent] Phase1 상한가 제외 후: ${buyableList.length}개 (제외: ${skipped.length}개)`);
 
-            // convictionScore 내림순 정렬 후 상위 MAX_GEMMA_POOL개로 캔선 (이미 정렬 완료됨)
-            const buyableList = buyableListAll.slice(0, MAX_GEMMA_POOL);
-            console.log(`[TrackABuyAgent] Phase1 상한가 제외 후: ${buyableListAll.length}개 | Gemma 투입: ${buyableList.length}개 (제외: ${skipped.length}개`);
+            // ── Phase 1.5: 효율화 전략 (급등 당일 거래대금 기준 Top 20 캡 적용) ──────────────
+            const rawDb = (this.db as any).db;
+            const tradingValueMap = new Map<string, number>();
 
-            if (buyableList.length === 0) {
+            for (const c of buyableList) {
+                // 최근 5영업일 데이터 중 최대 거래대금(급등일 거래대금과 거의 일치)을 구함
+                const maxVolRow = rawDb.prepare(`
+                    SELECT MAX(trading_value) as max_val FROM (
+                        SELECT trading_value FROM market_ohlcv_history
+                        WHERE stock_code = ? AND date <= ?
+                        ORDER BY date DESC LIMIT 5
+                    )
+                `).get(c.stockCode, today) as { max_val: number };
+                tradingValueMap.set(c.stockCode, maxVolRow?.max_val || 0);
+            }
+
+            buyableList.sort((a, b) => {
+                const aVol = tradingValueMap.get(a.stockCode) || 0;
+                const bVol = tradingValueMap.get(b.stockCode) || 0;
+                return bVol - aVol;
+            });
+            const cappedBuyableList = buyableList.slice(0, 20);
+            console.log(`[TrackEBuyAgent] Phase1.5 최대 거래대금 Top 20 캡 적용 후: ${cappedBuyableList.length}개`);
+
+            if (cappedBuyableList.length === 0) {
                 return { success: false, saved: 0, skipped: skipped.length, error: 'All candidates filtered (upper limit)' };
             }
 
             // ── Phase 2: 뉴스 온디맨드 리서치 ─────────────────
-            console.log(`[TrackABuyAgent] Phase2 뉴스 리서치 시작...`);
-            await this.enrichCandidateNews(buyableList, today);
+            console.log(`[TrackEBuyAgent] Phase2 뉴스 리서치 시작...`);
+            await this.enrichCandidateNews(cappedBuyableList, today);
 
             // ── Phase 3: Gemma 4 종목별 심층 분석 ─────────────
-            console.log(`[TrackABuyAgent] Phase3 Gemma4 종목별 분석 시작 (${buyableList.length}개)...`);
-            const gemmaReports = await this.runStockResearch(buyableList, today);
-            console.log(`[TrackABuyAgent] Phase3 완료: ${gemmaReports.length}개 분석됨`);
+            console.log(`[TrackEBuyAgent] Phase3 Gemma4 종목별 분석 시작 (${cappedBuyableList.length}개)...`);
+            const gemmaReports = await this.runStockResearch(cappedBuyableList, today);
+            console.log(`[TrackEBuyAgent] Phase3 완료: ${gemmaReports.length}개 분석됨`);
 
             // ── Phase 4: Gemini 최종 포트폴리오 선발 ──────────
-            console.log(`[TrackABuyAgent] Phase4 Gemini 최종 선발 시작...`);
-            const aiPicks = await this.runAiAnalysis(buyableList, gemmaReports, today);
+            console.log(`[TrackEBuyAgent] Phase4 Gemini 최종 선발 시작...`);
+            const aiPicks = await this.runAiAnalysis(cappedBuyableList, gemmaReports, today);
             if (!aiPicks || aiPicks.length === 0) {
-                console.log('[TrackABuyAgent] AI 분석 결과 없음. 종료.');
+                console.log('[TrackEBuyAgent] AI 분석 결과 없음. 종료.');
                 return { success: false, saved: 0, skipped: skipped.length, error: 'AI analysis returned no picks' };
             }
 
             // ── 저장 ──────────────────────────────────────────
             const buyPicks = aiPicks.filter(p => p.decision === 'BUY').slice(0, TARGET_PICKS);
-            const saved = this.savePicks(buyPicks, buyableList, gemmaReports, today);
+            const saved = this.savePicks(buyPicks, cappedBuyableList, gemmaReports, today);
 
+            // 장 마감(15:30) 이후 실행되었다면 진입가를 즉시 할당
             this.updateEntryPrices(today);
-            console.log(`[TrackABuyAgent] ✅ 파이프라인 완료: ${saved}개 저장`);
+
+            console.log(`[TrackEBuyAgent] ✅ 파이프라인 완료: ${saved}개 저장`);
             return { success: true, saved, skipped: skipped.length };
 
         } catch (err: any) {
-            console.error('[TrackABuyAgent] 에러:', err);
+            console.error('[TrackEBuyAgent] 에러:', err);
             return { success: false, saved: 0, skipped: 0, error: err.message };
         } finally {
             this.isRunning = false;
@@ -184,7 +203,7 @@ export class TrackABuyAgent {
         const rawDb = (this.db as any).db;
 
         const pendingPicks = rawDb.prepare(`
-            SELECT id, stock_code FROM track_a_buy_picks
+            SELECT id, stock_code FROM track_e_buy_picks
             WHERE pick_date = ? AND status = 'PENDING'
         `).all(today) as { id: number; stock_code: string }[];
 
@@ -200,7 +219,7 @@ export class TrackABuyAgent {
             if (!ohlcv || !ohlcv.close) continue;
 
             rawDb.prepare(`
-                UPDATE track_a_buy_picks
+                UPDATE track_e_buy_picks
                 SET entry_price = ?,
                     current_price = ?,
                     status = 'ACTIVE',
@@ -212,7 +231,7 @@ export class TrackABuyAgent {
             updated++;
         }
 
-        console.log(`[TrackABuyAgent] entry_price 업데이트: ${updated}/${pendingPicks.length}개`);
+        console.log(`[TrackEBuyAgent] entry_price 업데이트: ${updated}/${pendingPicks.length}개`);
         return updated;
     }
 
@@ -224,7 +243,7 @@ export class TrackABuyAgent {
         const rawDb = (this.db as any).db;
 
         const activePicks = rawDb.prepare(`
-            SELECT * FROM track_a_buy_picks WHERE status = 'ACTIVE'
+            SELECT * FROM track_e_buy_picks WHERE status = 'ACTIVE'
         `).all() as any[];
 
         let updated = 0;
@@ -244,7 +263,7 @@ export class TrackABuyAgent {
             // current_price만 최신 종가로 갱신하고 다음 영업일부터 채점 시작
             if (pick.entry_date === today) {
                 rawDb.prepare(`
-                    UPDATE track_a_buy_picks
+                    UPDATE track_e_buy_picks
                     SET current_price = ?, updated_at = ?
                     WHERE id = ?
                 `).run(ohlcv.close, new Date().toISOString(), pick.id);
@@ -269,7 +288,7 @@ export class TrackABuyAgent {
                     : currentReturn >= 0 ? 'PARTIAL' : 'LOSS';
 
                 rawDb.prepare(`
-                    UPDATE track_a_buy_picks
+                    UPDATE track_e_buy_picks
                     SET current_price = ?,
                         exit_price = ?,
                         holding_days = ?,
@@ -289,7 +308,7 @@ export class TrackABuyAgent {
                 closed++;
             } else {
                 rawDb.prepare(`
-                    UPDATE track_a_buy_picks
+                    UPDATE track_e_buy_picks
                     SET current_price = ?,
                         holding_days = ?,
                         peak_return = ?,
@@ -304,7 +323,7 @@ export class TrackABuyAgent {
             }
         }
 
-        console.log(`[TrackABuyAgent] 성과 채점: 갱신 ${updated}개, 청산 ${closed}개`);
+        console.log(`[TrackEBuyAgent] 성과 채점: 갱신 ${updated}개, 청산 ${closed}개`);
         return { updated, closed };
     }
 
@@ -365,7 +384,7 @@ export class TrackABuyAgent {
                     ohlcv.high === ohlcv.close;
 
                 if (isUpperLimit) {
-                    console.log(`[TrackABuyAgent] 상한가 제외: ${c.stockName}(${c.stockCode}) +${ohlcv.change_rate.toFixed(1)}%`);
+                    console.log(`[TrackEBuyAgent] 상한가 제외: ${c.stockName}(${c.stockCode}) +${ohlcv.change_rate.toFixed(1)}%`);
                     skipped.push(c);
                     continue;
                 }
@@ -434,17 +453,17 @@ export class TrackABuyAgent {
                 }
 
                 fetched++;
-                console.log(`[TrackABuyAgent] Phase2 뉴스 수집: ${c.stockName} → ${articles.length}건`);
+                console.log(`[TrackEBuyAgent] Phase2 뉴스 수집: ${c.stockName} → ${articles.length}건`);
 
                 // API Rate Limit 방어 (200ms 딜레이)
                 await new Promise(r => setTimeout(r, 200));
 
             } catch (e: any) {
-                console.warn(`[TrackABuyAgent] Phase2 뉴스 수집 실패 (${c.stockName}): ${e.message}`);
+                console.warn(`[TrackEBuyAgent] Phase2 뉴스 수집 실패 (${c.stockName}): ${e.message}`);
             }
         }
 
-        console.log(`[TrackABuyAgent] Phase2 완료: ${fetched}개 종목 신규 뉴스 수집`);
+        console.log(`[TrackEBuyAgent] Phase2 완료: ${fetched}개 종목 신규 뉴스 수집`);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -462,12 +481,12 @@ export class TrackABuyAgent {
         // 1. 가이드라인 로드
         let guidelineContent = '';
         try {
-            const guidelinePath = path.join(process.cwd(), 'guidelines', 'track_a_phase1.md');
+            const guidelinePath = path.join(process.cwd(), 'guidelines', 'track_e_phase1.md');
             if (fs.existsSync(guidelinePath)) {
                 guidelineContent = fs.readFileSync(guidelinePath, 'utf-8');
             }
         } catch (e) {
-            console.warn('[TrackA] Failed to load guideline document:', e);
+            console.warn('[TrackB] Failed to load guideline document:', e);
         }
 
         const systemPrompt = `${guidelineContent || '당신은 대한민국 코스피/코스닥 개별 종목 리서치 전담 애널리스트입니다.'}
@@ -476,15 +495,15 @@ export class TrackABuyAgent {
 {
   "stock_code": "종목코드",
   "stock_name": "종목명",
-  "market_theme_link": "[Step 1] 대장주 자격 검증 (진성 대장 여부)",
-  "theme_durability": "[Step 2] 재료 지속성 평가 (모멘텀이 살아있는가)",
-  "catalyst_summary": "[Step 3] 20% 추가 상승을 만들 핵심 촉매",
-  "price_action_analysis": "[Step 2] 피크아웃 vs 눌림목 판별 (알고리즘 지표 해석 + 일봉 차트 종합 분석)",
-  "risk_factors": "설거지/피크아웃 위험 및 주요 하방 리스크",
+  "market_theme_link": "[테마의 힘] 주류 메가 테마 탑승 여부",
+  "theme_durability": "LONG|MEDIUM|SHORT",
+  "catalyst_summary": "[재료의 질] 상승 트리거 뉴스의 구조적 성장성 vs 일회성 판별",
+  "price_action_analysis": "[수급/차트 방어력] OHLCV 기반 누군가의 관리 흔적 및 매물대",
+  "risk_factors": "치명적인 하락 리스크 요약",
   "upside_probability": "HIGH|MEDIUM|LOW|VERY_LOW",
-  "buy_score": 0,
+  "buy_score": 0~100,
   "preliminary_decision": "BUY|WATCH",
-  "reasoning": "종합 판단 근거 (2~3문장)"
+  "reasoning": "왜 이 종목을 사야(관망해야) 하는가? (핵심 1줄 요약)"
 }`;
 
         for (const c of candidates) {
@@ -517,8 +536,27 @@ export class TrackABuyAgent {
                 ? news.map((n: any) => `- ${n.title}${n.body_snippet ? ' | ' + n.body_snippet.slice(0, 80) : ''}`).join('\n')
                 : '- 관련 뉴스 없음';
 
-            // ── 피크아웃 감별 지표 사전 계산 (알고리즘) ──
-            const peakoutSection = this.buildPeakoutIndicators(c.stockCode, date);
+            // OHLCV 요약표 생성
+            let ohlcvSnippet = '관련 차트(OHLCV) 정보 없음';
+            try {
+                const recentOhlcv = rawDb.prepare(`
+                    SELECT date, open, high, low, close, trading_value 
+                    FROM market_ohlcv_history
+                    WHERE stock_code = ? AND date <= ?
+                    ORDER BY date DESC LIMIT 8
+                `).all(c.stockCode, date).reverse();
+
+                if (recentOhlcv.length > 0) {
+                    ohlcvSnippet = '[최근 8영업일 주가/거래대금 흐름]\n';
+                    ohlcvSnippet += '일자 | 시가 | 고가 | 저가 | 종가 | 거래대금(억)\n';
+                    recentOhlcv.forEach((row: any) => {
+                        const tv = Math.round(row.trading_value / 100000000);
+                        ohlcvSnippet += `${row.date} | ${row.open} | ${row.high} | ${row.low} | ${row.close} | ${tv}억\n`;
+                    });
+                }
+            } catch (e) {
+                console.warn('[TrackEBuyAgent] OHLCV 조회 실패:', e);
+            }
 
             const userPrompt = `[분석 대상 종목]
 종목코드: ${c.stockCode}
@@ -527,16 +565,21 @@ export class TrackABuyAgent {
 확신도: ${Math.round(c.convictionScore)}
 관련 테마: ${c.relatedThemes.slice(0, 3).join(', ') || '없음'}
 
+[종목 분류 상세 이유]
+${c.reason}
+
 [종목 관련 최근 뉴스 (최대 5건)]
 ${newsSection}
-${peakoutSection}
+
+${ohlcvSnippet}
+
 ${marketContext}
 
-위 정보를 바탕으로 이 종목의 1개월(20영업일) 내 +20% 이상 달성 가능성을 분석하십시오.`;
+위 정보를 바탕으로 이 종목의 10영업일 내 +15% 달성 가능성을 분석하십시오.`;
 
             try {
                 const rawResponse = await AiExecutionQueue.getInstance().enqueue({
-                    agentId: 'TRACK_A_GEMMA_RESEARCH',
+                    agentId: 'TRACK_B_GEMMA_RESEARCH',
                     agentName: `모의매매 Gemma 리서치 (${c.stockName})`,
                     triggerType: 'CRON',
                     targetType: 'local',
@@ -547,7 +590,7 @@ ${marketContext}
                 // JSON 파싱
                 const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
                 if (!jsonMatch) {
-                    console.warn(`[TrackABuyAgent] Phase3 JSON 파싱 실패 (${c.stockName})`);
+                    console.warn(`[TrackEBuyAgent] Phase3 JSON 파싱 실패 (${c.stockName})`);
                     // 파싱 실패 시 기본 리포트 생성
                     const fallback: GemmaStockReport = {
                         stock_code: c.stockCode,
@@ -567,7 +610,7 @@ ${marketContext}
                     };
                     reports.push(fallback);
                     this.db.saveStockResearchReport({
-                        date,
+                        date, stock_code: c.stockCode, stock_name: c.stockName,
                         ...fallback,
                         injected_context_json: userPrompt,
                         system_prompt: systemPrompt,
@@ -603,10 +646,10 @@ ${marketContext}
                     raw_ai_response: rawResponse,
                 });
 
-                console.log(`[TrackABuyAgent] Phase3 분석: ${c.stockName} → 점수:${parsed.buy_score} / ${parsed.preliminary_decision}`);
+                console.log(`[TrackEBuyAgent] Phase3 분석: ${c.stockName} → 점수:${parsed.buy_score} / ${parsed.preliminary_decision}`);
 
             } catch (e: any) {
-                console.warn(`[TrackABuyAgent] Phase3 Gemma 호출 실패 (${c.stockName}): ${e.message}`);
+                console.warn(`[TrackEBuyAgent] Phase3 Gemma 호출 실패 (${c.stockName}): ${e.message}`);
                 // 오류 시 기본 WATCH 처리
                 const fallback: GemmaStockReport = {
                     stock_code: c.stockCode,
@@ -614,7 +657,6 @@ ${marketContext}
                     market_theme_link: '로컬AI 오류',
                     theme_durability: 'UNKNOWN',
                     catalyst_summary: '로컬AI 오류',
-                    price_action_analysis: '로컬AI 오류',
                     risk_factors: e.message,
                     upside_probability: 'LOW',
                     buy_score: 25,
@@ -626,95 +668,6 @@ ${marketContext}
         }
 
         return reports;
-    }
-
-    // ─────────────────────────────────────────────────────────
-    // PRIVATE: 피크아웃 감별 지표 알고리즘 계산
-    // 거래대금 추세, 연속 음봉, 고점 낙폭을 사전 계산 → Gemma 부담 경감
-    // ─────────────────────────────────────────────────────────
-    private buildPeakoutIndicators(stockCode: string, date: string): string {
-        const rawDb = (this.db as any).db;
-        try {
-            // 최근 30 영업일 일봉 조회 (내림차순)
-            const rows: any[] = rawDb.prepare(`
-                SELECT date, open, high, low, close, trading_value
-                FROM market_ohlcv_history
-                WHERE stock_code = ? AND date <= ?
-                ORDER BY date DESC
-                LIMIT 30
-            `).all(stockCode, date);
-
-            if (!rows || rows.length < 5) return '';
-
-            // 오름차순 정렬 (과거 → 현재)
-            const daily = [...rows].reverse();
-            const latest = daily[daily.length - 1];
-
-            // ① 거래대금 추세: 최근 5일 평균 vs 직전 5일 평균
-            const recent5 = daily.slice(-5);
-            const prev5 = daily.slice(-10, -5);
-            const recentAvg = recent5.reduce((s, r) => s + (r.trading_value || 0), 0) / recent5.length;
-            const prevAvg = prev5.length > 0
-                ? prev5.reduce((s, r) => s + (r.trading_value || 0), 0) / prev5.length
-                : recentAvg;
-            const tvChangeRate = prevAvg > 0 ? ((recentAvg - prevAvg) / prevAvg) * 100 : 0;
-
-            // ② 연속 음봉 카운트 (최신부터 역순, 음봉 = 종가 < 시가)
-            let consecutiveRed = 0;
-            for (let i = daily.length - 1; i >= 0; i--) {
-                if (daily[i].close < daily[i].open) {
-                    consecutiveRed++;
-                } else {
-                    break;
-                }
-            }
-
-            // ③ 최근 30일 고점 대비 현재 낙폭
-            const highRow = daily.reduce((max, r) => r.high > max.high ? r : max, daily[0]);
-            const drawdown = highRow.high > 0
-                ? ((latest.close - highRow.high) / highRow.high) * 100
-                : 0;
-
-            // ④ 피크아웃 의심 플래그 판정
-            const volumeDecreasing = tvChangeRate <= -20;
-            const hasConsecutiveRed = consecutiveRed >= 3;
-            const significantDrawdown = drawdown <= -10;
-            const flagCount = [volumeDecreasing, hasConsecutiveRed, significantDrawdown].filter(Boolean).length;
-            const riskLevel = flagCount >= 3 ? 'HIGH' : flagCount >= 2 ? 'MEDIUM' : 'LOW';
-
-            const recentAvgBil = Math.round(recentAvg / 100000000);
-            const prevAvgBil = Math.round(prevAvg / 100000000);
-
-            let text = `\n[📊 알고리즘 사전 계산 결과 (피크아웃 감별 지표)]\n`;
-            text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-            text += `① 거래대금 추세:\n`;
-            text += `   - 최근 5일 평균: ${recentAvgBil}억 | 직전 5일 평균: ${prevAvgBil}억\n`;
-            text += `   - 변화율: ${tvChangeRate >= 0 ? '▲' : '▼'} ${Math.abs(tvChangeRate).toFixed(1)}% (${tvChangeRate >= 0 ? '증가' : '감소'})\n`;
-            text += `② 연속 음봉: ${consecutiveRed}일 연속 (종가 < 시가 기준)\n`;
-            text += `③ 최근 30일 고점(${highRow.date}, ${highRow.high}원) 대비 현재 낙폭: ${drawdown >= 0 ? '▲' : '▼'} ${Math.abs(drawdown).toFixed(1)}%\n`;
-            text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-            text += `⚠️ 피크아웃 의심도: ${riskLevel === 'HIGH' ? '🔴 높음' : riskLevel === 'MEDIUM' ? '🟡 중간' : '🟢 낮음'} (${flagCount}/3 조건 충족)\n`;
-            text += `   ${volumeDecreasing ? '✅' : '❌'} 거래대금 20% 이상 감소\n`;
-            text += `   ${hasConsecutiveRed ? '✅' : '❌'} 연속 음봉 3일 이상\n`;
-            text += `   ${significantDrawdown ? '✅' : '❌'} 고점 대비 낙폭 10% 이상\n`;
-
-            // 최근 25일 일봉 원본 테이블 (AI 맥락 해석용)
-            const recent25 = daily.slice(-25);
-            text += `\n[📈 최근 ${recent25.length}일 일봉 원본 데이터]\n`;
-            text += `날짜 | 시가 | 고가 | 저가 | 종가 | 등락 | 거래대금(억)\n`;
-            text += `---|---|---|---|---|---|---\n`;
-            for (const r of recent25) {
-                const tv = Math.round((r.trading_value || 0) / 100000000);
-                const candle = r.close >= r.open ? '양봉↑' : '음봉↓';
-                text += `${r.date} | ${r.open} | ${r.high} | ${r.low} | ${r.close} | ${candle} | ${tv}억\n`;
-            }
-            text += `\n`;
-
-            return text;
-        } catch (err: any) {
-            console.warn(`[TrackABuyAgent] buildPeakoutIndicators 실패 (${stockCode}): ${err.message}`);
-            return '';
-        }
     }
 
     // ─────────────────────────────────────────────────────────
@@ -786,13 +739,12 @@ ${marketContext}
             return !r || (r.buy_score >= GEMMA_MIN_SCORE_CUTOFF);
         });
 
-        console.log(`[TrackABuyAgent] Phase4 대상: ${eligibleCandidates.length}개 (컷오프 ${GEMMA_MIN_SCORE_CUTOFF}점 미만 제외)`);
+        console.log(`[TrackEBuyAgent] Phase4 대상: ${eligibleCandidates.length}개 (컷오프 ${GEMMA_MIN_SCORE_CUTOFF}점 미만 제외)`);
 
-        // 테마 밀집도(Tally) 산출
+        // 테마 밀집도(Tally) 산출 (Track C: 조정을 받고 있는 다양한 테마 확인 목적)
         const themeTally = new Map<string, number>();
         eligibleCandidates.forEach(c => {
             if (c.relatedThemes && c.relatedThemes.length > 0) {
-                // 핵심 테마 1~2개 정도만 반영
                 c.relatedThemes.slice(0, 2).forEach(t => {
                     themeTally.set(t, (themeTally.get(t) || 0) + 1);
                 });
@@ -800,15 +752,14 @@ ${marketContext}
         });
 
         const sortedThemes = Array.from(themeTally.entries())
-            .filter(([, count]) => count > 1) // 2개 이상인 테마만 표시
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5);
+            .filter(([, count]) => count >= 3) // 3개 종목 이상 포진된 핵심 테마만 추려냄
+            .sort((a, b) => b[1] - a[1]);
 
         let themeDensityText = '';
         if (sortedThemes.length > 0) {
-            themeDensityText = `[현재 시장 진성 대장주 섹터 밀집도 현황]\n` +
-                sortedThemes.map((t, idx) => `${['🥇', '🥈', '🥉', '4️⃣', '5️⃣'][idx] || '-'} ${t[0]} (${t[1]}개)`).join('\n') +
-                `\n*제공된 리스트는 살아남은 진성 대장주들의 전체 목록입니다.\n최종 종목을 추천할 때 위의 대장주 섹터 밀집도(주도 테마 순위) 현황을 적극 참고하여 제안하십시오.*\n\n`;
+            themeDensityText = `[종합 분석 기준 시장 주요 테마 풀(Pool) 현황]\n` +
+                sortedThemes.map((t, idx) => `${idx + 1}위 ${t[0]} (${t[1]}개)`).join(' / ') +
+                `\n\n*참고사항: 위 풀(Pool) 정보는 참고 데이터일 뿐 주된 의사결정 요인이 되어서는 안 됩니다. 눌림목 선발 시 가장 중요한 기준은 '상승을 이끌었던 호재(Catalyst)가 아직 유효하여 재상승 가능성이 높은가'입니다. 주도 테마 정보를 제공하는 이유는 이 시장 주도 테마에 해당할수록 수급이 몰려 재상승할 확률이 통계적으로 높기 때문입니다. 호재의 유효성을 최우선으로, 테마 가중치를 보조로 활용하십시오.*\n\n`;
         }
 
         // 팩트시트 텍스트 조립
@@ -818,23 +769,23 @@ ${marketContext}
                 return `${i + 1}. [${c.stockCode}] ${c.stockName} | ${c.category} | Gemma 분석 없음`;
             }
             return `${i + 1}. [${c.stockCode}] ${c.stockName} | ${c.category} | 확신도:${Math.round(c.convictionScore)}
-   Gemma 점수: ${r.buy_score} / 상승확률: ${r.upside_probability} / 1차판단: ${r.preliminary_decision}
-   테마 연관: ${r.market_theme_link}
-   핵심 호재: ${r.catalyst_summary}
-   [차트/피크아웃 분석]: ${r.price_action_analysis || 'Gemma 피크아웃 분석 누락'}
-   리스크: ${r.risk_factors}
-   근거: ${r.reasoning}`;
+   - 로컬점수: ${r.buy_score}점 (${r.preliminary_decision} / 상승확률: ${r.upside_probability})
+   - [테마분석]: ${r.market_theme_link} (수명: ${r.theme_durability})
+   - [핵심호재]: ${r.catalyst_summary}
+   - [차트수급]: ${r.price_action_analysis || 'Gemma 차트 분석 누락'}
+   - [리스크]: ${r.risk_factors}
+   - [1차요약]: ${r.reasoning}`;
         }).join('\n\n');
 
         // 2차 가이드라인 로드
         let phase2Guideline = '';
         try {
-            const guidelinePath = path.join(process.cwd(), 'guidelines', 'track_a_phase2.md');
+            const guidelinePath = path.join(process.cwd(), 'guidelines', 'track_e_phase2.md');
             if (fs.existsSync(guidelinePath)) {
                 phase2Guideline = fs.readFileSync(guidelinePath, 'utf-8');
             }
         } catch (e) {
-            console.warn('[TrackA] Failed to load phase2 guideline:', e);
+            console.warn('[TrackB] Failed to load phase2 guideline:', e);
         }
 
         const systemInstruction = `당신은 대한민국 코스피/코스닥 알파 수익률 전문 투자심의위원회 위원장입니다.
@@ -860,17 +811,17 @@ decision: "BUY" | "WATCH"
 theme_lifespan: "SHORT"(3일 미만) | "MEDIUM"(1~2주) | "LONG"(1달+) | "UNKNOWN"`;
 
         const userPrompt = `[오늘 날짜: ${date}]
-[분석 대상: ${eligibleCandidates.length}개 진성 대장주 종목]
+[분석 대상: ${eligibleCandidates.length}개 당일 급등주 종가베팅 후보 종목]
 
 ${themeDensityText}${factSheets}
 
 ---
-위 팩트시트를 기반으로 1개월(20영업일) 내 +20% 이상 달성 가능성 기준으로
+위 팩트시트를 기반으로 5영업일 내 +15% 달성 가능성 기준으로
 최종 Top ${TARGET_PICKS}개를 BUY로 선정하고, 나머지는 WATCH로 처리하십시오.`;
 
         try {
             const result = await AiExecutionQueue.getInstance().enqueue({
-                agentId: 'TRACK_A_BUY_AGENT',
+                agentId: 'TRACK_E_BUY_AGENT',
                 agentName: '모의매매 매수 선정 AI',
                 triggerType: 'CRON',
                 prompt: userPrompt,
@@ -878,22 +829,22 @@ ${themeDensityText}${factSheets}
             });
 
             if (!result) {
-                console.error('[TrackABuyAgent] Phase4 AI 응답 없음');
+                console.error('[TrackEBuyAgent] Phase4 AI 응답 없음');
                 return [];
             }
 
             const jsonMatch = result.match(/\[[\s\S]*\]/);
             if (!jsonMatch) {
-                console.error('[TrackABuyAgent] Phase4 JSON 추출 실패:', result.slice(0, 200));
+                console.error('[TrackEBuyAgent] Phase4 JSON 추출 실패:', result.slice(0, 200));
                 return [];
             }
 
             const picks: AiBuyPick[] = JSON.parse(jsonMatch[0]);
-            console.log(`[TrackABuyAgent] Phase4 결과: BUY ${picks.filter(p => p.decision === 'BUY').length}개, WATCH ${picks.filter(p => p.decision === 'WATCH').length}개`);
+            console.log(`[TrackEBuyAgent] Phase4 결과: BUY ${picks.filter(p => p.decision === 'BUY').length}개, WATCH ${picks.filter(p => p.decision === 'WATCH').length}개`);
             return picks;
 
         } catch (err: any) {
-            console.error('[TrackABuyAgent] Phase4 AI 분석 오류:', err.message);
+            console.error('[TrackEBuyAgent] Phase4 AI 분석 오류:', err.message);
             return [];
         }
     }
@@ -915,7 +866,7 @@ ${themeDensityText}${factSheets}
         let saved = 0;
 
         const insertStmt = rawDb.prepare(`
-            INSERT OR IGNORE INTO track_a_buy_picks (
+            INSERT OR IGNORE INTO track_e_buy_picks (
                 pick_date, pick_rank, stock_code, stock_name,
                 category, signals_json, buy_score, reason, risk,
                 related_themes_json, theme_lifespan,
@@ -966,7 +917,7 @@ ${themeDensityText}${factSheets}
                 );
                 if (info.changes > 0) saved++;
             } catch (e: any) {
-                console.error(`[TrackABuyAgent] 저장 실패 (${pick.stock_code}):`, e.message);
+                console.error(`[TrackEBuyAgent] 저장 실패 (${pick.stock_code}):`, e.message);
             }
         }
 

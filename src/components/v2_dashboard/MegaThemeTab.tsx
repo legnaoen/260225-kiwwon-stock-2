@@ -450,6 +450,27 @@ export const MegaThemeTab: React.FC<{ onNavigate?: (tabId: string, entityId?: st
             { label: '신규 거시 이슈 등록 감지', met: false },
         ];
 
+        const narrativeRaw = theme.core_narrative || '분석 데이터 없음';
+        let narrativeHistory: { date: string; title: string; body: string }[] = [];
+        try {
+            if (narrativeRaw.trim().startsWith('[')) {
+                const arr = JSON.parse(narrativeRaw);
+                if (Array.isArray(arr)) {
+                    narrativeHistory = arr.map(h => {
+                        let t = ''; let b = h.text;
+                        const match = b.match(/^\[(.*?)\]\s*(.*)/);
+                        if (match) { t = match[1]; b = match[2]; }
+                        return { date: h.date, title: t, body: b };
+                    });
+                } else { throw new Error('Not array'); }
+            } else { throw new Error('Legacy string'); }
+        } catch {
+            let t = ''; let b = narrativeRaw;
+            const match = b.match(/^\[(.*?)\]\s*(.*)/);
+            if (match) { t = match[1]; b = match[2]; }
+            narrativeHistory = [{ date: theme.last_seen_date?.slice(5) || '이전 기록', title: t, body: b }];
+        }
+
         return (
             <div
                 className="flex flex-col space-y-4 p-5"
@@ -538,64 +559,37 @@ export const MegaThemeTab: React.FC<{ onNavigate?: (tabId: string, entityId?: st
                     </div>
                 </div>
 
-                {/* 진테마 스토리 */}
+                {/* 진테마 스토리 타임라인 */}
                 <div className="border border-border/50 rounded-xl overflow-hidden bg-card">
                     <div className="px-3 py-2 border-b bg-muted/5 text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
-                        <Sparkles size={12} className="text-amber-500" /> 스토리
+                        <Sparkles size={12} className="text-amber-500" /> 스토리 (타임라인)
                     </div>
-                    <div className="p-3">
-                        <p className="text-[12px] leading-relaxed text-foreground/90">{theme.core_narrative || '분석 데이터 없음'}</p>
-                        {theme.alive_days >= 10 && (
-                            <div className="mt-2">
-                                <span className="text-[10px] px-2 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-400 border-emerald-500/25">
-                                    장기 지속 검증됨
-                                </span>
+                    <div className="p-3 space-y-3 max-h-[350px] overflow-y-auto">
+                        {narrativeHistory.map((h, i) => (
+                            <div key={i} className="relative pl-3 border-l-2 border-border/40 pb-2">
+                                <div className="absolute -left-[5px] top-1.5 w-2 h-2 rounded-full bg-border" />
+                                <div className="flex items-center justify-between pb-1">
+                                    <div className="flex items-baseline gap-2">
+                                        <span className="text-[10px] text-muted-foreground font-mono bg-muted/40 px-1 py-0.5 rounded">{h.date}</span>
+                                        {h.title && <span className="font-bold text-[12px] text-foreground">{h.title}</span>}
+                                    </div>
+                                    {i === 0 && theme.alive_days >= 10 && (
+                                        <span className="text-[9px] px-1.5 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-400 border-emerald-500/25 shrink-0">
+                                            장기 지속 검증됨
+                                        </span>
+                                    )}
+                                </div>
+                                <p className="text-[11px] leading-relaxed text-foreground/80 pt-0.5 whitespace-pre-wrap">
+                                    {h.body}
+                                </p>
                             </div>
-                        )}
+                        ))}
                     </div>
                 </div>
 
-                {/* 선발 종목 */}
-                {stocks.length > 0 && (
-                    <div className="border border-border/50 rounded-xl overflow-hidden bg-card">
-                        <div className="px-3 py-2 border-b bg-muted/5 text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
-                            <Target size={12} className="text-primary" /> 핵심 주도 종목군
-                        </div>
-                        <div className="p-3 space-y-2">
-                            {stocks.map((s) => {
-                                return (
-                                    <button
-                                        key={s.code}
-                                        onClick={() => setSelectedStock({ stockCode: s.code, stockName: s.name })}
-                                        className="w-full text-left flex flex-col gap-1.5 p-2.5 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/20 transition-colors group"
-                                    >
-                                        <div className="flex items-center justify-between min-w-0">
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <span className="font-bold text-[13px] text-foreground group-hover:text-primary transition-colors">{s.name}</span>
-                                                <span className="text-[10px] text-muted-foreground font-mono">{s.code}</span>
-                                            </div>
-                                            <div className="flex items-center gap-2 shrink-0">
-                                                {s.confidence && (
-                                                    <span className="text-[11px] font-mono font-bold text-primary">{s.confidence}%</span>
-                                                )}
-                                                <ChevronRight size={12} className="text-muted-foreground/40" />
-                                            </div>
-                                        </div>
-                                        {s.reason && (
-                                            <div className="text-[11px] text-muted-foreground line-clamp-2 w-full mt-0.5 pr-2">
-                                                {s.reason}
-                                            </div>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-
                 {/* DORMANT 부활 조건 */}
                 {theme.status === 'DORMANT' && (
-                    <div className="border border-border/40 rounded-xl overflow-hidden bg-card">
+                    <div className="border border-border/40 rounded-xl overflow-hidden bg-card mb-10">
                         <div className="px-3 py-2 border-b bg-muted/5 text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
                             <Moon size={12} /> 부활 감지 조건
                         </div>
@@ -609,6 +603,36 @@ export const MegaThemeTab: React.FC<{ onNavigate?: (tabId: string, entityId?: st
                                     <span className={cond.met ? 'text-foreground' : 'text-muted-foreground'}>{cond.label}</span>
                                 </div>
                             ))}
+                        </div>
+                    </div>
+                )}
+                
+                {/* 핵심 주도 종목군 (인라인 칩 형태) */}
+                {stocks.length > 0 && (
+                    <div className="border border-border/50 rounded-xl overflow-hidden bg-card mt-4 mb-6">
+                        <div className="px-3 py-2 border-b bg-muted/5 text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
+                            <Target size={12} className="text-primary" /> 핵심 주도 종목군
+                        </div>
+                        <div className="p-4 space-y-3">
+                            <div className="text-[10px] text-foreground/70 font-semibold px-1">🔥 AI 필터링 주도주 (테마/섹터 견인)</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                {stocks.map((stock: any) => (
+                                    <button 
+                                        key={stock.code} 
+                                        className="group flex items-center gap-1.5 text-[12px] bg-muted/40 hover:bg-muted/80 text-foreground px-3 py-1.5 rounded-full border border-primary/20 hover:border-primary/50 transition-colors cursor-pointer"
+                                        onClick={() => setSelectedStock({ stockCode: stock.code, stockName: stock.name })}
+                                    >
+                                        <span className="font-bold group-hover:text-primary transition-colors">
+                                            {stock.name}
+                                        </span>
+                                        {stock.confidence && (
+                                            <span className="text-[10px] font-bold font-mono tracking-tighter text-primary">
+                                                {stock.confidence}%
+                                            </span>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 )}

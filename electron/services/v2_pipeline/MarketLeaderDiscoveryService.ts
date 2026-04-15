@@ -19,6 +19,8 @@ export interface MarketLeaderItem {
     drawdownFromPeak?: number;
     recentTrend?: 'UP' | 'DOWN' | 'FLAT';
     validAlphaDays?: number;
+    /** 해당 기간 내 전체 순위 (1=1등, 300=꼴등). getMarketLeaders(topN=300) 기준. 미포함 시 undefined */
+    rank?: number;
 }
 
 /** 피크아웃 패널 설정값 (UI 설정 패널에서 전달) */
@@ -511,6 +513,7 @@ export class MarketLeaderDiscoveryService {
             return {
                 ...cleanItem,
                 phase: finalPhase,
+                rank,          // 기간 내 순위 (1~topN) — CrossPeriodAnalyzer 가중 점수 계산용
                 peakoutScore,
                 peakoutLevel,
                 peakoutWarning: peakoutLevel !== 'NONE', // 호환성 유지

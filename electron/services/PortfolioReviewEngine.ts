@@ -325,6 +325,14 @@ export class PortfolioReviewEngine {
                             ).run(currentPrice, item.stock_code)
                         }
 
+                        // peak_profit_rate 갱신 (성적표 피크 수익률 — 보유 중 역대 최고값 보존)
+                        const peakProfitRate = item.peak_profit_rate || 0
+                        if (profitRate > peakProfitRate) {
+                            this.db.getDb().prepare(
+                                'UPDATE maiis_portfolio SET peak_profit_rate = ? WHERE stock_code = ?'
+                            ).run(Math.round(profitRate * 10) / 10, item.stock_code)
+                        }
+
                         updated++
                     }
                 } catch (e) {

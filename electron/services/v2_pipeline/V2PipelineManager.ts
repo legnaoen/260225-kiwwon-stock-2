@@ -113,9 +113,9 @@ export class V2PipelineManager {
 
             switch (pipelineId) {
                 case 'PL-MarketDaily':
-                    await MarketDataCollectorService.getInstance().runDailyCollection(60);
+                    await MarketDataCollectorService.getInstance().runDailyCollection(100);
                     rawData = { message: 'Data Pump Completed' };
-                    aggregatedMarkdown = '### ✅ 전 종목(KOSPI/KOSDAQ) 60봉 데이터 수집 펌프 구동 완료\n관제 로그 화면을 확인하십시오.';
+                    aggregatedMarkdown = '### ✅ 전 종목(KOSPI/KOSDAQ) 100봉 데이터 수집 펌프 구동 완료\n관제 로그 화면을 확인하십시오.';
                     break;
                 case 'PL-Macro':
                     rawData = await this.macroCollector.collect(options);

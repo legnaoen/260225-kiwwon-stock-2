@@ -539,6 +539,28 @@ ipcMain.handle('ai-analyst:get-portfolio-history', async () => {
     }
 });
 
+// 성적표 AI 분석 실행
+ipcMain.handle('portfolio:run-retrospective', async () => {
+    try {
+        const { PortfolioRetrospectiveAgent } = await import('./services/v2_agents/PortfolioRetrospectiveAgent');
+        const result = await PortfolioRetrospectiveAgent.getInstance().run();
+        return result;
+    } catch (e: any) {
+        console.error('[Main] portfolio:run-retrospective 오류:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+// 최신 성적표 분석 리포트 조회
+ipcMain.handle('portfolio:get-latest-retrospective', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getLatestRetrospectiveReport();
+    } catch (e: any) {
+        return { error: e.message };
+    }
+});
+
 ipcMain.handle('ai-analyst:get-picks', async () => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService');
@@ -782,14 +804,17 @@ ipcMain.handle('v2:get-sim-trade-picks', async () => {
                 SELECT * FROM track_c_buy_picks
                 UNION ALL
                 SELECT * FROM track_d_buy_picks
+                UNION ALL
+                SELECT * FROM track_e_buy_picks
             )
             ORDER BY pick_date DESC, 
             CASE category 
                 WHEN 'TRUE_LEADER' THEN 1 
                 WHEN 'INTRADAY_SURGE' THEN 2 
-                WHEN 'EMERGING_STAR' THEN 3 
-                WHEN 'PULLBACK_DIP' THEN 4 
-                ELSE 5 
+                WHEN 'SHORT_TERM_CONSOLIDATION' THEN 3
+                WHEN 'EMERGING_STAR' THEN 4 
+                WHEN 'PULLBACK_DIP' THEN 5 
+                ELSE 6 
             END ASC, 
             pick_rank ASC
             LIMIT 500
@@ -849,6 +874,18 @@ ipcMain.handle('track-d:run-buy-agent', async (_event, date?: string) => {
     }
 })
 
+// [Track E] 단기 눌림목 종가베팅 AI 수동 실행
+ipcMain.handle('track-e:run-buy-agent', async (_event, date?: string) => {
+    try {
+        const { TrackEBuyAgent } = await import('./services/v2_agents/TrackEBuyAgent');
+        const result = await TrackEBuyAgent.getInstance().run(date);
+        return { success: result.success, saved: result.saved, skipped: result.skipped, error: result.error };
+    } catch (error: any) {
+        console.error('[TrackEBuyAgent] manual run error:', error);
+        return { success: false, error: error.message };
+    }
+})
+
 // [Track B] 진입가 수동 확정 (장 마감 후 테스트용)
 ipcMain.handle('track-b:update-entry-prices', async (_event, date?: string) => {
     try {
@@ -893,6 +930,59 @@ ipcMain.handle('track-b:delete-by-date', async (_event, date: string) => {
         return { success: true };
     } catch (error: any) {
         console.error('[TrackB] delete-by-date error:', error);
+        return { success: false, error: error.message };
+    }
+})
+
+// [SimTrade] 모의매매 개별 종목 삭제
+ipcMain.handle('simtrade:delete-pick-by-id', async (_event, id: number, category: string) => {
+    try {
+        const db = DatabaseService.getInstance().getDb();
+        const intId = Math.floor(id);
+        
+        // 어느 테이블에 있는지 먼저 찾기
+        const tables = ['track_a_buy_picks', 'track_b_buy_picks', 'track_c_buy_picks', 'track_d_buy_picks', 'track_e_buy_picks'];
+        let stockCode: string | null = null;
+        let foundTable: string | null = null;
+        
+        for (const table of tables) {
+            const row = db.prepare(`SELECT stock_code FROM ${table} WHERE id = ?`).get(intId) as any;
+            if (row) {
+                stockCode = row.stock_code;
+                foundTable = table;
+                console.log(`[SimTrade Delete] id=${intId} found in ${table}, stock_code=${stockCode}`);
+                break;
+            }
+        }
+        
+        if (!stockCode) {
+            console.warn(`[SimTrade Delete] id=${intId} not found in any table!`);
+            return { success: false, error: `id=${intId} not found` };
+        }
+        
+        // 해당 stock_code를 pick_date 기준으로 모든 테이블에서 삭제
+        // (같은 날짜에 여러 테이블에 중복 존재할 수 있음)
+        const pickDateRow = db.prepare(`SELECT pick_date FROM ${foundTable} WHERE id = ?`).get(intId) as any;
+        const pickDate = pickDateRow?.pick_date;
+        
+        let totalDeleted = 0;
+        for (const table of tables) {
+            let info;
+            if (pickDate) {
+                info = db.prepare(`DELETE FROM ${table} WHERE stock_code = ? AND pick_date = ?`).run(stockCode, pickDate);
+            } else {
+                info = db.prepare(`DELETE FROM ${table} WHERE stock_code = ?`).run(stockCode);
+            }
+            if (info.changes > 0) {
+                console.log(`[SimTrade Delete] ${table}: ${info.changes}건 삭제 (stock_code=${stockCode}, pick_date=${pickDate})`);
+                totalDeleted += info.changes;
+            }
+        }
+        
+        console.log(`[SimTrade Delete] 완료: 총 ${totalDeleted}건 삭제`);
+        return { success: true };
+    } catch (error: any) {
+        console.error('[SimTrade] delete-pick-by-id error:', error);
         return { success: false, error: error.message };
     }
 })

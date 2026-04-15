@@ -1,11 +1,8 @@
-const path = require('path');
-const os = require('os');
 const Database = require('better-sqlite3');
-
-const dbPath = path.join(os.homedir(), 'AppData', 'Roaming', 'kiwoom-trader', 'db', 'kiwoom.db');
-const db = new Database(dbPath);
-
-console.log("THEME types:");
-console.log(db.prepare("SELECT type FROM theme_intelligence WHERE type LIKE '%THEME%' LIMIT 5").all());
-console.log("SECTOR types:");
-console.log(db.prepare("SELECT type FROM theme_intelligence WHERE type LIKE '%SECTOR%' LIMIT 5").all());
+const db = new Database('./data/trading.db');
+try {
+  console.log('B:', db.prepare("SELECT id, pick_date, status, entry_date, entry_price, holding_days, category FROM track_b_buy_picks WHERE stock_code='006490'").all());
+} catch(e) { console.log(e.message); }
+try {
+  console.log('C:', db.prepare("SELECT id, pick_date, status, entry_date, entry_price, holding_days, category FROM track_c_buy_picks WHERE stock_code='006490'").all());
+} catch(e) { console.log(e.message); }

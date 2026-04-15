@@ -286,6 +286,12 @@ export const PortfolioManagerTab: React.FC = () => {
     const [showSkillModal, setShowSkillModal] = useState(false)
     const [skillContent, setSkillContent] = useState('')
     const [incubatorScanRunning, setIncubatorScanRunning] = useState(false)
+    // 성적표 AI 분석
+    const [retroRunning, setRetroRunning] = useState(false)
+    const [retroReport, setRetroReport] = useState<any | null>(null)
+    const [retroError, setRetroError] = useState<string | null>(null)
+    const [showRetroModal, setShowRetroModal] = useState(false)
+    const [retroModalTab, setRetroModalTab] = useState<'summary' | 'pm1' | 'pm2' | 'patterns'>('summary')
 
     const handleShowSkill = async () => {
         setShowSkillModal(true);
@@ -1172,8 +1178,25 @@ export const PortfolioManagerTab: React.FC = () => {
                 <div className="flex flex-col flex-1 overflow-hidden">
                     {/* Stats Dashboard */}
                     <div className="shrink-0 p-4 border-b border-border/30 bg-muted/5">
-                        <div className="text-xs font-bold text-muted-foreground uppercase mb-3 flex items-center gap-1.5">
-                            <Activity className="w-3.5 h-3.5 text-indigo-400" /> 부서별 AI 누적 실적 (Win Rate & Return)
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1.5">
+                                <Activity className="w-3.5 h-3.5 text-indigo-400" /> 부서별 AI 누적 실적 (Win Rate &amp; Return)
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {retroReport && (
+                                    <span className="text-[10px] text-muted-foreground/70">
+                                        최근 분석: {retroReport.created_date || retroReport.created_at?.substring(0, 10)}
+                                    </span>
+                                )}
+                                <button
+                                    onClick={() => setShowRetroModal(true)}
+                                    disabled={history.length < 5}
+                                    title={history.length < 5 ? '성적표 항목이 5건 이상 필요합니다' : 'AI 매매 성적 분석 및 PM 개선안 보기'}
+                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold border transition-all bg-indigo-500/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    🧠 AI 분석
+                                </button>
+                            </div>
                         </div>
                         <div className="grid grid-cols-4 gap-3">
                             {[
@@ -1221,6 +1244,7 @@ export const PortfolioManagerTab: React.FC = () => {
                                     <th className="py-2 pr-4 font-bold w-36 min-w-[144px]">종목</th>
                                     <th className="py-2 pr-4 font-bold text-right w-[90px]">진입가</th>
                                     <th className="py-2 pr-4 font-bold">추천 AI</th>
+                                    <th className="py-2 pr-4 font-bold text-right">피크 수익률</th>
                                     <th className="py-2 pr-4 font-bold text-right">종료 수익률</th>
                                     <th className="py-2 pr-4 font-bold text-center w-[60px]">시작일</th>
                                     <th className="py-2 pr-4 font-bold text-center w-[60px]">종료일</th>
@@ -1229,7 +1253,7 @@ export const PortfolioManagerTab: React.FC = () => {
                             <tbody>
                                 {history.length === 0 ? (
                                     <tr>
-                                        <td colSpan={7} className="py-12 text-center text-muted-foreground text-xs">
+                                        <td colSpan={8} className="py-12 text-center text-muted-foreground text-xs">
                                             종료된 포트폴리오(성적) 내역이 없습니다.
                                         </td>
                                     </tr>
@@ -1240,8 +1264,12 @@ export const PortfolioManagerTab: React.FC = () => {
                                     else if (prof > 0) rateColor = 'text-rose-500';
                                     else if (prof < 0) rateColor = 'text-blue-500';
 
-                                    // 시작일: entry_date → created_at 폴백
-                                    let entryRaw = p.entry_date || p.created_at || '';
+                                    // 피크 수익률
+                                    const peakProf = Number(p.peak_profit_rate ?? 0);
+                                    const peakColor = peakProf > 0 ? 'text-amber-400' : peakProf < 0 ? 'text-blue-400' : 'text-muted-foreground';
+
+                                    // 시작일: entry_price_at(실제 매수 확정일) → entry_date → created_at 순 폴백
+                                    let entryRaw = p.entry_price_at || p.entry_date || p.created_at || '';
                                     if (entryRaw.includes('T')) entryRaw = entryRaw.split('T')[0];
                                     const displayEntryDate = entryRaw.length >= 10 ? entryRaw.substring(5, 10).replace(/-/g, '.') : entryRaw || '-';
 
@@ -1277,7 +1305,17 @@ export const PortfolioManagerTab: React.FC = () => {
                                             <td className="py-2 pr-4">
                                                 <AnalystBadges json={p.analysts_json} />
                                             </td>
-                                            {/* 수익률 */}
+                                            {/* 피크 수익률 */}
+                                            <td className="py-2 pr-4 text-right">
+                                                {peakProf !== 0 ? (
+                                                    <span className={cn('text-xs font-bold font-mono', peakColor)}>
+                                                        {peakProf > 0 ? '+' : ''}{peakProf.toFixed(2)}%
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground/50 font-mono">─</span>
+                                                )}
+                                            </td>
+                                            {/* 종료 수익률 */}
                                             <td className="py-2 pr-4 text-right">
                                                 <span className={cn("text-sm font-bold font-mono", rateColor)}>
                                                     {prof > 0 ? '+' : ''}{!isNaN(prof) ? prof.toFixed(2) : '-'}%
@@ -1309,6 +1347,331 @@ export const PortfolioManagerTab: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* ══ PM 성적표 AI 분석 모달 ══ */}
+            {showRetroModal && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+                    onClick={(e) => { if (e.target === e.currentTarget) setShowRetroModal(false) }}
+                >
+                    <div className="bg-background border border-border rounded-xl shadow-2xl w-[700px] max-h-[85vh] flex flex-col overflow-hidden">
+
+                        {/* 모달 헤더 */}
+                        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/50 bg-muted/10 shrink-0">
+                            <div className="flex items-center gap-2.5">
+                                <span className="text-lg">🧠</span>
+                                <div>
+                                    <div className="font-bold text-sm">PM 성적 분석 &amp; 개선안</div>
+                                    <div className="text-[10px] text-muted-foreground">매매 {history.length}건 기준 · AI 3-Step 자동 분석</div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {retroReport && (
+                                    <span className="text-[10px] text-muted-foreground bg-muted/30 px-2 py-0.5 rounded">
+                                        마지막 분석: {retroReport.created_date || retroReport.created_at?.substring(0, 10)}
+                                    </span>
+                                )}
+                                <button
+                                    onClick={() => setShowRetroModal(false)}
+                                    className="p-1.5 rounded hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors text-sm"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 모달 툴바 */}
+                        <div className="flex items-center gap-1 px-5 py-2.5 border-b border-border/30 bg-muted/5 shrink-0">
+                            {(['summary', 'pm1', 'pm2', 'patterns'] as const).map(tab => (
+                                <button
+                                    key={tab}
+                                    onClick={() => setRetroModalTab(tab)}
+                                    className={cn(
+                                        'px-3 py-1 text-xs font-bold rounded transition-colors',
+                                        retroModalTab === tab
+                                            ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
+                                            : 'text-muted-foreground hover:bg-muted/30'
+                                    )}
+                                >
+                                    {({ summary: '📊 통계 요약', pm1: '📌 PM1 개선안', pm2: '💼 PM2 개선안', patterns: '⚠️ 패턴 분석' } as Record<string, string>)[tab]}
+                                </button>
+                            ))}
+                            <div className="ml-auto flex items-center gap-2">
+                                {!retroReport && !retroRunning && (
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                const report = await (window.electronAPI as any).getLatestPortfolioRetrospective()
+                                                if (report) setRetroReport(report)
+                                            } catch {}
+                                        }}
+                                        className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded border border-border/40"
+                                    >
+                                        이전 결과 불러오기
+                                    </button>
+                                )}
+                                <button
+                                    onClick={async () => {
+                                        setRetroRunning(true)
+                                        setRetroError(null)
+                                        try {
+                                            const res = await (window.electronAPI as any).runPortfolioRetrospective()
+                                            if (res?.success) {
+                                                const report = await (window.electronAPI as any).getLatestPortfolioRetrospective()
+                                                setRetroReport(report)
+                                                setRetroModalTab('summary')
+                                            } else {
+                                                setRetroError(res?.error || '분석 실패')
+                                            }
+                                        } catch (e: any) {
+                                            setRetroError(e.message)
+                                        } finally {
+                                            setRetroRunning(false)
+                                        }
+                                    }}
+                                    disabled={retroRunning}
+                                    className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold border transition-all bg-indigo-500/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50"
+                                >
+                                    {retroRunning
+                                        ? <><span className="animate-spin inline-block w-3 h-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full" /> 분석 중...</>
+                                        : '🧠 AI 분석 실행'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 모달 콘텐츠 */}
+                        <div className="flex-1 overflow-auto p-5">
+
+                            {/* 로딩 */}
+                            {retroRunning && (
+                                <div className="flex flex-col items-center justify-center py-20 gap-4 text-muted-foreground">
+                                    <div className="animate-spin w-10 h-10 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full" />
+                                    <div className="text-sm font-medium">AI가 매매 이력을 분석 중입니다...</div>
+                                    <div className="text-xs text-muted-foreground/60">3단계 분석 실행, 약 1~2분 소요됩니다</div>
+                                </div>
+                            )}
+
+                            {/* 에러 */}
+                            {retroError && !retroRunning && (
+                                <div className="flex items-start gap-2 text-rose-400 bg-rose-500/5 border border-rose-500/20 rounded-lg p-3 mb-4 text-xs">
+                                    ⚠️ {retroError}
+                                </div>
+                            )}
+
+                            {/* 초기 상태 */}
+                            {!retroRunning && !retroReport && (
+                                <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground/50">
+                                    <div className="text-5xl">🧠</div>
+                                    <div className="text-sm font-medium">AI 분석을 실행하면 PM1/PM2 개선안이 생성됩니다</div>
+                                    <div className="text-xs">현재 성적표 {history.length}건 기준 분석 (최소 5건 필요)</div>
+                                </div>
+                            )}
+
+                            {/* 결과 */}
+                            {!retroRunning && retroReport && (
+                                <div>
+
+                                    {/* ── 통계 요약 탭 ── */}
+                                    {retroModalTab === 'summary' && (
+                                        <div className="space-y-4">
+                                            <div className="grid grid-cols-3 gap-3">
+                                                {[
+                                                    { label: '총 분석 건수', value: `${retroReport.total_trades}건`, color: 'text-foreground' },
+                                                    { label: '승률', value: `${Number(retroReport.win_rate).toFixed(1)}%`, color: Number(retroReport.win_rate) >= 50 ? 'text-rose-500' : 'text-blue-500' },
+                                                    { label: '평균 수익률', value: `${Number(retroReport.avg_return) > 0 ? '+' : ''}${Number(retroReport.avg_return).toFixed(2)}%`, color: Number(retroReport.avg_return) >= 0 ? 'text-rose-500' : 'text-blue-500' },
+                                                ].map((item: any) => (
+                                                    <div key={item.label} className="bg-muted/20 border border-border/50 rounded-lg p-4 text-center">
+                                                        <div className="text-[10px] text-muted-foreground mb-1">{item.label}</div>
+                                                        <div className={`font-bold font-mono text-2xl ${item.color}`}>{item.value}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            {/* 성과 분포 */}
+                                            {(() => {
+                                                try {
+                                                    const stats = JSON.parse(retroReport.aggregated_stats_json || '{}')
+                                                    const dist = stats.outcome_distribution as Record<string, number>
+                                                    if (!dist) return null
+                                                    return (
+                                                        <div className="bg-muted/10 border border-border/40 rounded-lg p-4">
+                                                            <div className="text-xs font-bold text-muted-foreground uppercase mb-3">성과 분포</div>
+                                                            <div className="grid grid-cols-5 gap-2 text-center">
+                                                                {[
+                                                                    { k: 'BIG_WIN', label: '크게 성공', color: 'text-rose-400 bg-rose-500/10 border-rose-500/20' },
+                                                                    { k: 'SMALL_WIN', label: '소폭 성공', color: 'text-rose-300/70 bg-rose-500/5 border-rose-500/10' },
+                                                                    { k: 'BREAKEVEN', label: '보합', color: 'text-muted-foreground bg-muted/20 border-border/30' },
+                                                                    { k: 'SMALL_LOSS', label: '소폭 손실', color: 'text-blue-400 bg-blue-500/5 border-blue-500/10' },
+                                                                    { k: 'BIG_LOSS', label: '크게 실패', color: 'text-blue-500 bg-blue-500/10 border-blue-500/20' },
+                                                                ].map(({ k, label, color }) => (
+                                                                    <div key={k} className={`rounded-lg p-2 border ${color}`}>
+                                                                        <div className="font-bold font-mono text-xl">{dist[k] || 0}</div>
+                                                                        <div className="text-[10px] mt-0.5">{label}</div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                } catch { return null }
+                                            })()}
+
+                                            {/* AI별 공헌 */}
+                                            {(() => {
+                                                try {
+                                                    const stats = JSON.parse(retroReport.aggregated_stats_json || '{}')
+                                                    const byA = stats.by_analyst as Record<string, any>
+                                                    if (!byA || !Object.keys(byA).length) return null
+                                                    return (
+                                                        <div className="bg-muted/10 border border-border/40 rounded-lg p-4">
+                                                            <div className="text-xs font-bold text-muted-foreground uppercase mb-3">피치 AI별 실적</div>
+                                                            <div className="space-y-2">
+                                                                {Object.entries(byA).map(([analyst, v]: [string, any]) => (
+                                                                    <div key={analyst} className="flex items-center gap-3 text-xs">
+                                                                        <span className="w-32 shrink-0 font-semibold text-indigo-300">{analyst}</span>
+                                                                        <span className="text-muted-foreground">{v.count}건</span>
+                                                                        <span className={v.win_rate >= 50 ? 'text-rose-400' : 'text-blue-400'}>승률 {Number(v.win_rate).toFixed(1)}%</span>
+                                                                        <span className={`ml-auto ${Number(v.avg_return) >= 0 ? 'text-rose-400' : 'text-blue-400'}`}>평균 {Number(v.avg_return) > 0 ? '+' : ''}{Number(v.avg_return).toFixed(2)}%</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                } catch { return null }
+                                            })()}
+                                        </div>
+                                    )}
+
+                                    {/* ── PM1 개선안 탭 ── */}
+                                    {retroModalTab === 'pm1' && (() => {
+                                        try {
+                                            const pm1 = JSON.parse(retroReport.pm1_improvements_json || '[]')
+                                            if (!pm1.length) return <div className="py-10 text-center text-xs text-muted-foreground">제안이 없습니다.</div>
+                                            return (
+                                                <div className="space-y-3">
+                                                    <div className="text-xs text-muted-foreground mb-2">PM1 스크리닝 카테고리 선별 로직에 대한 AI 개선 제안</div>
+                                                    {pm1.map((item: any, i: number) => (
+                                                        <div key={i} className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <span className={cn('text-[10px] px-2 py-0.5 rounded font-bold',
+                                                                    item.priority === 'HIGH' ? 'bg-rose-500/20 text-rose-400' :
+                                                                    item.priority === 'MEDIUM' ? 'bg-amber-500/20 text-amber-400' :
+                                                                    'bg-muted/40 text-muted-foreground'
+                                                                )}>{item.priority}</span>
+                                                                <span className="text-xs font-bold text-amber-300">{item.target}</span>
+                                                            </div>
+                                                            <div className="text-xs text-muted-foreground mb-2"><span className="text-rose-400/80">문제: </span>{item.problem}</div>
+                                                            <div className="text-xs text-foreground/80 bg-amber-500/5 border border-amber-500/15 rounded p-2.5"><span className="text-amber-400">개선: </span>{item.proposed_change}</div>
+                                                            {item.expected_impact && <div className="text-[10px] text-emerald-400/70 mt-1.5">→ 기대 효과: {item.expected_impact}</div>}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )
+                                        } catch { return <div className="py-10 text-center text-xs text-muted-foreground">데이터를 불러올 수 없습니다.</div> }
+                                    })()}
+
+                                    {/* ── PM2 개선안 탭 ── */}
+                                    {retroModalTab === 'pm2' && (() => {
+                                        try {
+                                            const pm2 = JSON.parse(retroReport.pm2_improvements_json || '[]')
+                                            const sell = (() => { try { return JSON.parse(retroReport.sell_improvements_json || '[]') } catch { return [] } })()
+                                            return (
+                                                <div className="space-y-5">
+                                                    {pm2.length > 0 && (
+                                                        <div className="space-y-3">
+                                                            <div className="text-xs font-bold text-indigo-400 uppercase">PM2 프롬프트 개선안</div>
+                                                            {pm2.map((item: any, i: number) => (
+                                                                <div key={i} className="bg-indigo-500/5 border border-indigo-500/20 rounded-lg p-4">
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        <span className={cn('text-[10px] px-2 py-0.5 rounded font-bold',
+                                                                            item.priority === 'HIGH' ? 'bg-rose-500/20 text-rose-400' :
+                                                                            item.priority === 'MEDIUM' ? 'bg-amber-500/20 text-amber-400' :
+                                                                            'bg-muted/40 text-muted-foreground'
+                                                                        )}>{item.priority}</span>
+                                                                        <span className="text-xs font-bold text-indigo-300">{item.target}</span>
+                                                                    </div>
+                                                                    <div className="text-xs text-muted-foreground mb-2"><span className="text-rose-400/80">문제: </span>{item.problem}</div>
+                                                                    <div className="text-xs text-foreground/80 bg-indigo-500/5 border border-indigo-500/15 rounded p-2.5"><span className="text-indigo-400">추가할 지침: </span>{item.proposed_addition}</div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    {sell.length > 0 && (
+                                                        <div className="space-y-3">
+                                                            <div className="text-xs font-bold text-emerald-400 uppercase">매도 로직 개선안</div>
+                                                            {sell.map((item: any, i: number) => (
+                                                                <div key={i} className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-4">
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        <span className={cn('text-[10px] px-2 py-0.5 rounded font-bold',
+                                                                            item.priority === 'HIGH' ? 'bg-rose-500/20 text-rose-400' :
+                                                                            item.priority === 'MEDIUM' ? 'bg-amber-500/20 text-amber-400' :
+                                                                            'bg-muted/40 text-muted-foreground'
+                                                                        )}>{item.priority}</span>
+                                                                    </div>
+                                                                    <div className="text-xs text-muted-foreground mb-2"><span className="text-rose-400/80">문제: </span>{item.problem}</div>
+                                                                    <div className="text-xs text-foreground/80 bg-emerald-500/5 border border-emerald-500/15 rounded p-2.5"><span className="text-emerald-400">개선: </span>{item.proposed_change}</div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    {pm2.length === 0 && sell.length === 0 && (
+                                                        <div className="py-10 text-center text-xs text-muted-foreground">제안이 없습니다.</div>
+                                                    )}
+                                                </div>
+                                            )
+                                        } catch { return <div className="py-10 text-center text-xs text-muted-foreground">데이터를 불러올 수 없습니다.</div> }
+                                    })()}
+
+                                    {/* ── 패턴 분석 탭 ── */}
+                                    {retroModalTab === 'patterns' && (() => {
+                                        try {
+                                            const failures = JSON.parse(retroReport.failure_patterns_json || '[]')
+                                            const successes = JSON.parse(retroReport.success_patterns_json || '[]')
+                                            return (
+                                                <div className="space-y-5">
+                                                    {failures.length > 0 && (
+                                                        <div className="space-y-2">
+                                                            <div className="text-xs font-bold text-rose-400 uppercase">⚠️ 반복 실패 패턴</div>
+                                                            {failures.map((item: any, i: number) => (
+                                                                <div key={i} className="flex items-start gap-3 bg-rose-500/5 border border-rose-500/20 rounded-lg p-3.5">
+                                                                    <span className={cn('shrink-0 text-[10px] px-1.5 py-0.5 rounded font-bold mt-0.5',
+                                                                        item.severity === 'HIGH' ? 'bg-rose-500/30 text-rose-400' : 'bg-amber-500/20 text-amber-400'
+                                                                    )}>{item.severity}</span>
+                                                                    <div>
+                                                                        <div className="text-xs font-bold text-rose-300 mb-1">{item.pattern_name} <span className="font-normal text-muted-foreground">({item.frequency})</span></div>
+                                                                        <div className="text-xs text-muted-foreground">{item.description}</div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    {successes.length > 0 && (
+                                                        <div className="space-y-2">
+                                                            <div className="text-xs font-bold text-emerald-400 uppercase">✅ 성공 패턴</div>
+                                                            {successes.map((item: any, i: number) => (
+                                                                <div key={i} className="flex items-start gap-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3.5">
+                                                                    <div>
+                                                                        <div className="text-xs font-bold text-emerald-300 mb-1">{item.pattern_name} <span className="font-normal text-muted-foreground">({item.frequency})</span></div>
+                                                                        <div className="text-xs text-muted-foreground">{item.description}</div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    {failures.length === 0 && successes.length === 0 && (
+                                                        <div className="py-10 text-center text-xs text-muted-foreground">패턴이 없습니다.</div>
+                                                    )}
+                                                </div>
+                                            )
+                                        } catch { return <div className="py-10 text-center text-xs text-muted-foreground">데이터를 불러올 수 없습니다.</div> }
+                                    })()}
+
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
 
             {/* ── AI 수동실행 Tab ── */}
             {activeTab === 'runner' && (

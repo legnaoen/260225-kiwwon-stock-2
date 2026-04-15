@@ -706,7 +706,7 @@ export class DatabaseService {
             );
         `);
         // ──────────────────────────────────────────────────────────────────
-        
+
         // Portfolio Events Table (Added for Event Logs)
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS maiis_portfolio_events (
@@ -837,7 +837,7 @@ export class DatabaseService {
                 console.log('[DatabaseService] Migrating persona_performance to add time_slot...');
                 this.db.exec("DROP TABLE persona_performance");
             }
-        } catch (e) {}
+        } catch (e) { }
 
         const createPersonaPerformanceTable = `
             CREATE TABLE IF NOT EXISTS persona_performance (
@@ -877,7 +877,7 @@ export class DatabaseService {
         // 기존 테이블에 새 컬럼 추가 (ALTER TABLE은 이미 존재하면 무시)
         const intradayAlterColumns = ['position', 'entry_price', 'close_price', 'return_pct', 'sources_json', 'comments_json', 'swarm_sentiment']
         for (const col of intradayAlterColumns) {
-            try { this.db.exec(`ALTER TABLE intraday_predictions ADD COLUMN ${col} ${['sources_json', 'position', 'comments_json', 'swarm_sentiment'].includes(col) ? 'TEXT' : 'REAL'}`) } catch {}
+            try { this.db.exec(`ALTER TABLE intraday_predictions ADD COLUMN ${col} ${['sources_json', 'position', 'comments_json', 'swarm_sentiment'].includes(col) ? 'TEXT' : 'REAL'}`) } catch { }
         }
 
         // Phase 2.5: AI Analysts Sourcing Pool
@@ -999,7 +999,7 @@ export class DatabaseService {
             );
         `)
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_ai_analyst_picks_date ON ai_analyst_picks(date)")
-        
+
         // Phase 4: Retrospective & Performance Tracking for Analyst Picks
         try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN entry_price REAL DEFAULT 0") } catch (e) { }
         try { this.db.exec("ALTER TABLE ai_analyst_picks ADD COLUMN target_profit_rate REAL DEFAULT 5.0") } catch (e) { }
@@ -1009,17 +1009,19 @@ export class DatabaseService {
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN entry_price_at TEXT") } catch (e) { }
         // was_held: 실제 매수 포지션(HELD)에 진입한 적 있는 종목 마킹 → 성적표 필터 기준
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN was_held INTEGER DEFAULT 0") } catch (e) { }
+        // peak_profit_rate: HELD 포지션 보유 중 최고 수익률 (성적표 피크 수익률 표시)
+        try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN peak_profit_rate REAL DEFAULT 0") } catch (e) { }
 
         // Ensure macro_indicators_json exists in world state
         try {
             this.db.exec("ALTER TABLE maiis_world_state ADD COLUMN macro_indicators_json TEXT")
         } catch (e) { }
-        
+
         // Ensure source_news column exists for migration
         try {
             this.db.exec("ALTER TABLE market_news_consensus ADD COLUMN source_news TEXT")
         } catch (e) { }
-        
+
         // Ensure columns exist for migration
         try {
             this.db.exec("ALTER TABLE youtube_narrative_logs ADD COLUMN thumbnail TEXT")
@@ -1037,7 +1039,7 @@ export class DatabaseService {
         try {
             this.db.exec("ALTER TABLE schedules ADD COLUMN origin_id TEXT")
         } catch (e) { }
-        
+
         // Migration for daily_rising_stocks missing columns
         try {
             this.db.exec("ALTER TABLE daily_rising_stocks ADD COLUMN trading_value REAL")
@@ -1066,7 +1068,7 @@ export class DatabaseService {
         try { this.db.exec("ALTER TABLE ai_strategies ADD COLUMN max_positions INTEGER DEFAULT 2") } catch (e) { }
         try { this.db.exec("ALTER TABLE ai_strategies ADD COLUMN scoring_weights TEXT") } catch (e) { }
         try { this.db.exec("ALTER TABLE ai_strategies ADD COLUMN master_prompt TEXT") } catch (e) { }
-        
+
         // --- Timing Column Migrations ---
         try {
             this.db.exec("ALTER TABLE market_daily_reports ADD COLUMN timing TEXT DEFAULT 'EVENING'")
@@ -1089,7 +1091,7 @@ export class DatabaseService {
                 this.db.exec("ALTER TABLE market_news_consensus ADD COLUMN sentiment_score REAL");
                 this.db.exec("ALTER TABLE market_news_consensus ADD COLUMN hot_keywords_json TEXT");
             }
-        } catch (e) {}
+        } catch (e) { }
 
         // Migration for maiis_keyword_rankings reason column
         try { this.db.exec("ALTER TABLE maiis_keyword_rankings ADD COLUMN reason TEXT") } catch (e) { }
@@ -1117,7 +1119,7 @@ export class DatabaseService {
                     )
                 `);
             }
-        } catch (e) {}
+        } catch (e) { }
 
         try {
             const check = this.db.prepare("PRAGMA table_info(youtube_narrative_trends)").all() as any[];
@@ -1134,7 +1136,7 @@ export class DatabaseService {
                     )
                 `);
             }
-        } catch (e) {}
+        } catch (e) { }
 
         const createAiExecutionLogsTable = `
             CREATE TABLE IF NOT EXISTS ai_execution_logs (
@@ -1155,7 +1157,7 @@ export class DatabaseService {
             );
         `
         this.db.exec(createAiExecutionLogsTable)
-        
+
         try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN prompt TEXT;"); } catch { }
         try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN systemInstruction TEXT;"); } catch { }
         try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN result TEXT;"); } catch { }
@@ -1331,6 +1333,40 @@ export class DatabaseService {
             );
         `);
 
+        // ═══ Track E: 단기 눌림목 종가베팅 ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS track_e_buy_picks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pick_date TEXT NOT NULL,
+                pick_rank INTEGER NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                signals_json TEXT,
+                buy_score INTEGER DEFAULT 0,
+                reason TEXT,
+                risk TEXT,
+                related_themes_json TEXT,
+                theme_lifespan TEXT,
+                entry_price REAL DEFAULT 0,
+                exit_price REAL DEFAULT 0,
+                current_price REAL DEFAULT 0,
+                holding_days INTEGER DEFAULT 0,
+                target_days INTEGER DEFAULT 10,
+                target_return_pct REAL DEFAULT 15.0,
+                peak_return REAL,
+                peak_date TEXT,
+                final_return REAL,
+                status TEXT DEFAULT 'PENDING',
+                result TEXT,
+                entry_date TEXT,
+                exit_date TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(pick_date, stock_code)
+            );
+        `);
+
         // ═══ Track B: 종목별 Gemma 4 리서치 리포트 (Phase 3 분석 결과 + 로데이터) ═══
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS stock_research_reports (
@@ -1342,6 +1378,7 @@ export class DatabaseService {
                 market_theme_link TEXT,
                 theme_durability TEXT,
                 catalyst_summary TEXT,
+                price_action_analysis TEXT,
                 risk_factors TEXT,
                 upside_probability TEXT,
                 buy_score INTEGER DEFAULT 0,
@@ -1354,6 +1391,7 @@ export class DatabaseService {
                 UNIQUE(date, stock_code, agent_source)
             );
         `);
+        try { this.db.exec("ALTER TABLE stock_research_reports ADD COLUMN price_action_analysis TEXT;"); } catch(e) {}
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_stock_research_date ON stock_research_reports(date DESC);");
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_stock_research_code ON stock_research_reports(stock_code);");
 
@@ -1381,6 +1419,28 @@ export class DatabaseService {
         `);
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_mega_theme_status ON mega_theme_ledger(status);");
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_mega_theme_score  ON mega_theme_ledger(ranking_score DESC);");
+
+        // ═══ Portfolio Retrospective Reports (성적표 AI 분석 결과 저장) ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS portfolio_retrospective_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_date TEXT NOT NULL,
+                total_trades INTEGER DEFAULT 0,
+                win_rate REAL DEFAULT 0,
+                avg_return REAL DEFAULT 0,
+                diagnoses_json TEXT,
+                failure_patterns_json TEXT,
+                success_patterns_json TEXT,
+                pm1_improvements_json TEXT,
+                pm2_improvements_json TEXT,
+                sell_improvements_json TEXT,
+                aggregated_stats_json TEXT,
+                raw_ai_step1 TEXT,
+                raw_ai_step2 TEXT,
+                raw_ai_step3 TEXT,
+                created_at TEXT NOT NULL
+            );
+        `);
     }
 
 
@@ -1891,9 +1951,9 @@ export class DatabaseService {
 
         const combined = [...risingStocks, ...analystPicks.map(p => ({
             ...p,
-            agent_type: p.agent_type === 'THEME' ? '테마 AI' : 
-                        p.agent_type === 'REPORT' ? '리포트 AI' : 
-                        p.agent_type === 'MOMENTUM' ? '수급 AI (모멘텀)' : p.agent_type
+            agent_type: p.agent_type === 'THEME' ? '테마 AI' :
+                p.agent_type === 'REPORT' ? '리포트 AI' :
+                    p.agent_type === 'MOMENTUM' ? '수급 AI (모멘텀)' : p.agent_type
         }))];
 
         // 최신순 정렬
@@ -1927,8 +1987,8 @@ export class DatabaseService {
         date: string
         stock_code: string
         stock_name: string
-        news_json: string          
-        disclosures_json: string   
+        news_json: string
+        disclosures_json: string
     }) {
         const stmt = this.db.prepare(`
             INSERT INTO stock_raw_data (date, stock_code, stock_name, news_json, disclosures_json, collected_at)
@@ -2333,7 +2393,7 @@ export class DatabaseService {
             for (const type of types) {
                 const signalCondition = type === 'HELD' ? "status = 'HELD'" : "status = 'WATCHING'";
                 // status 자체가 조건이므로 중복되지만, 캡슐화 논리를 위해 남김
-                const statusCondition = "status NOT IN ('CLEARED', 'DROPPED', 'HIT')"; 
+                const statusCondition = "status NOT IN ('CLEARED', 'DROPPED', 'HIT')";
 
                 for (const strategy of strategies) {
                     const maxCount = type === 'HELD' ? (limits.buy[strategy] || 0) : (limits.watchlist[strategy] || 0);
@@ -2362,7 +2422,7 @@ export class DatabaseService {
                                 SET status = 'DROPPED', updated_at = ?
                                 WHERE stock_code IN (${codes})
                             `).run(this.getKstTimestamp());
-                            
+
                             // [수정] DROP된 종목을 인큐베이터로 강등 처리
                             excessItems.forEach((r: any) => {
                                 this.demoteToIncubator({
@@ -2462,14 +2522,14 @@ export class DatabaseService {
     }
 
 
-    public saveMarketNewsConsensus(data: { 
-        date: string, 
-        summary_json: string, 
-        pivot_analysis: string, 
-        keywords_used: string, 
+    public saveMarketNewsConsensus(data: {
+        date: string,
+        summary_json: string,
+        pivot_analysis: string,
+        keywords_used: string,
         source_news?: string,
         sentiment_score?: number,
-        hot_keywords_json?: string 
+        hot_keywords_json?: string
     }) {
         const sql = `
             INSERT OR REPLACE INTO market_news_consensus (
@@ -2477,10 +2537,10 @@ export class DatabaseService {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, DATETIME('now', 'localtime'))
         `;
         this.db.prepare(sql).run(
-            data.date, 
-            data.summary_json, 
-            data.pivot_analysis, 
-            data.keywords_used, 
+            data.date,
+            data.summary_json,
+            data.pivot_analysis,
+            data.keywords_used,
             data.source_news || null,
             data.sentiment_score ?? null,
             data.hot_keywords_json || null
@@ -2563,7 +2623,7 @@ export class DatabaseService {
     public clearAiRunLogs() {
         try {
             this.db.prepare('DELETE FROM ai_run_logs').run();
-        } catch (e) {}
+        } catch (e) { }
     }
 
     public saveMaiisDomainInsight(data: { date: string, domain_type: string, raw_input_text: string, used_prompt: string, generated_json: string }) {
@@ -2613,9 +2673,9 @@ export class DatabaseService {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         stmt.run(
-            date, 
-            timing, 
-            data.market_thesis || null, 
+            date,
+            timing,
+            data.market_thesis || null,
             data.sentiment_score || null,
             JSON.stringify(data.score_adjustments || []),
             JSON.stringify(data.new_alpha_picks || []),
@@ -2748,7 +2808,30 @@ export class DatabaseService {
     // Phase 2.5: AI Analyst Picks CRUD
     // ──────────────────────────────────────────────
 
-
+    /**
+     * 특정 종목에 대한 AI 애널리스트 추천 이력 조회 (retrospective 분석용)
+     * @param stockCode 종목코드
+     * @param beforeDate YYYY-MM-DD 형태의 기준일 (이 날짜 이전 추천만 조회)
+     */
+    public getAnalystPicksForStock(stockCode: string, beforeDate?: string): any[] {
+        try {
+            if (beforeDate) {
+                return this.db.prepare(`
+                    SELECT agent_type, reason, confidence, date FROM ai_analyst_picks
+                    WHERE stock_code = ? AND date <= ?
+                    ORDER BY date DESC LIMIT 5
+                `).all(stockCode, beforeDate) as any[];
+            }
+            return this.db.prepare(`
+                SELECT agent_type, reason, confidence, date FROM ai_analyst_picks
+                WHERE stock_code = ?
+                ORDER BY date DESC LIMIT 5
+            `).all(stockCode) as any[];
+        } catch (e) {
+            console.error('[DB] getAnalystPicksForStock error:', e);
+            return [];
+        }
+    }
 
     // ──────────────────────────────────────────────
     // Phase 2 Tracker: NAV & Daily Snapshot CRUD
@@ -2823,9 +2906,9 @@ export class DatabaseService {
         const avgHoldDays = closed.length > 0
             ? closed.reduce((sum: number, c: any) => sum + (c.days_held || 0), 0) / closed.length
             : 0;
-        const bestTrade = closed.reduce((best: any, c: any) => 
+        const bestTrade = closed.reduce((best: any, c: any) =>
             (!best || (c.closed_profit_rate || 0) > (best.closed_profit_rate || 0)) ? c : best, null);
-        const worstTrade = closed.reduce((worst: any, c: any) => 
+        const worstTrade = closed.reduce((worst: any, c: any) =>
             (!worst || (c.closed_profit_rate || 0) < (worst.closed_profit_rate || 0)) ? c : worst, null);
 
         return {
@@ -2866,7 +2949,7 @@ export class DatabaseService {
                 insertStmt.run(item);
             }
         });
-        
+
         replaceMany(flows);
     }
 
@@ -2906,24 +2989,24 @@ export class DatabaseService {
             SELECT DISTINCT date FROM naver_market_flow
             WHERE type = ? AND date <= ?
             ORDER BY date DESC LIMIT ?
-        `).all(type, targetDate, limitDays + 1) as {date: string}[];
-        
+        `).all(type, targetDate, limitDays + 1) as { date: string }[];
+
         if (dates.length === 0) return { current: [], topNames: [], trendData: [], date: targetDate };
 
         const latestDate = dates[0].date;
         const prevDate = dates.length > 1 ? dates[1].date : null;
-        
+
         // 2) Load history data
         const historyDataRaw = this.db.prepare(`
             SELECT * FROM naver_market_flow 
-            WHERE type = ? AND date IN (${dates.map(()=>'?').join(',')})
+            WHERE type = ? AND date IN (${dates.map(() => '?').join(',')})
             ORDER BY date DESC, rank_num ASC
         `).all(type, ...dates.map(d => d.date)) as any[];
 
         // Load theme intelligence for ALL fetched dates
         const intelligences = this.db.prepare(`
             SELECT * FROM theme_intelligence 
-            WHERE type = ? AND date IN (${dates.map(()=>'?').join(',')})
+            WHERE type = ? AND date IN (${dates.map(() => '?').join(',')})
         `).all(type, ...dates.map(d => d.date)) as any[];
 
         const historyData = historyDataRaw.map((item: any) => {
@@ -2955,9 +3038,9 @@ export class DatabaseService {
                 changeNum = prevItem.rank_num - item.rank_num; // positive means went up
                 change = changeNum > 0 ? `▲${changeNum}` : changeNum < 0 ? `▼${Math.abs(changeNum)}` : '-';
             }
-            
+
             // Fetch leading stocks from DB
-            const alphaStocks = getAlphaStocks.all(item.name, latestDate) as {stock_name: string, stock_code: string}[];
+            const alphaStocks = getAlphaStocks.all(item.name, latestDate) as { stock_name: string, stock_code: string }[];
 
             // Fetch price index history
             const priceIndexHistory = this.db.prepare(`
@@ -3150,7 +3233,7 @@ export class DatabaseService {
         if (message.includes('정상적으로 시작되었습니다')) {
             return;
         }
-        
+
         try {
             const stmt = this.db.prepare(`
                 INSERT INTO telegram_logs (sender_type, message, created_at)
@@ -3166,7 +3249,7 @@ export class DatabaseService {
             const threeDaysAgo = new Date();
             threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
             const limitDate = this.getKstTimestamp(threeDaysAgo);
-            
+
             this.db.prepare('DELETE FROM telegram_logs WHERE created_at < ?').run(limitDate);
         } catch (error) {
             console.error('[DatabaseService] failed to save telegram log', error);
@@ -3237,6 +3320,7 @@ export class DatabaseService {
         market_theme_link?: string;
         theme_durability?: string;
         catalyst_summary?: string;
+        price_action_analysis?: string;
         risk_factors?: string;
         upside_probability?: string;
         buy_score?: number;
@@ -3251,6 +3335,7 @@ export class DatabaseService {
                 INSERT OR REPLACE INTO stock_research_reports (
                     date, stock_code, stock_name, agent_source,
                     market_theme_link, theme_durability, catalyst_summary,
+                    price_action_analysis,
                     risk_factors, upside_probability, buy_score,
                     preliminary_decision, reasoning,
                     injected_context_json, system_prompt, raw_ai_response,
@@ -3258,6 +3343,7 @@ export class DatabaseService {
                 ) VALUES (
                     @date, @stock_code, @stock_name, @agent_source,
                     @market_theme_link, @theme_durability, @catalyst_summary,
+                    @price_action_analysis,
                     @risk_factors, @upside_probability, @buy_score,
                     @preliminary_decision, @reasoning,
                     @injected_context_json, @system_prompt, @raw_ai_response,
@@ -3271,6 +3357,7 @@ export class DatabaseService {
                 market_theme_link: report.market_theme_link ?? null,
                 theme_durability: report.theme_durability ?? null,
                 catalyst_summary: report.catalyst_summary ?? null,
+                price_action_analysis: report.price_action_analysis ?? null,
                 risk_factors: report.risk_factors ?? null,
                 upside_probability: report.upside_probability ?? null,
                 buy_score: report.buy_score ?? 0,
@@ -3318,9 +3405,44 @@ export class DatabaseService {
             this.db.prepare('DELETE FROM track_b_buy_picks WHERE pick_date = ?').run(date);
             this.db.prepare('DELETE FROM track_c_buy_picks WHERE pick_date = ?').run(date);
             this.db.prepare('DELETE FROM track_d_buy_picks WHERE pick_date = ?').run(date);
+            this.db.prepare('DELETE FROM track_e_buy_picks WHERE pick_date = ?').run(date);
             this.db.prepare('DELETE FROM stock_research_reports WHERE date = ?').run(date);
         } catch (e: any) {
             console.error('[DB] deleteTrackBDataByDate Error:', e.message);
+        }
+    }
+
+    public deleteSimTradePickById(id: number, category: string): void {
+        try {
+            // id가 float(20.0)으로 전달될 경우 SQLite INTEGER PK와 타입 불일치 방지
+            const intId = Math.floor(id);
+
+            if (category === 'PULLBACK_REBOUND') {
+                // PULLBACK_REBOUND는 track_b 또는 track_c 둘 다 존재 가능 (마이그레이션 과도기)
+                const inB = this.db.prepare('SELECT id FROM track_b_buy_picks WHERE id = ?').get(intId) as any;
+                if (inB) {
+                    this.db.prepare('DELETE FROM track_b_buy_picks WHERE id = ?').run(intId);
+                }
+                const inC = this.db.prepare('SELECT id FROM track_c_buy_picks WHERE id = ?').get(intId) as any;
+                if (inC) {
+                    this.db.prepare('DELETE FROM track_c_buy_picks WHERE id = ?').run(intId);
+                }
+                return;
+            }
+
+            let tableName = '';
+            switch (category) {
+                case 'TRUE_LEADER': tableName = 'track_a_buy_picks'; break;
+                case 'EMERGING_STAR': tableName = 'track_b_buy_picks'; break;
+                case 'PULLBACK_DIP': tableName = 'track_c_buy_picks'; break;
+                case 'INTRADAY_SURGE': tableName = 'track_d_buy_picks'; break;
+                case 'SHORT_TERM_CONSOLIDATION': tableName = 'track_e_buy_picks'; break;
+                default: throw new Error('Unknown category');
+            }
+            this.db.prepare(`DELETE FROM ${tableName} WHERE id = ?`).run(intId);
+        } catch (e: any) {
+            console.error('[DB] deleteSimTradePickById Error:', e.message);
+            throw e;
         }
     }
 
@@ -3415,8 +3537,8 @@ export class DatabaseService {
         const result: Record<string, { heat_60d: number; heat_120d: number; current_index: number }> = {};
         for (const row of rows) {
             result[row.name] = {
-                heat_60d:      row.heat_60d      ?? 0,
-                heat_120d:     row.heat_120d     ?? 0,
+                heat_60d: row.heat_60d ?? 0,
+                heat_120d: row.heat_120d ?? 0,
                 current_index: row.current_index ?? 100,
             };
         }
@@ -3430,13 +3552,13 @@ export class DatabaseService {
      */
     public getStockHeatByTheme(today: string): Record<string, { avg_heat_60: number; avg_heat_120: number; vol_ratio: number; stock_count: number; theme_abs_vol: number }> {
         const cutoff120 = new Date(today); cutoff120.setDate(cutoff120.getDate() - 120);
-        const cutoff60  = new Date(today); cutoff60.setDate(cutoff60.getDate() - 60);
-        const cutoff20  = new Date(today); cutoff20.setDate(cutoff20.getDate() - 20);
-        const cutoff5   = new Date(today); cutoff5.setDate(cutoff5.getDate() - 5);
+        const cutoff60 = new Date(today); cutoff60.setDate(cutoff60.getDate() - 60);
+        const cutoff20 = new Date(today); cutoff20.setDate(cutoff20.getDate() - 20);
+        const cutoff5 = new Date(today); cutoff5.setDate(cutoff5.getDate() - 5);
         const d120 = cutoff120.toISOString().slice(0, 10);
-        const d60  = cutoff60.toISOString().slice(0, 10);
-        const d20  = cutoff20.toISOString().slice(0, 10);
-        const d5   = cutoff5.toISOString().slice(0, 10);
+        const d60 = cutoff60.toISOString().slice(0, 10);
+        const d20 = cutoff20.toISOString().slice(0, 10);
+        const d5 = cutoff5.toISOString().slice(0, 10);
 
         const rows = (this.db.prepare(`
             WITH BaseStockStats AS (
@@ -3496,9 +3618,9 @@ export class DatabaseService {
         const result: Record<string, { avg_heat_60: number; avg_heat_120: number; vol_ratio: number; stock_count: number; theme_abs_vol: number }> = {};
         for (const row of rows) {
             result[row.theme_name] = {
-                avg_heat_60:  row.avg_heat_60  ?? 999,
+                avg_heat_60: row.avg_heat_60 ?? 999,
                 avg_heat_120: row.avg_heat_120 ?? 999,
-                vol_ratio:   row.vol_ratio   ?? 1.0,
+                vol_ratio: row.vol_ratio ?? 1.0,
                 stock_count: row.stock_count ?? 0,
                 theme_abs_vol: row.theme_abs_vol ?? 0,
             };
@@ -3689,7 +3811,7 @@ export class DatabaseService {
         type?: 'THEME' | 'SECTOR';
         signals?: string[];  // ['BEST_BUY', 'BUY', ...]
     }): { data: any[], date: string } {
-        
+
         let actualDate = date;
         const latestRow = this.db.prepare(`SELECT MAX(snapshot_date) as max_date FROM leader_regime_snapshot WHERE snapshot_date <= ?`).get(date) as any;
         if (latestRow && latestRow.max_date) {
@@ -3723,7 +3845,7 @@ export class DatabaseService {
                 WHEN 'EXIT'        THEN 8
                 ELSE 9
             END`;
-            
+
         const data = this.db.prepare(query).all(...params) as any[];
         return { data, date: actualDate };
     }
@@ -3766,4 +3888,120 @@ export class DatabaseService {
             ORDER BY appearance_days DESC, avg_daily_change DESC
         `).all(cutoff.toISOString().slice(0, 10), minAppearances) as any[];
     }
+
+    // ═══ Portfolio Retrospective Reports CRUD ═══
+
+    public saveRetrospectiveReport(report: {
+        created_date: string;
+        total_trades: number;
+        win_rate: number;
+        avg_return: number;
+        diagnoses_json: string;
+        failure_patterns_json: string;
+        success_patterns_json: string;
+        pm1_improvements_json: string;
+        pm2_improvements_json: string;
+        sell_improvements_json: string;
+        aggregated_stats_json: string;
+        raw_ai_step1?: string;
+        raw_ai_step2?: string;
+        raw_ai_step3?: string;
+    }): number {
+        const info = this.db.prepare(`
+            INSERT INTO portfolio_retrospective_reports (
+                created_date, total_trades, win_rate, avg_return,
+                diagnoses_json, failure_patterns_json, success_patterns_json,
+                pm1_improvements_json, pm2_improvements_json, sell_improvements_json,
+                aggregated_stats_json, raw_ai_step1, raw_ai_step2, raw_ai_step3,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            report.created_date,
+            report.total_trades,
+            report.win_rate,
+            report.avg_return,
+            report.diagnoses_json,
+            report.failure_patterns_json,
+            report.success_patterns_json,
+            report.pm1_improvements_json,
+            report.pm2_improvements_json,
+            report.sell_improvements_json,
+            report.aggregated_stats_json,
+            report.raw_ai_step1 || null,
+            report.raw_ai_step2 || null,
+            report.raw_ai_step3 || null,
+            this.getKstTimestamp()
+        );
+        return info.lastInsertRowid as number;
+    }
+
+    public getLatestRetrospectiveReport(): any | null {
+        return this.db.prepare(
+            'SELECT * FROM portfolio_retrospective_reports ORDER BY created_at DESC LIMIT 1'
+        ).get() || null;
+    }
+
+    public getRetrospectiveReports(limit = 10): any[] {
+        return this.db.prepare(
+            'SELECT id, created_date, total_trades, win_rate, avg_return, created_at FROM portfolio_retrospective_reports ORDER BY created_at DESC LIMIT ?'
+        ).all(limit) as any[];
+    }
+
+    /**
+     * 성적표 히스토리용: OHLCV에서 특정 기간의 peak/trough 수익률 계산
+     */
+    public getHistoricalPeakTrough(stockCode: string, entryDateStr: string, exitDateStr: string, entryPrice: number): {
+        peak_return_pct: number;
+        trough_return_pct: number;
+        entry_vs_ma5_pct: number;
+        entry_vs_ma20_pct: number;
+    } {
+        try {
+            const entryDate = entryDateStr.replace(/-/g, '');
+            const exitDate = exitDateStr.replace(/-/g, '');
+
+            // 진입~청산 구간 OHLCV
+            const candles = this.db.prepare(`
+                SELECT date, high, low, close
+                FROM market_ohlcv_history
+                WHERE stock_code = ? AND date >= ? AND date <= ?
+                ORDER BY date ASC
+            `).all(stockCode, entryDate, exitDate) as any[];
+
+            let peak_return_pct = 0;
+            let trough_return_pct = 0;
+            if (candles.length > 0 && entryPrice > 0) {
+                const maxHigh = Math.max(...candles.map((c: any) => Number(c.high) || 0));
+                const minLow = Math.min(...candles.map((c: any) => Number(c.low) || 999999999));
+                peak_return_pct = ((maxHigh - entryPrice) / entryPrice) * 100;
+                trough_return_pct = ((minLow - entryPrice) / entryPrice) * 100;
+            }
+
+            // 진입일 기준 MA5, MA20 계산 (진입일 이전 데이터)
+            const preCandles = this.db.prepare(`
+                SELECT close
+                FROM market_ohlcv_history
+                WHERE stock_code = ? AND date <= ?
+                ORDER BY date DESC
+                LIMIT 21
+            `).all(stockCode, entryDate) as any[];
+
+            let entry_vs_ma5_pct = 0;
+            let entry_vs_ma20_pct = 0;
+            if (preCandles.length >= 5 && entryPrice > 0) {
+                const ma5 = preCandles.slice(0, 5).reduce((s: number, c: any) => s + Number(c.close), 0) / 5;
+                entry_vs_ma5_pct = ((entryPrice - ma5) / ma5) * 100;
+            }
+            if (preCandles.length >= 20 && entryPrice > 0) {
+                const ma20 = preCandles.slice(0, 20).reduce((s: number, c: any) => s + Number(c.close), 0) / 20;
+                entry_vs_ma20_pct = ((entryPrice - ma20) / ma20) * 100;
+            }
+
+            return { peak_return_pct, trough_return_pct, entry_vs_ma5_pct, entry_vs_ma20_pct };
+        } catch (e) {
+            console.error('[DB] getHistoricalPeakTrough error:', e);
+            return { peak_return_pct: 0, trough_return_pct: 0, entry_vs_ma5_pct: 0, entry_vs_ma20_pct: 0 };
+        }
+    }
 }
+

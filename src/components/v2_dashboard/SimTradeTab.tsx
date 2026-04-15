@@ -41,7 +41,8 @@ const CATEGORY_META: Record<string, { icon: string; label: string; color: string
     PULLBACK_REBOUND:  { icon: '🔥', label: '눌림 반등',   color: 'text-red-500 bg-red-500/10 border-red-500/30' },
     PULLBACK_DIP:      { icon: '📉', label: '눌림목',      color: 'text-amber-500 bg-amber-500/10 border-amber-500/30' },
     TRUE_LEADER:       { icon: '👑', label: '진성 대장',   color: 'text-orange-500 bg-orange-500/10 border-orange-500/30' },
-    INTRADAY_SURGE:    { icon: '🔺', label: '급등주',      color: 'text-rose-500 bg-rose-500/10 border-rose-500/30' },
+    INTRADAY_SURGE:    { icon: '🔺', label: '당일 급등',      color: 'text-rose-500 bg-rose-500/10 border-rose-500/30' },
+    SHORT_TERM_CONSOLIDATION: { icon: '🎯', label: '단기 눌림', color: 'text-green-500 bg-green-500/10 border-green-500/30' },
 }
 
 // ── 상태 배지 ──
@@ -184,6 +185,7 @@ export const SimTradeTab: React.FC = () => {
         if (filterCategory !== 'all') {
             result = result.filter(p => p.category === filterCategory);
         }
+        
         return result;
     }, [picks, filterStatus, filterCategory])
 
@@ -209,9 +211,10 @@ export const SimTradeTab: React.FC = () => {
             const catOrder: Record<string, number> = {
                 'TRUE_LEADER': 1,
                 'INTRADAY_SURGE': 2,
-                'EMERGING_STAR': 3,
-                'PULLBACK_REBOUND': 4,
-                'PULLBACK_DIP': 5
+                'SHORT_TERM_CONSOLIDATION': 3,
+                'EMERGING_STAR': 4,
+                'PULLBACK_REBOUND': 5,
+                'PULLBACK_DIP': 6
             }
             datePicks.sort((a, b) => {
                 const aCat = catOrder[a.category] || 99
@@ -419,6 +422,25 @@ export const SimTradeTab: React.FC = () => {
                                         >
                                             🔥 당일 급등주 종가베팅 (D)
                                         </button>
+                                        <button 
+                                            onClick={async () => {
+                                                setIsAiMenuOpen(false);
+                                                setLoading(true);
+                                                try {
+                                                    alert('단기 눌림목 종가베팅 파이프라인 (Track E)을 시작합니다. 약 10~20초 소요됩니다.');
+                                                    await (window as any).electronAPI.runTrackEBuyAgent();
+                                                    alert('단기 눌림목 선정이 완료되었습니다.');
+                                                    await fetchPicks();
+                                                } catch(e: any) {
+                                                    alert('에러 발생: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2 text-xs font-medium hover:bg-muted transition-colors text-green-500"
+                                        >
+                                            🎯 단기 눌림목 탐색 (E)
+                                        </button>
                                     </div>
                                 </>
                             )}
@@ -515,6 +537,7 @@ export const SimTradeTab: React.FC = () => {
                                 <th className="py-2 px-3 font-bold text-right">피크</th>
                                 <th className="py-2 px-3 font-bold text-right">현재수익</th>
                                 <th className="py-2 px-3 font-bold text-center">상태</th>
+                                <th className="py-2 px-3 font-bold text-center w-8"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -522,7 +545,7 @@ export const SimTradeTab: React.FC = () => {
                                 <React.Fragment key={date}>
                                     {/* ── 날짜 구분 행 ── */}
                                     <tr className="bg-muted/30 border-y border-border/40 hover:bg-muted/40 transition-colors group/header">
-                                        <td colSpan={11} className="py-2 px-3">
+                                        <td colSpan={12} className="py-2 px-3">
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
                                                     <span className="font-black text-xs text-foreground">
@@ -691,6 +714,27 @@ export const SimTradeTab: React.FC = () => {
                                                 {/* 상태 */}
                                                 <td className="py-2.5 px-3 text-center">
                                                     <StatusBadge status={pick.status} result={pick.result} currentReturn={currentReturn} />
+                                                </td>
+
+                                                {/* 개별 삭제 버튼 */}
+                                                <td className="py-2.5 px-3 text-center">
+                                                    <button
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation()
+                                                            if (window.confirm(`'${pick.stock_name}' 종목을 삭제하시겠습니까?`)) {
+                                                                try {
+                                                                    await (window as any).electronAPI.deleteSimTradePickById(pick.id, pick.category)
+                                                                    await fetchPicks()
+                                                                } catch (err: any) {
+                                                                    alert('삭제 중 오류가 발생했습니다: ' + err.message)
+                                                                }
+                                                            }
+                                                        }}
+                                                        className="text-muted-foreground/30 hover:text-red-500 hover:bg-red-500/10 p-1 rounded transition-colors opacity-0 group-hover:opacity-100"
+                                                        title="종목 삭제"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
                                                 </td>
                                             </tr>
                                         )

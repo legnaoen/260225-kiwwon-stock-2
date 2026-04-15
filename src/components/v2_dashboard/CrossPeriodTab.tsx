@@ -15,8 +15,8 @@ function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 // ──────────────────────────────────────────────────────────
 
 type CrossCategory =
-    | 'EXHAUSTED' | 'TRUE_LEADER' | 'EMERGING_STAR' | 'PULLBACK_REBOUND'
-    | 'PULLBACK_DIP' | 'UNCLASSIFIED';
+    | 'EXHAUSTED' | 'TRUE_LEADER' | 'INTRADAY_SURGE' | 'EMERGING_STAR' | 'PULLBACK_REBOUND'
+    | 'PULLBACK_DIP' | 'SHORT_TERM_CONSOLIDATION' | 'UNCLASSIFIED';
 
 type CrossSignal = 'RANK_CLIMBER' | 'HIGH_CONSISTENCY' | 'BREAKOUT_CANDIDATE' | 'VOLUME_SURGE';
 
@@ -75,6 +75,11 @@ interface CrossPeriodResult {
 const CATEGORY_META: Record<CrossCategory, {
     label: string; icon: string; color: string; badgeClass: string; desc: string;
 }> = {
+    INTRADAY_SURGE: {
+        label: '당일 급등', icon: '🚀', color: 'text-fuchsia-500',
+        badgeClass: 'bg-fuchsia-500/15 text-fuchsia-500 border-fuchsia-500/30',
+        desc: '당일 강력한 수급 및 변동성 유입'
+    },
     EMERGING_STAR: {
         label: '\uc2e0\ud765 \uae09\ubd80\uc0c1', icon: '\ud83d\udd25', color: 'text-red-500',
         badgeClass: 'bg-red-500/15 text-red-500 border-red-500/30',
@@ -105,6 +110,11 @@ const CATEGORY_META: Record<CrossCategory, {
         badgeClass: 'bg-muted text-muted-foreground border-border',
         desc: '\ubd84\ub958 \uae30\uc900 \ubbf8\ub2ec'
     },
+    SHORT_TERM_CONSOLIDATION: {
+        label: '\ub2e8\uae30 \uc0ac\uc774\ub529', icon: '\u23f8\ufe0f', color: 'text-cyan-400',
+        badgeClass: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+        desc: '\ub2e8\uae30 \uac70\ub798 \uc218\ucda9 \ud6c4 \uc870\uc815 \uc911 \u2014 \uc7a5\uc138 \ud310\ub2e8 \ud544\uc694'
+    },
 };
 
 const SIGNAL_META: Record<CrossSignal, { label: string; icon: string; badgeClass: string; desc: string }> = {
@@ -130,7 +140,7 @@ const SIGNAL_META: Record<CrossSignal, { label: string; icon: string; badgeClass
     },
 };
 
-const CATEGORY_ORDER: CrossCategory[] = ['EMERGING_STAR', 'PULLBACK_REBOUND', 'PULLBACK_DIP', 'TRUE_LEADER', 'EXHAUSTED'];
+const CATEGORY_ORDER: CrossCategory[] = ['TRUE_LEADER', 'INTRADAY_SURGE', 'EMERGING_STAR', 'PULLBACK_REBOUND', 'PULLBACK_DIP', 'SHORT_TERM_CONSOLIDATION', 'EXHAUSTED'];
 const SIGNAL_ORDER: CrossSignal[] = ['RANK_CLIMBER', 'HIGH_CONSISTENCY', 'BREAKOUT_CANDIDATE', 'VOLUME_SURGE'];
 
 // ──────────────────────────────────────────────────────────
@@ -220,7 +230,7 @@ function SignalBadge({ signal }: { signal: CrossSignal }) {
 function CandidateRow({ item, rank, onClick }: {
     item: CrossCandidate; rank: number; onClick: (item: CrossCandidate) => void;
 }) {
-    const meta = CATEGORY_META[item.category];
+    const meta = CATEGORY_META[item.category] ?? CATEGORY_META['UNCLASSIFIED'];
     const seg  = item.segmentProfile;
     const p5   = item.period_5d;
     const isExhausted = item.category === 'EXHAUSTED';

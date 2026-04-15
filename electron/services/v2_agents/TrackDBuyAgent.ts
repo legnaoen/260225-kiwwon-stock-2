@@ -36,7 +36,7 @@ import { getKstDate } from '../../utils/DateUtils';
 // ── 상수 ───────────────────────────────────────────────────────
 const BUY_CATEGORIES = ['INTRADAY_SURGE'];
 const TARGET_PICKS = 5;
-const TARGET_DAYS = 5;
+const TARGET_DAYS = 10;
 const TARGET_RETURN_PCT = 15.0;
 
 // 상한가 임계값 (코스피/코스닥 공통 30%)
@@ -74,6 +74,7 @@ interface GemmaStockReport {
     market_theme_link: string;
     theme_durability: string;
     catalyst_summary: string;
+    price_action_analysis: string;
     risk_factors: string;
     upside_probability: 'HIGH' | 'MEDIUM' | 'LOW' | 'VERY_LOW';
     buy_score: number;
@@ -165,6 +166,7 @@ export class TrackDBuyAgent {
             const buyPicks = aiPicks.filter(p => p.decision === 'BUY').slice(0, TARGET_PICKS);
             const saved = this.savePicks(buyPicks, cappedBuyableList, gemmaReports, today);
 
+            this.updateEntryPrices(today);
             console.log(`[TrackDBuyAgent] ✅ 파이프라인 완료: ${saved}개 저장`);
             return { success: true, saved, skipped: skipped.length };
 
@@ -238,9 +240,22 @@ export class TrackDBuyAgent {
 
             if (!ohlcv || !ohlcv.close || pick.entry_price <= 0) continue;
 
+            // ─── 당일 편입 종목 처리 ───────────────────────────────
+            // 동시호가 종가로 매수한 당일은 peak_return/holding_days 갱신 불가
+            // (당일 고가는 매수 전 가격이므로 수익률 기준 왜곡 발생)
+            // current_price만 최신 종가로 갱신하고 다음 영업일부터 채점 시작
+            if (pick.entry_date === today) {
+                rawDb.prepare(`
+                    UPDATE track_d_buy_picks
+                    SET current_price = ?, updated_at = ?
+                    WHERE id = ?
+                `).run(ohlcv.close, new Date().toISOString(), pick.id);
+                continue;
+            }
+
             const currentReturn = ((ohlcv.close - pick.entry_price) / pick.entry_price) * 100;
             const dailyHighReturn = ((ohlcv.high - pick.entry_price) / pick.entry_price) * 100;
-            
+
             let newPeakReturn = pick.peak_return;
             let newPeakDate = pick.peak_date;
             if (pick.peak_return == null || dailyHighReturn > pick.peak_return) {
@@ -390,7 +405,7 @@ export class TrackDBuyAgent {
                         AND date >= date(?, '-3 days')
                     `).get(`%${c.stockName}%`, date) as { cnt: number };
                 }
-            } catch (_) {}
+            } catch (_) { }
 
             if ((existingCount?.cnt ?? 0) >= 2) {
                 continue; // 이미 충분한 뉴스 있음
@@ -463,14 +478,15 @@ export class TrackDBuyAgent {
 {
   "stock_code": "종목코드",
   "stock_name": "종목명",
-  "market_theme_link": "[Step 1] 카테고리 핏 검증 요약 (분류 타당성 판단)",
-  "theme_durability": "[Step 2] 테마 정렬 평가 (주류 테마 탑승 여부)",
-  "catalyst_summary": "[Step 3] 재료의 질적 평가 (일회성 vs 구조적 호재 여부)",
-  "risk_factors": "밸류에이션(목표가) 도달 여부 등 주요 리스크",
+  "market_theme_link": "[테마의 힘] 주류 메가 테마 탑승 여부",
+  "theme_durability": "LONG|MEDIUM|SHORT",
+  "catalyst_summary": "[재료의 질] 급등 트리거 뉴스의 구조적 모멘텀 여부",
+  "price_action_analysis": "[수급/차트 종가관리] OHLCV 기반 당일 윗꼬리(매물) 및 거래대금 폭발 분석",
+  "risk_factors": "윗꼬리, 단발성 찌라시 등 엑시트(설거지) 리스크",
   "upside_probability": "HIGH|MEDIUM|LOW|VERY_LOW",
   "buy_score": 0~100,
   "preliminary_decision": "BUY|WATCH",
-  "reasoning": "종합 판단 근거 (2~3문장)"
+  "reasoning": "이 종목을 내일 종가베팅 대상에 포함해야 하는가? (1줄 요약)"
 }`;
 
         for (const c of candidates) {
@@ -497,11 +513,33 @@ export class TrackDBuyAgent {
                         LIMIT 5
                     `).all(`%${c.stockName}%`, c.stockName, date);
                 }
-            } catch (_) {}
+            } catch (_) { }
 
             const newsSection = news.length > 0
                 ? news.map((n: any) => `- ${n.title}${n.body_snippet ? ' | ' + n.body_snippet.slice(0, 80) : ''}`).join('\n')
                 : '- 관련 뉴스 없음';
+
+            // OHLCV 요약표 생성
+            let ohlcvSnippet = '관련 차트(OHLCV) 정보 없음';
+            try {
+                const recentOhlcv = rawDb.prepare(`
+                    SELECT date, open, high, low, close, trading_value 
+                    FROM market_ohlcv_history
+                    WHERE stock_code = ? AND date <= ?
+                    ORDER BY date DESC LIMIT 8
+                `).all(c.stockCode, date).reverse();
+
+                if (recentOhlcv.length > 0) {
+                    ohlcvSnippet = '[최근 8영업일 주가/거래대금 흐름]\n';
+                    ohlcvSnippet += '일자 | 시가 | 고가 | 저가 | 종가 | 거래대금(억)\n';
+                    recentOhlcv.forEach((row: any) => {
+                        const tv = Math.round(row.trading_value / 100000000);
+                        ohlcvSnippet += `${row.date} | ${row.open} | ${row.high} | ${row.low} | ${row.close} | ${tv}억\n`;
+                    });
+                }
+            } catch (e) {
+                console.warn('[TrackDBuyAgent] OHLCV 조회 실패:', e);
+            }
 
             const userPrompt = `[분석 대상 종목]
 종목코드: ${c.stockCode}
@@ -513,9 +551,11 @@ export class TrackDBuyAgent {
 [종목 관련 최근 뉴스 (최대 5건)]
 ${newsSection}
 
+${ohlcvSnippet}
+
 ${marketContext}
 
-위 정보를 바탕으로 이 종목의 5영업일 내 +15% 달성 가능성을 분석하십시오.`;
+위 정보를 바탕으로 이 종목의 10영업일 내 +15% 달성 가능성을 분석하십시오.`;
 
             try {
                 const rawResponse = await AiExecutionQueue.getInstance().enqueue({
@@ -538,6 +578,7 @@ ${marketContext}
                         market_theme_link: '분석 실패',
                         theme_durability: 'UNKNOWN',
                         catalyst_summary: '분석 실패',
+                        price_action_analysis: '분석 실패',
                         risk_factors: '분석 실패',
                         upside_probability: 'LOW',
                         buy_score: 30,
@@ -574,6 +615,7 @@ ${marketContext}
                     market_theme_link: parsed.market_theme_link,
                     theme_durability: parsed.theme_durability,
                     catalyst_summary: parsed.catalyst_summary,
+                    price_action_analysis: parsed.price_action_analysis,
                     risk_factors: parsed.risk_factors,
                     upside_probability: parsed.upside_probability,
                     buy_score: parsed.buy_score,
@@ -627,7 +669,7 @@ ${marketContext}
                     lines.push(`${i + 1}. ${t.name} | 생애주기: ${t.lifespan_type ?? 'N/A'} | ${(t.reason ?? '').slice(0, 60)}`);
                 });
             }
-        } catch (_) {}
+        } catch (_) { }
 
         // 시황 AI 최신 투심
         try {
@@ -640,7 +682,7 @@ ${marketContext}
                 lines.push(`\n[시황 AI 투심] ${intraday.market_direction ?? ''} | 컨센서스: ${intraday.consensus ?? ''} | 신뢰도: ${intraday.final_confidence ?? ''}%`);
                 if (intraday.summary) lines.push(`요약: ${intraday.summary.slice(0, 100)}`);
             }
-        } catch (_) {}
+        } catch (_) { }
 
         // 증권사 리서치 핵심 (최신 3건)
         try {
@@ -653,7 +695,7 @@ ${marketContext}
                 lines.push(`\n[오늘 증권사 리서치 핵심]`);
                 research.forEach(r => lines.push(`- ${r.title}`));
             }
-        } catch (_) {}
+        } catch (_) { }
 
         return lines.length > 0
             ? `[시장 전체 맥락 — 오늘(${date}) 기준]\n${lines.join('\n')}`
@@ -707,11 +749,12 @@ ${marketContext}
                 return `${i + 1}. [${c.stockCode}] ${c.stockName} | ${c.category} | Gemma 분석 없음`;
             }
             return `${i + 1}. [${c.stockCode}] ${c.stockName} | ${c.category} | 확신도:${Math.round(c.convictionScore)}
-   Gemma 점수: ${r.buy_score} / 상승확률: ${r.upside_probability} / 1차판단: ${r.preliminary_decision}
-   테마 연관: ${r.market_theme_link}
-   핵심 호재: ${r.catalyst_summary}
-   리스크: ${r.risk_factors}
-   근거: ${r.reasoning}`;
+   - 로컬점수: ${r.buy_score}점 (${r.preliminary_decision} / 상승확률: ${r.upside_probability})
+   - [테마분석]: ${r.market_theme_link} (수명: ${r.theme_durability})
+   - [핵심호재]: ${r.catalyst_summary}
+   - [차트수급]: ${r.price_action_analysis || 'Gemma 차트 분석 누락'}
+   - [리스크]: ${r.risk_factors}
+   - [1차요약]: ${r.reasoning}`;
         }).join('\n\n');
 
         // 2차 가이드라인 로드
@@ -753,7 +796,7 @@ theme_lifespan: "SHORT"(3일 미만) | "MEDIUM"(1~2주) | "LONG"(1달+) | "UNKNO
 ${themeDensityText}${factSheets}
 
 ---
-위 팩트시트를 기반으로 5영업일 내 +15% 달성 가능성 기준으로
+위 팩트시트를 기반으로 10영업일 내 +15% 달성 가능성 기준으로
 최종 Top ${TARGET_PICKS}개를 BUY로 선정하고, 나머지는 WATCH로 처리하십시오.`;
 
         try {

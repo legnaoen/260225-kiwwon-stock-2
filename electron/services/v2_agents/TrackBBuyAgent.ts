@@ -35,7 +35,7 @@ import { getKstDate } from '../../utils/DateUtils';
 
 // ── 상수 ───────────────────────────────────────────────────────
 const BUY_CATEGORIES = ['EMERGING_STAR'];
-const TARGET_PICKS = 5;
+const MAX_PICKS = 5; // 선발 상한 캡
 const TARGET_DAYS = 20;
 const TARGET_RETURN_PCT = 15.0;
 
@@ -74,6 +74,7 @@ interface GemmaStockReport {
     market_theme_link: string;
     theme_durability: string;
     catalyst_summary: string;
+    price_action_analysis: string;  // 주봉 차트 기반 1차돌파 후 조정 국면 분석
     risk_factors: string;
     upside_probability: 'HIGH' | 'MEDIUM' | 'LOW' | 'VERY_LOW';
     buy_score: number;
@@ -135,6 +136,12 @@ export class TrackBBuyAgent {
                 return { success: false, saved: 0, skipped: skipped.length, error: 'All candidates filtered (upper limit)' };
             }
 
+            // ── 모집단 비례 동적 선발 목표 계산 ────────────────
+            // 상한가 제외 후 실제 후보 기준 1/3, 최소 1개, 최대 MAX_PICKS(5)개
+            const TARGET_PICKS = Math.max(1, Math.min(MAX_PICKS, Math.floor(buyableList.length / 3)));
+            console.log(`[TrackBBuyAgent] 동적 선발 목표: 모집단 ${buyableList.length}개 → ${TARGET_PICKS}개 선발 (1/3 비례)`);
+
+
             // ── Phase 2: 뉴스 온디맨드 리서치 ─────────────────
             console.log(`[TrackBBuyAgent] Phase2 뉴스 리서치 시작...`);
             await this.enrichCandidateNews(buyableList, today);
@@ -146,7 +153,7 @@ export class TrackBBuyAgent {
 
             // ── Phase 4: Gemini 최종 포트폴리오 선발 ──────────
             console.log(`[TrackBBuyAgent] Phase4 Gemini 최종 선발 시작...`);
-            const aiPicks = await this.runAiAnalysis(buyableList, gemmaReports, today);
+            const aiPicks = await this.runAiAnalysis(buyableList, gemmaReports, today, TARGET_PICKS);
             if (!aiPicks || aiPicks.length === 0) {
                 console.log('[TrackBBuyAgent] AI 분석 결과 없음. 종료.');
                 return { success: false, saved: 0, skipped: skipped.length, error: 'AI analysis returned no picks' };
@@ -156,6 +163,7 @@ export class TrackBBuyAgent {
             const buyPicks = aiPicks.filter(p => p.decision === 'BUY').slice(0, TARGET_PICKS);
             const saved = this.savePicks(buyPicks, buyableList, gemmaReports, today);
 
+            this.updateEntryPrices(today);
             console.log(`[TrackBBuyAgent] ✅ 파이프라인 완료: ${saved}개 저장`);
             return { success: true, saved, skipped: skipped.length };
 
@@ -229,9 +237,22 @@ export class TrackBBuyAgent {
 
             if (!ohlcv || !ohlcv.close || pick.entry_price <= 0) continue;
 
+            // ─── 당일 편입 종목 처리 ───────────────────────────────
+            // 동시호가 종가로 매수한 당일은 peak_return/holding_days 갱신 불가
+            // (당일 고가는 매수 전 가격이므로 수익률 기준 왜곡 발생)
+            // current_price만 최신 종가로 갱신하고 다음 영업일부터 채점 시작
+            if (pick.entry_date === today) {
+                rawDb.prepare(`
+                    UPDATE track_b_buy_picks
+                    SET current_price = ?, updated_at = ?
+                    WHERE id = ?
+                `).run(ohlcv.close, new Date().toISOString(), pick.id);
+                continue;
+            }
+
             const currentReturn = ((ohlcv.close - pick.entry_price) / pick.entry_price) * 100;
             const dailyHighReturn = ((ohlcv.high - pick.entry_price) / pick.entry_price) * 100;
-            
+
             let newPeakReturn = pick.peak_return;
             let newPeakDate = pick.peak_date;
             if (pick.peak_return == null || dailyHighReturn > pick.peak_return) {
@@ -381,7 +402,7 @@ export class TrackBBuyAgent {
                         AND date >= date(?, '-3 days')
                     `).get(`%${c.stockName}%`, date) as { cnt: number };
                 }
-            } catch (_) {}
+            } catch (_) { }
 
             if ((existingCount?.cnt ?? 0) >= 2) {
                 continue; // 이미 충분한 뉴스 있음
@@ -454,12 +475,13 @@ export class TrackBBuyAgent {
 {
   "stock_code": "종목코드",
   "stock_name": "종목명",
-  "market_theme_link": "[Step 1] 카테고리 핏 검증 요약 (분류 타당성 판단)",
-  "theme_durability": "[Step 2] 테마 정렬 평가 (주류 테마 탑승 여부)",
-  "catalyst_summary": "[Step 3] 재료의 질적 평가 (일회성 vs 구조적 호재 여부)",
-  "risk_factors": "밸류에이션(목표가) 도달 여부 등 주요 리스크",
+  "market_theme_link": "[Step 1] 모멘텀 폭발력 및 재료 신선도 (신흥주 돌파 타당성)",
+  "theme_durability": "[Step 2] 테마 정렬 평가 (신선한 테마 vs 이미 끝물 테마)",
+  "catalyst_summary": "[Step 3] 재료의 질적 평가 (이 종목의 2차 상승을 만들 촉매)",
+  "price_action_analysis": "[Step 4] 주봉 차트 분석 (1차 돌파파동 크기, 현재 조정의 건강성: 거래량 수축 여부, Fake Breakout 위험 여부)",
+  "risk_factors": "Fake Breakout 가능성, 세력 이탈 여부, 매물대 등 주요 리스크",
   "upside_probability": "HIGH|MEDIUM|LOW|VERY_LOW",
-  "buy_score": 0~100,
+  "buy_score": 0,
   "preliminary_decision": "BUY|WATCH",
   "reasoning": "종합 판단 근거 (2~3문장)"
 }`;
@@ -488,11 +510,54 @@ export class TrackBBuyAgent {
                         LIMIT 5
                     `).all(`%${c.stockName}%`, c.stockName, date);
                 }
-            } catch (_) {}
+            } catch (_) { }
 
             const newsSection = news.length > 0
                 ? news.map((n: any) => `- ${n.title}${n.body_snippet ? ' | ' + n.body_snippet.slice(0, 80) : ''}`).join('\n')
                 : '- 관련 뉴스 없음';
+
+            // ── 주봉 OHLCV 조립 (최근 15주, 신흥주 2차파동 판단용) ──
+            let weeklyOhlcvText = '';
+            try {
+                const rawDb2 = (this.db as any).db;
+                const ohlcvRows = rawDb2.prepare(`
+                    SELECT date, open, high, low, close, volume, trading_value
+                    FROM market_ohlcv_history
+                    WHERE stock_code = ? AND date <= ?
+                    ORDER BY date ASC
+                    LIMIT 100
+                `).all(c.stockCode, date);
+
+                if (ohlcvRows && ohlcvRows.length > 0) {
+                    const weekMap = new Map<string, any>();
+                    for (const r of ohlcvRows) {
+                        const d = new Date(r.date);
+                        const day = d.getDay();
+                        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+                        const monday = new Date(d.getFullYear(), d.getMonth(), diff);
+                        const mStr = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+                        if (!weekMap.has(mStr)) {
+                            weekMap.set(mStr, { week: mStr, open: r.open, high: r.high, low: r.low, close: r.close, trading_value: 0 });
+                        }
+                        const w = weekMap.get(mStr);
+                        w.high = Math.max(w.high, r.high);
+                        w.low = Math.min(w.low, r.low);
+                        w.close = r.close;
+                        w.trading_value += (r.trading_value || 0);
+                    }
+                    const weeklyRows = Array.from(weekMap.values()).slice(-15);
+                    weeklyOhlcvText = '\n[최근 15주간 주봉(Weekly) 차트 트렌드 (1주 단위 압축)]\n';
+                    weeklyOhlcvText += '주간시작일 | 주간시가 | 주간고가 | 주간저가 | 주간종가 | 주간 누적거래대금(억)\n';
+                    weeklyOhlcvText += '---|---|---|---|---|---\n';
+                    for (const w of weeklyRows) {
+                        const tvBil = Math.round(w.trading_value / 100000000);
+                        weeklyOhlcvText += `${w.week} | ${w.open} | ${w.high} | ${w.low} | ${w.close} | ${tvBil}억\n`;
+                    }
+                }
+            } catch (err: any) {
+                console.warn(`[TrackBBuyAgent] OHLCV 주봉 쿼리 실패: ${err.message}`);
+                weeklyOhlcvText = '';
+            }
 
             const userPrompt = `[분석 대상 종목]
 종목코드: ${c.stockCode}
@@ -502,7 +567,7 @@ export class TrackBBuyAgent {
 관련 테마: ${c.relatedThemes.slice(0, 3).join(', ') || '없음'}
 
 [종목 관련 최근 뉴스 (최대 5건)]
-${newsSection}
+${newsSection}${weeklyOhlcvText}
 
 ${marketContext}
 
@@ -529,6 +594,7 @@ ${marketContext}
                         market_theme_link: '분석 실패',
                         theme_durability: 'UNKNOWN',
                         catalyst_summary: '분석 실패',
+                        price_action_analysis: '분석 실패',
                         risk_factors: '분석 실패',
                         upside_probability: 'LOW',
                         buy_score: 30,
@@ -565,6 +631,7 @@ ${marketContext}
                     market_theme_link: parsed.market_theme_link,
                     theme_durability: parsed.theme_durability,
                     catalyst_summary: parsed.catalyst_summary,
+                    price_action_analysis: parsed.price_action_analysis,
                     risk_factors: parsed.risk_factors,
                     upside_probability: parsed.upside_probability,
                     buy_score: parsed.buy_score,
@@ -586,6 +653,7 @@ ${marketContext}
                     market_theme_link: '로컬AI 오류',
                     theme_durability: 'UNKNOWN',
                     catalyst_summary: '로컬AI 오류',
+                    price_action_analysis: '로컬AI 오류',
                     risk_factors: e.message,
                     upside_probability: 'LOW',
                     buy_score: 25,
@@ -618,7 +686,7 @@ ${marketContext}
                     lines.push(`${i + 1}. ${t.name} | 생애주기: ${t.lifespan_type ?? 'N/A'} | ${(t.reason ?? '').slice(0, 60)}`);
                 });
             }
-        } catch (_) {}
+        } catch (_) { }
 
         // 시황 AI 최신 투심
         try {
@@ -631,7 +699,7 @@ ${marketContext}
                 lines.push(`\n[시황 AI 투심] ${intraday.market_direction ?? ''} | 컨센서스: ${intraday.consensus ?? ''} | 신뢰도: ${intraday.final_confidence ?? ''}%`);
                 if (intraday.summary) lines.push(`요약: ${intraday.summary.slice(0, 100)}`);
             }
-        } catch (_) {}
+        } catch (_) { }
 
         // 증권사 리서치 핵심 (최신 3건)
         try {
@@ -644,7 +712,7 @@ ${marketContext}
                 lines.push(`\n[오늘 증권사 리서치 핵심]`);
                 research.forEach(r => lines.push(`- ${r.title}`));
             }
-        } catch (_) {}
+        } catch (_) { }
 
         return lines.length > 0
             ? `[시장 전체 맥락 — 오늘(${date}) 기준]\n${lines.join('\n')}`
@@ -658,7 +726,8 @@ ${marketContext}
     private async runAiAnalysis(
         candidates: CrossPeriodCandidate[],
         gemmaReports: GemmaStockReport[],
-        date: string
+        date: string,
+        targetPicks: number
     ): Promise<AiBuyPick[]> {
         const reportMap = new Map(gemmaReports.map(r => [r.stock_code, r]));
 
@@ -681,14 +750,14 @@ ${marketContext}
         });
 
         const sortedThemes = Array.from(themeTally.entries())
-            .filter(([, count]) => count > 1) 
+            .filter(([, count]) => count > 1)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 5); // 기존 대장 테마 상위 5개
 
         let themeDensityText = '';
         if (sortedThemes.length > 0) {
             themeDensityText = `[현재 시장을 장악한 기존 대장주 테마 밀집도 현황]\n` +
-                sortedThemes.map((t, idx) => `${['🥇','🥈','🥉','4️⃣','5️⃣'][idx] || '-'} ${t[0]} (${t[1]}개 종목 포진)`).join('\n') +
+                sortedThemes.map((t, idx) => `${['🥇', '🥈', '🥉', '4️⃣', '5️⃣'][idx] || '-'} ${t[0]} (${t[1]}개 종목 포진)`).join('\n') +
                 `\n*주의사항: 위 테마들은 이미 시장을 장악하여 시세가 분출된 '기존 주도 테마'들입니다. 신흥 성장주 발굴 시 가급적 위 테마들에 뒤늦게 속한 후발주(짜투리)는 회피하고, 새로운 모멘텀을 형성하는 신선한 테마의 종목에 가산점을 부여하십시오.*\n\n`;
         }
 
@@ -702,6 +771,7 @@ ${marketContext}
    Gemma 점수: ${r.buy_score} / 상승확률: ${r.upside_probability} / 1차판단: ${r.preliminary_decision}
    테마 연관: ${r.market_theme_link}
    핵심 호재: ${r.catalyst_summary}
+   [차트 분석]: ${r.price_action_analysis || 'Gemma 차트 분석 누락'}
    리스크: ${r.risk_factors}
    근거: ${r.reasoning}`;
         }).join('\n\n');
@@ -718,7 +788,7 @@ ${marketContext}
         }
 
         const systemInstruction = `당신은 대한민국 코스피/코스닥 알파 수익률 전문 투자심의위원회 위원장입니다.
-Gemma AI가 종목별로 작성한 팩트시트와 1차 판단을 검토하여 최종 Top ${TARGET_PICKS}개를 선발합니다.
+Gemma AI가 종목별로 작성한 팩트시트와 1차 판단을 검토하여 최종 Top ${targetPicks}개를 선발합니다.
 
 ${phase2Guideline || '[추가 판단 기준]\n1. 촉매 타이밍\n2. 포트폴리오 분산\n3. 리스크 필터링'}
 
@@ -746,7 +816,7 @@ ${themeDensityText}${factSheets}
 
 ---
 위 팩트시트를 기반으로 20영업일(약 한 달) 내 +15% 달성 가능성 기준으로
-최종 Top ${TARGET_PICKS}개를 BUY로 선정하고, 나머지는 WATCH로 처리하십시오.`;
+최종 Top ${targetPicks}개를 BUY로 선정하고, 나머지는 WATCH로 처리하십시오.`;
 
         try {
             const result = await AiExecutionQueue.getInstance().enqueue({

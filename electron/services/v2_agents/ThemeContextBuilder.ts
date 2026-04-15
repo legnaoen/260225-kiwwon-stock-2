@@ -270,23 +270,93 @@ ${ledgerText}
 }`;
 
         const { targetType } = getMegaThemeAiConfig();
+        let response = '';
+        let parsed: AiClusterResult | null = null;
+        let lastError = '';
+        
+        // --- [Stage 1 & Stage 2] 자가 교정 루프 (최대 1회 재시도) ---
+        const MAX_RETRIES = 1;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                let currentPrompt = prompt;
+                if (attempt > 0) {
+                    eventBus.emit('MEGA_THEME_PROGRESS' as any, { step: 'AI_CALL', detail: `[AI 자가 복구] 파싱 오류 교정 중... (${attempt}/${MAX_RETRIES})` });
+                    currentPrompt = `당신이 이전에 출력한 텍스트에서 JSON 파싱 에러("${lastError}")가 발생했습니다.\n형식을 수정한 완벽한 JSON만 다시 출력하십시오.\n\n[이전 출력]\n${response}\n\n---\n${prompt}`;
+                } else {
+                    eventBus.emit('MEGA_THEME_PROGRESS' as any, { step: 'AI_CALL', detail: `[AI 클러스터링] reason 기반 분류 중... (${date})` });
+                }
+
+                response = await AiExecutionQueue.getInstance().enqueue({
+                    agentId: 'MEGA_THEME_CLUSTER',
+                    agentName: '메가 테마 클러스터링',
+                    triggerType: 'CRON',
+                    targetType,
+                    prompt: currentPrompt,
+                    systemInstruction: '당신은 증권사 테마 애널리스트입니다. 반드시 JSON만 출력하십시오.',
+                });
+
+                // [Stage 1] 1차 텍스트 교정 및 Sanitizing
+                let clean = response.replace(/```(?:json)?\s*([\s\S]*?)```/i, '$1').trim();
+                const match = clean.match(/\{[\s\S]*\}/);
+                if (match) clean = match[0];
+                clean = clean.replace(/,\s*([\]}])/g, '$1'); // 후행 쉼표 제거
+
+                try {
+                    parsed = JSON.parse(clean) as AiClusterResult;
+                } catch (parseErr: any) {
+                    // 불완전 종료 보완 (Missing closing brackets)
+                    try { parsed = JSON.parse(clean + '}'); } 
+                    catch (e2) {
+                        try { parsed = JSON.parse(clean + ']}'); }
+                        catch (e3) { throw parseErr; }
+                    }
+                }
+
+                if (!parsed?.mega_clusters) throw new Error('mega_clusters 필드 없음');
+                break; // 성공 시 루프 탈출
+                
+            } catch (err: any) {
+                lastError = err.message;
+                console.warn(`[TCB] AI 파싱/응답 실패 (시도 ${attempt+1}):`, lastError);
+            }
+        }
+
+        // --- [Stage 3] 하위 호환 안전장치 - Gemini Fallback 전환 ---
+        if (!parsed && targetType === 'local') {
+            try {
+                console.log(`[TCB] 로컬 AI 문법 파괴 지속. Gemini Fallback 모드로 전환하여 시도합니다.`);
+                eventBus.emit('MEGA_THEME_PROGRESS' as any, { step: 'AI_CALL', detail: `[비상 가동] 로컬 AI 오류로 Gemini Fallback 투입...` });
+                
+                response = await AiExecutionQueue.getInstance().enqueue({
+                    agentId: 'MEGA_THEME_CLUSTER',
+                    agentName: '메가 테마 클러스터링 (Fallback)',
+                    triggerType: 'CRON',
+                    targetType: 'gemini', // 강제 전환
+                    prompt: prompt,
+                    systemInstruction: '당신은 증권사 테마 애널리스트입니다. 반드시 JSON만 출력하십시오.',
+                });
+                
+                let clean = response.replace(/```(?:json)?\s*([\s\S]*?)```/i, '$1').trim();
+                const match = clean.match(/\{[\s\S]*\}/);
+                if (match) clean = match[0];
+                clean = clean.replace(/,\s*([\]}])/g, '$1');
+                
+                parsed = JSON.parse(clean) as AiClusterResult;
+                if (!parsed?.mega_clusters) throw new Error('mega_clusters 필드 없음');
+                
+                console.log(`[TCB] ✅ Gemini Fallback 성공`);
+            } catch (fallbackErr: any) {
+                console.error(`[TCB] ❌ Gemini Fallback 최종 실패:`, fallbackErr.message);
+            }
+        }
+
+        if (!parsed) {
+            console.error('[ThemeContextBuilder] 클러스터링 모든 시도 실패. DB 반영을 스킵합니다.');
+            eventBus.emit('MEGA_THEME_PROGRESS' as any, { step: 'AI_DONE', detail: `❌ AI 분류 최종 실패 (JSON Broken)` });
+            return null;
+        }
+
         try {
-            eventBus.emit('MEGA_THEME_PROGRESS' as any, { step: 'AI_CALL', detail: `[AI 클러스터링] reason 기반 분류 중... (${date})` });
-            const response = await AiExecutionQueue.getInstance().enqueue({
-                agentId: 'MEGA_THEME_CLUSTER',
-                agentName: '메가 테마 클러스터링',
-                triggerType: 'CRON',
-                targetType,
-                prompt,
-                systemInstruction: '당신은 증권사 테마 애널리스트입니다. 반드시 JSON만 출력하십시오.',
-            });
-
-            const clean = response.replace(/```(?:json)?\s*([\s\S]*?)```/i, '$1').trim();
-            const match = clean.match(/\{[\s\S]*\}/);
-            const finalClean = match ? match[0].replace(/,\s*([\]}])/g, '$1') : clean;
-            const parsed = JSON.parse(finalClean) as AiClusterResult;
-            if (!parsed?.mega_clusters) throw new Error('mega_clusters 필드 없음');
-
             // ── 코드 레벨 강제 캡 (AI 무시 방어) ─────────────────────────────
             // 3개 이상 서브 테마를 묶은 그룹은 자동으로 NO_GROUP으로 분리
             const MAX_SUB_THEMES = 2;
@@ -307,7 +377,7 @@ ${ledgerText}
             return parsed;
 
         } catch (err: any) {
-            console.error('[ThemeContextBuilder] AI 클러스터링 실패:', err.message);
+            console.error('[ThemeContextBuilder] 클러스터링 후처리 실패:', err.message);
             return null;
         }
     }
@@ -385,7 +455,7 @@ ${ledgerText}
             WHERE mega_theme_name = ?
         `).run(
             JSON.stringify(updatedSubs),
-            cluster.updated_narrative || existing.core_narrative,
+            this.appendNarrative(existing.core_narrative, cluster.updated_narrative, date),
             date,
             aliveDays,
             status,
@@ -439,7 +509,7 @@ ${ledgerText}
         this.db.upsertMegaThemeLedger({
             mega_theme_name:        megaName,
             sub_themes_json:        JSON.stringify(subThemes),
-            core_narrative:         cluster.core_narrative || '',
+            core_narrative:         this.appendNarrative(null, cluster.core_narrative, date),
             catalyst_type:          'EVENT',
             first_seen_date:        firstSeen,
             last_seen_date:         date,
@@ -492,7 +562,7 @@ ${ledgerText}
             this.db.upsertMegaThemeLedger({
                 mega_theme_name:        themeName,
                 sub_themes_json:        JSON.stringify(subThemes),
-                core_narrative:         todayTheme?.reason || '',
+                core_narrative:         this.appendNarrative(null, todayTheme?.reason, date),
                 catalyst_type:          'EVENT',
                 first_seen_date:        firstSeen,
                 last_seen_date:         date,
@@ -693,8 +763,30 @@ ${ledgerText}
         try { return JSON.parse(str) as T; } catch { return fallback; }
     }
 
+    private appendNarrative(existingStr: string | null, newText: string | null | undefined, date: string): string {
+        if (!newText) return existingStr || '';
+        let history: { date: string; text: string }[] = [];
+        try {
+            if (existingStr && existingStr.trim().startsWith('[')) {
+                history = JSON.parse(existingStr);
+            } else if (existingStr) {
+                history = [{ date: '이전 기록', text: existingStr }];
+            }
+        } catch {
+            if (existingStr) history = [{ date: '이전 기록', text: existingStr }];
+        }
+        
+        const existingIdx = history.findIndex((h: any) => h.date === date);
+        if (existingIdx !== -1) {
+            history[existingIdx].text = newText;
+        } else {
+            history.unshift({ date, text: newText });
+        }
+        return JSON.stringify(history);
+    }
+
     /**
-     * 당일 포삼 실제 rank/power/낭주 통계 산출
+     * 당일 포매 실제 rank/power/주도주 통계 산출
      * - topRank: 소속 서브 테마 중 최상위 rank
      * - combinedPower: 서브 테마 등락륙 합산
      * - topStocks: 각 서브 테마의 대장주 1위 동맹 (최대 5종목)

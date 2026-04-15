@@ -186,25 +186,18 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Step 3] 09:45 PM 1차 평가 (루키 오디션)
-            const phase1Job = cron.schedule('45 09 * * 1-5', async () => {
-                console.log('[Scheduler] 🧑‍💼 포트폴리오 매니저 (1차 필터링) 실행 시작...')
+            // [Step 3+4 통합] 09:45 PM 통합 리뷰 (PM1 루키 오디션 → PM2 리밸런싱 즉시 체인 실행)
+            // ★ BUG FIX: phase1Job + phase2Job을 runDailyReview() 하나로 통합
+            //   이전에는 09:45(PM1)과 09:48(PM2)이 별개 크론으로 실행되어
+            //   PM1의 신규 픽(newPicks) 반환값이 PM2로 전달되지 않는 데이터 체인 단절 버그가 있었음.
+            //   runDailyReview()는 내부에서 PM1→PM2를 순서대로 실행하며 결과를 직접 전달함.
+            const pmDailyJob = cron.schedule('45 09 * * 1-5', async () => {
+                console.log('[Scheduler] 🧑‍💼 포트폴리오 매니저 (PM1→PM2 통합 리뷰) 실행 시작...')
                 try {
                     const { PortfolioManagerAgent } = await import('./v2_agents/PortfolioManagerAgent')
-                    await PortfolioManagerAgent.getInstance().runPhase1_Screening()
+                    await PortfolioManagerAgent.getInstance().runDailyReview()
                 } catch (e: any) {
-                    console.error('[Scheduler] PM 1차 오류:', e.message)
-                }
-            }, { timezone: 'Asia/Seoul' })
-
-            // [Step 4] 09:48 PM 2차 평가 (리밸런싱 - 캡 초과 통제 및 편입 결정)
-            const phase2Job = cron.schedule('48 09 * * 1-5', async () => {
-                console.log('[Scheduler] 🧑‍💼 포트폴리오 매니저 (2차 리밸런싱) 실행 시작...')
-                try {
-                    const { PortfolioManagerAgent } = await import('./v2_agents/PortfolioManagerAgent')
-                    await PortfolioManagerAgent.getInstance().runPhase2_Rebalancing()
-                } catch (e: any) {
-                    console.error('[Scheduler] PM 2차 오류:', e.message)
+                    console.error('[Scheduler] PM 통합 리뷰 오류:', e.message)
                 }
             }, { timezone: 'Asia/Seoul' })
 
@@ -227,14 +220,23 @@ export class SchedulerService {
                     const { PortfolioJudgeScheduler } = await import('./v2_pipeline/PortfolioJudgeScheduler')
                     await PortfolioJudgeScheduler.getInstance().runDailyJudgement()
 
-                    // [Track A, B, C] 모의매매 성과 채점 연동
+                    const { TrackEBuyAgent } = await import('./v2_agents/TrackEBuyAgent')
+                    const { TrackDBuyAgent } = await import('./v2_agents/TrackDBuyAgent')
                     const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
                     const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
                     const { TrackABuyAgent } = await import('./v2_agents/TrackABuyAgent')
+                    const trackEResult = TrackEBuyAgent.getInstance().scoreDailyPerformance()
+                    const trackDResult = TrackDBuyAgent.getInstance().scoreDailyPerformance()
                     const trackCResult = TrackCBuyAgent.getInstance().scoreDailyPerformance()
                     const trackBResult = TrackBBuyAgent.getInstance().scoreDailyPerformance()
                     const trackAResult = TrackABuyAgent.getInstance().scoreDailyPerformance()
 
+                    const trackEMsg = trackEResult.closed > 0
+                        ? `\n🎯 Track E (단기눌림): ${trackEResult.updated}개 갱신, ${trackEResult.closed}개 청산`
+                        : trackEResult.updated > 0 ? `\n🎯 Track E: ${trackEResult.updated}개 보유중 갱신` : ''
+                    const trackDMsg = trackDResult.closed > 0
+                        ? `\n⚡ Track D (당일급등): ${trackDResult.updated}개 갱신, ${trackDResult.closed}개 청산`
+                        : trackDResult.updated > 0 ? `\n⚡ Track D: ${trackDResult.updated}개 보유중 갱신` : ''
                     const trackCMsg = trackCResult.closed > 0
                         ? `\n🎣 Track C (눌림목): ${trackCResult.updated}개 갱신, ${trackCResult.closed}개 청산`
                         : trackCResult.updated > 0 ? `\n🎣 Track C: ${trackCResult.updated}개 보유중 갱신` : ''
@@ -245,7 +247,7 @@ export class SchedulerService {
                         ? `\n👑 Track A (대장주): ${trackAResult.updated}개 갱신, ${trackAResult.closed}개 청산`
                         : trackAResult.updated > 0 ? `\n👑 Track A: ${trackAResult.updated}개 보유중 갱신` : ''
 
-                    this.telegram.sendMessage(`⚖️ [15:41] 장마감 포트폴리오 채점 완료\n종가 기준 수익률·수명 심사 정상 완료\n확인: 종목AI 탭 > 포트폴리오 리스트${trackAMsg}${trackBMsg}${trackCMsg}`)
+                    this.telegram.sendMessage(`⚖️ [15:41] 장마감 포트폴리오 채점 완료\n종가 기준 수익률·수명 심사 정상 완료\n확인: 종목AI 탭 > 포트폴리오 리스트${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}`)
                 } catch (e: any) {
                     console.error('[Scheduler] 장마감 채점 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:41] 장마감 채점 실패\n오류: ${e.message}`)
@@ -274,20 +276,24 @@ export class SchedulerService {
             const marketDailyJob = cron.schedule('05 15 * * 1-5', async () => {
                 const startTime = new Date()
                 const fmt = (d: Date) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
-                this.telegram.sendMessage(`🚀 [${fmt(startTime)}] OHLCV 전 종목 수집 시작\n코스피/코스닥 전 종목 60일봉 수집 시작.\n수집 완료 후 → AI 모의매매 매수 선정 자동 실행 예정`)
+                this.telegram.sendMessage(`🚀 [${fmt(startTime)}] OHLCV 전 종목 수집 시작\n코스피/코스닥 전 종목 100일봉 수집 시작.\n수집 완료 후 → AI 모의매매 매수 선정 자동 실행 예정`)
                 console.log('[Scheduler] 🚀 전 종목 데이터 수집 펌프 자동 실행 시작 (15:05, 장중 마지막 수집)...')
                 try {
                     const { MarketDataCollectorService } = await import('./v2_pipeline/MarketDataCollectorService')
-                    await MarketDataCollectorService.getInstance().runDailyCollection(60)
+                    await MarketDataCollectorService.getInstance().runDailyCollection(100)
                     const endTime = new Date()
                     const elapsed = Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60)
                     this.telegram.sendMessage(`✅ [${fmt(endTime)}] OHLCV 전 종목 수집 완료\n소요 시간: 약 ${elapsed}분\n→ AI 모의매매 매수 선정 시작...`)
 
-                    // ─── 수집 완료 직후 TrackA, TrackB, TrackC 모의매매 AI 선정 연계 실행 ───
-                    console.log('[Scheduler] 🎯 수집 완료 → Track A, B, C 모의매매 AI 매수 선정 연계 실행...')
+                    // ─── 수집 완료 직후 TrackA, TrackB, TrackC, TrackD, TrackE 모의매매 AI 선정 연계 실행 ───
+                    console.log('[Scheduler] 🎯 수집 완료 → Track A, B, C, D, E 모의매매 AI 매수 선정 연계 실행...')
+                    const { TrackEBuyAgent } = await import('./v2_agents/TrackEBuyAgent')
+                    const { TrackDBuyAgent } = await import('./v2_agents/TrackDBuyAgent')
                     const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
                     const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
                     const { TrackABuyAgent } = await import('./v2_agents/TrackABuyAgent')
+                    const pickResultE = await TrackEBuyAgent.getInstance().run()
+                    const pickResultD = await TrackDBuyAgent.getInstance().run()
                     const pickResultC = await TrackCBuyAgent.getInstance().run()
                     const pickResultB = await TrackBBuyAgent.getInstance().run()
                     const pickResultA = await TrackABuyAgent.getInstance().run()
@@ -299,41 +305,79 @@ export class SchedulerService {
                         ? `Track B (신흥주): 매수 후보 ${pickResultB.saved}개 저장, 제외 ${pickResultB.skipped}개\n`
                         : `Track B 오류: ${pickResultB.error ?? '후보 없음'}\n`
                     let trackCMsg = pickResultC.success 
-                        ? `Track C (눌림목): 매수 후보 ${pickResultC.saved}개 저장, 제외 ${pickResultC.skipped}개`
-                        : `Track C 오류: ${pickResultC.error ?? '후보 없음'}`
+                        ? `Track C (눌림목): 매수 후보 ${pickResultC.saved}개 저장, 제외 ${pickResultC.skipped}개\n`
+                        : `Track C 오류: ${pickResultC.error ?? '후보 없음'}\n`
+                    let trackDMsg = pickResultD.success 
+                        ? `Track D (당일급등): 매수 후보 ${pickResultD.saved}개 저장, 제외 ${pickResultD.skipped}개\n`
+                        : `Track D 오류: ${pickResultD.error ?? '후보 없음'}\n`
+                    let trackEMsg = pickResultE.success 
+                        ? `Track E (단기눌림): 매수 후보 ${pickResultE.saved}개 저장, 제외 ${pickResultE.skipped}개`
+                        : `Track E 오류: ${pickResultE.error ?? '후보 없음'}`
                     
-                    this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정`)
+                    this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정`)
                 } catch (e: any) {
                     console.error('[Scheduler] 데이터 수집 / TrackB 선정 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:05] OHLCV 수집 또는 모의매매 선정 실패\n오류: ${e.message}\n→ 주도주 탭에서 수동 실행 필요`)
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Track A, B, C] 15:32 진입가 최종 보정 (동시호가 종료 2분 후)
-            // 15:05~15:23 수집 시의 근사 종가 → 실제 확정 종가(동시호가 결과)로 덮어쓰기
-            // market_ohlcv_history에 15:30 이후 정확한 close가 들어오면 entry_price 갱신
-            // PENDING → ACTIVE
+            // [Track A, B, C, D, E] 15:32 진입가 최종 보정 (동시호가 종료 2분 후)
+            // ① 오늘 PENDING 종목의 종가를 Kiwoom API로 재수집 (동시호가 확정 종가 반영)
+            // ② 갱신된 market_ohlcv_history.close를 읽어 entry_price 확정 (PENDING → ACTIVE)
             const trackEntryJob = cron.schedule('32 15 * * 1-5', async () => {
-                console.log('[Scheduler] 💰 Track A, B, C 모의매매 진입가 최종 확정...')
+                console.log('[Scheduler] 💰 Track A, B, C, D, E 모의매매 진입가 최종 확정...')
                 try {
+                    const today = (await import('../utils/DateUtils')).getKstDate()
+                    const rawDb = (DatabaseService.getInstance() as any).db
+
+                    // ── Step 1: 오늘 PENDING 종목 코드 전 트랙 합산 수집 ──
+                    const pendingCodes = new Set<string>()
+                    const pickTables = [
+                        'track_a_buy_picks', 'track_b_buy_picks', 'track_c_buy_picks',
+                        'track_d_buy_picks', 'track_e_buy_picks',
+                    ]
+                    for (const table of pickTables) {
+                        try {
+                            const rows = rawDb.prepare(
+                                `SELECT stock_code FROM ${table} WHERE pick_date = ? AND status = 'PENDING'`
+                            ).all(today) as { stock_code: string }[]
+                            rows.forEach(r => pendingCodes.add(r.stock_code))
+                        } catch (_) { /* 테이블 없으면 skip */ }
+                    }
+
+                    const codeList = Array.from(pendingCodes)
+                    console.log(`[Scheduler] 💰 진입가 보정 대상 PENDING 종목: ${codeList.length}개 → ${codeList.join(', ')}`)
+
+                    // ── Step 2: 동시호가 확정 종가 재수집 ──
+                    if (codeList.length > 0) {
+                        const { MarketDataCollectorService } = await import('./v2_pipeline/MarketDataCollectorService')
+                        const refreshResult = await MarketDataCollectorService.getInstance().refreshStocksClose(codeList)
+                        this.telegram.sendMessage(`🔄 [15:32] 동시호가 종가 재수집 완료\n갱신: ${refreshResult.refreshed}개 / 실패: ${refreshResult.failed}개\n→ 진입가 최종 확정 시작...`)
+                    }
+
+                    // ── Step 3: 갱신된 종가로 entry_price 최종 확정 (PENDING → ACTIVE) ──
+                    const { TrackEBuyAgent } = await import('./v2_agents/TrackEBuyAgent')
+                    const { TrackDBuyAgent } = await import('./v2_agents/TrackDBuyAgent')
                     const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
                     const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
                     const { TrackABuyAgent } = await import('./v2_agents/TrackABuyAgent')
+                    const updatedE = TrackEBuyAgent.getInstance().updateEntryPrices()
+                    const updatedD = TrackDBuyAgent.getInstance().updateEntryPrices()
                     const updatedC = TrackCBuyAgent.getInstance().updateEntryPrices()
                     const updatedB = TrackBBuyAgent.getInstance().updateEntryPrices()
                     const updatedA = TrackABuyAgent.getInstance().updateEntryPrices()
-                    
-                    if (updatedB > 0 || updatedA > 0 || updatedC > 0) {
-                        this.telegram.sendMessage(`💰 [15:32] 모의매매 진입가 최종 확정\nTrack A: ${updatedA}개\nTrack B: ${updatedB}개\nTrack C: ${updatedC}개\n→ 동시호가 확정 종가로 진입가 기록 (ACTIVE)`)
+
+                    if (updatedB > 0 || updatedA > 0 || updatedC > 0 || updatedD > 0 || updatedE > 0) {
+                        this.telegram.sendMessage(`💰 [15:32] 모의매매 진입가 최종 확정\nTrack A: ${updatedA}개\nTrack B: ${updatedB}개\nTrack C: ${updatedC}개\nTrack D: ${updatedD}개\nTrack E: ${updatedE}개\n→ 동시호가 확정 종가로 진입가 기록 (ACTIVE)`)
                     }
                 } catch (e: any) {
                     console.error('[Scheduler] Track 진입가 확정 오류:', e.message)
+                    this.telegram.sendMessage(`❌ [15:32] 진입가 확정 실패\n오류: ${e.message}`)
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [메가 테마] 임시 비활성화 (개선 작업 중)
-            /*
-            const megaThemeJob = cron.schedule('5 16 * * 1-5', async () => {
+            // [Step 2-C] 09:43 메가 테마 관리: 오전 테마 AI(09:41) 실행 후 집계 (개선 작업 중 -> 활성화)
+            const megaThemeJob = cron.schedule('43 09 * * 1-5', async () => {
                 console.log('[Scheduler] 🔥 ThemeContextBuilder 메가 테마 집계 시작...')
                 try {
                     const { ThemeContextBuilder } = await import('./v2_agents/ThemeContextBuilder')
@@ -343,12 +387,11 @@ export class SchedulerService {
                     console.error('[Scheduler] ThemeContextBuilder 오류:', e.message)
                 }
             }, { timezone: 'Asia/Seoul' })
-            */
 
-            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, phase1Job, phase2Job, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, ...swarmJobs)
+            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob, ...swarmJobs)
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
-            console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:40) → 눌림목(09:42) → PM(09:45)`)
+            console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)
             console.log(`[SchedulerService] 📊 장중 파이프라인: OHLCV수집+모의매매선정(15:05) → 진입가확정(15:32)`)
             console.log(`[SchedulerService] 📊 장마감 파이프라인: 성과추적(15:35) → 회고(15:38) → 채점(15:41) → 인큐베이터(15:43) → 주간(15:44,금) → 월간(15:47,28일)`)
         }

@@ -593,7 +593,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             📸 이미지 테스트
                         </button>
                         
-                        {/* 수동 군집 테스트 버튼 */}
+                        {/* 수동 스마트 점검 버튼 */}
                         <div className="flex items-center gap-1 ml-1 bg-emerald-500/10 border border-emerald-500/30 rounded px-1 py-0.5">
                             <button onClick={async () => {
                                 const now = new Date();
@@ -604,8 +604,8 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                 } catch (e: any) {
                                     alert('오류 발생: ' + e.message);
                                 }
-                            }} className="px-2 py-0.5 text-emerald-500 hover:text-emerald-400 font-bold transition-colors flex items-center gap-1 whitespace-nowrap" title="장중 군집 예측 강제 실행 (현재 시간 기준으로 기록됨)">
-                                🤖 실시간 군집 테스트
+                            }} className="px-2 py-0.5 text-emerald-500 hover:text-emerald-400 font-bold transition-colors flex items-center gap-1 whitespace-nowrap" title="장중 스마트 변동성 점검 강제 실행">
+                                🤖 실시간 장중 점검
                             </button>
                         </div>
                     </div>
@@ -912,7 +912,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                 <th className="py-2 pr-4 font-bold">Position</th>
                                 <th className="py-2 pr-4 font-bold text-right">{returnView} Peak</th>
                                 <th className="py-2 pr-4 font-bold text-right">{returnView}</th>
-                                <th className="py-2 pr-4 font-bold">Swarm Sentiment</th>
+                                <th className="py-2 pr-4 font-bold">Smart Report Summary</th>
                                 <th className="py-2 font-bold">Indicators</th>
                                 <th className="py-2 w-8"></th>
                             </tr>
@@ -1014,7 +1014,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                 <th className="py-2 pr-4 font-bold">Date</th>
                                 <th className="py-2 pr-4 font-bold text-center">Time</th>
                                 <th className="py-2 pr-4 font-bold">Position</th>
-                                <th className="py-2 pr-4 font-bold">Swarm Sentiment</th>
+                                <th className="py-2 pr-4 font-bold">Smart Report Summary</th>
                                 <th className="py-2 pr-4 font-bold text-right">Entry Price</th>
                                 <th className="py-2 pr-4 font-bold text-right">Max Return</th>
                                 <th className="py-2 pr-4 font-bold text-right">Close Return</th>
@@ -1340,7 +1340,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             {/* Quick Anchor Tabs */}
                             <div className="flex items-center gap-2 border-b border-border/40 pb-3">
                                 <button onClick={() => document.getElementById('intraday-rationale')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">🧠 메인 AI 분석</button>
-                                {selectedIntraday.comments_json && <button onClick={() => document.getElementById('intraday-swarm')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">👥 군집 AI 의견</button>}
+                                {selectedIntraday.comments_json && <button onClick={() => document.getElementById('intraday-swarm')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">📝 스마트 리포트</button>}
                                 {selectedIntraday.image_base64 && <button onClick={() => document.getElementById('intraday-chart')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">📸 차트 스냅샷</button>}
                                 <button onClick={() => document.getElementById('intraday-source')?.scrollIntoView({ behavior: 'smooth' })} className="px-3 py-1.5 text-xs font-bold bg-muted/30 hover:bg-muted focus:ring-1 ring-border rounded-md text-muted-foreground hover:text-foreground transition-all">📊 소스 데이터</button>
                                 <div className="flex-1"></div>
@@ -1359,7 +1359,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             {selectedIntraday.comments_json && (
                             <div id="intraday-swarm" className="scroll-mt-4 pt-4 border-t border-border/20">
                                 <div className="text-xs font-bold text-indigo-400 uppercase mb-2 flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Swarm Local Sentiment</div>
+                                    <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Intraday Smart Report</div>
                                     {selectedIntraday.swarm_sentiment && (
                                         <div className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/30 rounded text-[10px] text-indigo-400">
                                             종합: {selectedIntraday.swarm_sentiment}

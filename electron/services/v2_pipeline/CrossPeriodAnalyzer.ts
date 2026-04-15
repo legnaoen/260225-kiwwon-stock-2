@@ -832,17 +832,3 @@ export class CrossPeriodAnalyzer {
         };
     }
 }
-peakoutLevel: 'NONE',
-    drawdownFromPeak,
-    recentTrend,
-    validAlphaDays: seg.length,
-        };
-    }
-
-    private nullSegmentProfile(): SegmentProfile {
-    return {
-        rankTrajectory: [], rankSlope: 0, rankRSquared: 0, isRankClimber: false,
-        segments: [], trend: 'INCONSISTENT', consistencyScore: 0,
-    };
-}
-}

@@ -792,6 +792,12 @@ export class TelegramService {
             // sources_json 파싱으로 Gemini / 로컬 Swarm 출처 구분
             let sourcesArr: string[] = [];
             try { sourcesArr = JSON.parse(data.sources_json || '[]'); } catch (_) {}
+            
+            // IntradaySmartMonitor 엔진(뉴 버전)이 직접 발송하는 이벤트면, 여기서 공통 템플릿(구 버전)으로 가로채지 않고 무시합니다.
+            if (sourcesArr.includes('SMART_MONITOR_PIPELINE')) {
+                return;
+            }
+
             const isSwarm = sourcesArr.includes('SWARM_LOCAL');
             const sourceLabel = isSwarm ? '🧠 로컬 군집 위원회' : '🤖 시황 AI (Gemini)';
 

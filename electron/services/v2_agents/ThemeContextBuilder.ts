@@ -208,11 +208,11 @@ export class ThemeContextBuilder {
             const emNames = emergingRows.map(r => r.mega_theme_name).join(', ');
             let summaryText = '';
             if (domNames && emNames) {
-                summaryText = \`\${domNames} 섹터가 대장 역할을 지속하는 가운데, \${emNames} 섹터로 신규 수급이 강하게 유입되는 흐름입니다.\`;
+                summaryText = `${domNames} 섹터가 대장 역할을 지속하는 가운데, ${emNames} 섹터로 신규 수급이 강하게 유입되는 흐름입니다.`;
             } else if (domNames) {
-                summaryText = \`\${domNames} 섹터가 시장 수급을 독식하며 강력한 주도 랠리를 이어가고 있습니다.\`;
+                summaryText = `${domNames} 섹터가 시장 수급을 독식하며 강력한 주도 랠리를 이어가고 있습니다.`;
             } else if (emNames) {
-                summaryText = \`시장 주도주가 부재한 가운데 \${emNames} 섹터가 새롭게 부각되며 수급이 이동하고 있습니다.\`;
+                summaryText = `시장 주도주가 부재한 가운데 ${emNames} 섹터가 새롭게 부각되며 수급이 이동하고 있습니다.`;
             }
             
             tgMsg += `*📊 [오늘의 시장 테마 한 줄 평]*\n_"${summaryText}"_\n`;

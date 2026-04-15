@@ -51,8 +51,8 @@ export default function Settings() {
         buyEndTime: '15:00',
         phase1PassLimit: 10,
         portfolioLimits: {
-            buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
-            watchlist: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 }
+            buy:       { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
+            watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
         }
     })
     const [isSavingTg, setIsSavingTg] = useState(false)
@@ -168,10 +168,19 @@ export default function Settings() {
                     buyStartTime: savedAiSettings.buyStartTime || '09:10',
                     buyEndTime: savedAiSettings.buyEndTime || '15:00',
                     phase1PassLimit: savedAiSettings.phase1PassLimit ?? 10,
-                    portfolioLimits: savedAiSettings.portfolioLimits || {
-                        buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
-                        watchlist: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 }
-                    }
+                    portfolioLimits: savedAiSettings.portfolioLimits
+                        ? (() => {
+                            // 구버전 키(SWING/VALUE) 감지 → 새 기준으로 자동 마이그레이션
+                            const pl = savedAiSettings.portfolioLimits;
+                            if (pl.buy && ('SWING' in pl.buy || 'VALUE' in pl.buy)) {
+                                return {
+                                    buy:       { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
+                                    watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+                                };
+                            }
+                            return pl;
+                        })()
+                        : { buy: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }, watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 } }
                 })
             }
 

@@ -603,7 +603,7 @@ export const PortfolioManagerTab: React.FC = () => {
                                 <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
                                     <th className="py-2 pr-3 font-bold w-8">상태</th>
                                     <th className="py-2 pr-4 font-bold w-36 min-w-[144px]">종목</th>
-                                    <th className="py-2 pr-4 font-bold text-center w-16">전략</th>
+                                    <th className="py-2 pr-4 font-bold text-center w-16">분류</th>
                                     <th className="py-2 pr-4 font-bold">시그널 / 매력도</th>
                                     <th className="py-2 pr-4 font-bold text-center">추천 AI</th>
                                     <th className="py-2 pr-4 font-bold text-center">추가일</th>
@@ -668,21 +668,24 @@ export const PortfolioManagerTab: React.FC = () => {
                                                 <div className="text-[10px] font-mono text-muted-foreground">{p.stock_code}</div>
                                             </td>
 
-                                            {/* 전략 */}
+                                            {/* 추천 AI 카테고리 (primary_category) */}
                                             <td className="py-2 pr-4 text-center">
-                                                {p.strategy === 'MOMENTUM' ? (
-                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-rose-500 bg-rose-500/10 border-rose-500/30 whitespace-nowrap">
-                                                        🚀 메가테마 대장주
-                                                    </span>
-                                                ) : p.strategy === 'PULLBACK' ? (
-                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-orange-500 bg-orange-500/10 border-orange-500/30 whitespace-nowrap">
-                                                        🔥 주도주 눌림목
-                                                    </span>
-                                                ) : (
-                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] uppercase font-bold text-muted-foreground bg-muted/20 whitespace-nowrap">
-                                                        {p.strategy || 'SWING'}
-                                                    </span>
-                                                )}
+                                                {(() => {
+                                                    const cat = p.strategy || 'MOMENTUM';
+                                                    if (cat === 'THEME') return (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-violet-400 bg-violet-500/10 border-violet-500/30 whitespace-nowrap">🎯 테마</span>
+                                                    );
+                                                    if (cat === 'MOMENTUM') return (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-rose-400 bg-rose-500/10 border-rose-500/30 whitespace-nowrap">🚀 모멘텀</span>
+                                                    );
+                                                    if (cat === 'PULLBACK') return (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-amber-400 bg-amber-500/10 border-amber-500/30 whitespace-nowrap">🔥 눌림목</span>
+                                                    );
+                                                    if (cat === 'REPORT') return (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border-emerald-500/30 whitespace-nowrap">📋 리포트</span>
+                                                    );
+                                                    return <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] uppercase font-bold text-muted-foreground bg-muted/20 whitespace-nowrap">{cat}</span>;
+                                                })()}
                                             </td>
 
                                             {/* 시그널 + 매수 매력도 점수 */}
@@ -786,7 +789,7 @@ export const PortfolioManagerTab: React.FC = () => {
                                 <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
                                     <th className="py-2 pr-3 font-bold w-8">상태</th>
                                     <th className="py-2 pr-4 font-bold w-36 min-w-[144px]">종목</th>
-                                    <th className="py-2 pr-4 font-bold text-center w-16">전략</th>
+                                    <th className="py-2 pr-4 font-bold text-center w-16">분류</th>
                                     <th className="py-2 pr-4 font-bold">시그널 / 매력도</th>
                                     <th className="py-2 pr-4 font-bold text-center">추천 AI</th>
                                     <th className="py-2 pr-4 font-bold text-center">추가일</th>
@@ -821,9 +824,14 @@ export const PortfolioManagerTab: React.FC = () => {
                                                 <div className="text-[10px] font-mono text-muted-foreground">{p.stock_code}</div>
                                             </td>
                                             <td className="py-2 pr-4 text-center">
-                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] uppercase font-bold text-muted-foreground bg-muted/20 whitespace-nowrap">
-                                                    {p.strategy || 'SWING'}
-                                                </span>
+                                                {(() => {
+                                                    const cat = p.strategy || 'MOMENTUM';
+                                                    if (cat === 'THEME') return <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-violet-400 bg-violet-500/10 border-violet-500/30 whitespace-nowrap">🎯 테마</span>;
+                                                    if (cat === 'MOMENTUM') return <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-rose-400 bg-rose-500/10 border-rose-500/30 whitespace-nowrap">🚀 모멘텀</span>;
+                                                    if (cat === 'PULLBACK') return <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-amber-400 bg-amber-500/10 border-amber-500/30 whitespace-nowrap">🔥 눌림목</span>;
+                                                    if (cat === 'REPORT') return <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border-emerald-500/30 whitespace-nowrap">📋 리포트</span>;
+                                                    return <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] uppercase font-bold text-muted-foreground bg-muted/20 whitespace-nowrap">{cat}</span>;
+                                                })()}
                                             </td>
                                             <td className="py-2 pr-4">
                                                 <ScoreBar score={p.conviction_score || 0} />

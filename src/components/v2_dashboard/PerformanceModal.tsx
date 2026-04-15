@@ -6,7 +6,8 @@ const CATEGORY_META: Record<string, { icon: string; label: string; color: string
     INTRADAY_SURGE:    { icon: '🔺', label: '당일 급등주', color: 'text-orange-500 bg-orange-500/10 border-orange-500/30' },
     EMERGING_STAR:     { icon: '🔥', label: '신흥 급부상', color: 'text-red-500 bg-red-500/10 border-red-500/30' },
     PULLBACK_REBOUND:  { icon: '🎣', label: '눌림 반등', color: 'text-rose-500 bg-rose-500/10 border-rose-500/30' },
-    PULLBACK_DIP:      { icon: '📉', label: '눌림목', color: 'text-purple-500 bg-purple-500/10 border-purple-500/30' }
+    PULLBACK_DIP:      { icon: '📉', label: '눌림목', color: 'text-purple-500 bg-purple-500/10 border-purple-500/30' },
+    SHORT_TERM_CONSOLIDATION: { icon: '🎯', label: '단기 눌림', color: 'text-green-500 bg-green-500/10 border-green-500/30' }
 };
 
 interface SimTradePick {
@@ -126,7 +127,8 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
             'INTRADAY_SURGE': 2,
             'EMERGING_STAR': 3,
             'PULLBACK_REBOUND': 4,
-            'PULLBACK_DIP': 5
+            'PULLBACK_DIP': 5,
+            'SHORT_TERM_CONSOLIDATION': 6
         };
         catArray.sort((a, b) => (catOrder[a.category] || 99) - (catOrder[b.category] || 99));
 

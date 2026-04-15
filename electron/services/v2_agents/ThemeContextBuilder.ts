@@ -106,8 +106,122 @@ export class ThemeContextBuilder {
         // Step 7: 누적 스코어 갱신
         this.updateCumulativeScores(raw);
 
+        // Step 8: 텔레그램 브리핑 발송
+        await this.sendTelegramBriefing(raw, date);
+
         console.log(`[ThemeContextBuilder] ✅ ${date} 처리 완료`);
         eventBus.emit('MEGA_THEME_PROGRESS' as any, { step: 'DONE', detail: `${date} 메가 테마 갱신 완료` });
+    }
+
+    // ─── Step 8: 텔레그램 브리핑 발송 ──────────────────────────────────────
+
+    private async sendTelegramBriefing(raw: any, date: string): Promise<void> {
+        try {
+            const { TelegramService } = await import('../TelegramService');
+            const tgSvc = TelegramService.getInstance();
+            
+            // 1. 대장 테마 추출 (DOMINANT 또는 STRONG 중 파워 상위 3개)
+            const dominantRows = raw.prepare(`
+                SELECT mega_theme_name, sub_themes_json, core_narrative, alive_days, selected_stocks_json
+                FROM mega_theme_ledger
+                WHERE status IN ('DOMINANT', 'STRONG') AND last_seen_date = ?
+                ORDER BY ranking_score DESC, current_combined_power DESC
+                LIMIT 3
+            `).all(date) as any[];
+
+            // 2. 신흥 테마 추출 (CREATE로 신규 생성된 것 또는 EMERGING/REVIVAL 중에서 최근 부각된 상위 3개)
+            const emergingRows = raw.prepare(`
+                SELECT mega_theme_name, sub_themes_json, core_narrative, status, alive_days, selected_stocks_json
+                FROM mega_theme_ledger
+                WHERE status IN ('EMERGING', 'REVIVAL') AND last_seen_date = ?
+                  AND mega_theme_name NOT IN (SELECT mega_theme_name FROM mega_theme_ledger WHERE status IN ('DOMINANT', 'STRONG'))
+                ORDER BY ranking_score DESC, current_combined_power DESC
+                LIMIT 3
+            `).all(date) as any[];
+
+            if (dominantRows.length === 0 && emergingRows.length === 0) return;
+
+            let tgMsg = `🤖 *[메가 테마 & 주도 테마 브리핑]* (${date})\n\n`;
+
+            const formatNarrative = (n: string) => {
+                if (!n) return '(분석 내용 없음)';
+                try {
+                    const parsed = JSON.parse(n);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        return parsed[0].text;
+                    }
+                } catch (e) {}
+                return n;
+            };
+
+            const formatSubThemes = (s: string) => {
+                try {
+                    const parsed = JSON.parse(s);
+                    if (Array.isArray(parsed)) {
+                        return parsed.map((x: any) => x.name).join(', ');
+                    }
+                } catch(e) {}
+                return '-';
+            };
+
+            const formatStocks = (s: string) => {
+                try {
+                    const parsed = JSON.parse(s);
+                    if (Array.isArray(parsed)) {
+                        return parsed.map((x: any) => x.name).join(', ');
+                    }
+                } catch(e) {}
+                return '-';
+            };
+
+            if (dominantRows.length > 0) {
+                tgMsg += `*👑 [오늘의 시장 대장 테마]*\n`;
+                dominantRows.forEach((r, idx) => {
+                    const narrative = formatNarrative(r.core_narrative).replace(/[*_`]/g, '');
+                    const subThemes = formatSubThemes(r.sub_themes_json);
+                    const stocks = formatStocks(r.selected_stocks_json);
+                    
+                    tgMsg += `*${idx + 1}. ${r.mega_theme_name}* (${r.alive_days}일째)\n`;
+                    tgMsg += `- ${narrative}\n`;
+                    tgMsg += `- 서브테마 : ${subThemes}\n`;
+                    tgMsg += `- 주도종목 : ${stocks}\n\n`;
+                });
+            }
+
+            if (emergingRows.length > 0) {
+                tgMsg += `*🌱 [새로 부각된 신흥 테마]*\n`;
+                emergingRows.forEach((r, idx) => {
+                    const narrative = formatNarrative(r.core_narrative).replace(/[*_`]/g, '');
+                    const subThemes = formatSubThemes(r.sub_themes_json);
+                    const stocks = formatStocks(r.selected_stocks_json);
+                    const label = (r.status === 'REVIVAL') ? '재부각' : (r.alive_days <= 1 ? '신규' : `${r.alive_days}일째`);
+                    
+                    tgMsg += `*${idx + 1}. ${r.mega_theme_name}* (${label})\n`;
+                    tgMsg += `- ${narrative}\n`;
+                    tgMsg += `- 서브테마 : ${subThemes}\n`;
+                    tgMsg += `- 주도종목 : ${stocks}\n\n`;
+                });
+            }
+
+            // 한 줄 평
+            const domNames = dominantRows.map(r => r.mega_theme_name).join(', ');
+            const emNames = emergingRows.map(r => r.mega_theme_name).join(', ');
+            let summaryText = '';
+            if (domNames && emNames) {
+                summaryText = \`\${domNames} 섹터가 대장 역할을 지속하는 가운데, \${emNames} 섹터로 신규 수급이 강하게 유입되는 흐름입니다.\`;
+            } else if (domNames) {
+                summaryText = \`\${domNames} 섹터가 시장 수급을 독식하며 강력한 주도 랠리를 이어가고 있습니다.\`;
+            } else if (emNames) {
+                summaryText = \`시장 주도주가 부재한 가운데 \${emNames} 섹터가 새롭게 부각되며 수급이 이동하고 있습니다.\`;
+            }
+            
+            tgMsg += `*📊 [오늘의 시장 테마 한 줄 평]*\n_"${summaryText}"_\n`;
+
+            await tgSvc.sendMessage(tgMsg);
+            console.log(`[ThemeContextBuilder] 텔레그램 브리핑 발송 완료`);
+        } catch (error: any) {
+            console.error(`[ThemeContextBuilder] 텔레그램 브리핑 발송 실패:`, error.message);
+        }
     }
 
     // ─── Step 1: 당일 테마 + reason 조립 ───────────────────────────────────

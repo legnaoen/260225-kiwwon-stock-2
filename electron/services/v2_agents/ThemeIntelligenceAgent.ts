@@ -391,42 +391,6 @@ $issueListForPrompt
                 console.log(`[ThemeIntelligence] 🔗 Knowledge Graph: ${edgeCount}개 ISSUE→THEME/SECTOR 엣지 기록 완료`);
             }
 
-            // 7. 텔레그램 알림 전송 (Top 3 요약)
-            try {
-                const { TelegramService } = await import('../TelegramService');
-                const tgSvc = TelegramService.getInstance();
-                
-                let tgMsg = `🤖 *[테마 AI 브리핑 완료]* (${dateStr})\n\n`;
-
-                const themes = parsedArray.filter((i: any) => i.type.toUpperCase() === 'THEME');
-                const sectors = parsedArray.filter((i: any) => i.type.toUpperCase() === 'SECTOR');
-
-                if (themes.length > 0) {
-                    tgMsg += `*[🔥 상위 주도 테마 TOP 3]*\n\n`;
-                    tgMsg += themes.slice(0, 3).map((t: any, idx: number) => 
-                        `${idx + 1}. *${t.name}* [${t.lifespan_type}]\n  - ${t.reason.replace(/[*_`]/g, '')}`
-                    ).join('\n\n') + '\n\n\n';
-                }
-
-                if (sectors.length > 0) {
-                    tgMsg += `*[📈 상위 주도 섹터 TOP 3]*\n\n`;
-                    tgMsg += sectors.slice(0, 3).map((s: any, idx: number) => 
-                        `${idx + 1}. *${s.name}* [${s.lifespan_type}]\n  - ${s.reason.replace(/[*_`]/g, '')}`
-                    ).join('\n\n') + '\n\n';
-                }
-
-                if (stockPicksArray && stockPicksArray.length > 0) {
-                    tgMsg += `*[🎯 테마 AI 관심종목 추천]*\n\n`;
-                    tgMsg += stockPicksArray.map((p: any) => 
-                        `- *${p.stock_name}* (${p.confidence}점)\n  : ${p.reason.replace(/[*_`]/g, '')}`
-                    ).join('\n\n') + '\n\n';
-                }
-
-                tgSvc.sendMessage(tgMsg).catch(err => console.error('[ThemeIntelligence] 텔레그램 발송 실패', err));
-            } catch (tgErr) {
-                console.error('[ThemeIntelligence] 텔레그램 연동 실패', tgErr);
-            }
-
             return mapDataForDb;
 
         } catch (error: any) {

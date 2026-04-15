@@ -45,6 +45,23 @@ const CATEGORY_META: Record<string, { icon: string; label: string; color: string
     SHORT_TERM_CONSOLIDATION: { icon: '🎯', label: '단기 눌림', color: 'text-green-500 bg-green-500/10 border-green-500/30' },
 }
 
+// ── 카테고리 필터 드롭다운 옵션 (현재 운용 중인 6개 Track 카테고리 전체) ──
+const CATEGORY_FILTER_OPTIONS: { key: string; label: string }[] = [
+    { key: 'all',                       label: '📋 전략: 전체 보기' },
+    { key: 'TRUE_LEADER',               label: '👑 진성 대장 (Track A)' },
+    { key: 'EMERGING_STAR',             label: '🔥 신흥 급부상 (Track B)' },
+    { key: 'PULLBACK_REBOUND',          label: '🔥 눌림 반등 (Track C)' },
+    { key: 'PULLBACK_DIP',              label: '📉 눌림목 (Track C)' },
+    { key: 'INTRADAY_SURGE',            label: '🔺 당일 급등 (Track D)' },
+    { key: 'SHORT_TERM_CONSOLIDATION',  label: '🎯 단기 눌림 (Track E)' },
+]
+
+const STATUS_FILTER_OPTIONS: { key: string; label: string }[] = [
+    { key: 'all',    label: '📊 상태: 전체' },
+    { key: 'ACTIVE', label: '🟢 보유중' },
+    { key: 'CLOSED', label: '✅ 완료' },
+]
+
 // ── 상태 배지 ──
 function StatusBadge({ status, result, currentReturn }: { status: string; result: string | null; currentReturn: number | null }) {
     if (status === 'PENDING') {
@@ -135,7 +152,19 @@ export const SimTradeTab: React.FC = () => {
         try {
             const data = await (window as any).electronAPI.getSimTradePicks()
             if (data?.picks) {
-                setPicks(data.picks)
+                // ── Source-level dedup ──
+                // UNION ALL SQL로 같은 종목이 여러 Track 테이블에 중복 저장될 수 있음.
+                // SQL ORDER BY가 TRUE_LEADER(1) → INTRADAY_SURGE(2) → ... 순으로 정렬하므로
+                // 첫 번째 등장 레코드(최우선 카테고리)만 남기고 이후 중복은 제거.
+                // 키: stock_code + pick_date (카테고리 무관 — 같은 날 같은 종목은 1개만)
+                const seen = new Set<string>()
+                const deduped = (data.picks as SimTradePick[]).filter(p => {
+                    const key = `${p.stock_code}_${p.pick_date}`
+                    if (seen.has(key)) return false
+                    seen.add(key)
+                    return true
+                })
+                setPicks(deduped)
             }
         } catch (err) {
             console.error('[SimTrade] fetch error:', err)
@@ -176,17 +205,17 @@ export const SimTradeTab: React.FC = () => {
         }
     }
 
-    // ── 필터 적용 ──
+    // ── 필터 적용 (dedup은 fetchPicks에서 이미 처리됨) ──
+    console.log('[SimTrade] Render picks length:', picks.length, 'TRUE_LEADERS:', picks.filter(p=>p.category==='TRUE_LEADER').length);
     const filteredPicks = useMemo(() => {
-        let result = picks;
+        let result = picks
         if (filterStatus !== 'all') {
-            result = result.filter(p => p.status === filterStatus);
+            result = result.filter(p => p.status === filterStatus)
         }
         if (filterCategory !== 'all') {
-            result = result.filter(p => p.category === filterCategory);
+            result = result.filter(p => p.category === filterCategory)
         }
-        
-        return result;
+        return result
     }, [picks, filterStatus, filterCategory])
 
     // ── 날짜별 그룹핑 (최신 날짜가 상단) ──
@@ -287,51 +316,39 @@ export const SimTradeTab: React.FC = () => {
                         </button>
                     </div>
                     <div className="flex items-center gap-2">
-                        {/* 카테고리 필터 칩 */}
-                        <div className="flex items-center gap-1 bg-muted/30 rounded p-0.5 ml-2 mr-2">
-                            {([
-                                { key: 'all', label: '모든분류' },
-                                { key: 'TRUE_LEADER', label: '대장주' },
-                                { key: 'INTRADAY_SURGE', label: '급등당일' },
-                                { key: 'EMERGING_STAR', label: '신흥성장' },
-                                { key: 'PULLBACK_REBOUND', label: '눌림반등' },
-                            ] as const).map(f => (
-                                <button
-                                    key={f.key}
-                                    onClick={() => setFilterCategory(f.key)}
-                                    className={cn(
-                                        'px-2 py-1 text-xs font-bold rounded transition-colors',
-                                        filterCategory === f.key
-                                            ? 'bg-background text-foreground shadow-sm'
-                                            : 'text-muted-foreground hover:text-foreground'
-                                    )}
-                                >
-                                    {f.label}
-                                </button>
+                        {/* ── 카테고리 드롭다운 필터 ── */}
+                        <select
+                            value={filterCategory}
+                            onChange={e => setFilterCategory(e.target.value)}
+                            className={cn(
+                                'text-xs font-bold rounded px-2 py-1.5 cursor-pointer transition-colors',
+                                'focus:outline-none focus:ring-1 focus:ring-primary/50',
+                                filterCategory !== 'all'
+                                    ? 'bg-indigo-500/10 border border-indigo-500/50 text-indigo-400'
+                                    : 'bg-muted/40 border border-border/50 text-foreground hover:border-border'
+                            )}
+                        >
+                            {CATEGORY_FILTER_OPTIONS.map(opt => (
+                                <option key={opt.key} value={opt.key}>{opt.label}</option>
                             ))}
-                        </div>
+                        </select>
 
-                        {/* 상태 필터 칩 */}
-                        <div className="flex items-center gap-1 bg-muted/30 rounded p-0.5">
-                            {([
-                                { key: 'all', label: '상태전체' },
-                                { key: 'ACTIVE', label: '보유중' },
-                                { key: 'CLOSED', label: '완료' },
-                            ] as const).map(f => (
-                                <button
-                                    key={f.key}
-                                    onClick={() => setFilterStatus(f.key)}
-                                    className={cn(
-                                        'px-2 py-1 text-xs font-bold rounded transition-colors',
-                                        filterStatus === f.key
-                                            ? 'bg-background text-foreground shadow-sm'
-                                            : 'text-muted-foreground hover:text-foreground'
-                                    )}
-                                >
-                                    {f.label}
-                                </button>
+                        {/* ── 보유 상태 드롭다운 필터 ── */}
+                        <select
+                            value={filterStatus}
+                            onChange={e => setFilterStatus(e.target.value as 'all' | 'ACTIVE' | 'CLOSED')}
+                            className={cn(
+                                'text-xs font-bold rounded px-2 py-1.5 cursor-pointer transition-colors',
+                                'focus:outline-none focus:ring-1 focus:ring-primary/50',
+                                filterStatus !== 'all'
+                                    ? 'bg-amber-500/10 border border-amber-500/50 text-amber-400'
+                                    : 'bg-muted/40 border border-border/50 text-foreground hover:border-border'
+                            )}
+                        >
+                            {STATUS_FILTER_OPTIONS.map(opt => (
+                                <option key={opt.key} value={opt.key}>{opt.label}</option>
                             ))}
-                        </div>
+                        </select>
                         
                         {/* 다중 전략 테스트 메뉴 */}
                         <div className="relative">
@@ -593,7 +610,7 @@ export const SimTradeTab: React.FC = () => {
 
                                         return (
                                             <tr
-                                                key={pick.id}
+                                                key={`${pick.category}_${pick.id}`}
                                                 onClick={() => setSelectedStock({ 
                                                     stockCode: pick.stock_code, 
                                                     stockName: pick.stock_name,

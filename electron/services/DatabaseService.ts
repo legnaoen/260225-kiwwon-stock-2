@@ -1012,6 +1012,21 @@ export class DatabaseService {
         // peak_profit_rate: HELD 포지션 보유 중 최고 수익률 (성적표 피크 수익률 표시)
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN peak_profit_rate REAL DEFAULT 0") } catch (e) { }
 
+        // [Migration] strategy 컬럼 값을 agent_type 기반 primary_category로 통일
+        // SWING/VALUE 같은 구버전 값을 analysts_json에서 재계산한 THEME/MOMENTUM/PULLBACK/REPORT로 변환
+        try {
+            const PRIORITY = ['THEME', 'MOMENTUM', 'PULLBACK', 'REPORT'];
+            const rows = this.db.prepare("SELECT stock_code, analysts_json, strategy FROM maiis_portfolio WHERE strategy NOT IN ('THEME', 'MOMENTUM', 'PULLBACK', 'REPORT')").all() as any[];
+            for (const row of rows) {
+                let tags: string[] = [];
+                try { tags = JSON.parse(row.analysts_json || '[]'); } catch { tags = []; }
+                const filtered = tags.filter((t: string) => t !== 'ALPHA_TOP');
+                const primary = PRIORITY.find(p => filtered.includes(p)) ?? 'MOMENTUM';
+                this.db.prepare("UPDATE maiis_portfolio SET strategy = ? WHERE stock_code = ?").run(primary, row.stock_code);
+            }
+            if (rows.length > 0) console.log(`[DatabaseService] ♻️ strategy 마이그레이션: ${rows.length}개 THEME/MOMENTUM/PULLBACK/REPORT로 변환 완료`);
+        } catch (e) { console.warn('[DatabaseService] strategy 마이그레이션 실패:', e); }
+
         // Ensure macro_indicators_json exists in world state
         try {
             this.db.exec("ALTER TABLE maiis_world_state ADD COLUMN macro_indicators_json TEXT")
@@ -2353,11 +2368,19 @@ export class DatabaseService {
                     ELSE maiis_portfolio.was_held           -- 기존 값 보존 (한 번 매수한 종목은 영원히 was_held = 1)
                 END
         `);
+        // analysts_json 기반 primary_category 자동 계산 (strategy 파라미터 대체)
+        const AGENT_PRIORITY = ['THEME', 'MOMENTUM', 'PULLBACK', 'REPORT'];
+        const analysts: string[] = typeof item.analysts_json === 'string'
+            ? JSON.parse(item.analysts_json || '[]')
+            : (item.analysts_json || []);
+        const filteredAgents = analysts.filter((t: string) => t !== 'ALPHA_TOP');
+        const primaryCategory = AGENT_PRIORITY.find(p => filteredAgents.includes(p)) ?? 'MOMENTUM';
+
         stmt.run({
             stock_code: item.stock_code,
             stock_name: item.stock_name,
             status: item.status || 'WATCHLIST',
-            strategy: item.strategy || 'SWING',
+            strategy: primaryCategory,  // strategy 컬럼 = primary_category (THEME/MOMENTUM/PULLBACK/REPORT)
             conviction_score: item.conviction_score || 50,
             theme: item.theme || null,
             entry_date: item.entry_date || null,
@@ -2382,38 +2405,47 @@ export class DatabaseService {
     private enforcePortfolioCaps() {
         try {
             const aiSettings: any = store.get('ai_settings') || {};
-            const limits = aiSettings.portfolioLimits || {
-                buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },
-                watchlist: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 }
-            };
+            // 구버전 키(SWING/VALUE) 감지 → 새 기준(THEME/PULLBACK/MOMENTUM/REPORT)으로 자동 재설정
+            const storedLimits = aiSettings.portfolioLimits || {};
+            const hasLegacyKeys = storedLimits.buy && ('SWING' in storedLimits.buy || 'VALUE' in storedLimits.buy);
+            const limits = hasLegacyKeys ? {
+                buy:       { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
+                watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+            } : (aiSettings.portfolioLimits || {
+                buy:       { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
+                watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+            });
 
-            const strategies = ['MOMENTUM', 'PULLBACK', 'SWING', 'VALUE'];
+            // 구버전 키 감지 시 electron-store 자동 업데이트
+            if (hasLegacyKeys) {
+                store.set('ai_settings', { ...aiSettings, portfolioLimits: limits });
+                console.log('[DatabaseService] ♻️ portfolioLimits 구버전 키(SWING/VALUE) 감지 → THEME/MOMENTUM/PULLBACK/REPORT로 자동 재설정');
+            }
+
+            const categories = ['THEME', 'MOMENTUM', 'PULLBACK', 'REPORT'];
             const types = ['HELD', 'WATCHING'];
 
             for (const type of types) {
-                const signalCondition = type === 'HELD' ? "status = 'HELD'" : "status = 'WATCHING'";
-                // status 자체가 조건이므로 중복되지만, 캡슐화 논리를 위해 남김
-                const statusCondition = "status NOT IN ('CLEARED', 'DROPPED', 'HIT')";
+                const statusCondition = type === 'HELD' ? "status = 'HELD'" : "status = 'WATCHING'";
 
-                for (const strategy of strategies) {
-                    const maxCount = type === 'HELD' ? (limits.buy[strategy] || 0) : (limits.watchlist[strategy] || 0);
+                for (const category of categories) {
+                    const maxCount = type === 'HELD' ? (limits.buy[category] ?? 0) : (limits.watchlist[category] ?? 0);
 
+                    // strategy 컬럼 = primary_category (THEME/MOMENTUM/PULLBACK/REPORT)
                     const countRow = this.db.prepare(`
                         SELECT COUNT(*) as cnt 
                         FROM maiis_portfolio 
-                        WHERE ${statusCondition} AND ${signalCondition} AND 
-                        CASE WHEN UPPER(strategy) IN ('MOMENTUM', 'PULLBACK', 'VALUE') THEN UPPER(strategy) ELSE 'SWING' END = ?
-                    `).get(strategy) as any;
+                        WHERE ${statusCondition} AND strategy = ?
+                    `).get(category) as any;
 
                     if (countRow && countRow.cnt > maxCount) {
                         const excess = countRow.cnt - maxCount;
                         const excessItems = this.db.prepare(`
                             SELECT stock_code, stock_name FROM maiis_portfolio 
-                            WHERE ${statusCondition} AND ${signalCondition} AND 
-                            CASE WHEN UPPER(strategy) IN ('MOMENTUM', 'PULLBACK', 'VALUE') THEN UPPER(strategy) ELSE 'SWING' END = ?
+                            WHERE ${statusCondition} AND strategy = ?
                             ORDER BY conviction_score ASC, updated_at ASC
                             LIMIT ?
-                        `).all(strategy, excess) as any[];
+                        `).all(category, excess) as any[];
 
                         if (excessItems.length > 0) {
                             const codes = excessItems.map((r: any) => `'${r.stock_code.replace(/'/g, "''")}'`).join(',');
@@ -2423,23 +2455,22 @@ export class DatabaseService {
                                 WHERE stock_code IN (${codes})
                             `).run(this.getKstTimestamp());
 
-                            // [수정] DROP된 종목을 인큐베이터로 강등 처리
                             excessItems.forEach((r: any) => {
                                 this.demoteToIncubator({
                                     stock_code: r.stock_code,
-                                    stock_name: r.stock_name || '알수없음',  // join 안했으므로 db조회 필요
+                                    stock_name: r.stock_name || '알수없음',
                                     current_price: 0,
-                                    last_signal_reason: '관심종목 캡 한도 초과 자동 탈락'
+                                    last_signal_reason: '관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락'
                                 });
                             });
 
-                            console.log(`[DatabaseService] ✂️ 용량 설정 (Cap ${maxCount}) 초과로 ${info.changes}개 자동 DROPPED 및 인큐베이터 이관. (${type} - ${strategy})`);
+                            console.log(`[DatabaseService] ✂️ Cap(${maxCount}) 초과 → ${info.changes}개 DROPPED + 인큐베이터 이관 (${type} - ${category})`);
                         }
                     }
                 }
             }
         } catch (e) {
-            console.error(`[DatabaseService] 포트폴리오 전략별 Cap 검사 중 오류:`, e);
+            console.error(`[DatabaseService] 포트폴리오 캡 검사 중 오류:`, e);
         }
     }
 

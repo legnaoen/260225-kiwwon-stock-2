@@ -432,16 +432,22 @@ ${chartRiskSkill}
 
 [매수 및 관심종목 판단 이원화 원칙 — 이 지침이 규칙의 알파이자 오메가다]
 1. **[매수(HELD) 포지션 엄격 분리]**: 지금 당장 "실제 현금으로 매수"할 만한 초A급 주도주에만 "BUY" 또는 기존 매수종목 유지 시 "HOLD" 판정을 내려라. 매수 조건은 극도로 엄격하게 적용하며, 상단 저항, 재료 소멸, 추격매수 시에는 가차없이 제외한다. (매도는 "SELL" 지시)
-2. **[강제 T/O 서바이벌 스코어링]**: 매수(BUY / HOLD / SELL)로 판정된 최상위 종목 혹은 청산종목을 제외한 >>나머지 모든 종목<<(기존 관심종목 + 새로 올라온 추천주 전체)에 대해서는 무단으로 탈락(DROP)시키지 마라.
-대신에, 이들을 관심종목 후보(WATCHING)로 두고 각각 해당하는 전략(strategy) 내에서 0점~100점의 **매력도 점수(conviction_score)** 를 매우 촘촘하게(상대적인 랭킹을 매긴다는 느낌으로) 평가하라.
-시스템적으로 각 전략 바스켓당 최대 허용 개수가 정해져 있으며, 네가 매긴 점수순으로 정렬한 뒤 시스템(코드)이 하위권 종목들을 자동으로 탈락(DROP) 처리할 것이다. 즉, 너의 역할은 후보 종목 간의 성적표(등수별 점수)를 냉정하게 매기는 것이다!
 
-[전략 지정 기준]
-각 종목의 strategy를 반드시 지정해야 하며(MOMENTUM, PULLBACK, SWING, VALUE 중 택1), 점수는 이 전략 바스켓 내에서의 경쟁력을 의미한다.
-- MOMENTUM: 당일/초단기 재료와 거래량
-- PULLBACK: 단기 눌림목 및 MA20 지지
-- SWING: 중기 모멘텀 유지 (테마 내러티브 성장 가능성)
-- VALUE: 저점 가치투자
+1-A. **[최대 수익 추구 원칙 — 절대 규칙]**: 보유 종목(HELD)의 수익률이 특정 수치(예: +8%, +10%)에 도달했다는 이유만으로 SELL을 판정하지 마라. **수익률 목표치는 성과 측정 기준일 뿐, 매도 트리거가 아니다.** 모멘텀이 살아있고 시장 주도력이 유지되는 한 최대한 보유하며 최대 수익을 추구하라. 매도 판단은 오직 다음 경우에만: ① 핵심 재료/테마 소멸 ② 시장 주도력 상실(Alpha 랭킹 급락) ③ 상단 강한 저항 + 거래량 고갈 ④ 더 강한 종목으로 교체가 필요한 경우.
+2. **[강제 T/O 서바이벌 스코어링]**: 매수(BUY / HOLD / SELL)로 판정된 최상위 종목 혹은 청산종목을 제외한 >>나머지 모든 종목<<(기존 관심종목 + 새로 올라온 추천주 전체)에 대해서는 무단으로 탈락(DROP)시키지 마라.
+대신에, 이들을 관심종목 후보(WATCHING)로 두고 0점~100점의 **매력도 점수(conviction_score)** 를 매우 촘촘하게(상대적인 랭킹을 매긴다는 느낌으로) 평가하라.
+시스템적으로 각 추천 AI 카테고리(THEME/MOMENTUM/PULLBACK/REPORT)별 최대 허용 개수가 정해져 있으며, 네가 매긴 점수순으로 정렬한 뒤 시스템(코드)이 하위권 종목들을 자동으로 탈락(DROP) 처리할 것이다. 즉, 너의 역할은 후보 종목 간의 성적표(등수별 점수)를 냉정하게 매기는 것이다!
+
+[추천 AI 카테고리 & 캡 안내]
+각 종목의 analysts_json에는 이미 추천 AI 카테고리가 지정되어 있다. 시스템은 아래 우선순위로 캡 슬롯을 배정한다.
+- THEME(3슬롯): 테마 AI 추천 종목 (내러티브·섹터 기반)
+- MOMENTUM(3슬롯): 수급/모멘텀 AI 추천 종목 (단기 거래량·강세)
+- PULLBACK(2슬롯): 눌림목 AI 추천 종목 (MA 지지·타점 진입)
+- REPORT(2슬롯): 리포트 AI 추천 종목 (증권사 보고서 기반)
+- ALPHA_TOP: **캡 슬롯 없음 — 가산점 신호로만 활용**
+  → analysts_json에 ALPHA_TOP이 포함된 종목은 conviction_score를 5점 추가로 부여하라 (100점 초과 불가)
+
+※ strategy 필드는 더 이상 사용하지 않는다. 응답 JSON에 strategy를 포함하지 마라.
 
 [응답 가이드]
 결과는 반드시 JSON 형식이어야 하며, 풀에 있는 모든 종목을 누락 없이 반환하여야 한다.
@@ -451,12 +457,11 @@ ${chartRiskSkill}
         {
             "stock_code": "000000",
             "stock_name": "종목명",
-            "last_signal": "BUY | HOLD | SELL | WATCHING", // 매수/보유는 BUY/HOLD, 보유하다 매도할땐 SELL, 나머지 관심종목 후보들은 모두 WATCHING
-            "conviction_score": 95, // WATCHING 종목일수록 이 점수가 랭킹 서바이벌의 결정적 요인이 됨 (100점에 가까울수록 생존률 높음)
-            "strategy": "SWING",
-            "lifespan_days": 20, // BUY 판정시에만 유효
-            "analysts_json": ["REPORT", "MOMENTUM"], 
-            "last_signal_reason": "알파 Top 5 + 방산. (BUY 이유 혹은 WATCHING 고득점 편성 이유 명시)"
+            "last_signal": "BUY | HOLD | SELL | WATCHING",
+            "conviction_score": 95,
+            "lifespan_days": 20,
+            "analysts_json": ["THEME", "ALPHA_TOP"],
+            "last_signal_reason": "알파 Top 5 + 테마 AI 수혜. (BUY 이유 혹은 WATCHING 고득점 편성 이유 명시)"
         }
     ]
 }
@@ -486,9 +491,10 @@ ${chartRiskSkill}
                 const parsed = JSON.parse(jsonStr);
                 if (parsed.decisions && Array.isArray(parsed.decisions)) {
 
-                    // [추가] 매수 및 대기(WATCHING) 슬롯 분리 처리 배열
+                    // [Phase 5] 매수 및 대기(WATCHING) 슬롯 분리 처리 배열
                     const buysAndSells: any[] = [];
-                    const groupedWatchlist: Record<string, any[]> = { MOMENTUM: [], PULLBACK: [], SWING: [], VALUE: [] };
+                    // primaryCategory 기반 그룹화 (THEME/MOMENTUM/PULLBACK/REPORT)
+                    const groupedWatchlist: Record<string, any[]> = { THEME: [], MOMENTUM: [], PULLBACK: [], REPORT: [] };
                     const validDecisions: any[] = [];
 
                     for (const dec of parsed.decisions) {
@@ -502,9 +508,18 @@ ${chartRiskSkill}
                         dec.finalCode = finalCode;
                         const previousInfo = activePortfolio.find(p => p.stock_code === finalCode);
                         const isHeld = previousInfo && (previousInfo.status === 'HELD' || previousInfo.status === 'IMMEDIATE_BUY');
-                        
-                        let finalStatus = 'WATCHING';
-                        
+
+                        // ALPHA_TOP 가산점 +5 적용
+                        const decTags: string[] = Array.isArray(dec.analysts_json) ? dec.analysts_json : [];
+                        if (decTags.includes('ALPHA_TOP')) {
+                            dec.conviction_score = Math.min(100, (dec.conviction_score || 50) + 5);
+                        }
+
+                        // primary_category 계산 (analysts_json 기반, ALPHA_TOP 제외 후 우선순위 적용)
+                        const AGENT_PRIORITY = ['THEME', 'MOMENTUM', 'PULLBACK', 'REPORT'];
+                        const filteredTags = decTags.filter((t: string) => t !== 'ALPHA_TOP');
+                        dec.primaryCategory = AGENT_PRIORITY.find(p => filteredTags.includes(p)) ?? 'MOMENTUM';
+
                         if (isHeld) {
                             if (dec.last_signal === 'SELL' || dec.last_signal === 'DROP') {
                                 dec.finalStatus = 'DROPPED';
@@ -517,24 +532,23 @@ ${chartRiskSkill}
                                 dec.finalStatus = 'HELD';
                                 buysAndSells.push(dec);
                             } else if (dec.last_signal === 'SELL' || dec.last_signal === 'DROP') {
-                                // AI가 아주 의도적으로 버린 쓰레기
                                 dec.finalStatus = 'DROPPED';
-                                dec.conviction_score = -1; 
+                                dec.conviction_score = -1;
                                 validDecisions.push(dec);
                             } else {
-                                // WATCHING 후보군 (나머지 전부)
+                                // WATCHING 후보군 — primaryCategory(THEME/MOMENTUM/PULLBACK/REPORT) 기준 그룹화
                                 dec.finalStatus = 'WATCHING';
-                                const s = dec.strategy || 'SWING';
-                                if (!groupedWatchlist[s]) groupedWatchlist[s] = [];
-                                groupedWatchlist[s].push(dec);
+                                const cat = dec.primaryCategory;
+                                if (!groupedWatchlist[cat]) groupedWatchlist[cat] = [];
+                                groupedWatchlist[cat].push(dec);
                             }
                         }
                     }
 
-                    // BUG FIX #2: 전략별 Cut-Off + 총 10개 글로벌 강제 트리밍
-                    // 기본값 합계 = 2+2+4+2 = 10개 (이전에 aiSettings undefined 시 3+3+6+3=15개 버그 방어)
+                    // [Phase 5] primaryCategory기반 Cut-Off + 총 10개 글로벌 강제 트리밍
                     const TOTAL_WATCH_LIMIT = 10;
-                    const watchLimits = limits.watchlist || { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 };
+                    // 새 기준: THEME:3, MOMENTUM:3, PULLBACK:2, REPORT:2 = 10개
+                    const watchLimits = limits.watchlist || { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 };
                     const cutOffDropped: any[] = [];
                     const survivedWatchlist: any[] = [];
 

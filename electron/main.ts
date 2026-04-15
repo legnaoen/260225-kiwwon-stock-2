@@ -795,8 +795,10 @@ ipcMain.handle('v2:get-sim-trade-picks', async () => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService');
         const db = DatabaseService.getInstance().getDb();
+        // ROW_NUMBER() 윈도우 함수로 (stock_code, pick_date) 파티션 내 1위 레코드만 선택
+        // 동일 종목이 여러 Track 테이블에 중복 저장되어도 DB 레벨에서 완전 dedup
         const picks = db.prepare(`
-            SELECT * FROM (
+            WITH combined AS (
                 SELECT * FROM track_a_buy_picks
                 UNION ALL
                 SELECT * FROM track_b_buy_picks
@@ -806,17 +808,45 @@ ipcMain.handle('v2:get-sim-trade-picks', async () => {
                 SELECT * FROM track_d_buy_picks
                 UNION ALL
                 SELECT * FROM track_e_buy_picks
+            ),
+            ranked AS (
+                SELECT *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY stock_code, pick_date
+                        ORDER BY
+                            CASE category
+                                WHEN 'TRUE_LEADER'              THEN 1
+                                WHEN 'INTRADAY_SURGE'           THEN 2
+                                WHEN 'SHORT_TERM_CONSOLIDATION' THEN 3
+                                WHEN 'EMERGING_STAR'            THEN 4
+                                WHEN 'PULLBACK_REBOUND'         THEN 5
+                                WHEN 'PULLBACK_DIP'             THEN 6
+                                ELSE 7
+                            END ASC,
+                            id ASC
+                    ) AS rn
+                FROM combined
             )
-            ORDER BY pick_date DESC, 
-            CASE category 
-                WHEN 'TRUE_LEADER' THEN 1 
-                WHEN 'INTRADAY_SURGE' THEN 2 
-                WHEN 'SHORT_TERM_CONSOLIDATION' THEN 3
-                WHEN 'EMERGING_STAR' THEN 4 
-                WHEN 'PULLBACK_DIP' THEN 5 
-                ELSE 6 
-            END ASC, 
-            pick_rank ASC
+            SELECT
+                id, pick_date, pick_rank, stock_code, stock_name, category,
+                signals_json, buy_score, reason, risk, related_themes_json,
+                theme_lifespan, entry_price, exit_price, current_price,
+                holding_days, target_days, target_return_pct, peak_return,
+                peak_date, final_return, status, result, entry_date, exit_date
+            FROM ranked
+            WHERE rn = 1
+            ORDER BY
+                pick_date DESC,
+                CASE category
+                    WHEN 'TRUE_LEADER'              THEN 1
+                    WHEN 'INTRADAY_SURGE'           THEN 2
+                    WHEN 'SHORT_TERM_CONSOLIDATION' THEN 3
+                    WHEN 'EMERGING_STAR'            THEN 4
+                    WHEN 'PULLBACK_REBOUND'         THEN 5
+                    WHEN 'PULLBACK_DIP'             THEN 6
+                    ELSE 7
+                END ASC,
+                pick_rank ASC
             LIMIT 500
         `).all();
         return { picks };

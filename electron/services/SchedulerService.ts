@@ -97,19 +97,6 @@ export class SchedulerService {
             }, { timezone: 'Asia/Seoul' })
 
 
-
-            // 장중 군집 AI 로컬 스웜 (09:10 ~ 11:10 간 15분 단위, 총 9회)
-            const swarmJobs: cron.ScheduledTask[] = []
-            const swarmSlots = ['09:10', '09:25', '09:40', '09:55', '10:10', '10:25', '10:40', '10:55', '11:10']
-            for (const slot of swarmSlots) {
-                const [hr, min] = slot.split(':')
-                const job = cron.schedule(`${parseInt(min)} ${parseInt(hr)} * * 1-5`, async () => {
-                    const { IntradaySwarmAgent } = await import('./v2_agents/IntradaySwarmAgent')
-                    await IntradaySwarmAgent.getInstance().runSwarm(slot)
-                }, { timezone: 'Asia/Seoul' })
-                swarmJobs.push(job)
-            }
-
             // 주간 회고 AI (금요일 15:44, 3분 텀 내 편성)
             const weeklyReviewJob = cron.schedule('44 15 * * 5', async () => {
                 try {
@@ -387,8 +374,7 @@ export class SchedulerService {
                     console.error('[Scheduler] ThemeContextBuilder 오류:', e.message)
                 }
             }, { timezone: 'Asia/Seoul' })
-
-            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob, ...swarmJobs)
+            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob)
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)

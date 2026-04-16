@@ -42,8 +42,8 @@ export default function MaiisMonitorTab() {
     const apiStatuses: ApiStatus[] = [
         { id: 'kiwoom', name: 'KIWOOM REST', status: 'online', latency: stats.find(s => s.api_name.includes('Kiwoom'))?.latency_ms || 0, lastChecked: formatRelativeTime(inventory.find(i => i.data_key === 'kiwoom_daily_master')?.last_freshness_at || ''), icon: ShieldCheck, color: 'text-primary' },
         { id: 'naver', name: 'NAVER NEWS', status: 'online', latency: stats.find(s => s.api_name.includes('Naver'))?.latency_ms || 0, lastChecked: formatRelativeTime(inventory.find(i => i.data_key === 'naver_news_top50')?.last_freshness_at || ''), icon: Globe, color: 'text-emerald-500' },
-        { id: 'dart', name: 'OPENDART', status: 'online', latency: stats.find(s => s.api_name.includes('DART'))?.latency_ms || 0, lastChecked: formatRelativeTime(inventory.find(i => i.data_key.startsWith('dart'))?.last_freshness_at || ''), icon: Database, color: 'text-emerald-600' },
-        { id: 'yahoo', name: 'YAHOO FIN', status: 'online', latency: stats.find(s => s.api_name.includes('Yahoo'))?.latency_ms || 0, lastChecked: formatRelativeTime(inventory.find(i => i.data_key.startsWith('yahoo'))?.last_freshness_at || ''), icon: Globe, color: 'text-purple-500' },
+        { id: 'dart', name: 'OPENDART', status: 'online', latency: stats.find(s => s.api_name.includes('DART'))?.latency_ms || 0, lastChecked: formatRelativeTime(inventory.find(i => i.data_key?.startsWith('dart'))?.last_freshness_at || ''), icon: Database, color: 'text-emerald-600' },
+        { id: 'yahoo', name: 'YAHOO FIN', status: 'online', latency: stats.find(s => s.api_name.includes('Yahoo'))?.latency_ms || 0, lastChecked: formatRelativeTime(inventory.find(i => i.data_key?.startsWith('yahoo'))?.last_freshness_at || ''), icon: Globe, color: 'text-purple-500' },
         { id: 'gemini', name: 'GOOGLE AI', status: 'online', latency: stats.find(s => s.api_name.includes('Gemini'))?.latency_ms || 0, lastChecked: '방금 전', icon: Activity, color: 'text-indigo-500' },
     ];
 

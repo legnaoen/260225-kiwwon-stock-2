@@ -7,15 +7,18 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
 
 // ── Helpers ──
-const getSeverityColor = (sev: string) => {
+const getSeverityColor = (sev?: string | null) => {
+  if (!sev) return 'text-slate-500';
   if (sev.startsWith('A') || sev.startsWith('B')) return 'text-rose-500';
   if (sev.startsWith('C')) return 'text-amber-500';
   return 'text-slate-500';
 }
 
-const getSeverityBadgeClasses = (sev: string) => {
+const getSeverityBadgeClasses = (sev?: string | null) => {
+  if (!sev) return 'bg-slate-500/10 text-slate-500 border-slate-500/20';
   if (sev.startsWith('A') || sev.startsWith('B')) return 'bg-rose-500/10 text-rose-500 border-rose-500/20';
   if (sev.startsWith('C')) return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
+  return 'bg-slate-500/10 text-slate-500 border-slate-500/20';
 }
 
 const getRiskColorClass = (score: number) => {

@@ -173,29 +173,31 @@ function PortfolioStockModal({ stock, watchlist, onClose, onUpdateStockPrice }: 
                                 <div className="p-5 md:px-6 space-y-6 max-w-full">
 
                                     {/* 1. Stats Grid */}
-                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                        {(() => {
-                                            const ep = stock.entry_price || stock.actual_entry_price || stock.current_price;
-                                            const displayPrice = latestPrice || stock.current_price;
-                                            const pr = (ep && displayPrice) ? ((displayPrice - ep) / ep) * 100 : (stock.profit_rate != null ? Number(stock.profit_rate) : null);
-                                            const hr = (stock.high_price && ep && stock.high_price > ep) ? ((stock.high_price - ep) / ep) * 100 : pr;
+                                    {!['DROPPED', 'HIT', 'CLOSED'].includes(stock.status) && (
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                            {(() => {
+                                                const ep = stock.entry_price || stock.actual_entry_price || stock.current_price;
+                                                const displayPrice = latestPrice || stock.current_price;
+                                                const pr = (ep && displayPrice) ? ((displayPrice - ep) / ep) * 100 : (stock.profit_rate != null ? Number(stock.profit_rate) : null);
+                                                const hr = (stock.high_price && ep && stock.high_price > ep) ? ((stock.high_price - ep) / ep) * 100 : pr;
 
-                                            return [
-                                                { label: '매력도 / 시그널', value: `${stock.conviction_score || 0}점 / ${stock.last_signal || '-'}` },
-                                                { label: '현재가 수익률', value: pr != null ? `${pr > 0 ? '+' : ''}${pr.toFixed(2)}%` : '-', color: pr && pr > 0 ? 'text-rose-500' : pr && pr < 0 ? 'text-blue-500' : '' },
-                                                {
-                                                    label: '목표 보유일정', value: (stock.status === 'HELD' || stock.last_signal === 'IMMEDIATE_BUY')
-                                                        ? `D+${stock.days_held ?? 0} / ${stock.lifespan_days ?? '-'}일`
-                                                        : '─ (관심 대기 중)'
-                                                },
-                                            ].map(({ label, value, color }) => (
-                                                <div key={label} className="bg-muted/10 border border-border/30 rounded-lg p-3">
-                                                    <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1.5">{label}</div>
-                                                    <div className={cn('text-xs font-mono font-bold', color)}>{value}</div>
-                                                </div>
-                                            ));
-                                        })()}
-                                    </div>
+                                                return [
+                                                    { label: '매력도 / 시그널', value: `${stock.conviction_score || 0}점 / ${stock.last_signal || '-'}` },
+                                                    { label: '현재가 수익률', value: pr != null ? `${pr > 0 ? '+' : ''}${pr.toFixed(2)}%` : '-', color: pr && pr > 0 ? 'text-rose-500' : pr && pr < 0 ? 'text-blue-500' : '' },
+                                                    {
+                                                        label: '목표 보유일정', value: (stock.status === 'HELD' || stock.last_signal === 'IMMEDIATE_BUY')
+                                                            ? `D+${stock.days_held ?? 0} / ${stock.lifespan_days ?? '-'}일`
+                                                            : '- (관심 대기 중)'
+                                                    },
+                                                ].map(({ label, value, color }) => (
+                                                    <div key={label} className="bg-muted/10 border border-border/30 rounded-lg p-3">
+                                                        <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1.5">{label}</div>
+                                                        <div className={cn('text-xs font-mono font-bold', color)}>{value}</div>
+                                                    </div>
+                                                ));
+                                            })()}
+                                        </div>
+                                    )}
 
                                     {/* 2. PM Rationale */}
                                     <div className="space-y-3">
@@ -1250,8 +1252,9 @@ export const PortfolioManagerTab: React.FC = () => {
                                 <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
                                     <th className="py-2 pr-3 font-bold w-16 text-center">결과</th>
                                     <th className="py-2 pr-4 font-bold w-36 min-w-[144px]">종목</th>
+                                    <th className="py-2 pr-4 font-bold text-center w-[60px]">분류</th>
                                     <th className="py-2 pr-4 font-bold text-right w-[90px]">진입가</th>
-                                    <th className="py-2 pr-4 font-bold">추천 AI</th>
+                                    <th className="py-2 pr-4 font-bold text-right w-[90px]">청산가</th>
                                     <th className="py-2 pr-4 font-bold text-right">피크 수익률</th>
                                     <th className="py-2 pr-4 font-bold text-right">종료 수익률</th>
                                     <th className="py-2 pr-4 font-bold text-center w-[60px]">시작일</th>
@@ -1302,6 +1305,25 @@ export const PortfolioManagerTab: React.FC = () => {
                                                 <div className="font-semibold text-[13px] truncate max-w-[128px]" title={p.stock_name}>{p.stock_name}</div>
                                                 <div className="text-[10px] font-mono text-muted-foreground">{p.stock_code}</div>
                                             </td>
+                                            {/* 분류 */}
+                                            <td className="py-2 pr-4 text-center">
+                                                {(() => {
+                                                    const cat = p.strategy || 'MOMENTUM';
+                                                    if (cat === 'THEME') return (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-violet-400 bg-violet-500/10 border-violet-500/30 whitespace-nowrap">🎯 테마</span>
+                                                    );
+                                                    if (cat === 'MOMENTUM') return (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-rose-400 bg-rose-500/10 border-rose-500/30 whitespace-nowrap">🚀 모멘텀</span>
+                                                    );
+                                                    if (cat === 'PULLBACK') return (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-amber-400 bg-amber-500/10 border-amber-500/30 whitespace-nowrap">🔥 눌림목</span>
+                                                    );
+                                                    if (cat === 'REPORT') return (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border-emerald-500/30 whitespace-nowrap">📋 리포트</span>
+                                                    );
+                                                    return <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] uppercase font-bold text-muted-foreground bg-muted/20 whitespace-nowrap">{cat}</span>;
+                                                })()}
+                                            </td>
                                             {/* 진입가 */}
                                             <td className="py-2 pr-4 text-right">
                                                 <div className="font-mono text-[12px] text-muted-foreground">
@@ -1309,13 +1331,16 @@ export const PortfolioManagerTab: React.FC = () => {
                                                 </div>
                                                 <div className="text-[10px] text-muted-foreground/60">원</div>
                                             </td>
-                                            {/* 추천 AI */}
-                                            <td className="py-2 pr-4">
-                                                <AnalystBadges json={p.analysts_json} />
+                                            {/* 청산가 */}
+                                            <td className="py-2 pr-4 text-right">
+                                                <div className="font-mono text-[12px] text-muted-foreground">
+                                                    {p.closed_price ? p.closed_price.toLocaleString() : (p.current_price ? p.current_price.toLocaleString() : '─')}
+                                                </div>
+                                                <div className="text-[10px] text-muted-foreground/60">원</div>
                                             </td>
                                             {/* 피크 수익률 */}
                                             <td className="py-2 pr-4 text-right">
-                                                {peakProf !== 0 ? (
+                                                {p.peak_profit_rate != null ? (
                                                     <span className={cn('text-xs font-bold font-mono', peakColor)}>
                                                         {peakProf > 0 ? '+' : ''}{peakProf.toFixed(2)}%
                                                     </span>

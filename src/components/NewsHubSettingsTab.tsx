@@ -432,7 +432,7 @@ export default function NewsHubSettingsTab() {
 
                 <div className="space-y-2">
                     {settings.scheduleSlots.map((slot, i) => {
-                        const isWarning = warnings.some(w => w.startsWith(`[${slot.time}]`))
+                        const isWarning = warnings.some(w => w?.startsWith(`[${slot.time}]`))
                         return (
                             <div
                                 key={i}

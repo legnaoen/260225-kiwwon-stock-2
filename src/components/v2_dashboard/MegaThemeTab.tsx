@@ -453,7 +453,7 @@ export const MegaThemeTab: React.FC<{ onNavigate?: (tabId: string, entityId?: st
         const narrativeRaw = theme.core_narrative || '분석 데이터 없음';
         let narrativeHistory: { date: string; title: string; body: string }[] = [];
         try {
-            if (narrativeRaw.trim().startsWith('[')) {
+            if (narrativeRaw.trim()?.startsWith('[')) {
                 const arr = JSON.parse(narrativeRaw);
                 if (Array.isArray(arr)) {
                     narrativeHistory = arr.map(h => {

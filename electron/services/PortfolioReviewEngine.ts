@@ -95,19 +95,19 @@ export class PortfolioReviewEngine {
 
             const profile = this.profileService.getProfile(item.strategy || 'SWING')
 
-            // ─── 1. 비상 손절 (모든 전략, 최우선) ───
-            if (profitRate <= profile.hardStopLoss) {
-                forceSells.push({
-                    action: 'FORCE_SELL',
-                    reason: `하드 손절 (${profitRate.toFixed(1)}% ≤ ${profile.hardStopLoss}%)`,
-                    ruleType: 'STOP_LOSS',
-                    item,
-                    profitRate,
-                })
-                continue
-            }
+            // ─── 1. 비상 손절 (기계적 손절 제거, AI의 자율 판단으로 위임) ───
+            // if (profitRate <= profile.hardStopLoss) {
+            //     forceSells.push({
+            //         action: 'FORCE_SELL',
+            //         reason: `하드 손절 (${profitRate.toFixed(1)}% ≤ ${profile.hardStopLoss}%)`,
+            //         ruleType: 'STOP_LOSS',
+            //         item,
+            //         profitRate,
+            //     })
+            //     continue
+            // }
 
-            // ─── 2. 하드 익절 (Track A만, hardTakeProfit > 0) ───
+            // ─── 2. 하드 익절 (Track A만, hardTakeProfit > 0) - 사용 안함 ───
             if (profile.hardTakeProfit > 0 && profitRate >= profile.hardTakeProfit) {
                 forceSells.push({
                     action: 'FORCE_SELL',
@@ -119,24 +119,24 @@ export class PortfolioReviewEngine {
                 continue
             }
 
-            // ─── 3. 트레일링 스탑 (SWING) ───
-            if (profile.trailingStopPct < 0) {
-                const highPrice = item.high_price || item.actual_entry_price || item.entry_price || 0
-                const currentPrice = item.current_price || 0
-                if (highPrice > 0 && currentPrice > 0) {
-                    const dropFromHigh = ((currentPrice / highPrice) - 1) * 100
-                    if (dropFromHigh <= profile.trailingStopPct) {
-                        forceSells.push({
-                            action: 'FORCE_SELL',
-                            reason: `트레일링 스탑 (고점 대비 ${dropFromHigh.toFixed(1)}% ≤ ${profile.trailingStopPct}%)`,
-                            ruleType: 'TRAILING_STOP',
-                            item,
-                            profitRate,
-                        })
-                        continue
-                    }
-                }
-            }
+            // ─── 3. 트레일링 스탑 (기계적 손절 제거, AI 자율 판단 위임) ───
+            // if (profile.trailingStopPct < 0) {
+            //     const highPrice = item.high_price || item.actual_entry_price || item.entry_price || 0
+            //     const currentPrice = item.current_price || 0
+            //     if (highPrice > 0 && currentPrice > 0) {
+            //         const dropFromHigh = ((currentPrice / highPrice) - 1) * 100
+            //         if (dropFromHigh <= profile.trailingStopPct) {
+            //             forceSells.push({
+            //                 action: 'FORCE_SELL',
+            //                 reason: `트레일링 스탑 (고점 대비 ${dropFromHigh.toFixed(1)}% ≤ ${profile.trailingStopPct}%)`,
+            //                 ruleType: 'TRAILING_STOP',
+            //                 item,
+            //                 profitRate,
+            //             })
+            //             continue
+            //         }
+            //     }
+            // }
 
             // ─── 4. DAYTRADING 강제청산 (장중 INTRADAY에서만) ───
             if (profile.forceCloseTime && mode === 'INTRADAY') {
@@ -204,6 +204,8 @@ export class PortfolioReviewEngine {
                 this.db.getDb().prepare("UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ? WHERE stock_code = ?")
                     .run(`[자동 파기] ${result.reason}`, new Date().toISOString(), item.stock_code)
                 executed++
+                
+                this.db.logPortfolioEvent(item.stock_code, item.stock_name, 'DROPPED', item.status, 'DROPPED', `[자동 파기] ${result.reason}`, sellPrice);
 
                 const log = `[가비지 컬렉터] ${item.stock_name}(${item.stock_code}) ${result.reason} → 관리 제외`
                 console.log(log)
@@ -223,6 +225,8 @@ export class PortfolioReviewEngine {
                 // DB 청산 기록
                 this.db.closePortfolioItem(item.stock_code, sellPrice, today)
                 executed++
+
+                this.db.logPortfolioEvent(item.stock_code, item.stock_name, 'DROPPED', item.status, 'CLEARED', `[하드룰 청산] ${result.reason}`, sellPrice);
 
                 const log = `[하드룰] ${result.ruleType}: ${item.stock_name}(${item.stock_code}) ${result.reason} → 청산 (${sellResult.profitRate > 0 ? '+' : ''}${sellResult.profitRate.toFixed(1)}%)`
                 console.log(log)

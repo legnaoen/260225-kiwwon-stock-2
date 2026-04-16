@@ -1,0 +1,1 @@
+const Database = require('better-sqlite3'); const db = new Database('maiis.db'); const row = db.prepare(\SELECT request_text, response_text FROM ai_run_logs WHERE target_type='gemini' AND request_text LIKE '%여의도 최고 수익률%' ORDER BY id DESC LIMIT 1\).get(); console.log(row ? row.response_text : 'No row found');

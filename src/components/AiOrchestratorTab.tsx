@@ -253,11 +253,11 @@ export default function AiOrchestratorTab() {
         ).sort((a, b) => a.time.localeCompare(b.time))
 
     const filteredLog = selectedAgent
-        ? executionLog.filter(e => e.agentId.startsWith(selectedAgent.id))
+        ? executionLog.filter(e => e.agentId?.startsWith(selectedAgent.id))
         : executionLog // 'LOGS' 일 때도 전체 원본 사용
         
     // 마지막 실행 조회
-    const getLastRun = (agentId: string) => executionLog.find(e => e.agentId.startsWith(agentId))
+    const getLastRun = (agentId: string) => executionLog.find(e => e.agentId?.startsWith(agentId))
 
     return (
         <div className="flex h-full bg-background text-foreground">
@@ -348,7 +348,7 @@ export default function AiOrchestratorTab() {
                     {AI_AGENTS.map(agent => {
                         const isSelected = selectedAgentId === agent.id
                         const lastRun = getLastRun(agent.id)
-                        const isRunning = queueStatus?.pendingJobs?.some(j => j.agentId.startsWith(agent.id) && j.status === 'RUNNING')
+                        const isRunning = queueStatus?.pendingJobs?.some(j => j.agentId?.startsWith(agent.id) && j.status === 'RUNNING')
 
                         return (
                             <button
@@ -437,7 +437,7 @@ export default function AiOrchestratorTab() {
                             </h4>
                             <div className="space-y-3">
                                 {queueStatus.pendingJobs
-                                    .filter(j => !selectedAgent || j.agentId.startsWith(selectedAgent.id))
+                                    .filter(j => !selectedAgent || j.agentId?.startsWith(selectedAgent.id))
                                     .map(job => (
                                     <div key={job.id} className="flex items-center gap-4 bg-background px-4 py-3 rounded-xl border border-border shadow-sm">
                                         <RefreshCw size={16} className={job.status === 'RUNNING' ? 'animate-spin text-primary' : 'text-muted-foreground'} />

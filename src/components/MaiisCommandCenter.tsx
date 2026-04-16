@@ -355,7 +355,7 @@ const PipelineMonitorModal = ({ onClose }: { onClose: () => void }) => {
     useEffect(() => {
         if (!selectedRunId) return;
 
-        if (selectedRunId.startsWith('upcoming-')) {
+        if (selectedRunId?.startsWith('upcoming-')) {
             const upc = upcomingRuns.find(u => u.id === selectedRunId);
             if (upc) {
                 let phases = [];
@@ -410,7 +410,7 @@ const PipelineMonitorModal = ({ onClose }: { onClose: () => void }) => {
             if (phase.durationMs) md += `- **Duration**: ${(phase.durationMs / 1000).toFixed(1)}s\n`;
             if (phase.error) md += `- **Error**: \`${phase.error}\`\n`;
             if (phase.result) {
-                const isJson = phase.result.startsWith('{') || phase.result.startsWith('[');
+                const isJson = phase.result?.startsWith('{') || phase.result?.startsWith('[');
                 md += `- **Result**:\n${isJson ? '```json\n' : '```text\n'}${phase.result}\n\`\`\`\n`;
             }
             md += `\n`;

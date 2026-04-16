@@ -433,18 +433,18 @@ ${chartRiskSkill}
 [매수 및 관심종목 판단 이원화 원칙 — 이 지침이 규칙의 알파이자 오메가다]
 1. **[매수(HELD) 포지션 엄격 분리]**: 지금 당장 "실제 현금으로 매수"할 만한 초A급 주도주에만 "BUY" 또는 기존 매수종목 유지 시 "HOLD" 판정을 내려라. 매수 조건은 극도로 엄격하게 적용하며, 상단 저항, 재료 소멸, 추격매수 시에는 가차없이 제외한다. (매도는 "SELL" 지시)
 
-1-A. **[최대 수익 추구 원칙 — 절대 규칙]**: 보유 종목(HELD)의 수익률이 특정 수치(예: +8%, +10%)에 도달했다는 이유만으로 SELL을 판정하지 마라. **수익률 목표치는 성과 측정 기준일 뿐, 매도 트리거가 아니다.** 모멘텀이 살아있고 시장 주도력이 유지되는 한 최대한 보유하며 최대 수익을 추구하라. 매도 판단은 오직 다음 경우에만: ① 핵심 재료/테마 소멸 ② 시장 주도력 상실(Alpha 랭킹 급락) ③ 상단 강한 저항 + 거래량 고갈 ④ 더 강한 종목으로 교체가 필요한 경우.
+1-A. **[수익/손실 제로베이스 평가 (Sunk Cost 무시) — 절대 규칙]**: 현재 종목이 +20% 수익이든 -10% 손실이든 과거의 숫자는 '매몰비용(Sunk Cost)'으로 취급하라. 기계적인 익절이나 기계적인 손절(Panic Sell)은 절대 금지한다. 종목을 유지(HOLD)할지 매도(SELL)할지는 오직 단 하나, **"현시점을 기준으로 앞으로 이 종목이 다른 관심 종목(WATCHING) 후보들보다 더 크게 상승할 여력(Upside Potential)과 시장 주도력이 남아있는가?"**만을 잣대로 삼아 제로베이스에서 판단하라. 모멘텀과 수급이 살아있다면 마이너스 상태라도 과감히 홀드(HOLD)하며 최대 수익을 추구하고, 반대로 상승 추세가 무너지고(Alpha 급락, 재료 소멸, 상단 저항+거래량 고갈) 가망이 없다면 단 -1% 손실이더라도 가차없이 매도(SELL)하라.
 2. **[강제 T/O 서바이벌 스코어링]**: 매수(BUY / HOLD / SELL)로 판정된 최상위 종목 혹은 청산종목을 제외한 >>나머지 모든 종목<<(기존 관심종목 + 새로 올라온 추천주 전체)에 대해서는 무단으로 탈락(DROP)시키지 마라.
 대신에, 이들을 관심종목 후보(WATCHING)로 두고 0점~100점의 **매력도 점수(conviction_score)** 를 매우 촘촘하게(상대적인 랭킹을 매긴다는 느낌으로) 평가하라.
-시스템적으로 각 추천 AI 카테고리(THEME/MOMENTUM/PULLBACK/REPORT)별 최대 허용 개수가 정해져 있으며, 네가 매긴 점수순으로 정렬한 뒤 시스템(코드)이 하위권 종목들을 자동으로 탈락(DROP) 처리할 것이다. 즉, 너의 역할은 후보 종목 간의 성적표(등수별 점수)를 냉정하게 매기는 것이다!
+시스템적으로 각 카테고리별 최대 허용 개수는 시스템 로직(코드)이 알아서 계산하여 하위권 종목들을 정밀하게 탈락(DROP)시킬 것이다. 네가 임의로 종목을 누락시키면 심각한 시스템 오류가 발생하므로, 무조건 입력된 전체 ${stockList.length}개 종목 모두에 대하여 리스트에 담아 판정 결과를 반환해라. 즉, 너의 역할은 모든 후보 종목 간의 성적표(등수별 점수)를 냉정하게 매기는 것이다!
 
-[추천 AI 카테고리 & 캡 안내]
-각 종목의 analysts_json에는 이미 추천 AI 카테고리가 지정되어 있다. 시스템은 아래 우선순위로 캡 슬롯을 배정한다.
-- THEME(3슬롯): 테마 AI 추천 종목 (내러티브·섹터 기반)
-- MOMENTUM(3슬롯): 수급/모멘텀 AI 추천 종목 (단기 거래량·강세)
-- PULLBACK(2슬롯): 눌림목 AI 추천 종목 (MA 지지·타점 진입)
-- REPORT(2슬롯): 리포트 AI 추천 종목 (증권사 보고서 기반)
-- ALPHA_TOP: **캡 슬롯 없음 — 가산점 신호로만 활용**
+[추천 AI 카테고리 가산점 안내]
+각 종목의 analysts_json에는 현재 추천 AI 카테고리가 지정되어 있다.
+- THEME: 테마 AI 추천 종목 (내러티브·섹터 기반)
+- MOMENTUM: 수급/모멘텀 AI 추천 종목 (단기 거래량·강세)
+- PULLBACK: 눌림목 AI 추천 종목 (MA 지지·타점 진입)
+- REPORT: 리포트 AI 추천 종목 (증권사 보고서 기반)
+- ALPHA_TOP: **가산점 신호로 활용**
   → analysts_json에 ALPHA_TOP이 포함된 종목은 conviction_score를 5점 추가로 부여하라 (100점 초과 불가)
 
 ※ strategy 필드는 더 이상 사용하지 않는다. 응답 JSON에 strategy를 포함하지 마라.
@@ -469,7 +469,7 @@ ${chartRiskSkill}
 
             const response = await AiExecutionQueue.getInstance().enqueue({
                 agentId: 'PORTFOLIO_MANAGER',
-                agentName: '포트폴리오 매니저',
+                agentName: '포트폴리오 매니저 (v2.5 Max-Profit)',
                 triggerType: 'CRON',
                 targetType: 'gemini',
                 prompt: promptContext,
@@ -490,6 +490,15 @@ ${chartRiskSkill}
             try {
                 const parsed = JSON.parse(jsonStr);
                 if (parsed.decisions && Array.isArray(parsed.decisions)) {
+
+                    // 누락 경고 (AI Hallucination 방어)
+                    if (parsed.decisions.length < stockList.length) {
+                        console.warn(`[PortfolioManager] ⚠️ AI 응답 누락 감지: 입력 ${stockList.length}개 중 ${parsed.decisions.length}개만 반환됨.`);
+                        try {
+                            const { TelegramService } = await import('../TelegramService');
+                            TelegramService.getInstance().sendMessage(`⚠️ [PM경고] AI가 ${stockList.length}개 중 ${parsed.decisions.length}개의 분석만 반환하여 나머지 ${stockList.length - parsed.decisions.length}종목은 강제 탈락(DROPPED) 처리됩니다.`);
+                        } catch (_) {}
+                    }
 
                     // [Phase 5] 매수 및 대기(WATCHING) 슬롯 분리 처리 배열
                     const buysAndSells: any[] = [];
@@ -517,7 +526,13 @@ ${chartRiskSkill}
 
                         // primary_category 계산 (analysts_json 기반, ALPHA_TOP 제외 후 우선순위 적용)
                         const AGENT_PRIORITY = ['THEME', 'MOMENTUM', 'PULLBACK', 'REPORT'];
-                        const filteredTags = decTags.filter((t: string) => t !== 'ALPHA_TOP');
+                        const filteredTags = decTags.map((t: string) => {
+                            if (t === '테마') return 'THEME';
+                            if (t === '수급' || t === '모멘텀') return 'MOMENTUM';
+                            if (t === '눌림목') return 'PULLBACK';
+                            if (t === '리포트') return 'REPORT';
+                            return t;
+                        }).filter((t: string) => t !== 'ALPHA_TOP');
                         dec.primaryCategory = AGENT_PRIORITY.find(p => filteredTags.includes(p)) ?? 'MOMENTUM';
 
                         if (isHeld) {

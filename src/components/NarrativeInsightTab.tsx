@@ -151,7 +151,7 @@ export default function NarrativeInsightTab() {
                             ).sort((a: any, b: any) => b.score - a.score).slice(0, 6)
                         ),
                         source_news: ins.raw_input_text ? JSON.stringify(
-                            ins.raw_input_text.split('\n').filter((l: string) => l.startsWith('-')).map((l: string) => ({
+                            ins.raw_input_text.split('\n').filter((l: string) => l?.startsWith('-')).map((l: string) => ({
                                 title: l.replace(/^- /, '').split(':')[0]?.trim(),
                                 link: '#'
                             })).slice(0, 10)

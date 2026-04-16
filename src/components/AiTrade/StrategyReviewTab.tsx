@@ -47,7 +47,7 @@ export default function StrategyReviewTab() {
             setStrategies(sortedData);
             // If strategies exist created today, mark as analyzed
             const today = new Date().toISOString().split('T')[0];
-            const analyzedToday = data?.some((s: StrategyDetail) => s.created_at.startsWith(today) && s.version !== 'v1');
+            const analyzedToday = data?.some((s: StrategyDetail) => s.created_at?.startsWith(today) && s.version !== 'v1');
             setIsAnalyzed(analyzedToday);
         } catch (error) {
             console.error('Failed to load strategies:', error);

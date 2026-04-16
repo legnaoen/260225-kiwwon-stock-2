@@ -324,7 +324,7 @@ export default function RisingStocksReport() {
                     date: reportDate,
                     // 장 시작 전일 경우 요약 문구 수정 (운영 원칙 9.3)
                     // 기존 리포트가 있더라도(DB에서 로드된 것 등), 장 시작 전이면 안내 문구를 우선시하거나 유지함
-                    summary: (existing?.summary && existing.summary.startsWith('{')) 
+                    summary: (existing?.summary && existing.summary?.startsWith('{')) 
                         ? existing.summary 
                         : (isPreMarket 
                             ? '장 시작 전입니다. 현재 보고 계신 목록은 직전 거래일 기준 급등주입니다.' 
@@ -366,7 +366,7 @@ export default function RisingStocksReport() {
                     const merged = historyReports.map(history => {
                         const existing = prev.find(p => p.date === history.date);
                         // 기존에 이미 내용({로 시작하는 JSON)이 들어있다면 그것을 유지
-                        if (existing && existing.summary && existing.summary.startsWith('{')) {
+                        if (existing && existing.summary && existing.summary?.startsWith('{')) {
                             return existing;
                         }
                         return history;
@@ -517,7 +517,7 @@ export default function RisingStocksReport() {
                 }
 
                 // 기존 상세 리포트 보존 로직 추가
-                if (existing && existing.summary && existing.summary.startsWith('{') && (!newReport.summary || !newReport.summary.startsWith('{'))) {
+                if (existing && existing.summary && existing.summary?.startsWith('{') && (!newReport.summary || !newReport.summary?.startsWith('{'))) {
                     return prev
                 }
 
@@ -1288,7 +1288,7 @@ export default function RisingStocksReport() {
                                  let parsed: any = { summary_lines: [], market_outlook: '', top_themes: [] };
                                  try {
                                      const raw = currentReport.summary || '';
-                                     if (raw.startsWith('{')) {
+                                     if (raw?.startsWith('{')) {
                                          const p = JSON.parse(raw);
                                          parsed = {
                                              summary_lines: p.summary_lines || (p.market_summary ? [p.market_summary] : []),
@@ -1322,7 +1322,7 @@ export default function RisingStocksReport() {
                                                 )}
                                             </div>
                                             
-                                            {!currentReport.summary || !currentReport.summary.startsWith('{') ? (
+                                            {!currentReport.summary || !currentReport.summary?.startsWith('{') ? (
                                                 <div className="bg-indigo-500/[0.03] border border-indigo-500/10 rounded-2xl p-8 text-center space-y-4">
                                                     <div className="bg-indigo-500/10 w-12 h-12 rounded-2xl flex items-center justify-center mx-auto">
                                                         <Beaker size={24} className="text-indigo-600" />

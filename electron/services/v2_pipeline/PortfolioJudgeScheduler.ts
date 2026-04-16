@@ -114,22 +114,11 @@ export class PortfolioJudgeScheduler {
                 const closeProfitPct = ((todayClosePrice - entryPrice) / entryPrice) * 100;
                 const daysHeld = stock.days_held + 1;
 
-                // 2. 전략별(Strategy-Aware) 판정 로직
-                let newStatus = stock.status;
-                const strategy: string = (stock.strategy || 'SWING').toUpperCase();
+                // 2. 종목 상태 변경 기능 제거 (15시 41분에는 상태 변경을 하지 않음)
+                // - 실제 물리적인 매매가 가능한 09:45, 14:05 크론에서 포트폴리오 매니저가 담당함.
+                const newStatus = stock.status;
 
-                if (newStatus !== 'DROPPED' && newStatus !== 'HIT') {
-                    const judgeResult = this.judgeByStrategy(strategy, {
-                        highProfitPct,
-                        closeProfitPct,
-                        daysHeld,
-                        lifespanDays: stock.lifespan_days,
-                        stockName: stock.stock_name,
-                    });
-                    if (judgeResult) newStatus = judgeResult;
-                }
-
-                // 3. DB 갱신
+                // 3. DB 갱신 (종가 기록, 일수 +1 증가)
                 rawDb.prepare(`
                     UPDATE maiis_portfolio
                     SET current_price = ?, target_price = ?, profit_rate = ?, days_held = ?, status = ?, updated_at = ?
@@ -143,28 +132,8 @@ export class PortfolioJudgeScheduler {
                     this.db.getKstTimestamp(),
                     stock.stock_code
                 );
-
-                // ─── P3-6: DROPPED 시 인큐베이터 자동 이관 로직 ───
-                if (newStatus === 'DROPPED') {
-                    try {
-                        const shouldDemote = this.checkThemeOrAlphaSurvival(rawDb, stock.stock_code, stock.stock_name);
-                        if (shouldDemote) {
-                            this.db.demoteToIncubator({
-                                stock_code: stock.stock_code,
-                                stock_name: stock.stock_name,
-                                current_price: todayClosePrice,
-                                last_signal_reason: stock.last_signal_reason,
-                                id: stock.id
-                            });
-                            console.log(`[PortfolioJudge] 🔀 ${stock.stock_name} → 🧪 인큐베이터 이관 (테마/Alpha 생존)`);
-                            demotedCount++;
-                        } else {
-                            console.log(`[PortfolioJudge] ❌ ${stock.stock_name} 완전 탈락 (테마/Alpha 소멸)`);
-                        }
-                    } catch (e) {
-                        console.warn(`[PortfolioJudge] ${stock.stock_name} 인큐베이터 이관 실패:`, e);
-                    }
-                }
+                
+                // (제거됨) DROPPED 시 인큐베이터 자동 이관 로직은 매매 관리 크론으로 이전/위임됨.
             }
 
             const endTime = Date.now();
@@ -304,15 +273,15 @@ export class PortfolioJudgeScheduler {
         const rule = rules[strategy] ?? rules['SWING'];
         const effectiveLifespan = lifespanDays || rule.lifespan;
 
-        // ① 목표 수익률 달성 → HIT
-        if (highProfitPct >= rule.hitHighPct || closeProfitPct >= rule.hitClosePct) {
-            console.log(
-                `[PortfolioJudge] 🎉 [${strategy}] ${stockName} HIT! ` +
-                `고가 ${highProfitPct.toFixed(1)}% (기준 ${rule.hitHighPct}%) / ` +
-                `종가 ${closeProfitPct.toFixed(1)}% (기준 ${rule.hitClosePct}%)`
-            );
-            return 'HIT';
-        }
+        // ① 목표 수익률 달성 → HIT (자동 익절 방식을 제거하고 AI 자율 판단(Max-profit pursuit)에 맡김)
+        // 사용자가 "AI가 포트폴리오를 전담하며 가능한 최대 수익을 추구하라"고 지시.
+        // if (highProfitPct >= rule.hitHighPct || closeProfitPct >= rule.hitClosePct) {
+        //     console.log(
+        //         `[PortfolioJudge] 🎉 [${strategy}] ${stockName} HIT (Disabled for Max Profit) ` +
+        //         `고가 ${highProfitPct.toFixed(1)}% / 종가 ${closeProfitPct.toFixed(1)}%`
+        //     );
+        //     // return 'HIT'; // 더이상 강제 HIT 시키지 않고 진행
+        // }
 
         // ② 손절선 이탈 → 즉시 DROPPED
         if (closeProfitPct <= rule.stopLossPct) {

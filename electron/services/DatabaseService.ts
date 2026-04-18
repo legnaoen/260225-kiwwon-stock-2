@@ -723,6 +723,33 @@ export class DatabaseService {
             );
         `);
 
+        // ─── maiis_trade_history: 거래 단위 성적표 (trade_id 기반) ───────────
+        // 종목 단위(stock_code UNIQUE)의 한계를 해소하기 위해 거래 단위로 분리.
+        // OPEN(보유중) → CLOSED(청산완료) 라이프사이클로 관리.
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS maiis_trade_history (
+                trade_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code    TEXT NOT NULL,
+                stock_name    TEXT NOT NULL,
+                entry_date    TEXT,              -- 매수 일자 (YYYY-MM-DD)
+                entry_price   REAL DEFAULT 0,   -- 매수가
+                entry_reason  TEXT,              -- 매수 판정 근거 (AI 사유)
+                entry_at      TEXT,              -- 매수 타임스탬프 (KST ISO)
+                exit_date     TEXT,              -- 매도 일자 (NULL = 보유 중)
+                exit_price    REAL DEFAULT 0,   -- 매도가 (NULL = 보유 중)
+                exit_reason   TEXT,              -- 매도 판정 근거
+                exit_at       TEXT,              -- 매도 타임스탬프 (NULL = 보유 중)
+                profit_rate   REAL DEFAULT 0,   -- 확정 수익률 (exit 시 계산)
+                hold_days     INTEGER DEFAULT 0, -- 보유 기간(일)
+                strategy      TEXT,              -- 전략 (MOMENTUM/PULLBACK/SWING 등)
+                analysts_json TEXT,              -- 추천 AI 목록 (JSON)
+                status        TEXT DEFAULT 'OPEN', -- OPEN(보유중) | CLOSED(청산완료)
+                created_at    TEXT,
+                updated_at    TEXT
+            );
+        `);
+        // ─────────────────────────────────────────────────────────────────────
+
         // Theme Ontology
         const createThemeOntologyTable = `
             CREATE TABLE IF NOT EXISTS theme_ontology (
@@ -2422,51 +2449,70 @@ export class DatabaseService {
                 console.log('[DatabaseService] ♻️ portfolioLimits 구버전 키(SWING/VALUE) 감지 → THEME/MOMENTUM/PULLBACK/REPORT로 자동 재설정');
             }
 
-            const categories = ['THEME', 'MOMENTUM', 'PULLBACK', 'REPORT'];
             const types = ['HELD', 'WATCHING'];
 
             for (const type of types) {
                 const statusCondition = type === 'HELD' ? "status = 'HELD'" : "status = 'WATCHING'";
+                const limitMap = type === 'HELD' ? limits.buy : limits.watchlist;
+                const totalLimit = Object.values(limitMap).reduce((a: any, b: any) => a + Number(b), 0) as number;
 
-                for (const category of categories) {
-                    const maxCount = type === 'HELD' ? (limits.buy[category] ?? 0) : (limits.watchlist[category] ?? 0);
+                // 1. 해당 타입의 모든 종목 가져오기
+                const allItems = this.db.prepare(`
+                    SELECT stock_code, stock_name, strategy, conviction_score 
+                    FROM maiis_portfolio 
+                    WHERE ${statusCondition}
+                    ORDER BY conviction_score DESC, updated_at ASC
+                `).all() as any[];
 
-                    // strategy 컬럼 = primary_category (THEME/MOMENTUM/PULLBACK/REPORT)
-                    const countRow = this.db.prepare(`
-                        SELECT COUNT(*) as cnt 
-                        FROM maiis_portfolio 
-                        WHERE ${statusCondition} AND strategy = ?
-                    `).get(category) as any;
+                if (allItems.length === 0) continue;
 
-                    if (countRow && countRow.cnt > maxCount) {
-                        const excess = countRow.cnt - maxCount;
-                        const excessItems = this.db.prepare(`
-                            SELECT stock_code, stock_name FROM maiis_portfolio 
-                            WHERE ${statusCondition} AND strategy = ?
-                            ORDER BY conviction_score ASC, updated_at ASC
-                            LIMIT ?
-                        `).all(category, excess) as any[];
+                // 2. 분류 및 Category Cap 적용
+                const passed: any[] = [];
+                const failed: any[] = [];
+                const categoryCounts: Record<string, number> = {};
 
-                        if (excessItems.length > 0) {
-                            const codes = excessItems.map((r: any) => `'${r.stock_code.replace(/'/g, "''")}'`).join(',');
-                            const info = this.db.prepare(`
-                                UPDATE maiis_portfolio 
-                                SET status = 'DROPPED', updated_at = ?
-                                WHERE stock_code IN (${codes})
-                            `).run(this.getKstTimestamp());
+                for (const item of allItems) {
+                    const cat = item.strategy || 'MOMENTUM';
+                    const maxForCat = limitMap[cat] || 0;
+                    if (!categoryCounts[cat]) categoryCounts[cat] = 0;
 
-                            excessItems.forEach((r: any) => {
-                                this.demoteToIncubator({
-                                    stock_code: r.stock_code,
-                                    stock_name: r.stock_name || '알수없음',
-                                    current_price: 0,
-                                    last_signal_reason: '관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락'
-                                });
-                            });
-
-                            console.log(`[DatabaseService] ✂️ Cap(${maxCount}) 초과 → ${info.changes}개 DROPPED + 인큐베이터 이관 (${type} - ${category})`);
-                        }
+                    if (categoryCounts[cat] < maxForCat) {
+                        passed.push(item);
+                        categoryCounts[cat]++;
+                    } else {
+                        failed.push(item);
                     }
+                }
+
+                // 3. 남은 슬롯이 있다면 Failed 목록에서 높은 점수순으로 생존(Flexible Quota)
+                let dropItems = failed;
+                if (passed.length < totalLimit && failed.length > 0) {
+                    // failed는 이미 conviction_score DESC로 정렬되어 있음
+                    const availableSlots = totalLimit - passed.length;
+                    const rescued = failed.slice(0, availableSlots);
+                    dropItems = failed.slice(availableSlots);
+                }
+
+                // 4. 최종 탈락 종목 처리
+                if (dropItems.length > 0) {
+                    const codes = dropItems.map(r => `'${r.stock_code.replace(/'/g, "''")}'`).join(',');
+                    const info = this.db.prepare(`
+                        UPDATE maiis_portfolio 
+                        SET status = 'DROPPED', updated_at = ?,
+                            was_held = CASE WHEN entry_price > 0 THEN was_held ELSE 0 END
+                        WHERE stock_code IN (${codes})
+                    `).run(this.getKstTimestamp());
+
+                    dropItems.forEach(r => {
+                        this.demoteToIncubator({
+                            stock_code: r.stock_code,
+                            stock_name: r.stock_name || '알수없음',
+                            current_price: 0,
+                            last_signal_reason: '관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락'
+                        });
+                    });
+
+                    console.log(`[DatabaseService] ✂️ 캡(${totalLimit}) 초과로 인한 Flexible 트리밍: ${info.changes}개 DROPPED (${type})`);
                 }
             }
         } catch (e) {
@@ -2489,8 +2535,17 @@ export class DatabaseService {
     }
 
     public getPortfolioHistory() {
-        // was_held = 1 인 종목만 반환 — 관심종목(WATCHING)에서 탈락한 종목은 성적표 제외
-        return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status IN ('DROPPED', 'HIT') AND was_held = 1 ORDER BY updated_at DESC LIMIT 100").all();
+        // maiis_trade_history 기반 거래 단위 조회 — CLOSED(청산완료) 거래만 성적표에 표시
+        // trade_id DESC = 최신 거래 먼저
+        try {
+            return this.db.prepare(
+                "SELECT * FROM maiis_trade_history WHERE status = 'CLOSED' ORDER BY trade_id DESC LIMIT 200"
+            ).all();
+        } catch (e) {
+            // 테이블 미생성 시 폴백 (최초 마이그레이션 전)
+            console.warn('[DB] maiis_trade_history 조회 실패, 구형 쿼리로 폴백:', e);
+            return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status IN ('DROPPED', 'HIT') AND was_held = 1 AND entry_price > 0 ORDER BY updated_at DESC LIMIT 100").all();
+        }
     }
 
     /**
@@ -2832,6 +2887,171 @@ export class DatabaseService {
         } catch (e) {
             console.error('[DB] Failed to fetch portfolio event logs:', e);
             return [];
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 거래 단위 히스토리 (maiis_trade_history) — open / close / migrate
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 매수 포지션 진입 시 호출 — trade_id를 생성하여 OPEN 거래 레코드 INSERT
+     * @returns 생성된 trade_id
+     */
+    public openTradeRecord(params: {
+        stock_code: string;
+        stock_name: string;
+        entry_price: number;
+        entry_reason?: string;
+        strategy?: string;
+        analysts_json?: string | any[];
+    }): number {
+        try {
+            const now = this.getKstTimestamp();
+            const today = this.getKstDate();
+            const analystsStr = typeof params.analysts_json === 'string'
+                ? params.analysts_json
+                : JSON.stringify(params.analysts_json || []);
+
+            const result = this.db.prepare(`
+                INSERT INTO maiis_trade_history
+                    (stock_code, stock_name, entry_date, entry_price, entry_reason,
+                     entry_at, strategy, analysts_json, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?)
+            `).run(
+                params.stock_code, params.stock_name,
+                today, params.entry_price, params.entry_reason || '',
+                now, params.strategy || 'MOMENTUM',
+                analystsStr, now, now
+            );
+            const tradeId = result.lastInsertRowid as number;
+            console.log(`[DB] ✅ openTradeRecord: ${params.stock_name}(${params.stock_code}) trade_id=${tradeId} entry@${params.entry_price}`);
+            return tradeId;
+        } catch (e: any) {
+            console.error('[DB] openTradeRecord 실패:', e.message);
+            return -1;
+        }
+    }
+
+    /**
+     * 매도(DROPPED/HIT/SELL) 시 호출 — 가장 최근 OPEN 거래를 CLOSED로 닫기
+     * @returns 닫힌 trade_id (-1 = 해당 OPEN 거래 없음)
+     */
+    public closeTradeRecord(params: {
+        stock_code: string;
+        exit_price: number;
+        exit_reason?: string;
+        profit_rate?: number;
+    }): number {
+        try {
+            // 해당 종목의 가장 최근 OPEN 거래를 조회
+            const openTrade = this.db.prepare(
+                "SELECT trade_id, entry_price, entry_date FROM maiis_trade_history WHERE stock_code = ? AND status = 'OPEN' ORDER BY trade_id DESC LIMIT 1"
+            ).get(params.stock_code) as any;
+
+            if (!openTrade) {
+                console.warn(`[DB] closeTradeRecord: ${params.stock_code} 에 OPEN 거래 없음. 스킵.`);
+                return -1;
+            }
+
+            const now = this.getKstTimestamp();
+            const today = this.getKstDate();
+
+            // profit_rate 계산: 명시된 값이 없으면 가격 기반 산출
+            let profitRate = params.profit_rate ?? 0;
+            if (profitRate === 0 && openTrade.entry_price > 0 && params.exit_price > 0) {
+                profitRate = ((params.exit_price - openTrade.entry_price) / openTrade.entry_price) * 100;
+            }
+
+            // 보유 기간 계산
+            let holdDays = 0;
+            if (openTrade.entry_date) {
+                const entryMs = new Date(openTrade.entry_date).getTime();
+                const exitMs = new Date(today).getTime();
+                holdDays = Math.round((exitMs - entryMs) / (1000 * 60 * 60 * 24));
+            }
+
+            this.db.prepare(`
+                UPDATE maiis_trade_history
+                SET exit_date = ?, exit_price = ?, exit_reason = ?, exit_at = ?,
+                    profit_rate = ?, hold_days = ?, status = 'CLOSED', updated_at = ?
+                WHERE trade_id = ?
+            `).run(today, params.exit_price, params.exit_reason || '',
+                now, profitRate, holdDays, now, openTrade.trade_id);
+
+            console.log(`[DB] ✅ closeTradeRecord: trade_id=${openTrade.trade_id} ${params.stock_code} exit@${params.exit_price} pnl=${profitRate.toFixed(2)}%`);
+            return openTrade.trade_id;
+        } catch (e: any) {
+            console.error('[DB] closeTradeRecord 실패:', e.message);
+            return -1;
+        }
+    }
+
+    /**
+     * 기존 maiis_portfolio 이력(was_held=1, entry_price>0, DROPPED/HIT)을
+     * maiis_trade_history 테이블로 일괄 마이그레이션.
+     * 앱 시작 시 1회 실행 — 이미 이관된 레코드는 중복 INSERT 방지.
+     */
+    public migratePortfolioToTradeHistory(): { migrated: number; skipped: number } {
+        try {
+            // 이미 가져간 stock_code+entry_date 조합은 스킵
+            const rows = this.db.prepare(`
+                SELECT p.stock_code, p.stock_name,
+                       p.entry_date, p.entry_price, p.entry_price_at,
+                       p.current_price, p.profit_rate, p.days_held,
+                       p.strategy, p.analysts_json, p.last_signal_reason,
+                       p.updated_at, p.status
+                FROM maiis_portfolio p
+                WHERE p.was_held = 1
+                  AND p.entry_price > 0
+                  AND p.status IN ('DROPPED', 'HIT')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM maiis_trade_history th
+                      WHERE th.stock_code = p.stock_code
+                        AND th.entry_date = p.entry_date
+                  )
+            `).all() as any[];
+
+            if (rows.length === 0) {
+                return { migrated: 0, skipped: 0 };
+            }
+
+            let migrated = 0;
+            const stmt = this.db.prepare(`
+                INSERT INTO maiis_trade_history
+                    (stock_code, stock_name, entry_date, entry_price, entry_reason,
+                     entry_at, exit_date, exit_price, exit_reason, exit_at,
+                     profit_rate, hold_days, strategy, analysts_json,
+                     status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?)
+            `);
+
+            const insertMany = this.db.transaction((items: any[]) => {
+                for (const r of items) {
+                    stmt.run(
+                        r.stock_code, r.stock_name,
+                        r.entry_date, r.entry_price, r.last_signal_reason || '',
+                        r.entry_price_at || r.entry_date,  // entry_at
+                        r.updated_at?.slice(0, 10) || r.entry_date,  // exit_date
+                        r.current_price || r.entry_price,             // exit_price
+                        r.last_signal_reason || '',                   // exit_reason
+                        r.updated_at,                                  // exit_at
+                        r.profit_rate || 0,
+                        r.days_held || 0,
+                        r.strategy || 'MOMENTUM',
+                        r.analysts_json || '[]',
+                        r.updated_at, r.updated_at
+                    );
+                    migrated++;
+                }
+            });
+
+            insertMany(rows);
+            console.log(`[DB] ✅ 포트폴리오 이력 마이그레이션 완료: ${migrated}건`);
+            return { migrated, skipped: 0 };
+        } catch (e: any) {
+            console.error('[DB] migratePortfolioToTradeHistory 실패:', e.message);
+            return { migrated: 0, skipped: -1 };
         }
     }
 

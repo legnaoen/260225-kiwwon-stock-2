@@ -317,8 +317,8 @@ export class SchedulerService {
                     const today = (await import('../utils/DateUtils')).getKstDate()
                     const rawDb = (DatabaseService.getInstance() as any).db
 
-                    // ── Step 1: 오늘 PENDING 종목 코드 전 트랙 합산 수집 ──
-                    const pendingCodes = new Set<string>()
+                    // ── Step 1: 오늘 PENDING 종목 및 기존 ACTIVE 종목 코드 전 트랙 합산 수집 ──
+                    const targetCodes = new Set<string>()
                     const pickTables = [
                         'track_a_buy_picks', 'track_b_buy_picks', 'track_c_buy_picks',
                         'track_d_buy_picks', 'track_e_buy_picks',
@@ -326,20 +326,20 @@ export class SchedulerService {
                     for (const table of pickTables) {
                         try {
                             const rows = rawDb.prepare(
-                                `SELECT stock_code FROM ${table} WHERE pick_date = ? AND status = 'PENDING'`
-                            ).all(today) as { stock_code: string }[]
-                            rows.forEach(r => pendingCodes.add(r.stock_code))
+                                `SELECT stock_code FROM ${table} WHERE status IN ('PENDING', 'ACTIVE')`
+                            ).all() as { stock_code: string }[]
+                            rows.forEach(r => targetCodes.add(r.stock_code))
                         } catch (_) { /* 테이블 없으면 skip */ }
                     }
 
-                    const codeList = Array.from(pendingCodes)
-                    console.log(`[Scheduler] 💰 진입가 보정 대상 PENDING 종목: ${codeList.length}개 → ${codeList.join(', ')}`)
+                    const codeList = Array.from(targetCodes)
+                    console.log(`[Scheduler] 💰 종가/수익률 갱신 대상 종목 (PENDING+ACTIVE): ${codeList.length}개 → ${codeList.join(', ')}`)
 
                     // ── Step 2: 동시호가 확정 종가 재수집 ──
                     if (codeList.length > 0) {
                         const { MarketDataCollectorService } = await import('./v2_pipeline/MarketDataCollectorService')
                         const refreshResult = await MarketDataCollectorService.getInstance().refreshStocksClose(codeList)
-                        this.telegram.sendMessage(`🔄 [15:32] 동시호가 종가 재수집 완료\n갱신: ${refreshResult.refreshed}개 / 실패: ${refreshResult.failed}개\n→ 진입가 최종 확정 시작...`)
+                        this.telegram.sendMessage(`🔄 [15:32] 동시호가 종가 재수집 완료\n갱신: ${refreshResult.refreshed}개 / 실패: ${refreshResult.failed}개\n→ 진입가/수익률 최종 확정 시작...`)
                     }
 
                     // ── Step 3: 갱신된 종가로 entry_price 최종 확정 (PENDING → ACTIVE) ──

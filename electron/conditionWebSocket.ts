@@ -115,14 +115,57 @@ export class KiwoomConditionWebSocketManager {
                 // 특정 조건식을 충족하는 종목 리스트 수신 (초기 1회 조회 + 실시간 편입/편출)
                 const stocks = data.data || []
                 console.log(`Condition Search Result [${data.seq || ''}]:`, stocks.length, 'items')
+                if (stocks.length > 0) {
+                    console.log('[ConditionWS] Sample raw stock item:', JSON.stringify(stocks[0]))
+                    console.log('[ConditionWS] Sample stock keys:', Object.keys(stocks[0]))
+                }
+
+                let mappedStocks = []
+                try {
+                    mappedStocks = stocks.map((s: any) => {
+                        // 1. 만약 요소 자체가 문자열(종목코드)인 경우: ["005930", "A123450"] 형태
+                        if (typeof s === 'string') {
+                            return {
+                                code: s.startsWith('A') ? s : `A${s}`,
+                                name: `(포착종목: ${s})`, // 단일 문자열 응답 시 이름/가격 정보 부재
+                                price: 0,
+                                type: '1',
+                                seq: data.seq
+                            };
+                        }
+                        
+                        // 2. 객체 형태인 경우
+                        let codeStr = s['9001']
+                        if (!codeStr) {
+                            const codeKey = Object.keys(s).find(k => k.length === 4 && typeof s[k] === 'string' && s[k].startsWith('A'))
+                            if (codeKey) codeStr = s[codeKey]
+                        }
+                        return {
+                            code: codeStr,
+                            name: s['302'],
+                            price: s['10'] ? Math.abs(Number(s['10'])) : 0,
+                            type: s['1001'], // 편입('1') / 편출('2') 여부 판단 가능
+                            seq: data.seq
+                        }
+                    }).filter((s:any) => s.code); // 코드가 없는 비정상 데이터 필터링
+                } catch (err) {
+                    console.error('Condition mapping error:', err, 'Raw data:', stocks[0]);
+                }
 
                 // EventBus를 통해 AutoTradeService 등으로 종목 포착 시그널 전송
-                eventBus.emit(SystemEvent.CONDITION_MATCHED, stocks.map((s: any) => ({
-                    code: Object.keys(s).find(k => k.length === 4 && s[k].startsWith('A')) ? s[Object.keys(s).find(k => k.length === 4 && s[k].startsWith('A'))!] : s['9001'],
-                    name: s['302'],
-                    price: s['10'] ? Math.abs(Number(s['10'])) : 0,
-                    type: s['1001'] // 편입('1') / 편출('2') 여부 판단 가능
-                })))
+                eventBus.emit(SystemEvent.CONDITION_MATCHED, mappedStocks)
+                
+                // UI(Playground)로 목록 전송
+                console.log(`[ConditionWS] IPC 전송 - seq: ${data.seq}, mappedStocks: ${mappedStocks.length}건, mainWindow: ${!!this.mainWindow}`)
+                if (mappedStocks.length > 0) {
+                    console.log('[ConditionWS] First mapped stock:', JSON.stringify(mappedStocks[0]))
+                }
+                if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                    this.mainWindow.webContents.send('kiwoom:condition-matched', { seq: data.seq, stocks: mappedStocks })
+                    console.log('[ConditionWS] IPC sent OK')
+                } else {
+                    console.error('[ConditionWS] mainWindow is null or destroyed! IPC 전송 실패')
+                }
             } else {
                 console.error('Condition Search Failed:', data.return_msg)
             }

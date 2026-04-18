@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, Settings, Wallet, Network, Globe, LineChart, Server, Sparkles, Brain, Activity, Telescope, TrendingUp } from 'lucide-react'
+import { LayoutDashboard, Settings, Wallet, Network, Globe, LineChart, Server, Sparkles, Brain, Activity, Telescope, TrendingUp, Rocket } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -21,6 +21,7 @@ export const menuItems = [
     { id: 'theme-tracker', name: '테마 AI', icon: Activity },
     { id: 'portfolio-manager', name: '종목 AI', icon: Wallet },
     { id: 'market-leaders', name: '주도주 AI', icon: TrendingUp },
+    { id: 'moonshot', name: '텐베거 AI', icon: Rocket },
     /* [V1 Legacy - 제외]
     { id: 'incubator-lab', name: '인큐베이터', icon: Telescope }, // PortfolioManagerTab 내부로 기능 통합
     { id: 'narrative-insight', name: '내러티브', icon: Brain }, // IncubatorLab으로 진화
@@ -51,7 +52,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
     return (
         <aside className="w-[84px] shrink-0 flex flex-col items-center border-r bg-muted/30">
-            <nav className="flex-1 w-full flex flex-col items-center space-y-2 py-4">
+            <nav className="flex-1 w-full flex flex-col items-center space-y-2 py-4 overflow-y-auto scrollbar-hide">
                 {menuItems.map((item) => (
                     <button
                         key={item.id}

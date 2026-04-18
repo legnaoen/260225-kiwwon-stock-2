@@ -400,10 +400,19 @@ export class PortfolioManagerAgent {
 
             // 5-C. Load Dynamic Limits from Store
             const aiSettings: any = store.get('ai_settings') || {};
-            const limits = aiSettings.portfolioLimits || {
-                buy: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 },      // 합계 10개
-                watchlist: { MOMENTUM: 2, PULLBACK: 2, SWING: 4, VALUE: 2 } // 합계 10개 (DatabaseService enforcePortfolioCaps 기본값과 일치)
+            let limits = aiSettings.portfolioLimits || {
+                buy: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
+                watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
             };
+            
+            // 구버전 키(SWING/VALUE) 감지 → 새 기준으로 자동 마이그레이션 적용
+            if (limits.watchlist && ('SWING' in limits.watchlist || 'VALUE' in limits.watchlist)) {
+                limits = {
+                    buy: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
+                    watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+                };
+            }
+
             const totalBuy = Object.values(limits.buy).reduce((a: any, b: any) => a + Number(b), 0);
             const totalWatch = Object.values(limits.watchlist).reduce((a: any, b: any) => a + Number(b), 0);
             
@@ -676,8 +685,9 @@ ${chartRiskSkill}
                         for (const zombie of zombieRows) {
                             if (!processedCodes.has(zombie.stock_code)) {
                                 // evalPool에 있었으나 AI가 응답에서 돌려주지 않은 종목 자동 DROP
+                                // entry_price = 0이면 실제 매수 이력이 없으므로 was_held 오마킹 방지를 위해 0으로 리셋
                                 rawDb.prepare(
-                                    "UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ? WHERE stock_code = ? AND status IN ('WATCHING', 'WATCHLIST')"
+                                    "UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ?, was_held = CASE WHEN entry_price > 0 THEN was_held ELSE 0 END WHERE stock_code = ? AND status IN ('WATCHING', 'WATCHLIST')"
                                 ).run('PM2 응답 누락 종목 — 자동 정리', this.db.getKstTimestamp(), zombie.stock_code);
                                 console.log(`[PortfolioManager] 🧹 좀비 정리: ${zombie.stock_name}(${zombie.stock_code})`);
                                 zombieCount++;
@@ -692,8 +702,9 @@ ${chartRiskSkill}
                         if (finalWatching.length > 10) {
                             const excess = finalWatching.slice(10);
                             excess.forEach((s: any) => {
+                                // entry_price = 0이면 실제 매수 이력 없으므로 was_held 오마킹 리셋
                                 rawDb.prepare(
-                                    "UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ? WHERE stock_code = ?"
+                                    "UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ?, was_held = CASE WHEN entry_price > 0 THEN was_held ELSE 0 END WHERE stock_code = ?"
                                 ).run('WATCHING 10개 한도 초과 — DB 최종 트리밍', this.db.getKstTimestamp(), s.stock_code);
                             });
                             console.log(`[PortfolioManager] ✂️ DB 최종 확인: WATCHING 10개 초과 ${excess.length}개 제거 완료`);
@@ -731,6 +742,15 @@ ${chartRiskSkill}
                                 const reasonMatch = parsed.decisions.find((d: any) => d.stock_code === b.stock_code);
                                 const reason = reasonMatch ? (reasonMatch.last_signal_reason || reasonMatch.reason) : 'PM 매수 승급 확정';
                                 this.db.logPortfolioEvent(b.stock_code, b.stock_name, 'BUY_UPGRADED', 'WATCHLIST', 'IMMEDIATE_BUY', reason || 'PM 매수 승급 확정', b.current_price || 0);
+                                // ✅ [거래 단위] 매수 진입 시 trade_history OPEN 레코드 생성
+                                this.db.openTradeRecord({
+                                    stock_code: b.stock_code,
+                                    stock_name: b.stock_name,
+                                    entry_price: b.current_price || b.entry_price || 0,
+                                    entry_reason: reason || 'PM 매수 승급 확정',
+                                    strategy: b.strategy || 'MOMENTUM',
+                                    analysts_json: b.analysts_json || []
+                                });
                             });
                         } else {
                             tgMsg += `\n\n⚠️ [신규 매수 없음]`;
@@ -762,6 +782,14 @@ ${chartRiskSkill}
                                 // WATCHING → DROPPED 종목은 성적표/이벤트 로그 대상 아님
                                 if (d.status === 'HELD' || d.status === 'IMMEDIATE_BUY') {
                                     this.db.logPortfolioEvent(d.stock_code, d.stock_name, 'DROPPED', d.status, 'CLEARED', reason, d.current_price || 0);
+                                    // ✅ [거래 단위] 매도 시 trade_history OPEN 레코드 닫기
+                                    const droppedPf = rawDb.prepare("SELECT profit_rate FROM maiis_portfolio WHERE stock_code = ?").get(d.stock_code) as any;
+                                    this.db.closeTradeRecord({
+                                        stock_code: d.stock_code,
+                                        exit_price: d.current_price || 0,
+                                        exit_reason: reason,
+                                        profit_rate: droppedPf?.profit_rate || 0
+                                    });
                                 }
                                 
                                 // 인큐베이터 강등은 WATCHING/HELD 모두 대상

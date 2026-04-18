@@ -856,6 +856,73 @@ ipcMain.handle('v2:get-sim-trade-picks', async () => {
     }
 })
 
+// ── 수동 현재가 갱신 기능 (모의매매 탭 전용) ──
+ipcMain.handle('v2:force-refresh-sim-trade-prices', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        const { KiwoomService } = await import('./services/KiwoomService');
+        const kiwoom = KiwoomService.getInstance();
+        
+        const tables = [
+            'track_a_buy_picks', 'track_b_buy_picks', 'track_c_buy_picks',
+            'track_d_buy_picks', 'track_e_buy_picks'
+        ];
+        
+        let refreshedCount = 0;
+
+        for (const table of tables) {
+            let activeAndPending;
+            try {
+                activeAndPending = db.prepare(`SELECT id, stock_code, entry_price, entry_date, peak_return, peak_date FROM ${table} WHERE status IN ('ACTIVE', 'PENDING')`).all() as any[];
+            } catch (_) { continue; }
+            const { getKstDate } = await import('./utils/DateUtils');
+            const today = getKstDate();
+
+            for (const row of activeAndPending) {
+                try {
+                    const priceInfo = await kiwoom.getStockBasicInfo(row.stock_code);
+                    const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
+                    const currentPrcStr = String(body.stk_prc || body.currentPrice || body.cur_prc || body.stck_prpr || '').replace(/[^0-9-]/g, '');
+                    const highPrcStr = String(body.stck_hgpr || body.highPrice || body.hgpr || '').replace(/[^0-9-]/g, '');
+                    
+                    if (currentPrcStr) {
+                        const todayClosePrice = Math.abs(parseFloat(currentPrcStr));
+                        const todayHighPrice = highPrcStr ? Math.abs(parseFloat(highPrcStr)) : todayClosePrice;
+                        
+                        let newPeakReturn = row.peak_return;
+                        let newPeakDate = row.peak_date;
+
+                        // PENDING 또는 당일 진입 종목은 제외, entry_price가 존재하는 경우에만 고점 갱신
+                        if (row.entry_price > 0 && row.entry_date !== today) {
+                            const dailyHighReturn = ((todayHighPrice - row.entry_price) / row.entry_price) * 100;
+                            if (row.peak_return == null || dailyHighReturn > row.peak_return) {
+                                newPeakReturn = dailyHighReturn;
+                                newPeakDate = today;
+                            }
+                        }
+                        
+                        db.prepare(`
+                            UPDATE ${table} 
+                            SET current_price = ?, peak_return = ?, peak_date = ?, updated_at = ? 
+                            WHERE id = ?
+                        `).run(todayClosePrice, newPeakReturn, newPeakDate, new Date().toISOString(), row.id);
+                        
+                        refreshedCount++;
+                    }
+                    await new Promise(r => setTimeout(r, 200));
+                } catch (e) {
+                    continue;
+                }
+            }
+        }
+        
+        return { success: true, refreshedCount };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
 // [Track A] 대장주 모의매매 AI 수동 실행
 ipcMain.handle('track-a:run-buy-agent', async (_event, date?: string) => {
     try {
@@ -1943,6 +2010,7 @@ ipcMain.handle('kiwoom:get-condition-list', () => {
 })
 
 ipcMain.handle('kiwoom:start-condition-search', (_event, seq: string) => {
+    console.log(`[Main] kiwoom:start-condition-search 수신 - seq: "${seq}"`)
     return kiwoomService.startConditionSearch(seq)
 })
 

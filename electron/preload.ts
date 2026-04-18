@@ -96,6 +96,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('kiwoom:condition-list', listener)
         return () => ipcRenderer.removeListener('kiwoom:condition-list', listener)
     },
+    onConditionSearchMatched: (callback: (data: {seq: string, stocks: any[]}) => void) => {
+        const listener = (_event: any, data: {seq: string, stocks: any[]}) => callback(data)
+        ipcRenderer.on('kiwoom:condition-matched', listener)
+        return () => ipcRenderer.removeListener('kiwoom:condition-matched', listener)
+    },
 
     // DART API & SQLite Scheduling
     saveDartApiKey: (key: string) => ipcRenderer.invoke('dart:save-key', key),
@@ -258,6 +263,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMarketLeaders: (days: number, topN: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN, peakoutSettings }),
     getCrossPeriodProfile: (topN?: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-cross-period-profile', { topN, peakoutSettings }),
     getSimTradePicks: () => ipcRenderer.invoke('v2:get-sim-trade-picks'),
+    forceRefreshSimTradePrices: () => ipcRenderer.invoke('v2:force-refresh-sim-trade-prices'),
     runTrackABuyAgent: (date?: string) => ipcRenderer.invoke('track-a:run-buy-agent', date),
     runTrackBBuyAgent: (date?: string) => ipcRenderer.invoke('track-b:run-buy-agent', date),
     runTrackCBuyAgent: (date?: string) => ipcRenderer.invoke('track-c:run-buy-agent', date),
@@ -403,6 +409,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMegaThemeAiConfig: () => ipcRenderer.invoke('mega-theme:get-ai-config'),
     setMegaThemeAiConfig: (config: { targetType: 'gemini' | 'local' }) => ipcRenderer.invoke('mega-theme:set-ai-config', config),
     checkMegaThemeLocalAi: () => ipcRenderer.invoke('mega-theme:check-local-ai'),
+
+    // ── 조건검색 (MoonshotTab / TenBagger) ──
+    connectConditionWs: () => ipcRenderer.invoke('kiwoom:connect-condition-ws'),
+    getConditionList: () => ipcRenderer.invoke('kiwoom:get-condition-list'),
+    startConditionSearch: (seq: string) => ipcRenderer.invoke('kiwoom:start-condition-search', seq),
+    onConditionList: (callback: (conditions: any[]) => void) => {
+        const listener = (_event: any, conditions: any[]) => callback(conditions)
+        ipcRenderer.on('kiwoom:condition-list', listener)
+        return () => ipcRenderer.removeListener('kiwoom:condition-list', listener)
+    },
+    onConditionSearchMatched: (callback: (data: { seq: string, stocks: any[] }) => void) => {
+        const listener = (_event: any, data: { seq: string, stocks: any[] }) => callback(data)
+        ipcRenderer.on('kiwoom:condition-matched', listener)
+        return () => ipcRenderer.removeListener('kiwoom:condition-matched', listener)
+    },
 })
 
 

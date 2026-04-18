@@ -470,6 +470,24 @@ export const SimTradeTab: React.FC = () => {
                             옵션
                         </button>
                         <button
+                            onClick={async () => {
+                                setLoading(true);
+                                try {
+                                    const res = await (window as any).electronAPI.forceRefreshSimTradePrices();
+                                    if(res.success) {
+                                        await fetchPicks();
+                                    } else {
+                                        alert('원격 갱신 실패: ' + res.error);
+                                    }
+                                } finally { setLoading(false); }
+                            }}
+                            disabled={loading}
+                            className="text-xs text-indigo-400 border border-indigo-500/50 hover:bg-indigo-500/10 px-2 py-1 rounded transition-colors flex items-center gap-1"
+                        >
+                            <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
+                            현재가 즉시 수동 갱신
+                        </button>
+                        <button
                             onClick={fetchPicks}
                             disabled={loading}
                             className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/30 transition-colors flex items-center gap-1"

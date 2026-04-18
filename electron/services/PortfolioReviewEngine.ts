@@ -206,6 +206,8 @@ export class PortfolioReviewEngine {
                 executed++
                 
                 this.db.logPortfolioEvent(item.stock_code, item.stock_name, 'DROPPED', item.status, 'DROPPED', `[자동 파기] ${result.reason}`, sellPrice);
+                // [거래 단위] 가비지 컨렉터 DROP도 trade_history 거래 종료
+                this.db.closeTradeRecord({ stock_code: item.stock_code, exit_price: sellPrice, exit_reason: `[자동 파기] ${result.reason}` });
 
                 const log = `[가비지 컬렉터] ${item.stock_name}(${item.stock_code}) ${result.reason} → 관리 제외`
                 console.log(log)
@@ -227,6 +229,13 @@ export class PortfolioReviewEngine {
                 executed++
 
                 this.db.logPortfolioEvent(item.stock_code, item.stock_name, 'DROPPED', item.status, 'CLEARED', `[하드룰 청산] ${result.reason}`, sellPrice);
+                // [거래 단위] 하드룰 청산 시 trade_history 거래 종료
+                this.db.closeTradeRecord({
+                    stock_code: item.stock_code,
+                    exit_price: sellPrice,
+                    exit_reason: `[하드룰 청산] ${result.reason}`,
+                    profit_rate: sellResult.profitRate
+                });
 
                 const log = `[하드룰] ${result.ruleType}: ${item.stock_name}(${item.stock_code}) ${result.reason} → 청산 (${sellResult.profitRate > 0 ? '+' : ''}${sellResult.profitRate.toFixed(1)}%)`
                 console.log(log)

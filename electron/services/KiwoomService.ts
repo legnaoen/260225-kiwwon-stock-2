@@ -689,6 +689,7 @@ export class KiwoomService {
             }
         }
 
+        console.log('[KiwoomService] Requesting condition search for seq:', seq);
         this.conditionWsManager.requestConditionSearch(seq);
     }
 

@@ -396,6 +396,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // 개별 항목 삭제
     deletePortfolioItem: (id: number) => ipcRenderer.invoke('ai-analyst:delete-portfolio-item', id),
+    deleteTradeHistoryItem: (id: number) => ipcRenderer.invoke('ai-analyst:delete-trade-history-item', id),
     deleteAnalystPick: (id: number) => ipcRenderer.invoke('ai-analyst:delete-pick', id),
     deleteEventLog: (id: number) => ipcRenderer.invoke('ai-analyst:delete-event-log', id),
     syncEntryPrice: (stockCode: string, price: number, entryDate: string) => ipcRenderer.invoke('ai-analyst:sync-entry-price', stockCode, price, entryDate),
@@ -423,6 +424,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const listener = (_event: any, data: { seq: string, stocks: any[] }) => callback(data)
         ipcRenderer.on('kiwoom:condition-matched', listener)
         return () => ipcRenderer.removeListener('kiwoom:condition-matched', listener)
+    },
+    
+    // ── Moonshot 텐베거 발굴 전용 추가 API ──
+    getSmartMoneyFlow: (stk_cd: string) => ipcRenderer.invoke('kiwoom:get-smart-money-flow', stk_cd),
+    getFundamentalInfo: (stk_cd: string) => ipcRenderer.invoke('kiwoom:get-fundamental-info', stk_cd),
+    validateMoonshotStocks: (stocks: any[]) => ipcRenderer.invoke('moonshot:validate-stocks', stocks),
+    onMoonshotProgressLog: (callback: (data: { code: string, log: any }) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('moonshot:progress-log', listener)
+        return () => ipcRenderer.removeListener('moonshot:progress-log', listener)
+    },
+    onMoonshotEvalStart: (callback: (code: string) => void) => {
+        const listener = (_event: any, code: string) => callback(code)
+        ipcRenderer.on('moonshot:eval-start', listener)
+        return () => ipcRenderer.removeListener('moonshot:eval-start', listener)
+    },
+    onMoonshotEvalComplete: (callback: (data: { code: string, result: any }) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('moonshot:eval-complete', listener)
+        return () => ipcRenderer.removeListener('moonshot:eval-complete', listener)
     },
 })
 

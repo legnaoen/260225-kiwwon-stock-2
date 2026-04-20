@@ -983,7 +983,7 @@ export class TelegramService {
 
     public async sendMessage(message: string) {
         if (!this.bot) {
-            throw new Error("텔레그램 봇 토큰이 설정되지 않았거나 초기화되지 않았습니다.");
+            throw new Error("설정된 텔레그램 토큰이 유효하지 않거나 봇 재시작 중입니다. 토큰을 다시 확인해주세요.");
         }
         if (!this.chatId) {
             throw new Error("Chat ID가 설정되지 않았습니다. 텔레그램 개인 톡방 혹은 단톡방에서 봇에게 /start 를 먼저 입력해주세요.");

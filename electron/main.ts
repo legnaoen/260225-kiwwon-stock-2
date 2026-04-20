@@ -2014,11 +2014,30 @@ ipcMain.handle('kiwoom:start-condition-search', (_event, seq: string) => {
     return kiwoomService.startConditionSearch(seq)
 })
 
+// === Moonshot APIs ===
+ipcMain.handle('kiwoom:get-smart-money-flow', async (_event, stk_cd: string) => {
+    return kiwoomService.getSmartMoneyFlow(stk_cd);
+})
+
+ipcMain.handle('kiwoom:get-fundamental-info', async (_event, stk_cd: string) => {
+    return kiwoomService.getFundamentalInfo(stk_cd);
+})
+
 // === Telegram Settings IPC Handlers ===
-ipcMain.handle('telegram:save-settings', (_event, settings: any) => {
-    store.set('telegram_settings', settings)
-    telegramService.reloadConfig()
-    return { success: true }
+ipcMain.handle('telegram:save-settings', async (_event, settings: any) => {
+    try {
+        if (settings && settings.botToken) {
+            const { Telegraf } = require('telegraf')
+            const tempBot = new Telegraf(settings.botToken)
+            await tempBot.telegram.getMe() // Validate token
+        }
+        store.set('telegram_settings', settings)
+        telegramService.reloadConfig()
+        return { success: true }
+    } catch (error: any) {
+        console.error('[TelegramService] Telegram Token validation failed:', error.message)
+        return { success: false, error: '유효하지 않은 텔레그램 봇 토큰입니다. 올바른 토큰인지 확인해주세요.' }
+    }
 })
 
 ipcMain.handle('telegram:save-theme', (_event, theme: string) => {
@@ -2471,6 +2490,18 @@ ipcMain.handle('youtube:sync-videos', async () => {
     }
 });
 
+// ── Moonshot IPC Handlers ──
+ipcMain.handle('moonshot:validate-stocks', async (event, stocks: any[]) => {
+    try {
+        const { MoonshotValidationAgent } = await import('./services/v2_agents/MoonshotValidationAgent');
+        const agent = MoonshotValidationAgent.getInstance();
+        const results = await agent.runValidation(stocks, win || undefined);
+        return { success: true, data: results };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+});
+
 ipcMain.handle('youtube:collect-now', async (_event, channelId?: string) => {
     try {
         const apiKey = store.get('youtube_api_key') as string
@@ -2807,6 +2838,15 @@ ipcMain.handle('ai-analyst:delete-portfolio-item', async (_event, id: number) =>
     try {
         const { DatabaseService } = await import('./services/DatabaseService')
         return DatabaseService.getInstance().deletePortfolioItem(id)
+    } catch (err: any) {
+        return { deleted: false, error: err.message }
+    }
+})
+
+ipcMain.handle('ai-analyst:delete-trade-history-item', async (_event, id: number) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        return DatabaseService.getInstance().deleteTradeHistoryItem(id)
     } catch (err: any) {
         return { deleted: false, error: err.message }
     }

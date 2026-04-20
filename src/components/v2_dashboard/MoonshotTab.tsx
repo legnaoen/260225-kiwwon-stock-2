@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Rocket, ShieldAlert, Flame, Activity, Zap, CheckCircle2, ChevronRight, Lock, Archive, History, BookOpen, TrendingUp, TrendingDown, Telescope, Database, Filter, BrainCircuit, XCircle, Search, Fingerprint, LayoutGrid, Table, Copy, Check, Settings, Loader2 } from 'lucide-react'
+import { Rocket, ShieldAlert, Flame, Activity, Zap, CheckCircle2, ChevronRight, Lock, Archive, History, BookOpen, TrendingUp, TrendingDown, Telescope, Database, Filter, BrainCircuit, XCircle, Search, Fingerprint, LayoutGrid, Table, Copy, Check, Settings, Loader2, Terminal } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -14,10 +16,18 @@ const DUMMY_MOONSHOTS = [
         code: '042700',
         marketCap: '8조 5000억',
         weight: '무거움',
-        tbpScore: 85,
-        trend: 'AI / HBM 후공정',
+        status: '가설 순항',
+        statusColor: 'text-green-500',
+        trend: 'AI / HBM 밸류체인',
         signals: ['🔥 CAPEX +300%', '💰 스마트머니 매집'],
-        originalThesis: '글로벌 AI 반도체 수요 급증에 따른 글로벌 벤더들의 HBM 증설 필수 요건. 독점적 후공정 장비 공급 지위.',
+        bullCase: '글로벌 AI 반도체 수요 급증에 따른 글로벌 벤더들의 HBM 증설 필수 요건. 독점적 후공정 장비 공급 지위.',
+        bearCase: '시총이 너무 무거워 추가 상승 탄력이 둔화되고 있으며, 경쟁사의 TC 본더 진입 가능성이 거론됨.',
+        milestones: [
+            { text: '마이크론 등 신규 글로벌 고객사 수주 공시', checked: true },
+            { text: '월간 수출 데이터 연속 상승 지속', checked: false }
+        ],
+        investThesis: '글로벌 HBM CAPEX 확장의 최대 수혜주로서 실적 고도화의 1등 벤더 프리미엄 지속 구간',
+        invalidation: '외국인 지분율의 구조적 이탈 발생 시 또는 전방 데이터센터 CAPEX 컷 사인 발생 시',
         entryDate: '2024.01.15',
         entryPrice: 55000,
         currentPrice: 135000,
@@ -31,10 +41,18 @@ const DUMMY_MOONSHOTS = [
         code: '033100',
         marketCap: '7500억',
         weight: '가벼움',
-        tbpScore: 92,
+        status: '목표 초과 달성',
+        statusColor: 'text-blue-500',
         trend: '전력 인프라 슈퍼사이클',
         signals: ['📈 흑자 턴어라운드', '🔥 OPM 20% 점프'],
-        originalThesis: '미국 전력망 교체 주기 및 AI 데이터센터 가동으로 인한 변압기 숏티지. 북미 수출 비중 급증에 따른 폭발적 이익 레버리지.',
+        bullCase: '미국 전력망 교체 주기 및 AI 데이터센터 가동으로 인한 변압기 숏티지. 북미 수출 급증에 따른 레버리지.',
+        bearCase: '최근 단기 급등으로 밸류에이션 부담 가중 및 테마주 엮임으로 인한 변동성 심화 우려.',
+        milestones: [
+            { text: '분기별 북미향 수출 비중 우상향 유지', checked: true },
+            { text: 'OPM(영업이익률) 25% 이상 달성', checked: true }
+        ],
+        investThesis: '북미 전력망 교체 슈퍼사이클의 최대 레버리지 수혜주로, 실적 폭발성이 단기 테마를 압도함.',
+        invalidation: '원/달러 환율의 급격한 하락 또는 월별 수출 잠정치 YOY 하락 전환 시',
         entryDate: '2024.02.20',
         entryPrice: 20000,
         currentPrice: 65000,
@@ -48,16 +66,24 @@ const DUMMY_MOONSHOTS = [
         code: '257720',
         marketCap: '1조 2000억',
         weight: '적절함',
-        tbpScore: 95,
-        trend: 'K-뷰티 글로벌 침투',
-        signals: ['📈 매분기 서프라이즈', '💰 기관/외국인 연속 순매수'],
-        originalThesis: '미국/유럽향 인디 브랜드 화장품 수출의 독보적 플랫폼. 물류 인프라 선점에 따른 구조적 성장.',
+        status: '경고 누적 (1/3)',
+        statusColor: 'text-orange-500',
+        trend: 'K-뷰티 / 플랫폼',
+        signals: ['📈 매분기 서프라이즈', '💸 최근 매도세 출회'],
+        bullCase: '미국/유럽향 인디 브랜드 화장품 수출의 독보적 유통 플랫폼. 물류 인프라 선점에 따른 구조적 진입장벽 구축.',
+        bearCase: '단기 실적 피크아웃 우려 및 기관의 차익 실현 출회 조짐.',
+        milestones: [
+            { text: '미국 외 유럽, 아시아 등 신규 국가 매출 비중 30% 돌파', checked: false },
+            { text: '운반비 상승분 판가 전가 방어율 확인', checked: false }
+        ],
+        investThesis: '단순 테마가 아닌 K-인디 뷰티 브랜드 엑셀러레이터이자 독점적 인프라로서 플랫폼 가치 부여 가능.',
+        invalidation: '주요 벤더사(고객)들의 직접 수출 이탈 또는 분기 영업이익률의 구조적 하향 시 즉시 컷오프',
         entryDate: '2024.03.05',
         entryPrice: 8500,
         currentPrice: 8100,
         returnRate: -4.70,
-        trackType: 'A',
-        trackBadge: 'A안'
+        trackType: 'C',
+        trackBadge: 'C안'
     }
 ]
 
@@ -114,6 +140,7 @@ export default function MoonshotTab() {
     const [reportFilter, setReportFilter] = useState<'all' | 'passed' | 'failed'>('all')
     const [reportViewStyle, setReportViewStyle] = useState<'table' | 'card'>('table')
     const [selectedDetail, setSelectedDetail] = useState<any | null>(null)
+    const [selectedDetailId, setSelectedDetailId] = useState<string | null>(null)
     const [activeModalStep, setActiveModalStep] = useState<number>(3)
     const [isCopied, setIsCopied] = useState(false)
 
@@ -140,7 +167,9 @@ export default function MoonshotTab() {
             if (!data || !data.stocks) return
             const cleanSeq = data.seq ? data.seq.toString().trim() : '';
             setSyncedStocks(prev => {
-                const newStocks = (data.stocks || []).map((s: any) => {
+                const newStocks = (data.stocks || [])
+                    .filter((s: any) => s.name && !s.name.includes('리츠'))
+                    .map((s: any) => {
                     let tag = '기타안'
                     if (window.sessionStorage.getItem('condA')?.trim() === cleanSeq) tag = 'A안'
                     else if (window.sessionStorage.getItem('condB')?.trim() === cleanSeq) tag = 'B안'
@@ -259,13 +288,55 @@ export default function MoonshotTab() {
             return
         }
 
+        if (toolName.includes('매매동향')) {
+            try {
+                const { electronAPI } = window as any
+                if (!electronAPI || !electronAPI.getSmartMoneyFlow) throw new Error("electronAPI 연동이 불가능합니다.")
+                
+                const testCode = '005930'; // 삼성전자 테스트
+                setPlaygroundLogs(prev => [...prev, {
+                    time: new Date().toISOString().split('T')[1].split('.')[0],
+                    msg: `[조회중...] ${testCode} 종목 60일 매매동향 조회 (opt10059)`
+                }])
+
+                const flowData = await electronAPI.getSmartMoneyFlow(testCode)
+                setPlaygroundLogs(prev => [...prev, {
+                    time: new Date().toISOString().split('T')[1].split('.')[0],
+                    msg: `[응답 수신] ${toolName} 실제 데이터 수신 완료.`,
+                    json: { status: "Rate Limit 방어 상태 정상", rowCount: flowData?.length || 0, dataPreview: flowData?.slice(0, 5) || [] }
+                }])
+            } catch (err: any) {
+                setPlaygroundLogs(prev => [...prev, { time: new Date().toISOString().split('T')[1].split('.')[0], msg: `[에러] ${toolName}: ${err.message}` }])
+            }
+            return
+        }
+
+        if (toolName.includes('기본정보')) {
+            try {
+                const { electronAPI } = window as any
+                if (!electronAPI || !electronAPI.getFundamentalInfo) throw new Error("electronAPI 연동이 불가능합니다.")
+                
+                const testCode = '005930'; // 삼성전자 테스트
+                setPlaygroundLogs(prev => [...prev, {
+                    time: new Date().toISOString().split('T')[1].split('.')[0],
+                    msg: `[조회중...] ${testCode} 종목 펀더멘털 조회 (opt10001)`
+                }])
+
+                const fundData = await electronAPI.getFundamentalInfo(testCode)
+                setPlaygroundLogs(prev => [...prev, {
+                    time: new Date().toISOString().split('T')[1].split('.')[0],
+                    msg: `[응답 수신] ${toolName} 실제 데이터 수신 완료.`,
+                    json: { status: "success", data: fundData }
+                }])
+            } catch (err: any) {
+                setPlaygroundLogs(prev => [...prev, { time: new Date().toISOString().split('T')[1].split('.')[0], msg: `[에러] ${toolName}: ${err.message}` }])
+            }
+            return
+        }
+
         setTimeout(() => {
-            const resultData = toolName.includes('매매동향') 
-                ? { status: "Rate Limit 방어 상태 정상", foreigner_net: "+12,340,000,000", institution_net: "+5,420,000,000" }
-                : toolName.includes('로컬 DB') 
+            const resultData = toolName.includes('로컬 DB') 
                 ? { historyFound: true, report_memory: "25년 12월 04일 컷오프 (재무 악화). 현재 재진입 추적." }
-                : toolName.includes('기본정보')
-                ? { _credit_ratio: "1.23%", PER: 12.4, EPS: 450, fetchStatus: "success" }
                 : { module: "selenium_bypass", isCaptchaBlocked: false, headlines: ["[단독] 경쟁사 무상증자...", "신사업 본격화..."] }
                 
             setPlaygroundLogs(prev => [...prev, {
@@ -348,25 +419,71 @@ export default function MoonshotTab() {
         }
     }
 
-    const handleStartValidation = () => {
-        setIsScanning(true)
-        setTimeout(() => {
-            const results = syncedStocks.map((stock, i) => ({
-                ...stock,
-                status: i % 2 === 0 ? 'passed' : 'failed',
-                narrative: i % 2 === 0 
-                    ? '글로벌 메가트렌드(AI/전력망/바이오 등) 연계 확인. 대형 CAPEX 사이클 초입 등 강력 훼손조건 설정 가능.' 
-                    : '정치 테마나 일회성 경영권 분쟁으로 파악됨. 실질적 밸류에이션 점프 근거 희박.',
-                tbpScore: i % 2 === 0 ? Math.floor(Math.random() * 20) + 80 : Math.floor(Math.random() * 40) + 20,
-                inputData: "[Dart 공시] 최근 3분기 연속 영업이익률 상승 (전년동기대비 +45%)\n[키움 조건검색] 120일 선 거래량 동반 갭돌파 포착\n[수급 흐름] 기관/외국인 쌍끌이 순매수 5거래일 연속 진행 중\n[뉴스 플로우] \"글로벌 공급망 재편의 최대 수혜 확인...\" (서울경제)",
-                prompt: "당신은 월스트리트 출신의 딥 밸류 퀀트 애널리스트입니다.\n아래의 종목 데이터, 차트 시그널, 뉴스 플로우를 종합적으로 분석하여 해당 종목이 단기 펌핑용 약세 테마인지, 구조적 메가트렌드에 올라탄 텐베거(10-bagger) 초입인지 판별하십시오.\n판단 기준은 '가시적 촉매(Catalyst)', '수급 연속성', '펀더멘탈 증분' 입니다.",
-                rawResult: i % 2 === 0 
-                    ? "[최종 판정: 편입 승인]\n\n1. 가시적 촉매 (Catalyst)\n대형 CAPEX 사이클의 초입 단계로 글로벌 산업 구조 재편 트렌드와 정확히 일치함.\n\n2. 수급 연속성\n일회성이 아닌 꾸준한 쌍끌이 매집 패턴이 확인되며, 스마트 머니의 유입이 뚜렷함.\n\n3. 펀더멘탈 증분\n단순 테마가 아닌 실질적인 영업이익률 점프가 동반되어 밸류에이션 정당성이 훼손불가능하게 확보됨.\n\n결론: 주포의 단기 엑시트가 아닌 장기 상승 랠리의 1파 구간으로 샌드박스로의 편입을 강력히 권고합니다."
-                    : "[최종 판정: 편입 탈락]\n\n1. 가시적 촉매 (Catalyst)\n실질적 밸류에이션 상승 근거가 부족하며 경영권 분쟁이나 인맥 관련의 소동성 재료일 확률이 높음.\n\n2. 수급 연속성\n주도 수급 주체가 불분명하고 특정 창구에서의 기계적 펌핑이 짙게 의심됨.\n\n3. 펀더멘탈 증분\n실적 개선 가시성이 전혀 보이지 않으며 최근 자금조달(CB/BW) 이력이 불안감을 가중시킴.\n\n결론: 텐베거 요건에 절대 부합하지 않으며 리스크가 매우 높은 단기성 종목으로 컷오프 처리합니다."
-            }))
-            setScannedResults(results)
-            setIsScanning(false)
-        }, 1500)
+    useEffect(() => {
+        const { electronAPI } = window as any;
+        if (!electronAPI?.onMoonshotEvalStart) return;
+
+        const us1 = electronAPI.onMoonshotEvalStart((code: string) => {
+            setScannedResults(prev => {
+                const exist = prev.find(p => p.code === code);
+                if (exist) return prev;
+                const stock = syncedStocks.find(s => s.code === code);
+                if (!stock) return prev;
+                return [...prev, {
+                    code: stock.code, name: stock.name, tag: stock.tag,
+                    status: 'pending' as any, tbpScore: 0,
+                    narrative: '', inputData: '', rawResult: '', prompt: '',
+                    harnessLogs: []
+                }];
+            });
+            setSelectedDetailId(code);
+        });
+
+        const us2 = electronAPI.onMoonshotProgressLog(({code, log}: any) => {
+            setScannedResults(prev => prev.map(p => {
+                if (p.code === code) {
+                    return { ...p, harnessLogs: [...(p.harnessLogs||[]), log] };
+                }
+                return p;
+            }));
+        });
+
+        const us3 = electronAPI.onMoonshotEvalComplete(({code, result}: any) => {
+            setScannedResults(prev => prev.map(p => p.code === code ? result : p));
+        });
+
+        return () => {
+            us1(); us2(); us3();
+        };
+    }, [syncedStocks]);
+
+    const handleStartValidation = async (targetTrack: 'all' | 'A' | 'B' | 'C' = 'all') => {
+        const { electronAPI } = window as any;
+        if (!electronAPI?.validateMoonshotStocks) return;
+
+        const targetStocks = targetTrack === 'all' 
+            ? syncedStocks 
+            : syncedStocks.filter(s => s.tag.includes(`${targetTrack}안`));
+
+        if (targetStocks.length === 0) {
+            alert(`해당 트랙(${targetTrack}안) 조건에 맞는 종목이 없습니다.`);
+            return;
+        }
+
+        setIsScanning(true);
+        setScannedResults([]);
+        
+        try {
+            const res = await electronAPI.validateMoonshotStocks(targetStocks);
+            if (!res.success) {
+                console.error("Moonshot Validation Error:", res.error);
+                alert("평가 중 에러가 발생했습니다: " + res.error);
+            }
+        } catch (error) {
+            console.error("IPC Error:", error);
+        } finally {
+            setIsScanning(false);
+        }
     }
 
     const totalCount = scannedResults.length
@@ -519,8 +636,17 @@ ${selectedDetail.rawResult}
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border">
-                                            {syncedStocks.map((stock) => (
-                                                <tr key={stock.code} className="hover:bg-muted/30 transition-colors">
+                                            {syncedStocks.map((stock) => {
+                                                const result = scannedResults.find(r => r.code === stock.code);
+                                                return (
+                                                <tr 
+                                                    key={stock.code} 
+                                                    onClick={() => setSelectedDetailId(stock.code)}
+                                                    className={cn(
+                                                        "transition-colors cursor-pointer",
+                                                        selectedDetailId === stock.code ? "bg-primary/5 border-l-2 border-primary" : "hover:bg-muted/30 border-l-2 border-transparent"
+                                                    )}
+                                                >
                                                     <td className="px-3 py-2.5">
                                                         <span className={cn(
                                                             "text-[10px] px-1.5 py-0.5 rounded font-bold whitespace-nowrap",
@@ -529,178 +655,214 @@ ${selectedDetail.rawResult}
                                                             "bg-purple-500/20 text-purple-400"
                                                         )}>{stock.tag}</span>
                                                     </td>
-                                                    <td className="px-3 py-2.5 font-bold">{stock.name}</td>
+                                                    <td className="px-3 py-2.5 font-bold flex items-center gap-1.5">
+                                                        {stock.name}
+                                                        {result && (
+                                                            <span>
+                                                                {result.status === 'passed' ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : 
+                                                                 result.status === 'pending' ? <Loader2 className="w-3.5 h-3.5 text-amber-500 animate-spin" /> : 
+                                                                 <XCircle className="w-3.5 h-3.5 text-red-500" />}
+                                                            </span>
+                                                        )}
+                                                    </td>
                                                     <td className="px-3 py-2.5 text-right font-medium">{stock.price.toLocaleString()}</td>
                                                     <td className="px-3 py-2.5 text-right text-muted-foreground">{stock.volume}</td>
                                                 </tr>
-                                            ))}
+                                            )})}
                                         </tbody>
                                     </table>
                                 )}
                             </div>
-                            <button 
-                                onClick={handleStartValidation}
-                                disabled={isScanning || syncedStocks.length === 0}
-                                className={cn(
-                                    "mt-4 w-full py-3 rounded-lg font-bold flex justify-center items-center space-x-2 transition-all",
-                                    isScanning ? "bg-primary/20 text-primary cursor-wait" : "bg-primary hover:bg-primary/90 text-primary-foreground"
-                                )}
-                            >
-                                {isScanning ? (
-                                    <>
-                                        <Activity className="w-5 h-5 animate-pulse" />
-                                        <span>LLM 딥 스캐닝 중...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <BrainCircuit className="w-5 h-5" />
-                                        <span>2단계: 네이버 뉴스 LLM 검증 시작</span>
-                                    </>
-                                )}
-                            </button>
+                            <div className="mt-4 grid grid-cols-2 gap-2">
+                                <button 
+                                    onClick={() => handleStartValidation('A')}
+                                    disabled={isScanning || syncedStocks.length === 0}
+                                    className={cn(
+                                        "py-2.5 rounded-lg text-sm font-bold flex justify-center items-center space-x-2 transition-all",
+                                        isScanning ? "opacity-50 cursor-not-allowed" : "bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
+                                    )}
+                                >
+                                    <BrainCircuit className="w-4 h-4" />
+                                    <span>[A안] 검증 시작</span>
+                                </button>
+                                <button 
+                                    onClick={() => handleStartValidation('B')}
+                                    disabled={isScanning || syncedStocks.length === 0}
+                                    className={cn(
+                                        "py-2.5 rounded-lg text-sm font-bold flex justify-center items-center space-x-2 transition-all",
+                                        isScanning ? "opacity-50 cursor-not-allowed" : "bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 border border-orange-500/20"
+                                    )}
+                                >
+                                    <BrainCircuit className="w-4 h-4" />
+                                    <span>[B안] 검증 시작</span>
+                                </button>
+                                <button 
+                                    onClick={() => handleStartValidation('C')}
+                                    disabled={isScanning || syncedStocks.length === 0}
+                                    className={cn(
+                                        "py-2.5 rounded-lg text-sm font-bold flex justify-center items-center space-x-2 transition-all",
+                                        isScanning ? "opacity-50 cursor-not-allowed" : "bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/20"
+                                    )}
+                                >
+                                    <BrainCircuit className="w-4 h-4" />
+                                    <span>[C안] 검증 시작</span>
+                                </button>
+                                <button 
+                                    onClick={() => handleStartValidation('all')}
+                                    disabled={isScanning || syncedStocks.length === 0}
+                                    className={cn(
+                                        "py-2.5 rounded-lg text-sm font-bold flex justify-center items-center space-x-2 transition-all",
+                                        isScanning ? "bg-primary/20 text-primary cursor-wait" : "bg-primary hover:bg-primary/90 text-primary-foreground"
+                                    )}
+                                >
+                                    {isScanning ? (
+                                        <>
+                                            <Activity className="w-4 h-4 animate-pulse" />
+                                            <span>스캐닝 중...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <BrainCircuit className="w-4 h-4" />
+                                            <span>[전체] 검증 시작</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
                         </div>
                     </div>
 
-                    {/* 우측 패널 (LLM 검증 리포트) */}
-                    <div className="flex flex-col w-full lg:w-2/3 flex-1 min-h-[500px] overflow-hidden">
-                        <div className="p-5 border-b bg-muted/30 flex justify-between items-center">
+                    {/* 우측 패널 (Harness Console & Report - Light/Premium Theme) */}
+                    <div className="flex flex-col w-full lg:w-2/3 flex-1 min-h-[500px] overflow-hidden bg-background">
+                        <div className="p-5 border-b bg-muted/20 flex justify-between items-center">
                             <div className="flex items-center space-x-2">
-                                <Fingerprint className="w-5 h-5 text-primary" />
-                                <h2 className="text-base font-bold">LLM 내러티브 컷오프 리포트</h2>
+                                <BrainCircuit className="w-5 h-5 text-primary" />
+                                <h2 className="text-base font-bold tracking-tight">AI 자율 리서치 궤적 (Harness Log)</h2>
                             </div>
-                            
-                            {scannedResults.length > 0 && (
-                                <div className="flex items-center space-x-4">
-                                    <div className="flex items-center space-x-1.5 text-xs font-bold">
-                                        <button 
-                                            onClick={() => setReportFilter('all')}
-                                            className={cn("px-3 py-1.5 rounded-full transition-colors border", reportFilter === 'all' ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground hover:bg-muted")}
-                                        >전체 <span className="text-[10px] opacity-80">{totalCount}</span></button>
-                                        <button 
-                                            onClick={() => setReportFilter('passed')}
-                                            className={cn("px-3 py-1.5 rounded-full transition-colors border", reportFilter === 'passed' ? "bg-green-500 text-white border-green-500" : "bg-card text-muted-foreground hover:bg-muted")}
-                                        >승인 <span className="text-[10px] opacity-80">{passedCount}</span></button>
-                                        <button 
-                                            onClick={() => setReportFilter('failed')}
-                                            className={cn("px-3 py-1.5 rounded-full transition-colors border", reportFilter === 'failed' ? "bg-red-500 text-white border-red-500" : "bg-card text-muted-foreground hover:bg-muted")}
-                                        >탈락 <span className="text-[10px] opacity-80">{failedCount}</span></button>
-                                    </div>
-                                    <div className="flex items-center p-1 bg-background border rounded-lg">
-                                        <button 
-                                            onClick={() => setReportViewStyle('table')}
-                                            className={cn("p-1.5 rounded-md transition-colors", reportViewStyle === 'table' ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
-                                        >
-                                            <Table className="w-4 h-4" />
-                                        </button>
-                                        <button 
-                                            onClick={() => setReportViewStyle('card')}
-                                            className={cn("p-1.5 rounded-md transition-colors", reportViewStyle === 'card' ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
-                                        >
-                                            <LayoutGrid className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
+                            <div className="flex items-center gap-4 text-xs font-bold">
+                                <span className={cn("flex items-center gap-1.5", isScanning ? "text-primary animate-pulse" : "text-muted-foreground")}>
+                                    {isScanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                                    {isScanning ? '딥 스캐닝 진행 중...' : '검증 대기'}
+                                </span>
+                            </div>
                         </div>
-                        <div className="p-5 overflow-y-auto flex-1 bg-background/50 scrollbar-hide">
-                            {scannedResults.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center text-muted-foreground space-y-4">
-                                    <Search className="w-12 h-12 opacity-20" />
-                                    <p className="text-sm">종목을 스캔하여 내러티브 진위 여부를 확인하세요.</p>
+
+                        <div className="p-6 flex-1 overflow-y-auto scrollbar-hide">
+                            {(!selectedDetailId && scannedResults.length === 0) ? (
+                                <div className="h-full flex flex-col items-center justify-center text-muted-foreground space-y-4 pt-10">
+                                    <Database className="w-12 h-12 opacity-20" />
+                                    <p className="text-sm">좌측 목록에서 종목을 선택하여 실시간 검증 궤적을 확인하세요.</p>
                                 </div>
-                            ) : (
-                                <>
-                                    {reportViewStyle === 'table' ? (
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="text-xs text-muted-foreground bg-muted/50 uppercase sticky top-0">
-                                                <tr>
-                                                    <th className="px-3 py-2 font-semibold text-center w-12">판정</th>
-                                                    <th className="px-3 py-2 font-semibold text-center w-14">전략</th>
-                                                    <th className="px-3 py-2 font-semibold w-28">종목정보</th>
-                                                    <th className="px-3 py-2 font-semibold text-center w-20">스코어</th>
-                                                    <th className="px-3 py-2 font-semibold">AI 내러티브 요약</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-border bg-card/50">
-                                                {filteredResults.map((result) => (
-                                                    <tr 
-                                                        key={result.code} 
-                                                        onClick={() => { setSelectedDetail(result); setActiveModalStep(3); }}
-                                                        className={cn("transition-colors cursor-pointer hover:bg-muted/50", result.status !== 'passed' && "opacity-80 text-muted-foreground")}
-                                                    >
-                                                        <td className="px-3 py-3 text-center">
-                                                            {result.status === 'passed' ? <CheckCircle2 className="w-5 h-5 text-green-500 mx-auto" /> : <XCircle className="w-5 h-5 text-red-500 mx-auto" />}
-                                                        </td>
-                                                        <td className="px-3 py-3 text-center">
-                                                            <span className={cn(
-                                                                "text-[10px] px-1.5 py-0.5 rounded font-bold whitespace-nowrap",
-                                                                result.tag?.includes('A안') ? "bg-blue-500/20 text-blue-400" :
-                                                                result.tag?.includes('B안') ? "bg-orange-500/20 text-orange-400" :
-                                                                "bg-purple-500/20 text-purple-400"
-                                                            )}>{result.tag}</span>
-                                                        </td>
-                                                        <td className="px-3 py-3">
-                                                            <div className="flex flex-col">
-                                                                <span className="font-bold flex-1">{result.name}</span>
-                                                                <span className="text-xs text-muted-foreground font-mono mt-0.5">{result.code}</span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-3 py-3 font-black text-lg text-center">
-                                                            <span className={result.status === 'passed' ? "text-primary" : "text-muted-foreground"}>{result.tbpScore}</span>
-                                                        </td>
-                                                        <td className="px-3 py-3 text-sm leading-relaxed p-4">
-                                                            {result.narrative}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    ) : (
-                                        <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
-                                            {filteredResults.map((result) => (
-                                                <div 
-                                                    key={result.code} 
-                                                    onClick={() => { setSelectedDetail(result); setActiveModalStep(3); }}
-                                                    className={cn(
-                                                    "p-4 rounded-xl border flex flex-col gap-3 cursor-pointer transition-all hover:shadow-md",
-                                                    result.status === 'passed' ? "bg-card border-green-500/30 hover:border-green-500/60" : "bg-muted/50 border-red-500/20 opacity-90 hover:border-red-500/40"
-                                                )}>
-                                                    <div className="flex justify-between items-start">
-                                                        <div className="flex items-center space-x-3">
-                                                            {result.status === 'passed' ? <CheckCircle2 className="w-5 h-5 text-green-500" /> : <XCircle className="w-5 h-5 text-red-500" />}
-                                                            <div>
-                                                                <div className="flex items-center gap-2 mb-1">
-                                                                    <span className={cn(
-                                                                        "text-[10px] px-1.5 py-0.5 rounded font-bold",
-                                                                        result.tag?.includes('A안') ? "bg-blue-500/20 text-blue-400" :
-                                                                        result.tag?.includes('B안') ? "bg-orange-500/20 text-orange-400" :
-                                                                        "bg-purple-500/20 text-purple-400"
-                                                                    )}>{result.tag}</span>
-                                                                </div>
-                                                                <div className="flex items-center space-x-2">
-                                                                    <span className="text-base font-bold">{result.name}</span>
-                                                                    <span className="text-xs text-muted-foreground">{result.code}</span>
-                                                                </div>
-                                                                <div className={cn("text-xs font-bold mt-1", result.status === 'passed' ? "text-green-500" : "text-red-500")}>
-                                                                    {result.status === 'passed' ? 'Sandbox 편입 승인' : '단발성 테마 컷오프'}
-                                                                </div>
-                                                            </div>
+                            ) : (() => {
+                                const activeResult = scannedResults.find(r => r.code === selectedDetailId);
+                                if (!activeResult) return (
+                                    <div className="h-full flex flex-col justify-center items-center text-muted-foreground">
+                                        <Loader2 className="w-8 h-8 animate-spin opacity-50 mb-4" />
+                                        <span className="text-sm font-medium">데이터 로딩 중...</span>
+                                    </div>
+                                );
+                                
+                                return (
+                                    <div className="max-w-3xl mx-auto w-full flex flex-col gap-8 pb-10">
+                                        {/* 헤더 섹션 */}
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1.5">
+                                                    <span className={cn(
+                                                        "text-[10px] px-2 py-0.5 rounded font-bold border",
+                                                        activeResult.tag.includes('A안') ? "bg-blue-500/10 text-blue-600 border-blue-500/20" : 
+                                                        activeResult.tag.includes('B안') ? "bg-orange-500/10 text-orange-600 border-orange-500/20" :
+                                                        "bg-purple-500/10 text-purple-600 border-purple-500/20"
+                                                    )}>{activeResult.tag}</span>
+                                                    <span className="text-xs text-muted-foreground font-mono">{activeResult.code}</span>
+                                                </div>
+                                                <h2 className="text-2xl font-black flex items-center gap-3">
+                                                    {activeResult.name}
+                                                    {activeResult.status === 'passed' ? (
+                                                        <span className="bg-green-50 text-green-600 dark:bg-green-500/10 dark:text-green-500 px-2.5 py-1 rounded-md text-xs font-bold border border-green-200 dark:border-green-500/20 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5"/> 샌드박스 편입 승인</span>
+                                                    ) : activeResult.status === 'pending' ? (
+                                                        <span className="bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-500 px-2.5 py-1 rounded-md text-xs font-bold border border-amber-200 dark:border-amber-500/20 flex items-center gap-1"><Loader2 className="w-3.5 h-3.5 animate-spin"/> AI 배틀로얄 심사 중...</span>
+                                                    ) : (
+                                                        <span className="bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-500 px-2.5 py-1 rounded-md text-xs font-bold border border-red-200 dark:border-red-500/20 flex items-center gap-1"><XCircle className="w-3.5 h-3.5"/> 텐베거 요건 미달</span>
+                                                    )}
+                                                </h2>
+                                            </div>
+                                            <div className="text-right bg-muted/30 p-3 rounded-xl border">
+                                                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">TBP Score</div>
+                                                <div className={cn("text-3xl font-black tracking-tighter leading-none", activeResult.status === 'passed' ? "text-primary" : "text-muted-foreground")}>
+                                                    {activeResult.tbpScore}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* 타임라인 노드 (Harness Logs) */}
+                                        <div className="relative pl-4 border-l-2 border-muted space-y-6 ml-2">
+                                            {activeResult.harnessLogs?.map((log: any, idx: number) => {
+                                                const isLast = idx === activeResult.harnessLogs.length - 1;
+                                                return (
+                                                <div key={idx} className="relative">
+                                                    <div className={cn(
+                                                        "absolute -left-[23px] top-1 rounded-full border-4 border-background w-3.5 h-3.5",
+                                                        log.type === 'success' ? "bg-green-500" :
+                                                        log.type === 'error' ? "bg-red-500" :
+                                                        log.type === 'warning' ? "bg-amber-500" : "bg-primary"
+                                                    )} />
+                                                    <div className="flex flex-col gap-1 pl-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded font-bold font-mono">{log.time}</span>
+                                                            <span className="text-xs font-bold text-primary">{log.step}</span>
                                                         </div>
-                                                        <div className="text-right">
-                                                            <div className="text-xs text-muted-foreground mb-1">TBP 스코어</div>
-                                                            <div className={cn("text-lg font-black", result.status === 'passed' ? "text-primary" : "text-muted-foreground")}>{result.tbpScore}</div>
+                                                        <div className={cn(
+                                                            "text-sm font-medium mt-0.5 leading-relaxed p-3 rounded-lg border",
+                                                            log.type === 'error' ? "bg-red-50/50 dark:bg-red-500/5 text-red-600 dark:text-red-400 border-red-100 dark:border-red-500/20" :
+                                                            log.type === 'success' ? "bg-green-50/50 dark:bg-green-500/5 text-green-600 dark:text-green-400 border-green-100 dark:border-green-500/20" :
+                                                            log.type === 'warning' ? "bg-amber-50/50 dark:bg-amber-500/5 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-500/20" :
+                                                            "bg-muted/30 text-foreground border-transparent"
+                                                        )}>
+                                                            {log.msg}
                                                         </div>
-                                                    </div>
-                                                    <div className="bg-background p-3 rounded-lg border flex-1">
-                                                        <div className="text-xs font-bold text-muted-foreground mb-1">AI Analyst 의견</div>
-                                                        <p className="text-sm leading-relaxed">{result.narrative}</p>
                                                     </div>
                                                 </div>
-                                            ))}
+                                            )})}
+                                            {isScanning && (
+                                                <div className="relative">
+                                                    <div className="absolute -left-[25px] top-1 bg-primary/20 rounded-full border-4 border-background w-4 h-4 flex items-center justify-center">
+                                                        <span className="w-2 h-2 bg-primary rounded-full animate-pulse" />
+                                                    </div>
+                                                    <div className="pl-4">
+                                                        <div className="text-sm font-medium text-muted-foreground animate-pulse mt-0.5">판단 근거를 추론하고 있습니다...</div>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
-                                    )}
-                                </>
-                            )}
+
+                                        {/* 제공된 팩트 데이터 (Distilled Facts) */}
+                                        <div className="mt-8">
+                                            <div className="flex items-center gap-2 mb-3 px-1">
+                                                <Database className="w-4 h-4 text-purple-500" />
+                                                <h3 className="text-sm font-bold">제미나이에 제공된 팩트 데이터 (Distilled AI)</h3>
+                                            </div>
+                                            <div className="bg-purple-50 dark:bg-purple-500/5 border border-purple-100 dark:border-purple-500/20 rounded-xl p-5 shadow-sm prose prose-sm prose-purple dark:prose-invert max-w-none">
+                                                {activeResult.inputData ? (
+                                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeResult.inputData}</ReactMarkdown>
+                                                ) : (
+                                                    <span className="text-muted-foreground">제공된 데이터가 없습니다.</span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* 최종 판단 리포트 */}
+                                        <div className="mt-8">
+                                            <div className="flex items-center gap-2 mb-3 px-1">
+                                                <BookOpen className="w-4 h-4 text-primary" />
+                                                <h3 className="text-sm font-bold">AI 내러티브 총평 (최종 판별 결과)</h3>
+                                            </div>
+                                            <div className="bg-card border rounded-xl p-5 shadow-sm prose prose-sm dark:prose-invert max-w-none">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeResult.rawResult}</ReactMarkdown>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -709,60 +871,17 @@ ${selectedDetail.rawResult}
             {viewMode === 'active' && (
                 <div className="flex-1 flex gap-6 min-h-0">
                     {/* 좌측 메인 대시보드 (Active Tracking) */}
-                    <div className="flex-1 flex flex-col min-w-0 space-y-6 overflow-y-auto pr-2 scrollbar-hide">
-                        {/* 1. Action Summary Header (상태 요약) */}
-                        <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 flex items-center justify-between shadow-sm">
-                            <div className="flex items-center gap-4">
-                                <div className="p-3 bg-primary/10 rounded-full text-primary"><ShieldAlert size={24} /></div>
-                                <div>
-                                    <h3 className="font-bold text-lg">포트폴리오 상태 요약</h3>
-                                    <p className="text-xs text-muted-foreground mt-0.5">현재 추적/편입 중인 종목들 중 리뷰(조치)가 필요한 종목 현황</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/30 rounded-lg">
-                                    <Activity className="text-green-500" size={16} />
-                                    <span className="text-green-500 font-bold text-sm tracking-tight">3종목 순항 (가설 유지)</span>
-                                </div>
-                                <div className="flex items-center gap-2 px-4 py-2 bg-red-500/5 border border-red-500/20 rounded-lg opacity-60">
-                                    <div className="w-2 h-2 rounded-full bg-red-500" />
-                                    <span className="text-red-500/80 font-bold text-sm tracking-tight">0종목 편출 대기 (위험)</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* 2. Mega-Trend Matrix */}
-                        <div className="grid grid-cols-3 gap-4">
-                            {[
-                                { title: 'AI / HBM 밸류체인', icon: Zap, value: '확장중', color: 'text-amber-500' },
-                                { title: '전력 / 인프라', icon: Flame, value: '초과수요', color: 'text-red-500' },
-                                { title: 'K-뷰티 / 플랫폼', icon: Activity, value: '침투율 급증', color: 'text-blue-500' },
-                            ].map((idx, i) => (
-                                <div key={i} className="bg-card border rounded-xl p-4 flex items-center gap-4 shadow-sm">
-                                    <div className={`p-3 rounded-full bg-muted ${idx.color}`}>
-                                        <idx.icon size={20} />
-                                    </div>
-                                    <div>
-                                        <h3 className="font-bold text-sm">{idx.title}</h3>
-                                        <p className="text-xs text-muted-foreground font-medium mt-1">{idx.value}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* 3. Candidate List */}
-                        <div className="flex-1 bg-card border rounded-xl flex flex-col min-h-0 overflow-hidden shadow-sm">
-                            <div className="p-4 border-b bg-muted/30">
-                                <h2 className="font-bold text-sm">Track M 캔디데이트 (추적 종목)</h2>
-                            </div>
-                            <div className="overflow-y-auto w-full p-2">
+                    <div className="flex-1 flex flex-col min-w-0 overflow-y-auto pr-4 scrollbar-hide">
+                        {/* Candidate List (단독 확장) */}
+                        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                            <div className="overflow-y-auto w-full">
                                 <table className="w-full text-sm text-left">
                                     <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b">
                                         <tr>
                                             <th className="px-4 py-3 font-semibold text-left">종목명 / 시총</th>
                                             <th className="px-4 py-3 font-semibold text-right">편입 정보</th>
                                             <th className="px-4 py-3 font-semibold text-right">현재가 / 수익률</th>
-                                            <th className="px-4 py-3 font-semibold text-center">TBP 스코어</th>
+                                            <th className="px-4 py-3 font-semibold text-center">가설 상태</th>
                                             <th className="px-4 py-3 font-semibold text-left">메가 트렌드 & 시그널</th>
                                         </tr>
                                     </thead>
@@ -783,7 +902,8 @@ ${selectedDetail.rawResult}
                                                         <span className="text-xs text-muted-foreground font-normal">{stock.code}</span>
                                                         <span className={cn(
                                                             "text-[10px] px-1.5 py-0.5 rounded font-bold ml-1",
-                                                            stock.trackType === 'A' ? "bg-blue-500/20 text-blue-400" : "bg-orange-500/20 text-orange-400"
+                                                            stock.trackType === 'A' ? "bg-blue-500/20 text-blue-400" : 
+                                                            stock.trackType === 'B' ? "bg-orange-500/20 text-orange-400" : "bg-purple-500/20 text-purple-400"
                                                         )}>{stock.trackBadge}</span>
                                                     </div>
                                                     <div className="flex items-center gap-1 text-xs font-medium mt-1">
@@ -809,16 +929,17 @@ ${selectedDetail.rawResult}
                                                     </div>
                                                 </td>
 
-                                                {/* TBP 스코어 */}
+                                                {/* 상태 (가설 순항/훼손 등) */}
                                                 <td className="px-4 py-4">
-                                                    <div className="flex flex-col items-center gap-1">
-                                                        <span className="font-mono text-lg font-bold">{stock.tbpScore}</span>
-                                                        <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-                                                            <div 
-                                                                className={cn("h-full", stock.tbpScore > 90 ? "bg-green-500" : "bg-primary")} 
-                                                                style={{ width: `${stock.tbpScore}%` }} 
-                                                            />
-                                                        </div>
+                                                    <div className="flex justify-center">
+                                                        <span className={cn("text-xs font-bold px-2.5 py-1 rounded-md border whitespace-nowrap", 
+                                                            stock.statusColor.includes('green') ? "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20" :
+                                                            stock.statusColor.includes('amber') || stock.statusColor.includes('orange') ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20" :
+                                                            stock.statusColor.includes('blue') ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20" :
+                                                            "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
+                                                        )}>
+                                                            {stock.status}
+                                                        </span>
                                                     </div>
                                                 </td>
 
@@ -842,8 +963,8 @@ ${selectedDetail.rawResult}
                     </div>
 
                     {/* 우측 사이드 패널: Conviction Lock-up */}
-                    <div className="w-[380px] shrink-0 flex flex-col bg-card border rounded-2xl overflow-hidden shadow-lg h-full">
-                        <div className="bg-primary p-6 text-primary-foreground relative overflow-hidden shrink-0">
+                    <div className="w-[380px] shrink-0 flex flex-col border-l h-full overflow-hidden">
+                        <div className="bg-primary p-6 text-primary-foreground relative shrink-0">
                             <div className="absolute right-[-20px] top-[-20px] opacity-10">
                                 <Lock size={120} />
                             </div>
@@ -878,40 +999,83 @@ ${selectedDetail.rawResult}
                         </div>
 
                         <div className="p-6 flex-1 overflow-y-auto space-y-6 scrollbar-hide">
-                            {/* 최초 투자 논리 */}
-                            <div>
-                                <h3 className="flex items-center gap-2 text-sm font-bold text-muted-foreground mb-3 uppercase">
-                                    <CheckCircle2 size={16} />
-                                    Original Thesis (투자가설)
+                            {/* 1. Synthesis 피치 시트 */}
+                            <div className="space-y-4">
+                                <h3 className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
+                                    <Telescope size={14} className="text-primary" />
+                                    Original Thesis
                                 </h3>
-                                <blockquote className="border-l-4 border-primary pl-4 py-3 text-sm font-medium leading-relaxed bg-muted/30 rounded-r-lg">
-                                    "{selectedStock.originalThesis}"
-                                </blockquote>
+                                <div>
+                                    <p className="text-sm font-bold leading-relaxed">{selectedStock.investThesis}</p>
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-6 pt-2">
+                                    <div className="space-y-2">
+                                        <div className="text-[10px] font-bold text-green-600 dark:text-green-500 flex items-center gap-1 uppercase tracking-widest"><TrendingUp size={12}/> Bull's View</div>
+                                        <p className="text-xs leading-relaxed text-muted-foreground">{selectedStock.bullCase}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="text-[10px] font-bold text-red-600 dark:text-red-500 flex items-center gap-1 uppercase tracking-widest"><TrendingDown size={12}/> Bear's Warning</div>
+                                        <p className="text-xs leading-relaxed text-muted-foreground">{selectedStock.bearCase}</p>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="w-full h-px bg-border my-2" />
-                            {/* AI 심사 로깅 */}
+                            
+                            <div className="w-full h-px bg-border/50" />
+
+                            {/* 2. 체크리스트 - Milestone & Invalidation */}
+                            <div className="space-y-4">
+                                <div>
+                                    <h3 className="flex items-center justify-between text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-3">
+                                        <div className="flex items-center gap-2"><CheckCircle2 size={14} className="text-blue-500" /> 핵심 마일스톤</div>
+                                    </h3>
+                                    <div className="space-y-3">
+                                        {selectedStock.milestones?.map((m: any, i: number) => (
+                                            <div key={i} className="flex items-start gap-2.5">
+                                                <div className={cn("shrink-0 mt-0.5", m.checked ? "text-blue-500" : "text-muted-foreground/30")}>
+                                                    <CheckCircle2 size={14} />
+                                                </div>
+                                                <p className={cn("text-xs leading-relaxed", m.checked ? "font-bold text-foreground" : "text-muted-foreground")}>{m.text}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="pt-2">
+                                    <h3 className="flex items-center gap-2 text-[10px] font-bold text-red-500 mb-2 uppercase tracking-widest">
+                                        <XCircle size={12} /> 손절 / 가설 훼손 조건
+                                    </h3>
+                                    <p className="text-xs font-bold text-red-600/80 dark:text-red-400/80 leading-relaxed">
+                                        {selectedStock.invalidation}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="w-full h-px bg-border/50" />
+
+                            {/* 3. Daily AI Review Log */}
                             <div>
-                                <h3 className="flex items-center gap-2 text-sm font-bold text-muted-foreground mb-3 uppercase">
-                                    <Activity size={16} />
-                                    Daily AI Review Log
+                                <h3 className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-4">
+                                    <Activity size={14} className="text-amber-500" />
+                                    Daily Hypothesis Review
                                 </h3>
-                                <div className="space-y-4">
-                                    <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <span className="text-xs font-mono opacity-60">오늘 장마감 검증 요약</span>
-                                            <span className="text-[10px] font-bold text-green-500 bg-green-500/20 px-2 py-0.5 rounded">STRONG HOLD</span>
+                                <div className="space-y-5">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] font-mono text-muted-foreground">오늘 장마감 판결</span>
+                                            <span className="text-[10px] font-bold text-green-600 dark:text-green-500">가설 순항 (STRONG)</span>
                                         </div>
-                                        <p className="text-xs leading-relaxed text-foreground">
-                                            주가 하락(-4.5%)은 거시적 지수 영향에 기인함. 외인/기관 연속 매수 지표는 우상향 중. 메인 내러티브 훼손 없으며, 오버행 이슈 무관함. 기계적 손절 로직 우회 처리 완료.
+                                        <p className="text-xs leading-relaxed font-medium">
+                                            주가 4.5% 하락 발생. 그러나 금일 AI가 뉴스/수급을 추적한 결과, 'Bear's Warning' 요인은 발현되지 않음. 핵심 마일스톤인 글로벌 수주 관련 긍정적 내러티브 지속 유효. 기계적 손절매 우회 처리 및 가설 유지(HOLD).
                                         </p>
                                     </div>
-                                    <div className="bg-muted p-4 rounded-xl border">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <span className="text-xs font-mono opacity-60">어제 장마감 검증 요약</span>
-                                            <span className="text-[10px] font-bold text-green-600 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded">HOLD</span>
+                                    <div className="w-full h-px border-t border-dashed border-border/50" />
+                                    <div className="space-y-2 opacity-60 hover:opacity-100 transition-opacity">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] font-mono text-muted-foreground">어제 장마감 판결</span>
+                                            <span className="text-[10px] font-bold text-muted-foreground">리스크 관망</span>
                                         </div>
                                         <p className="text-xs leading-relaxed text-muted-foreground">
-                                            거래량 감소하며 횡보 중이나 동종 섹터 대비 하방 경직성 발현 중.
+                                            특이 수급 이탈 없음. 가설 진행 상황 특이사항 없음.
                                         </p>
                                     </div>
                                 </div>

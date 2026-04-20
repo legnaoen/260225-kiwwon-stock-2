@@ -1158,4 +1158,142 @@ export class KiwoomService {
             return response.data
         })
     }
+
+    /**
+     * [Moonshot] 텐베거 매집 탐지용: 기관/외국인 60일치 매매동향 연속조회 (opt10059)
+     */
+    public async getSmartMoneyFlow(stk_cd: string): Promise<any> {
+        let allData: any[] = [];
+        let contYn = 'N';
+        let nextKey = '';
+        
+        do {
+            const data: any = await this.makeApiRequestWithRetry(async (token) => {
+                const url = `${BASE_URL}/api/dostk/stkinfo`;
+                const headers: any = {
+                    'Content-Type': 'application/json;charset=UTF-8',
+                    'authorization': `Bearer ${token}`,
+                    'api-id': 'ka10059',
+                    'cont-yn': contYn,
+                };
+                if (nextKey) headers['next-key'] = nextKey;
+
+                const todayDt = new Date().toISOString().split('T')[0].replace(/-/g, '');
+                
+                const body = {
+                    dt: todayDt,        // 빈값 불가, YYYYMMDD 필수
+                    stk_cd: stk_cd,
+                    amt_qty_tp: '1',    // 1:금액
+                    trde_tp: '0',       // 0:순매수
+                    unit_tp: '1000'     // 1000:천주 단위
+                };
+
+                const response = await this.kiwoomAxios.post(url, body, { headers });
+                
+                // --- DEBUG LOG START ---
+                console.log(`[Moonshot Debug] opt10059 response status:`, response.status);
+                console.log(`[Moonshot Debug] opt10059 response body snippet:`, JSON.stringify(response.data).substring(0, 300));
+                // --- DEBUG LOG END ---
+                
+                return {
+                    json: response.data,
+                    resContYn: response.headers['cont-yn'] || response.headers['tr-cont-yn'] || response.headers['tr_cont_yn'] || 'N', // 헤더 이름 다양성 방어
+                    resNextKey: response.headers['next-key'] || ''
+                };
+            });
+
+            // Parse and append current chunk safely by checking multiple possible payload locations
+            const root = data.json || {};
+            const chunk = root.stk_invsr_orgn 
+                || root.body?.stk_invsr_orgn 
+                || root.output?.stk_invsr_orgn 
+                || root.body?.output?.stk_invsr_orgn 
+                || [];
+                
+            allData = allData.concat(chunk);
+            
+            contYn = data.resContYn;
+            nextKey = data.resNextKey;
+
+            // 60 영업일 데이터만 필요하므로, 초과 시 루프 조기 종료
+            if (allData.length >= 60) {
+                console.log(`[Moonshot Debug] 60일치 조회 완료 (${allData.length}건). 연속조회 중단.`);
+                contYn = 'N';
+            }
+
+            // Rate Limit Safety (1.5초 딜레이)
+            if (contYn === 'Y' && chunk.length > 0) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            } else if (chunk.length === 0) {
+                // If chunk is empty but there's a payload, let's keep the raw data for debugging
+                if (Object.keys(root).length > 0 && allData.length === 0) {
+                    allData.push({ __debug_raw__: root });
+                }
+                // If chunk is empty, avoid infinite loops by ending iteration
+                contYn = 'N';
+            }
+        } while (contYn === 'Y');
+
+        // 정확히 최근 최신 60일 데이터만 사용
+        const slicedData = allData.length > 60 ? allData.slice(0, 60) : allData;
+
+        return slicedData.length > 0 && slicedData[0].__debug_raw__ 
+            ? slicedData 
+            : this.parseSmartMoneyFlow(slicedData);
+    }
+
+    private parseSmartMoneyFlow(dataList: any[]) {
+        return dataList.map((item: any) => {
+            if (item.__debug_raw__) return item;
+            
+            // 키움 응답 필드: 기관(orgn), 외국인(frgnr_invsr), 개인(ind_invsr)
+            const orgn_amt = item.orgn || item.orgn_invsr_amt || item.orgn_nettrde_amt || '0';
+            const frgnr_amt = item.frgnr_invsr || item.frgnr || item.frgnr_nettrde_amt || '0';
+            const ind_amt = item.ind_invsr || '0';
+            
+            return {
+                date: item.dt || '',
+                orgn_net_buy_amt: parseInt(orgn_amt, 10) || 0,
+                frgnr_net_buy_amt: parseInt(frgnr_amt, 10) || 0,
+                ind_net_buy_amt: parseInt(ind_amt, 10) || 0,
+                cur_prc: item.cur_prc || '', 
+            };
+        });
+    }
+
+    /**
+     * [Moonshot] 텐베거 펀더멘털용: 주식기본정보 (opt10001) - 신용비율 및 PER 추출
+     */
+    public async getFundamentalInfo(stk_cd: string): Promise<any> {
+        return this.makeApiRequestWithRetry(async (token) => {
+            const url = `${BASE_URL}/api/dostk/stkinfo`;
+            const headers = {
+                'Content-Type': 'application/json;charset=UTF-8',
+                'authorization': `Bearer ${token}`,
+                'api-id': 'ka10001'
+            };
+            
+            const response = await this.kiwoomAxios.post(url, { stk_cd }, { headers });
+            const root = response.data || {};
+            const data = root.body || root.output || root;
+            
+            // Safe ratio parser
+            const passPercent = (val: any) => {
+                if (!val) return 0.0;
+                const clean = String(val).replace(/[%+,]/g, '').trim();
+                const num = parseFloat(clean);
+                return isNaN(num) ? 0.0 : num;
+            };
+
+            return {
+                stock_code: data.stk_cd || stk_cd,
+                stock_name: data.stk_nm || '',
+                credit_ratio: passPercent(data.crd_rt),
+                per: passPercent(data.per),
+                pbr: passPercent(data.pbr),
+                eps: passPercent(data.eps),
+                market_cap: data.mkt_cap || '' // 시가총액
+            };
+        });
+    }
 }

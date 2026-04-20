@@ -24,6 +24,11 @@ import { FinanceInfoAggregator } from './aggregators/FinanceInfoAggregator';
 import { InvestorFlowCollector } from './collectors/InvestorFlowCollector';
 import { InvestorFlowAggregator } from './aggregators/InvestorFlowAggregator';
 
+import { SmartMoneyCollector } from './collectors/SmartMoneyCollector';
+import { SmartMoneyAggregator } from './aggregators/SmartMoneyAggregator';
+import { FundamentalCollector } from './collectors/FundamentalCollector';
+import { FundamentalAggregator } from './aggregators/FundamentalAggregator';
+
 import { MarketDataCollectorService } from './MarketDataCollectorService';
 
 export class V2PipelineManager {
@@ -60,6 +65,12 @@ export class V2PipelineManager {
     private investorFlowCollector: InvestorFlowCollector;
     private investorFlowAggregator: InvestorFlowAggregator;
 
+    private smartMoneyCollector: SmartMoneyCollector;
+    private smartMoneyAggregator: SmartMoneyAggregator;
+
+    private fundamentalCollector: FundamentalCollector;
+    private fundamentalAggregator: FundamentalAggregator;
+
     private constructor() {
         this.macroCollector = new MacroCollector();
         this.macroAggregator = new MacroAggregator();
@@ -91,6 +102,12 @@ export class V2PipelineManager {
 
         this.investorFlowCollector = new InvestorFlowCollector();
         this.investorFlowAggregator = new InvestorFlowAggregator();
+
+        this.smartMoneyCollector = new SmartMoneyCollector();
+        this.smartMoneyAggregator = new SmartMoneyAggregator();
+
+        this.fundamentalCollector = new FundamentalCollector();
+        this.fundamentalAggregator = new FundamentalAggregator();
     }
 
     public static getInstance(): V2PipelineManager {
@@ -157,6 +174,14 @@ export class V2PipelineManager {
                 case 'PL-InvestorFlow':
                     rawData = await this.investorFlowCollector.collect();
                     aggregatedMarkdown = await this.investorFlowAggregator.process(rawData);
+                    break;
+                case 'PL-SmartMoney':
+                    rawData = await this.smartMoneyCollector.collect(options);
+                    aggregatedMarkdown = await this.smartMoneyAggregator.process(rawData);
+                    break;
+                case 'PL-Fundamental':
+                    rawData = await this.fundamentalCollector.collect(options);
+                    aggregatedMarkdown = await this.fundamentalAggregator.process(rawData);
                     break;
                 default:
                     throw new Error(`Unknown pipeline ID: ${pipelineId}`);

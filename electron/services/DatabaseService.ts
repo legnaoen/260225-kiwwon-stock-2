@@ -631,6 +631,16 @@ export class DatabaseService {
         this.db.exec(createSchedulesTable)
         this.db.exec(createFinancialDataTable)
         this.db.exec(createAnalysisCacheTable)
+
+        const createPipelineDataCacheTable = `
+            CREATE TABLE IF NOT EXISTS pipeline_data_cache (
+                data_key TEXT PRIMARY KEY,
+                json_data TEXT,
+                updated_at TEXT
+            );
+        `
+        this.db.exec(createPipelineDataCacheTable)
+
         this.db.exec(createYahooFinanceCacheTable)
         this.db.exec(createYahooMacroCacheTable)
         this.db.exec(createAiStrategiesTable)
@@ -1779,6 +1789,39 @@ export class DatabaseService {
         return this.db.prepare('SELECT * FROM analysis_cache WHERE stock_code = ?').get(stockCode) as any
     }
 
+    // ─── Pipeline Data Cache ────────────────────────────────────────────────
+    public setPipelineCache(key: string, data: any) {
+        try {
+            this.db.prepare(`
+                INSERT OR REPLACE INTO pipeline_data_cache (data_key, json_data, updated_at)
+                VALUES (?, ?, ?)
+            `).run(key, JSON.stringify(data), new Date().toISOString())
+        } catch (error) {
+            console.error('[DatabaseService] Failed to set pipeline cache', error)
+        }
+    }
+
+    public getPipelineCache(key: string, maxAgeHours: number = 24): any {
+        try {
+            const row = this.db.prepare('SELECT * FROM pipeline_data_cache WHERE data_key = ?').get(key) as any
+            if (!row || !row.updated_at) return null
+
+            const updatedTime = new Date(row.updated_at).getTime()
+            const now = new Date().getTime()
+            const ageHours = (now - updatedTime) / (1000 * 60 * 60)
+
+            if (ageHours > maxAgeHours) {
+                return null // Expired
+            }
+
+            return JSON.parse(row.json_data)
+        } catch (error) {
+            console.error('[DatabaseService] Failed to get pipeline cache', error)
+            return null
+        }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     public saveYahooFinanceCache(symbol: string, historicalDataJson: string) {
         const stmt = this.db.prepare(`
             INSERT OR REPLACE INTO yahoo_finance_cache (symbol, historical_data, updated_at)
@@ -2461,7 +2504,10 @@ export class DatabaseService {
                     SELECT stock_code, stock_name, strategy, conviction_score 
                     FROM maiis_portfolio 
                     WHERE ${statusCondition}
-                    ORDER BY conviction_score DESC, updated_at ASC
+                    ORDER BY 
+                        CASE WHEN entry_date = SUBSTR(DATETIME('now', 'localtime'), 1, 10) AND status = 'HELD' THEN 1 ELSE 0 END DESC,
+                        conviction_score DESC, 
+                        updated_at ASC
                 `).all() as any[];
 
                 if (allItems.length === 0) continue;
@@ -2583,6 +2629,12 @@ export class DatabaseService {
     public deletePortfolioItem(id: number): { deleted: boolean } {
         const info = this.db.prepare('DELETE FROM maiis_portfolio WHERE id = ?').run(id);
         console.log(`[DB] deletePortfolioItem: id=${id}, changes=${info.changes}`);
+        return { deleted: info.changes > 0 };
+    }
+
+    public deleteTradeHistoryItem(id: number): { deleted: boolean } {
+        const info = this.db.prepare('DELETE FROM maiis_trade_history WHERE trade_id = ?').run(id);
+        console.log(`[DB] deleteTradeHistoryItem: trade_id=${id}, changes=${info.changes}`);
         return { deleted: info.changes > 0 };
     }
 

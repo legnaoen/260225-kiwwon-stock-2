@@ -118,7 +118,8 @@ function PortfolioStockModal({ stock, watchlist, onClose, onUpdateStockPrice }: 
     }, [onClose]);
 
     // 매력도나 시그널 정보가 있다면 관리 대상 종목으로 판단 (없으면 차트만 표시)
-    const isManaged = stock.conviction_score != null || stock.last_signal != null || stock.raw_context != null;
+    // PM 관리 앱이므로 포트폴리오 탭, 성적표 탭 등에서 열린 모달은 모두 관리 대상으로 간주함.
+    const isManaged = true;
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 md:p-12 animate-in fade-in duration-200 bg-background/80 backdrop-blur-sm">
@@ -205,7 +206,7 @@ function PortfolioStockModal({ stock, watchlist, onClose, onUpdateStockPrice }: 
                                             <Brain className="w-3.5 h-3.5 text-indigo-400" /> 포트폴리오 매니저 판단
                                         </div>
                                         <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl text-sm font-semibold text-foreground/90 leading-relaxed min-h-[80px]">
-                                            {stock.last_signal_reason || '분석 내용이 없습니다.'}
+                                            {stock.last_signal_reason || stock.exit_reason || stock.entry_reason || '분석 내용이 없습니다.'}
                                         </div>
                                     </div>
 
@@ -1279,13 +1280,13 @@ export const PortfolioManagerTab: React.FC = () => {
                                     const peakProf = Number(p.peak_profit_rate ?? 0);
                                     const peakColor = peakProf > 0 ? 'text-amber-400' : peakProf < 0 ? 'text-blue-400' : 'text-muted-foreground';
 
-                                    // 시작일: entry_price_at(실제 매수 확정일) → entry_date → created_at 순 폴백
-                                    let entryRaw = p.entry_price_at || p.entry_date || p.created_at || '';
+                                    // 시작일: entry_date -> created_at 순 폴백
+                                    let entryRaw = p.entry_date || p.created_at || '';
                                     if (entryRaw.includes('T')) entryRaw = entryRaw.split('T')[0];
                                     const displayEntryDate = entryRaw.length >= 10 ? entryRaw.substring(5, 10).replace(/-/g, '.') : entryRaw || '-';
 
-                                    // 종료일: closed_date → updated_at 폴백
-                                    let closeRaw = p.closed_date || p.updated_at || '';
+                                    // 종료일: exit_date -> updated_at 폴백
+                                    let closeRaw = p.exit_date || p.updated_at || '';
                                     if (closeRaw.includes('T')) closeRaw = closeRaw.split('T')[0];
                                     const displayCloseDate = closeRaw.length >= 10 ? closeRaw.substring(5, 10).replace(/-/g, '.') : closeRaw || '-';
 
@@ -1364,7 +1365,7 @@ export const PortfolioManagerTab: React.FC = () => {
                                                     onClick={async (e) => {
                                                         e.stopPropagation();
                                                         if (!window.confirm(`'${p.stock_name}' 성적 항목을 삭제하시겠습니까?\n실제 매매는 영향없습니다.`)) return;
-                                                        await (window.electronAPI as any).deletePortfolioItem(p.id);
+                                                        await (window.electronAPI as any).deleteTradeHistoryItem(p.trade_id || p.id);
                                                         fetchPortfolio();
                                                     }}
                                                     className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity text-muted-foreground hover:text-rose-400"

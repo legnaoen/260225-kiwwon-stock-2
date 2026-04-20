@@ -20,7 +20,12 @@ export class FinanceInfoCollector implements IBaseCollector {
             let stockCode = keyword;
             let stockName = keyword;
 
-            if (!/^\d+$/.test(keyword)) {
+            // 키움증권 종목코드 형식('A' + 6자리 숫자)인 경우 'A' 제거
+            if (/^A\d{6}$/i.test(keyword)) {
+                stockCode = keyword.substring(1);
+            }
+
+            if (!/^\d+$/.test(stockCode)) {
                 // 정확히 일치하는 종목명부터 찾기 (라이크 검색의 ETN/ELW 오탐 방지)
                 const db = DatabaseService.getInstance().getDb();
                 let exactMatch = db.prepare('SELECT stock_code, stock_name FROM stocks_master WHERE stock_name = ? COLLATE NOCASE LIMIT 1').get(keyword);

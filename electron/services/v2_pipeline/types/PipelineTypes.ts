@@ -9,7 +9,9 @@ export type PipelineId =
     | 'PL-NaverSearch' // 키워드 기반 동적 뉴스 검색 
     | 'PL-FinanceInfo' // [Phase 2.9] 종목코드 기반 (coinfo) 재무/비즈니스 마크다운 추출
     | 'PL-InvestorFlow'// 장중 주체별 수급 동향 (외인/기관 현선물 및 프로그램)
-    | 'PL-MarketDaily';// [Phase 1] 60봉 전 종목 데이터 캐싱 펌프
+    | 'PL-MarketDaily' // [Phase 1] 60봉 전 종목 데이터 캐싱 펌프
+    | 'PL-SmartMoney'  // 기관/외인 60일 순매수 누적 추적
+    | 'PL-Fundamental';// 종목 신용비율, PER/PBR, 시가총액 추출
 
 // 모든 데이터 수집 및 1차 가공 파이프라인의 종착역 (표준 리턴 포맷)
 export interface V2PipelineResult {

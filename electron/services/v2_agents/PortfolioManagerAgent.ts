@@ -604,19 +604,10 @@ ${chartRiskSkill}
                     }
 
                     const finalProcessed = [...buysAndSells, ...survivedWatchlist, ...cutOffDropped, ...validDecisions];
+                    const pricesMap: Record<string, number> = {};
 
                     // DB 기록 실행 루프
                     for (const dec of finalProcessed) {
-                        // AI가 직접 DROP한 것도 처리 (컷오프 서바이벌로 밀려난 종목들도 포함)
-                        if (dec.finalStatus === 'DROPPED') {
-                            const previousInfo = activePortfolio.find(p => p.stock_code === dec.finalCode);
-                            if (previousInfo) {
-                                // 기존에 포트폴리오에 있었던 종목이 밀려난 거라면 DB 상태 변경
-                                this.db.updatePortfolioStatus(dec.finalCode, 'DROPPED', dec.last_signal_reason || '관심종목 서바이벌 컷오프 탈락');
-                            }
-                            continue; // 그 외 신규 픽이었다가 탈락한 건 DB에 넣을 필요 없으므로 생략
-                        }
-
                         const specificContext = dossiersMap[dec.stock_name] || `[담당 AI 추천 근거 요약]`;
 
                         // 현재가 처리
@@ -634,6 +625,18 @@ ${chartRiskSkill}
                         } catch (apiErr) {
                             const match = specificContext.match(/현재가: ([0-9,]+)원/);
                             if (match && match[1]) curPrice = parseInt(match[1].replace(/,/g, ''), 10);
+                        }
+                        
+                        pricesMap[dec.finalCode] = curPrice;
+
+                        // AI가 직접 DROP한 것도 처리 (컷오프 서바이벌로 밀려난 종목들도 포함)
+                        if (dec.finalStatus === 'DROPPED') {
+                            const previousInfo = activePortfolio.find(p => p.stock_code === dec.finalCode);
+                            if (previousInfo) {
+                                // 기존에 포트폴리오에 있었던 종목이 밀려난 거라면 DB 상태 변경
+                                this.db.updatePortfolioStatus(dec.finalCode, 'DROPPED', dec.last_signal_reason || '관심종목 서바이벌 컷오프 탈락');
+                            }
+                            continue; // 그 외 신규 픽이었다가 탈락한 건 DB에 넣을 필요 없으므로 생략
                         }
 
                         const previousInfo = activePortfolio.find(p => p.stock_code === dec.finalCode);
@@ -778,15 +781,17 @@ ${chartRiskSkill}
                                     ? (reasonMatch.last_signal_reason || 'PM 익/손절 판정')
                                     : '관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락';
 
+                                const freshPrice = pricesMap[d.stock_code] > 0 ? pricesMap[d.stock_code] : (d.current_price || 0);
+
                                 // ✅ 실제 매수(HELD) 포지션이었던 종목만 이벤트 로그 기록
                                 // WATCHING → DROPPED 종목은 성적표/이벤트 로그 대상 아님
                                 if (d.status === 'HELD' || d.status === 'IMMEDIATE_BUY') {
-                                    this.db.logPortfolioEvent(d.stock_code, d.stock_name, 'DROPPED', d.status, 'CLEARED', reason, d.current_price || 0);
+                                    this.db.logPortfolioEvent(d.stock_code, d.stock_name, 'DROPPED', d.status, 'CLEARED', reason, freshPrice);
                                     // ✅ [거래 단위] 매도 시 trade_history OPEN 레코드 닫기
                                     const droppedPf = rawDb.prepare("SELECT profit_rate FROM maiis_portfolio WHERE stock_code = ?").get(d.stock_code) as any;
                                     this.db.closeTradeRecord({
                                         stock_code: d.stock_code,
-                                        exit_price: d.current_price || 0,
+                                        exit_price: freshPrice,
                                         exit_reason: reason,
                                         profit_rate: droppedPf?.profit_rate || 0
                                     });

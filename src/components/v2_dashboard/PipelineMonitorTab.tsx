@@ -17,7 +17,9 @@ const PIPELINES = [
     { id: 'PL-InvestorFlow', name: 'Intraday Investor Flow', description: '실시간 현선물 외인/기관 주체별 수급 (네이버 모바일)', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
     { id: 'PL-Research', name: 'Naver Research (Top 3)', description: '최근 1주간 애널리스트 집중 산업 및 리포트 본문', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
     { id: 'PL-NaverSearch', name: 'Dynamic Naver Search', description: '키워드 기반 맞춤형 동적 네이버 뉴스 검색 (테스트/디버깅용)', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
-    { id: 'PL-FinanceInfo', name: 'Naver Finance (coinfo)', description: '종목명 기반 재무제표 및 기업개요 (md_browse)', status: 'idle', lastRun: '--:--:--', timeMs: 0 }
+    { id: 'PL-FinanceInfo', name: 'Naver Finance (coinfo)', description: '종목명 기반 재무제표 및 기업개요 (md_browse)', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
+    { id: 'PL-SmartMoney', name: 'Smart Money Flow', description: '특정 종목 기관/외인 60영업일 매매동향 (opt10059)', status: 'idle', lastRun: '--:--:--', timeMs: 0 },
+    { id: 'PL-Fundamental', name: 'Stock Fundamental', description: '특정 종목 신용비율 및 기본 펀더멘털 시총 정보 (opt10001)', status: 'idle', lastRun: '--:--:--', timeMs: 0 }
 ];
 
 export default function PipelineMonitorTab() {
@@ -151,9 +153,11 @@ export default function PipelineMonitorTab() {
         setIsExecuting(true);
         try {
             const options: any = { forceFetch };
-            if (activePipeline.id === 'PL-NaverSearch' || activePipeline.id === 'PL-FinanceInfo') {
+            
+            const requireKeywordPipelines = ['PL-NaverSearch', 'PL-FinanceInfo', 'PL-SmartMoney', 'PL-Fundamental'];
+            if (requireKeywordPipelines.includes(activePipeline.id)) {
                 if (!searchKeyword.trim()) {
-                    alert('검색 텍스트 필드에 테스트할 종목명/키워드를 입력하세요.');
+                    alert('검색 텍스트 필드에 종목코드 또는 키워드를 입력하세요. (예: 005930)');
                     setIsExecuting(false);
                     return;
                 }
@@ -309,14 +313,14 @@ export default function PipelineMonitorTab() {
                                         <SettingsIcon size={12} /> 설정
                                     </button>
                                 )}
-                                {(activePipeline.id === 'PL-NaverSearch' || activePipeline.id === 'PL-FinanceInfo') && (
+                                {(activePipeline.id === 'PL-NaverSearch' || activePipeline.id === 'PL-FinanceInfo' || activePipeline.id === 'PL-SmartMoney' || activePipeline.id === 'PL-Fundamental') && (
                                     <div className="flex items-center gap-2">
                                         <input 
                                             type="text" 
                                             value={searchKeyword}
                                             onChange={(e) => setSearchKeyword(e.target.value)}
-                                            placeholder="검색어 (예: 삼성전자)" 
-                                            className="px-2 py-1 text-xs border border-muted-foreground/30 bg-background/50 rounded w-40 text-foreground focus:outline-none focus:border-primary"
+                                            placeholder="종목코드/검색어 입력 (예: 005930)" 
+                                            className="px-2 py-1 text-xs border border-muted-foreground/30 bg-background/50 rounded w-48 text-foreground focus:outline-none focus:border-primary"
                                         />
                                     </div>
                                 )}

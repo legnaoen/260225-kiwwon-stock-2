@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getChartData: (options: { stk_cd: string, base_dt?: string }) => ipcRenderer.invoke('kiwoom:get-chart-data', options),
     getChart5m: (ticker: string, days?: number) => ipcRenderer.invoke('kiwoom:get-chart-5m', ticker, days),
     wsRegister: (symbols: string[]) => ipcRenderer.invoke('kiwoom:ws-register', symbols),
+    wsUnregister: (symbols: string[]) => ipcRenderer.invoke('kiwoom:ws-unregister', symbols),
     onRealTimeData: (callback: (data: any) => void) => {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('kiwoom:real-time-data', listener)
@@ -452,6 +453,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const listener = (_event: any, log: any) => callback(log)
         ipcRenderer.on('moonshot:tracker-progress', listener)
         return () => ipcRenderer.removeListener('moonshot:tracker-progress', listener)
+    },
+
+    // Live Trade V2
+    getLiveTradeStrategies: () => ipcRenderer.invoke('livetrade:get-strategies'),
+    saveLiveTradeStrategy: (strategy: any) => ipcRenderer.invoke('livetrade:save-strategy', strategy),
+    getLiveTradeTickets: () => ipcRenderer.invoke('livetrade:get-tickets'),
+    // Kill-Switch (긴급 중단)
+    getLiveTradeKillSwitch: () => ipcRenderer.invoke('livetrade:get-kill-switch'),
+    setLiveTradeKillSwitch: (active: boolean) => ipcRenderer.invoke('livetrade:set-kill-switch', active),
+    // Live Trade Error Log
+    onLiveTradeError: (callback: (error: any) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('livetrade:error', listener)
+        return () => ipcRenderer.removeListener('livetrade:error', listener)
     },
 })
 

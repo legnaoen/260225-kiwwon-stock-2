@@ -8,7 +8,7 @@ import Sidebar, { menuItems } from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import Holdings from './components/Holdings'
 import Settings from './components/Settings'
-import MaiisCommandCenter from './components/MaiisCommandCenter'
+// import MaiisCommandCenter from './components/MaiisCommandCenter' // 사용자 요청으로 제거
 import MacroDashboard from './components/MacroDashboard'
 import PipelineMonitorTab from './components/v2_dashboard/PipelineMonitorTab'
 import MarketAgentTab from './components/v2_dashboard/MarketAgentTab'
@@ -359,7 +359,7 @@ function AppContent() {
                         {activeTab === 'dashboard' && <Dashboard />}
                         {activeTab === 'holdings' && <Holdings />}
                         {activeTab === 'settings' && <Settings />}
-                        {activeTab === 'maiis-command' && <MaiisCommandCenter />}
+                        {/* {activeTab === 'maiis-command' && <MaiisCommandCenter />} */}
                         {activeTab === 'macro-dashboard' && <MacroDashboard />}
                         {activeTab === 'pipeline-monitor' && <PipelineMonitorTab />}
                         {activeTab === 'market-agent' && <MarketAgentTab onNavigate={navigateTo} />}
@@ -371,7 +371,7 @@ function AppContent() {
                         {activeTab === 'moonshot' && <MoonshotTab />}
 
                         {/* 등록된 탭이 아닌 경우 폴백 화면 */}
-                        {(['dashboard', 'holdings', 'settings', 'maiis-command', 'macro-dashboard', 'pipeline-monitor', 'market-agent', 'issue-agent', 'theme-tracker', 'portfolio-manager', 'market-leaders', 'moonshot'].indexOf(activeTab) === -1) && (
+                        {(['dashboard', 'holdings', 'settings', 'macro-dashboard', 'pipeline-monitor', 'market-agent', 'issue-agent', 'theme-tracker', 'portfolio-manager', 'market-leaders', 'moonshot'].indexOf(activeTab) === -1) && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

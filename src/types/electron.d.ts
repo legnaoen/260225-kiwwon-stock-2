@@ -208,6 +208,11 @@ export interface IElectronAPI {
     runPortfolioJudge: () => Promise<{ success: boolean, data?: any, error?: string }>
     getActivePortfolio: () => Promise<any[]>
     getAiPicks: () => Promise<any[]>
+
+    // Live Trade V2
+    getLiveTradeStrategies: () => Promise<any[]>
+    saveLiveTradeStrategy: (strategy: any) => Promise<{ success: boolean, error?: string }>
+    getLiveTradeTickets: () => Promise<any[]>
 }
 
 declare global {

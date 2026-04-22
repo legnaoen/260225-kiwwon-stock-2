@@ -231,6 +231,68 @@ export class KiwoomWebSocketManager {
         }
     }
 
+    /**
+     * 특정 종목의 실시간 구독을 해제합니다.
+     * - registeredItems에서 제거 후 나머지 목록으로 REG refresh 재전송
+     * - 남은 구독 목록이 없으면 UNREG 패킷으로 전체 해제
+     * @param symbols 해제할 종목코드 배열 (6자리 숫자 또는 A접두사 포함 모두 허용)
+     */
+    public unregisterItems(symbols: string[]) {
+        const cleanCodes = symbols.map(s => s.trim().replace(/^A/, '').replace(/[^0-9]/g, ''))
+
+        let anyRemoved = false
+        for (const code of cleanCodes) {
+            // registeredItems에는 원본 포맷(A접두사 포함 또는 숫자만)이 섞일 수 있으므로
+            // 숫자 정규화 후 일치 여부로 제거
+            for (const item of Array.from(this.registeredItems)) {
+                if (item.replace(/[^0-9]/g, '') === code) {
+                    this.registeredItems.delete(item)
+                    anyRemoved = true
+                }
+            }
+        }
+
+        if (!anyRemoved) return // 제거할 항목 없으면 아무것도 안 함
+
+        if (!this.ws || !this.isConnected || this.ws.readyState !== WebSocket.OPEN) {
+            console.log(`[WS] Unregister queued (not connected). Removed from local set: ${symbols.join(', ')}`)
+            return
+        }
+
+        const remainingSymbols = Array.from(this.registeredItems)
+            .map(s => s.replace(/[^0-9]/g, ''))
+            .filter(s => s.length === 6)
+
+        if (remainingSymbols.length === 0) {
+            // 더 이상 구독할 종목이 없으면 전체 해제
+            const unregPacket = { trnm: 'UNREG', grp_no: '1' }
+            this.ws.send(JSON.stringify(unregPacket))
+            console.log(`[WS] 전체 구독 해제 (UNREG)`)
+        } else {
+            // 나머지 목록으로 refresh 재등록 (기존 구독 목록 교체)
+            const regPacket = {
+                trnm: 'REG',
+                grp_no: '1',
+                refresh: '1', // 기존 그룹 목록을 새 목록으로 교체
+                data: [{ item: remainingSymbols, type: ['0B', '0s', '00'] }]
+            }
+            this.ws.send(JSON.stringify(regPacket))
+            console.log(`[WS] 구독 갱신 후 해제: ${symbols.join(', ')} 제거 / 잔여: ${remainingSymbols.join(', ')}`)
+        }
+    }
+
+    /**
+     * 현재 구독 중인 종목코드 Set을 반환 (6자리 숫자 정규화)
+     */
+    public getRegisteredCodes(): Set<string> {
+        const result = new Set<string>()
+        for (const item of this.registeredItems) {
+            const code = item.replace(/[^0-9]/g, '')
+            if (code.length === 6) result.add(code)
+        }
+        return result
+    }
+
     public disconnect() {
         this.ws?.close()
         this.stopPing()

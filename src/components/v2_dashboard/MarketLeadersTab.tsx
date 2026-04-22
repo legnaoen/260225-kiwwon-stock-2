@@ -7,6 +7,7 @@ import { StockChart } from '../StockChart'
 import { StockAiReport } from '../StockAiReport'
 import { CrossPeriodTab } from './CrossPeriodTab'
 import { SimTradeTab } from './SimTradeTab'
+import { LiveTradeTab } from './LiveTradeTab'
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
 
@@ -233,6 +234,7 @@ export const MarketLeadersTab: React.FC = () => {
             {/* ── 최상단 트랙 탭 ── */}
             <div className="shrink-0 flex items-center gap-1 px-3 pt-2.5 pb-0 border-b border-border/50 bg-muted/5">
                 {([
+                    { id: 'live-trade',       label: '▶ 실전매매',            icon: Zap,        badge: '실전' },
                     { id: 'sim-trade',        label: '🎯 모의매매',           icon: Target,     badge: 'NEW' },
                     { id: 'track-b-new',      label: 'Track B — 알파 역상관', icon: Shield,     badge: '알파' },
                     { id: 'track-b-cross',    label: '🎯 추천 종목',          icon: TrendingUp, badge: 'NEW' },
@@ -265,6 +267,11 @@ export const MarketLeadersTab: React.FC = () => {
             {/* ── 모의매매 ── */}
             {activeTrack === 'sim-trade' && (
                 <SimTradeTab />
+            )}
+
+            {/* ── 실전매매 ── */}
+            {activeTrack === 'live-trade' && (
+                <LiveTradeTab />
             )}
 
             {/* ── Track B: 추천 종목 (Layer 2) ── */}

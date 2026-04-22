@@ -861,7 +861,18 @@ ${chartRiskSkill}
 
                         if (newBuys.length > 0) {
                             tgMsg += `\n\n🎉 [신규 매수 승급]`;
-                            newBuys.forEach(b => {
+                            
+                            // Load active live trade strategy
+                            let activeLiveStrategy: any = null;
+                            try {
+                                const { LiveTradeLedgerService } = await import('../LiveTradeLedgerService');
+                                const strategies = LiveTradeLedgerService.getInstance().getStrategies();
+                                activeLiveStrategy = strategies.find(s => s.is_active === 1);
+                            } catch (e) {
+                                console.error('[PortfolioManager] Failed to load active live strategy:', e);
+                            }
+
+                            for (const b of newBuys) {
                                 tgMsg += `\n- ${b.stock_name} (${b.strategy} | ${b.conviction_score}점)`;
                                 const reasonMatch = parsed.decisions.find((d: any) => d.stock_code === b.stock_code);
                                 const reason = reasonMatch ? (reasonMatch.last_signal_reason || reasonMatch.reason) : 'PM 매수 승급 확정';
@@ -875,7 +886,28 @@ ${chartRiskSkill}
                                     strategy: b.strategy || 'MOMENTUM',
                                     analysts_json: b.analysts_json || []
                                 });
-                            });
+
+                                // 🔥 [Live Trade 파이프라인 연동]
+                                // AI가 선택한 종목의 카테고리가 실전 매매에서 설정된 activeStrategy와 일치하면 실제 매수 실행
+                                const pickCategory = b.primaryCategory || b.strategy || 'MOMENTUM';
+                                if (activeLiveStrategy && activeLiveStrategy.strategy_category === pickCategory) {
+                                    try {
+                                        const { LiveTradeExecutionService } = await import('../LiveTradeExecutionService');
+                                        await LiveTradeExecutionService.getInstance().executeBuy({
+                                            stockCode: b.stock_code,
+                                            stockName: b.stock_name,
+                                            category: activeLiveStrategy.strategy_category,
+                                            themes: (b.analysts_json || []).join(', '),
+                                            buyScore: b.conviction_score || 90,
+                                            currentPrice: b.current_price || b.entry_price || 0
+                                        });
+                                        tgMsg += `\n  👉 [실전매매] ${activeLiveStrategy.strategy_category} 전략 자동 매수 완료`;
+                                    } catch (liveTradeErr: any) {
+                                        console.error(`[PortfolioManager] 실전매매 매수 실패: ${b.stock_name}`, liveTradeErr);
+                                        tgMsg += `\n  🚨 [실전매매 실패] ${liveTradeErr.message}`;
+                                    }
+                                }
+                            }
                         } else {
                             tgMsg += `\n\n⚠️ [신규 매수 없음]`;
                             

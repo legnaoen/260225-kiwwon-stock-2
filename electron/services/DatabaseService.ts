@@ -798,6 +798,42 @@ export class DatabaseService {
         `
         this.db.exec(createThemeOntologyTable)
 
+        // ─── Live Trade Ledger ──────────────────────────────────────────────
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS live_trade_tickets (
+                ticket_id TEXT PRIMARY KEY,
+                stock_code TEXT NOT NULL,
+                entry_date TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                quantity INTEGER NOT NULL,
+                strategy_category TEXT NOT NULL,
+                target_exit_date TEXT NOT NULL,
+                status TEXT DEFAULT 'ACTIVE', -- ACTIVE, CLOSED, FAILED
+                fail_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        `);
+        
+        try {
+            this.db.exec(`ALTER TABLE live_trade_tickets ADD COLUMN fail_reason TEXT;`);
+        } catch (e) {
+            // Ignore if column already exists
+        }
+        
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS live_trade_strategies (
+                id TEXT PRIMARY KEY,
+                strategy_category TEXT NOT NULL UNIQUE,
+                is_active INTEGER DEFAULT 0,
+                buy_amount_per_trade REAL DEFAULT 0,
+                max_hold_days INTEGER DEFAULT 0,
+                target_profit_rate REAL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+        `);
+        // ──────────────────────────────────────────────────────────────────
+
         // ═══ V2 Agent Swarm: Market Condition Agent ═══
         const createAgentPredictionsTable = `
             CREATE TABLE IF NOT EXISTS agent_predictions (

@@ -115,6 +115,67 @@ export class SchedulerService {
                     this.telegram.sendMessage(`❌ [15:35] 성과 추적 실패\n오류: ${e.message}`)
                 }
             }, { timezone: 'Asia/Seoul' })
+            // 실전 매매 최대 보유일 청산 (Time-Stop) 파이프라인 (15:00)
+            const liveTradeTimeStopJob = cron.schedule('00 15 * * 1-5', async () => {
+                try {
+                    const { LiveTradeLedgerService } = await import('./LiveTradeLedgerService')
+                    const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService')
+                    const ledger = LiveTradeLedgerService.getInstance()
+                    const execSvc = LiveTradeExecutionService.getInstance()
+                    
+                    const activeTickets = ledger.getActiveTickets()
+                    const today = new Date().toISOString().split('T')[0]
+                    
+                    const expiringTickets = activeTickets.filter(t => t.target_exit_date <= today)
+                    
+                    if (expiringTickets.length > 0) {
+                        this.telegram.sendMessage(`⏳ **[장 마감 기간 청산 시작]**\n- 청산 대상: ${expiringTickets.length}건\n- 최대 보유일 도달로 인해 15:20 동시호가 시장가(조건부 지정가)로 전량 매도 실행합니다.`);
+                        for (const ticket of expiringTickets) {
+                            try {
+                                const priceInfo = await this.kiwoom.getStockBasicInfo(ticket.stock_code);
+                                const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
+                                const rawCur = String(body.cur_prc || body.stk_prc || body.stck_prpr || '0').replace(/[^0-9-]/g, '');
+                                const currentPrice = Math.abs(parseInt(rawCur, 10)) || 0;
+
+                                if (currentPrice > 0) {
+                                    await execSvc.executeTimeStopSell(ticket);
+                                    await new Promise(r => setTimeout(r, 1000)); // Rate limit 보호
+                                } else {
+                                    console.warn(`[Scheduler] ${ticket.stock_code} 현재가 조회 실패. 기간청산 건너뜀.`);
+                                    this.telegram.sendMessage(`⚠️ **[기간청산 건너뜀]**\n- 종목: ${ticket.stock_code}\n- 사유: 현재가 조회 실패`);
+                                }
+                            } catch (err: any) {
+                                console.error(`[Scheduler] ${ticket.stock_code} 기간청산 매도 에러:`, err.message);
+                            }
+                        }
+                    }
+                } catch (e: any) {
+                    console.error('[Scheduler] 실전매매 기간청산 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            // I-4: 장 시작 전 잔고 대조 (Daily Sync Check, 08:50)
+            // 전날 정산 실패 또는 야간 수동 매매로 인한 불일치 조기 감지
+            const liveTradeSyncCheckJob = cron.schedule('50 08 * * 1-5', async () => {
+                try {
+                    const { LiveTradeReconciliationService } = await import('./LiveTradeReconciliationService')
+                    console.log('[Scheduler] 장 시작 전 실전매매 잔고 대조 (Sync Check) 실행')
+                    await LiveTradeReconciliationService.getInstance().reconcileDailyExecutions()
+                } catch (e: any) {
+                    console.error('[Scheduler] 장 시작 전 Sync Check 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
+            // 장 마감 실전매매 정산 파이프라인 (15:35)
+            const liveTradeReconJob = cron.schedule('35 15 * * 1-5', async () => {
+                try {
+                    const { LiveTradeReconciliationService } = await import('./LiveTradeReconciliationService')
+                    await LiveTradeReconciliationService.getInstance().reconcileDailyExecutions()
+                } catch (e: any) {
+                    console.error('[Scheduler] 실전매매 장 마감 정산 오류:', e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
 
 
             // 주간 회고 AI (금요일 15:44, 3분 텀 내 편성)
@@ -437,12 +498,33 @@ export class SchedulerService {
                     console.error('[Scheduler] ThemeContextBuilder 오류:', e.message)
                 }
             }, { timezone: 'Asia/Seoul' })
-            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob)
+
+            // [실전 매매] 1분 단위 미체결 주문 모니터링 및 익절 매도 모니터링 (09:00 ~ 15:30 장중)
+            const liveTradeMonitorJob = cron.schedule('* 09-14 * * 1-5', async () => {
+                try {
+                    const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService');
+                    await LiveTradeExecutionService.getInstance().monitorTakeProfit();
+                    await LiveTradeExecutionService.getInstance().monitorUnexecutedOrders();
+                } catch (e: any) {
+                    // Ignore background errors or log them silently
+                }
+            }, { timezone: 'Asia/Seoul' });
+            const liveTradeMonitorJob15 = cron.schedule('0-30 15 * * 1-5', async () => {
+                try {
+                    const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService');
+                    await LiveTradeExecutionService.getInstance().monitorTakeProfit();
+                    await LiveTradeExecutionService.getInstance().monitorUnexecutedOrders();
+                } catch (e: any) {
+                    // Ignore background errors
+                }
+            }, { timezone: 'Asia/Seoul' });
+            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob, liveTradeMonitorJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)
             console.log(`[SchedulerService] 📊 장중 파이프라인: OHLCV수집+모의매매선정(15:05) → 진입가확정(15:32)`)
             console.log(`[SchedulerService] 📊 장마감 파이프라인: 성과추적(15:35) → 회고(15:38) → 채점(15:41) → 인큐베이터(15:43) → 주간(15:44,금) → 월간(15:47,28일)`)
+            console.log(`[SchedulerService] 📈 실전 매매 미체결 루프 활성화 (장중 1분 단위)`)
         }
 
         // ═══ [Step 3] NaverFlow 크론 등록 ═══

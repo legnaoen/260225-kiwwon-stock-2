@@ -10,7 +10,7 @@ function cn(...inputs: ClassValue[]) {
 export const menuItems = [
     { id: 'dashboard', name: '대시보드', icon: LayoutDashboard },
     { id: 'pipeline-monitor', name: '데이터 관제', icon: Server },
-    { id: 'maiis-command', name: '종합 관제', icon: Network },
+    // { id: 'maiis-command', name: '종합 관제', icon: Network }, // 사용자 요청으로 제거
     { id: 'macro-dashboard', name: '글로벌 매크로', icon: Globe },
     { id: 'holdings', name: '보유종목', icon: Wallet },
     /* [V1 Legacy] 추후 재활용을 위해 UI 라우팅만 중단 (컴포넌트는 보존)

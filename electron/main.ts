@@ -156,6 +156,13 @@ function createWindow() {
         }
     })
 
+    // Forward Live Trade Errors to renderer (error log panel)
+    eventBus.on(SystemEvent.LIVE_TRADE_ERROR, (errorInfo) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('livetrade:error', errorInfo)
+        }
+    })
+
     // Forward Market Agent Prediction Complete
     eventBus.on('MARKET_AGENT_PREDICTION_COMPLETE' as any, (data) => {
         if (win && !win.isDestroyed()) {
@@ -2140,6 +2147,11 @@ ipcMain.handle('kiwoom:ws-register', async (_event, symbols: string[]) => {
     return { success: false, error: 'WebSocket not initialized' }
 })
 
+ipcMain.handle('kiwoom:ws-unregister', (_event, symbols: string[]) => {
+    const success = kiwoomService.wsUnregister(symbols)
+    return { success }
+})
+
 // === Condition Search IPC Handlers ===
 ipcMain.handle('kiwoom:save-autotrade-settings', (_event, settings: any) => {
     store.set('autotrade_settings', settings)
@@ -2696,6 +2708,51 @@ ipcMain.handle('moonshot:run-daily-tracker', async () => {
     }
 });
 
+// ── Live Trade V2 Handlers ──
+ipcMain.handle('livetrade:get-strategies', async () => {
+    try {
+        const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');
+        return await LiveTradeLedgerService.getInstance().getStrategies();
+    } catch (err: any) {
+        return [];
+    }
+});
+
+ipcMain.handle('livetrade:save-strategy', async (_event, strategy: any) => {
+    try {
+        const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');
+        LiveTradeLedgerService.getInstance().upsertStrategy(strategy);
+        return { success: true };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('livetrade:get-tickets', async () => {
+    try {
+        const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');
+        return await LiveTradeLedgerService.getInstance().getAllTickets();
+    } catch (err: any) {
+        return [];
+    }
+});
+
+// ─── Kill-Switch IPC ─────────────────────────────────────────────────────────
+ipcMain.handle('livetrade:get-kill-switch', async () => {
+    return store.get('live_trade_kill_switch') === true;
+});
+
+ipcMain.handle('livetrade:set-kill-switch', async (_event, active: boolean) => {
+    store.set('live_trade_kill_switch', active);
+    const msg = active
+        ? '🚫 **[긴급 중단 활성화]** 실전 매매 Kill-Switch가 켜졌습니다. 모든 주문 발송이 차단됩니다.'
+        : '✅ **[긴급 중단 해제]** Kill-Switch가 해제되었습니다. 정상 운영 상태로 복귀합니다.';
+    try {
+        const { TelegramService } = await import('./services/TelegramService');
+        TelegramService.getInstance().sendMessage(msg);
+    } catch {}
+    return { success: true, active };
+});
 
 ipcMain.handle('youtube:collect-now', async (_event, channelId?: string) => {
     try {

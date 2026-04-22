@@ -139,9 +139,7 @@ export default function Holdings() {
                     }
                 })
 
-                if (holdings.length > 0 && !selectedStock) {
-                    setSelectedStock({ code: holdings[0].code, name: holdings[0].name })
-                }
+                // Removed raw holdings[0] auto-selection to defer it to the sorted list useEffect
 
                 // Register for real-time and background signal check
                 const symbols = holdings.map((h: any) => h.code).filter((c: any) => !!c)
@@ -203,6 +201,44 @@ export default function Holdings() {
     useEffect(() => {
         fetchHistory();
     }, []);
+
+    // Auto-select top stock based on UI sorting logic
+    useEffect(() => {
+        if (data.holdings.length === 0) {
+            if (selectedStock) setSelectedStock(null);
+            return;
+        }
+
+        const exists = selectedStock ? data.holdings.some(h => h.code === selectedStock.code) : false;
+        if (exists) return; // Only auto-select if no valid stock is currently selected
+
+        const groups: Record<string, Stock[]> = {}
+        data.holdings.forEach(stock => {
+            const cleanCode = stock.code.replace(/^A/i, '').trim();
+            let date = history[cleanCode] || '알 수 없음'
+            if (stock.name.includes('(폐)')) {
+                date = '상장폐지 / 거래정지'
+            }
+            if (!groups[date]) groups[date] = []
+            groups[date].push(stock)
+        })
+
+        const sortedDates = Object.keys(groups).sort((a, b) => {
+            if (a === '상장폐지 / 거래정지') return 1;
+            if (b === '상장폐지 / 거래정지') return -1;
+            if (a === '알 수 없음' && b !== '알 수 없음') return 1;
+            if (b === '알 수 없음' && a !== '알 수 없음') return -1;
+            return b.localeCompare(a)
+        })
+
+        if (sortedDates.length > 0) {
+            const topGroup = groups[sortedDates[0]]
+            if (topGroup && topGroup.length > 0) {
+                const topStock = topGroup[0];
+                setSelectedStock({ code: topStock.code, name: topStock.name });
+            }
+        }
+    }, [data.holdings, history, selectedStock]);
 
     // React to manual refresh events via window event listener,
     // ensuring we ALWAYS use the latest selectedAccount from the store context.
@@ -306,13 +342,25 @@ export default function Holdings() {
                                 const groups: Record<string, Stock[]> = {}
                                 data.holdings.forEach(stock => {
                                     const cleanCode = stock.code.replace(/^A/i, '').trim();
-                                    const date = history[cleanCode] || '알 수 없음'
+                                    let date = history[cleanCode] || '알 수 없음'
+                                    
+                                    // 상장폐지/정지 종목 분리
+                                    if (stock.name.includes('(폐)')) {
+                                        date = '상장폐지 / 거래정지'
+                                    }
+
                                     if (!groups[date]) groups[date] = []
                                     groups[date].push(stock)
                                 })
 
                                 // Sort dates in descending order (newest first)
-                                const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a))
+                                const sortedDates = Object.keys(groups).sort((a, b) => {
+                                    if (a === '상장폐지 / 거래정지') return 1;
+                                    if (b === '상장폐지 / 거래정지') return -1;
+                                    if (a === '알 수 없음' && b !== '알 수 없음') return 1;
+                                    if (b === '알 수 없음' && a !== '알 수 없음') return -1;
+                                    return b.localeCompare(a)
+                                })
 
                                 if (data.holdings.length === 0 && !isLoading) {
                                     return (
@@ -326,7 +374,7 @@ export default function Holdings() {
                                     // Calculate trading days difference (+N일)
                                     let diff = -1;
                                     let diffTag = '';
-                                    if (tradingDays && tradingDays.length > 0 && date !== '알 수 없음') {
+                                    if (tradingDays && tradingDays.length > 0 && date !== '알 수 없음' && date !== '상장폐지 / 거래정지') {
                                         const startIndex = tradingDays.indexOf(date);
                                         const todayStr = new Date().toLocaleDateString('sv-SE');
                                         let todayIndex = tradingDays.indexOf(todayStr);

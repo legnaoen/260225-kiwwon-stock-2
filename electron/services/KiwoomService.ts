@@ -278,10 +278,8 @@ export class KiwoomService {
         this.pendingRequestsCount = 0;
     }
 
-    // [LEGACY] 키움 계좌 목록 조회 (V2 전환으로 비활성화)
+    // [LEGACY] 키움 계좌 목록 조회 (V2 전환으로 비활성화 -> 복구)
     public async getAccounts() {
-        return [];
-        /*
         const url = `/api/dostk/acnt`
         const response = await this.makeApiRequestWithRetry((t) => this.kiwoomAxios.post(url, {}, {
             headers: {
@@ -291,7 +289,6 @@ export class KiwoomService {
             }
         }))
         return response.data;
-        */
     }
 
     public async getHoldings(accountNo: string, nextKey: string = "") {
@@ -649,6 +646,23 @@ export class KiwoomService {
         return false;
     }
 
+    /** 특정 종목의 실시간 시세 구독을 해제합니다. */
+    public wsUnregister(symbols: string[]) {
+        if (this.wsManager) {
+            this.wsManager.unregisterItems(symbols)
+            return true;
+        }
+        return false;
+    }
+
+    /** 현재 WS 구독 중인 종목코드 Set (6자리 숫자)을 반환합니다. */
+    public wsGetRegisteredCodes(): Set<string> {
+        if (this.wsManager) {
+            return this.wsManager.getRegisteredCodes()
+        }
+        return new Set()
+    }
+
     public getConditionList() {
         if (this.conditionWsManager) {
             return this.conditionWsManager.getConditions()
@@ -696,7 +710,7 @@ export class KiwoomService {
     /**
      * 국내주식 매수 주문
      */
-    public async sendBuyOrder(accountNo: string, stk_cd: string, qty: number, price: number): Promise<any> {
+    public async sendBuyOrder(accountNo: string, stk_cd: string, qty: number, price: number, trdeType: string = '00'): Promise<any> {
         return this.makeApiRequestWithRetry(async (token) => {
             const url = `/api/dostk/ordr`
             const headers = {
@@ -704,13 +718,16 @@ export class KiwoomService {
                 'authorization': `Bearer ${token}`,
                 'api-id': 'kt10000', // 매수
             }
+            
+            const normalizedTrdeType = trdeType === '5' ? '05' : trdeType;
+            
             const body: any = {
                 acnt_no: accountNo,
                 dmst_stex_tp: 'KRX',
                 stk_cd: stk_cd,
                 ord_qty: String(qty),
                 ord_uv: String(price),
-                trde_tp: '00', // 지정가 (보통)
+                trde_tp: normalizedTrdeType, 
             }
             // 지정가 주문인 경우 cond_uv를 아예 포함하지 않아야 오류 방지 가능
             const response = await this.kiwoomAxios.post(url, body, { headers })
@@ -803,30 +820,20 @@ export class KiwoomService {
     }
 
     /**
-     * 미체결 주문 내역 조회 (TODO: 정확한 TR명 반영 필요)
+     * 미체결 주문 내역 조회 (ka10075)
      */
-    // [LEGACY] 미체결 주문 내역 조회 (V2 전환으로 비활성화)
     public async getUnexecutedOrders(
         accountNo: string,
         options: {
             all_stk_tp?: string;
             trde_tp?: string;
             stk_cd?: string;
-            stex_tp?: string;
-            cont_yn?: string;
-            next_key?: string;
         } = {}
     ): Promise<any> {
-        return { oso: [] };
-        
-        /* [원본 코드 백업]
         const {
             all_stk_tp = '1', // 전체 종목 조회
             trde_tp = '0', // 전체 매매구분
             stk_cd = '', // 특정 종목코드 없으면 전체
-            stex_tp = '0', // 통합 거래소
-            cont_yn = 'N',
-            next_key = ''
         } = options;
 
         return this.makeApiRequestWithRetry(async (token) => {
@@ -835,26 +842,33 @@ export class KiwoomService {
                 const headers = {
                     'Content-Type': 'application/json;charset=UTF-8',
                     'authorization': `Bearer ${token}`,
-                    'api-id': 'kt00018' // TODO: Verify exact TR ID for unexecuted orders
+                    'api-id': 'ka10075' 
                 };
                 const body = {
-                    account_no: accountNo,
-                    qry_tp: '2', // Usually 2 represents unexecuted/open orders
+                    acnt_no: accountNo,
                     all_stk_tp: all_stk_tp,
                     trde_tp: trde_tp,
                     stk_cd: stk_cd,
-                    dmst_stex_tp: 'KRX'
                 };
                 const response = await this.kiwoomAxios.post(url, body, { headers });
-                const orderCount = response.data?.oso?.length ?? 0;
-                if (orderCount > 0) console.log(`[KiwoomService] 미체결 조회: ${orderCount}건`);
-                return response.data;
-            } catch (err: any) {
-                console.error('[KiwoomService] getUnexecutedOrders Error:', err?.response?.data || err.message);
-                throw err;
+                // Check if response has Body or similar list
+                let orderList = [];
+                if (response.data && response.data.Body) {
+                    orderList = Array.isArray(response.data.Body) ? response.data.Body : [response.data.Body];
+                } else if (response.data && response.data.list) {
+                    orderList = response.data.list;
+                } else if (response.data && Array.isArray(response.data)) {
+                    orderList = response.data;
+                }
+                
+                if (orderList.length > 0) console.log(`[KiwoomService] 미체결 조회 (ka10075): ${orderList.length}건`);
+                
+                return { oso: orderList };
+            } catch (error: any) {
+                console.error(`[KiwoomService] 미체결 조회 에러:`, error.response?.data || error.message);
+                throw error;
             }
         });
-        */
     }
 
     /**

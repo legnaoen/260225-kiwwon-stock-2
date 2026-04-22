@@ -18,6 +18,21 @@ export class SchedulerService {
     private kiwoom = KiwoomService.getInstance()
 
     private scheduledJobs: cron.ScheduledTask[] = []
+    
+    // OHLCV 중앙 상태 관리
+    private ohlcvCollectionStatus: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'FAILED' = 'IDLE';
+
+    private async waitForOhlcv(timeoutMinutes: number = 40): Promise<boolean> {
+        const start = Date.now();
+        while (this.ohlcvCollectionStatus === 'RUNNING') {
+            if (Date.now() - start > timeoutMinutes * 60 * 1000) {
+                console.warn(`[Scheduler] OHLCV 대기 시간 초과 (${timeoutMinutes}분)`);
+                return false;
+            }
+            await new Promise(r => setTimeout(r, 60000)); // 1분 대기 폴링
+        }
+        return this.ohlcvCollectionStatus === 'SUCCESS';
+    }
 
     private constructor() {
         this.initSchedules()
@@ -84,6 +99,11 @@ export class SchedulerService {
 
             // PerformanceTracker 기록용 (15:35 T+1 / T+5 / T+20) + 장중 인트라데이 평가
             const mcaTrackerJob = cron.schedule('35 15 * * 1-5', async () => {
+                const isReady = await this.waitForOhlcv();
+                if (!isReady) {
+                    console.log('[Scheduler] 성과 추적 취소: OHLCV 선행 작업 미완료');
+                    return;
+                }
                 try {
                     const { PerformanceTracker } = await import('./v2_agents/PerformanceTracker')
                     const tracker = PerformanceTracker.getInstance()
@@ -129,6 +149,11 @@ export class SchedulerService {
 
             // Option 2: Post-Market 일간 회고 AI (15:38, 성과추적 3분 후)
             const dailyRetroJob = cron.schedule('38 15 * * 1-5', async () => {
+                const isReady = await this.waitForOhlcv();
+                if (!isReady) {
+                    console.log('[Scheduler] 일간 회고 취소: OHLCV 선행 작업 미완료');
+                    return;
+                }
                 try {
                     const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
                     await MarketReviewAgent.getInstance().runDailyReview()
@@ -188,20 +213,26 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Step 4-B] 14:05 PM 장중 2차 미니 리뷰 (포트폴리오 중간 점검 및 리밸런싱)
+            // [Step 4-B] 14:05 PM 장중 2차 미니 리뷰 (포트폴리오 중간 점검 및 리밸런싱) - 잦은 매매 방지를 위해 비활성화
+            /*
             const phase2MiniJob = cron.schedule('05 14 * * 1-5', async () => {
                 console.log('[Scheduler] 🧑‍💼 포트폴리오 매니저 (14시 장중 미니 리뷰) 실행 시작...')
                 try {
                     const { PortfolioManagerAgent } = await import('./v2_agents/PortfolioManagerAgent')
-                    // 14:05에는 1차 통과자가 없으므로, 현재 활성 상태인 포트폴리오/관심 종목들끼리만 리밸런싱을 수행하여 상태를 재점검합니다.
                     await PortfolioManagerAgent.getInstance().runPhase2_Rebalancing()
                 } catch (e: any) {
                     console.error('[Scheduler] PM 장중 미니 리뷰 오류:', e.message)
                 }
             }, { timezone: 'Asia/Seoul' })
+            */
 
             // [Step 4] 15:41 장마감 채점: 종가 기준 수익률·수명 심사
             const portfolioJudgeJob = cron.schedule('41 15 * * 1-5', async () => {
+                const isReady = await this.waitForOhlcv();
+                if (!isReady) {
+                    console.log('[Scheduler] 장마감 채점 취소: OHLCV 선행 작업 미완료');
+                    return;
+                }
                 console.log('[Scheduler] ⚖️ 포트폴리오 장마감 채점 자동 실행 시작...')
                 try {
                     const { PortfolioJudgeScheduler } = await import('./v2_pipeline/PortfolioJudgeScheduler')
@@ -243,6 +274,11 @@ export class SchedulerService {
 
             // [Step 5] 인큐베이터 스캔: Pool B neglect_score 갱신 (15:43)
             const incubatorScanJob = cron.schedule('43 15 * * 1-5', async () => {
+                const isReady = await this.waitForOhlcv();
+                if (!isReady) {
+                    console.log('[Scheduler] 인큐베이터 스캔 취소: OHLCV 선행 작업 미완료');
+                    return;
+                }
                 console.log('[Scheduler] 🧪 인큐베이터 neglect_score 스캔 자동 실행 시작...')
                 try {
                     const { IncubatorScanEngine } = await import('./v2_agents/IncubatorScanEngine')
@@ -261,13 +297,34 @@ export class SchedulerService {
             // CrossPeriodAnalyzer는 이 오늘 데이터를 포함한 60봉을 기반으로 분석
             // 진입가 최종 보정은 15:32에 실제 동시호가 확정 종가로 덮어쓰기
             const marketDailyJob = cron.schedule('05 15 * * 1-5', async () => {
+                this.ohlcvCollectionStatus = 'RUNNING';
                 const startTime = new Date()
                 const fmt = (d: Date) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
                 this.telegram.sendMessage(`🚀 [${fmt(startTime)}] OHLCV 전 종목 수집 시작\n코스피/코스닥 전 종목 100일봉 수집 시작.\n수집 완료 후 → AI 모의매매 매수 선정 자동 실행 예정`)
                 console.log('[Scheduler] 🚀 전 종목 데이터 수집 펌프 자동 실행 시작 (15:05, 장중 마지막 수집)...')
                 try {
                     const { MarketDataCollectorService } = await import('./v2_pipeline/MarketDataCollectorService')
-                    await MarketDataCollectorService.getInstance().runDailyCollection(100)
+                    const collector = MarketDataCollectorService.getInstance();
+                    
+                    let result = await collector.runDailyCollection(100);
+                    
+                    // 재시도 로직 (최대 2회)
+                    let retries = 0;
+                    while (!result.success && retries < 2) {
+                        retries++;
+                        this.telegram.sendMessage(`⚠️ [15:05] OHLCV 수집 실패 (수집: ${result.collected}개). 5분 후 재시도합니다... (${retries}/2)`);
+                        console.log(`[Scheduler] OHLCV 수집 실패. 5분 대기 후 재시도 (${retries}/2)...`);
+                        await new Promise(r => setTimeout(r, 5 * 60 * 1000));
+                        result = await collector.runDailyCollection(100);
+                    }
+                    
+                    if (!result.success) {
+                        this.ohlcvCollectionStatus = 'FAILED';
+                        this.telegram.sendMessage(`🚨 [OHLCV 수집 최종 실패] 자동 복구 실패.\n오류 확산을 막기 위해 오늘 주도주 AI(Track A~E) 모의매매 실행을 전면 중단(Abort)합니다.`);
+                        return; // 연쇄 실행 차단
+                    }
+
+                    this.ohlcvCollectionStatus = 'SUCCESS';
                     const endTime = new Date()
                     const elapsed = Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60)
                     this.telegram.sendMessage(`✅ [${fmt(endTime)}] OHLCV 전 종목 수집 완료\n소요 시간: 약 ${elapsed}분\n→ AI 모의매매 매수 선정 시작...`)
@@ -303,7 +360,8 @@ export class SchedulerService {
                     
                     this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정`)
                 } catch (e: any) {
-                    console.error('[Scheduler] 데이터 수집 / TrackB 선정 오류:', e.message)
+                    this.ohlcvCollectionStatus = 'FAILED';
+                    console.error('[Scheduler] 데이터 수집 / 모의매매 선정 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:05] OHLCV 수집 또는 모의매매 선정 실패\n오류: ${e.message}\n→ 주도주 탭에서 수동 실행 필요`)
                 }
             }, { timezone: 'Asia/Seoul' })
@@ -312,6 +370,11 @@ export class SchedulerService {
             // ① 오늘 PENDING 종목의 종가를 Kiwoom API로 재수집 (동시호가 확정 종가 반영)
             // ② 갱신된 market_ohlcv_history.close를 읽어 entry_price 확정 (PENDING → ACTIVE)
             const trackEntryJob = cron.schedule('32 15 * * 1-5', async () => {
+                const isReady = await this.waitForOhlcv();
+                if (!isReady) {
+                    console.log('[Scheduler] 💰 진입가 확정 취소: OHLCV 선행 작업 미완료');
+                    return;
+                }
                 console.log('[Scheduler] 💰 Track A, B, C, D, E 모의매매 진입가 최종 확정...')
                 try {
                     const today = (await import('../utils/DateUtils')).getKstDate()
@@ -419,6 +482,136 @@ export class SchedulerService {
                     console.error(`[SchedulerService] NaverFlow 크론 등록 실패 (${slot.time}):`, err.message)
                 }
             })
+        }
+
+        // ═══ [Step 4] Moonshot AI 크론 등록 ═══
+        const moonshotSettings = store.get('moonshot_settings') as any;
+        if (moonshotSettings?.enabled) {
+            try {
+                // Scanner
+                if (moonshotSettings.scannerCronTime) {
+                    const [hrStr, minStr] = moonshotSettings.scannerCronTime.split(':');
+                    const hr = parseInt(hrStr, 10);
+                    const min = parseInt(minStr, 10);
+                    if (!isNaN(hr) && !isNaN(min)) {
+                        const cronExpr = `${min} ${hr} * * 1-5`;
+                        const scannerJob = cron.schedule(cronExpr, async () => {
+                            console.log(`[SchedulerService] 🚀 Moonshot Scanner AI 자동 실행 시작...`);
+                            this.telegram.sendMessage(`🚀 [Moonshot] 텐베거 자동 신규 발굴 스캐너(Scanner AI)가 백그라운드에서 실행되었습니다. 지정된 조건검색을 수집합니다.`);
+                            
+                            try {
+                                // 설정된 조건식이 없으면 UI의 기본값(101, 201, 301)을 대체로 사용
+                                const activeConditions = moonshotSettings.conditions || ['101', '201', '301']; 
+                                const targetSeqs = activeConditions;
+
+                                let allFoundStocks: any[] = [];
+
+                                for (let i = 0; i < targetSeqs.length; i++) {
+                                    const seq = targetSeqs[i];
+                                    console.log(`[SchedulerService] 🚀 Moonshot 조건검색 [${seq}] 수집 요청...`);
+                                    
+                                    const stocks = await new Promise<any[]>((resolve) => {
+                                        let handled = false;
+                                        const timeoutId = setTimeout(() => {
+                                            if (!handled) {
+                                                handled = true;
+                                                eventBus.removeListener(SystemEvent.CONDITION_MATCHED, onConditionMatched);
+                                                console.log(`[SchedulerService] 조건검색 [${seq}] 응답 타임아웃 (10초)`);
+                                                resolve([]);
+                                            }
+                                        }, 10000); // 최대 10초 대기
+
+                                        const onConditionMatched = (matchedStocks: any[]) => {
+                                            if (!handled && matchedStocks && matchedStocks.length > 0 && String(matchedStocks[0].seq) === String(seq)) {
+                                                handled = true;
+                                                clearTimeout(timeoutId);
+                                                eventBus.removeListener(SystemEvent.CONDITION_MATCHED, onConditionMatched);
+                                                resolve(matchedStocks);
+                                            }
+                                        };
+
+                                        eventBus.on(SystemEvent.CONDITION_MATCHED, onConditionMatched);
+                                        
+                                        this.kiwoom.startConditionSearch(seq).catch(err => {
+                                            console.error(`[SchedulerService] 조건검색 [${seq}] 실행 실패:`, err);
+                                            if (!handled) {
+                                                handled = true;
+                                                clearTimeout(timeoutId);
+                                                eventBus.removeListener(SystemEvent.CONDITION_MATCHED, onConditionMatched);
+                                                resolve([]);
+                                            }
+                                        });
+                                    });
+
+                                    if (stocks.length > 0) {
+                                        // 태그 추가
+                                        const tag = i === 0 ? 'A안' : i === 1 ? 'B안' : 'C안';
+                                        stocks.forEach(s => s.tag = tag);
+                                        allFoundStocks = allFoundStocks.concat(stocks);
+                                    }
+                                    
+                                    // TR Limit 방어를 위해 1.5초 대기
+                                    await new Promise(r => setTimeout(r, 1500)); 
+                                }
+
+                                if (allFoundStocks.length === 0) {
+                                    this.telegram.sendMessage(`⚠️ [Moonshot] 발굴된 종목이 없습니다. 자동 스캐너를 종료합니다.`);
+                                    return;
+                                }
+
+                                // 중복 종목 제거 및 태그 병합
+                                const uniqueStocksMap = new Map();
+                                allFoundStocks.forEach(s => {
+                                    if (uniqueStocksMap.has(s.code)) {
+                                        uniqueStocksMap.get(s.code).tag += `, ${s.tag}`;
+                                    } else {
+                                        uniqueStocksMap.set(s.code, { ...s });
+                                    }
+                                });
+                                const uniqueStocks = Array.from(uniqueStocksMap.values());
+
+                                this.telegram.sendMessage(`✅ [Moonshot] 조건검색 완료: 총 ${uniqueStocks.length}건 발굴. 즉시 AI 전체 검증(Deep Scanning)을 시작합니다.`);
+                                
+                                const { MoonshotValidationAgent } = await import('./v2_agents/MoonshotValidationAgent');
+                                await MoonshotValidationAgent.getInstance().runValidation(uniqueStocks, undefined, true);
+                                
+                            } catch (e: any) {
+                                console.error('[SchedulerService] Moonshot 스캐너 에러:', e);
+                                this.telegram.sendMessage(`❌ [Moonshot] 자동 스캐너 실행 중 오류 발생: ${e.message}`);
+                            }
+
+                        }, { timezone: 'Asia/Seoul' });
+                        this.scheduledJobs.push(scannerJob);
+                        console.log(`[SchedulerService] 🚀 Moonshot Scanner 크론 등록 완료 (${cronExpr})`);
+                    }
+                }
+
+                // Tracker
+                if (moonshotSettings.trackerCronTime) {
+                    const [hrStr, minStr] = moonshotSettings.trackerCronTime.split(':');
+                    const hr = parseInt(hrStr, 10);
+                    const min = parseInt(minStr, 10);
+                    if (!isNaN(hr) && !isNaN(min)) {
+                        const cronExpr = `${min} ${hr} * * 1-5`;
+                        const trackerJob = cron.schedule(cronExpr, async () => {
+                            console.log(`[SchedulerService] 🚀 Moonshot Tracker AI 자동 실행 시작...`);
+                            try {
+                                this.telegram.sendMessage(`🚀 [Moonshot] 액티브 트래킹 데일리 리뷰(Tracker AI) 자동 실행이 시작되었습니다.`);
+                                const { MoonshotTrackerAgent } = await import('./v2_agents/MoonshotTrackerAgent');
+                                await MoonshotTrackerAgent.getInstance().runDailyReview();
+                                this.telegram.sendMessage(`✅ [Moonshot] 데일리 리뷰 완료. 텐베거 포트폴리오를 점검하고 UI에 결과를 반영했습니다.`);
+                            } catch (e: any) {
+                                console.error('[SchedulerService] Moonshot Tracker 에러:', e.message);
+                                this.telegram.sendMessage(`❌ [Moonshot] 데일리 리뷰 실패: ${e.message}`);
+                            }
+                        }, { timezone: 'Asia/Seoul' });
+                        this.scheduledJobs.push(trackerJob);
+                        console.log(`[SchedulerService] 🚀 Moonshot Tracker 크론 등록 완료 (${cronExpr})`);
+                    }
+                }
+            } catch(e: any) {
+                console.error(`[SchedulerService] Moonshot 크론 등록 실패:`, e.message);
+            }
         }
     }
 

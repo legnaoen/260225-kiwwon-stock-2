@@ -45,6 +45,18 @@ export class IncubatorScanEngine {
         const dateStr = this.db.getKstDate();
         console.log(`[IncubatorScan] 🔬 ${dateStr} 인큐베이터 neglect_score 스캔 시작...`);
 
+        // ─── 데이터 무결성 검증 ───
+        try {
+            const { MarketDataCollectorService } = await import('../v2_pipeline/MarketDataCollectorService');
+            const collector = MarketDataCollectorService.getInstance();
+            if (!collector.verifyTodayDataIntegrity()) {
+                console.warn(`[IncubatorScan] ⚠️ 오늘자 시장 데이터 수집이 누락되었습니다. 잘못된 스코어 산출을 막기 위해 스캔을 취소합니다.`);
+                return;
+            }
+        } catch (e) {
+            console.error(`[IncubatorScan] 무결성 검증 오류:`, e);
+        }
+
         try {
             const watchList = this.db.getIncubatorList('WATCHING') as any[];
             const readyList = this.db.getIncubatorList('READY_TO_IGNITE') as any[];

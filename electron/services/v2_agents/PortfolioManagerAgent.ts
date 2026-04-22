@@ -2,6 +2,7 @@ import { AiExecutionQueue } from '../AiExecutionQueue';
 import { DatabaseService } from '../DatabaseService';
 import { KiwoomService } from '../KiwoomService';
 import { TechnicalAnalyzer } from './TechnicalAnalyzer';
+import { StockSignalBuilder } from '../v2_pipeline/StockSignalBuilder';
 import Store from 'electron-store';
 
 const store = new Store();
@@ -232,8 +233,21 @@ export class PortfolioManagerAgent {
                 // (B) Fallback: 스케줄러 단독 호출 또는 PM1 실패 시 DB에서 직접 당일 WATCHLIST 종목 조회
                 // getActivePortfolio()가 이미 WATCHLIST를 포함하므로 source만 NEW_PICK으로 교정
                 const activeCodes = new Set(activePortfolio.map((p: any) => p.stock_code));
+
+                // [Phase 2] 당일 HELD→DROPPED 이력 종목 재진입 차단
+                // 오전 PM2에서 이미 매도 처리된 종목이 14:05 미니 리뷰에서 "신규 추천"으로 부활하는 경로 봉쇄
+                const todayDroppedCodes = this.db.getTodayHeldDroppedCodes(dateStr);
+
                 const todayPicksFallback = this.db.getAiAnalystPicksByDate(dateStr) as any[];
-                const newPicksFallback = todayPicksFallback.filter((p: any) => !activeCodes.has(p.stock_code));
+                const newPicksFallback = todayPicksFallback.filter((p: any) =>
+                    !activeCodes.has(p.stock_code) &&
+                    !todayDroppedCodes.has(p.stock_code)  // 당일 DROP 종목 재진입 차단
+                );
+
+                if (todayDroppedCodes.size > 0 && todayPicksFallback.length !== newPicksFallback.length) {
+                    console.log(`[PortfolioManager] 🚫 당일 DROP 종목 재진입 차단: ${Array.from(todayDroppedCodes).join(', ')}`);
+                }
+
 
                 if (newPicksFallback.length > 0) {
                     const byCode: Record<string, any> = {};
@@ -294,6 +308,7 @@ export class PortfolioManagerAgent {
             const { IssueLedgerDB } = await import('./IssueLedgerDB');
             const issueDb = IssueLedgerDB.getInstance();
             const dossiersMap: Record<string, string> = {};
+            const signalBuilder = StockSignalBuilder.getInstance();
 
             for (let i = 0; i < stockList.length; i += 2) {
                 const chunk = stockList.slice(i, i + 2);
@@ -356,10 +371,31 @@ export class PortfolioManagerAgent {
                     ds += `-------------------------------------------------\n`;
                     ds += `[기술적 차트 진단 (MA200)]\n${s.chart_digest}\n`;
 
+                    // D. 수급·재무·신용 통합 신호 (StockSignalBuilder — 카테고리별 1차 가공)
+                    // primaryCategory는 이후 단계에서 결정되므로 현재 evalPool의 agents 기준으로 추론
+                    try {
+                        const agentTypes: string[] = (s.analysts || s.today_analysts || [])
+                            .map((a: any) => (a.agent || '').toUpperCase());
+                        const AGENT_PRIORITY = ['REPORT', 'PULLBACK', 'THEME', 'MOMENTUM'];
+                        const inferredCategory = AGENT_PRIORITY.find(p => agentTypes.includes(p)) ?? 'MOMENTUM';
+
+                        const signalBlock = await signalBuilder.buildSignals(
+                            s.stock_code,
+                            s.stock_name,
+                            inferredCategory
+                        );
+                        if (signalBlock) {
+                            ds += `-------------------------------------------------\n`;
+                            ds += signalBlock;
+                        }
+                    } catch (sigErr: any) {
+                        console.warn(`[StockSignalBuilder] ${s.stock_name} 신호 생성 실패 (무시):`, sigErr.message);
+                    }
+
                     s.dossier = ds;
                     dossiersMap[s.stock_name] = ds;
                 }));
-                // Rate Limit 방지 딜레이
+                // Rate Limit 방지 딜레이 (FinanceInfoCollector가 있는 REPORT 종목은 추가 딜레이 불필요 — Python 프록시가 이미 직렬 처리)
                 if (i + 2 < stockList.length) await new Promise(r => setTimeout(r, 400));
             }
 
@@ -678,7 +714,91 @@ ${chartRiskSkill}
                     }
                     console.log(`[PortfolioManager] ✅ 통합 서바이벌 리뷰 및 DB 반영 완료.`);
 
+                    // ─── [Phase 1 + Phase 3] Cap 재적용 + PM3 교체 재심사 ──────────────
+                    // upsertPortfolioWatchlist 내부 자동 Cap은 protectedCodes 없이 실행되므로
+                    // BUY 판정 종목을 보호 목록으로 전달하여 재실행. HELD 초과분은 즉시 DROP 대신
+                    // pm3Candidates로 반환받아 PM3 재심사 후 최종 결정.
+                    const protectedBuyCodes = new Set<string>(
+                        buysAndSells
+                            .filter((d: any) => d.finalStatus === 'HELD')
+                            .map((d: any) => d.finalCode)
+                            .filter(Boolean)
+                    );
+                    const { pm3Candidates } = this.db.enforcePortfolioCaps(protectedBuyCodes);
+
+                    // ─── PM3 재심사: HELD Cap 초과 후보 순차 처리 ─────────────────────
+                    if (pm3Candidates.length > 0) {
+                        console.log(`[PortfolioManager] ⚖️ PM3 재심사 시작: ${pm3Candidates.length}개 HELD 후보`);
+
+                        // 현재 WATCHING 종목 (대체 후보군) — conviction_score 상위순
+                        const watchingCandidates = (this.db.getActivePortfolio() as any[])
+                            .filter((p: any) => p.status === 'WATCHING')
+                            .slice(0, 5); // 상위 5개만 도전자로 사용
+
+                        // dossiersMap에서 팩트시트 참조 (이미 위에서 구성됨)
+                        for (const candidate of pm3Candidates) {
+                            try {
+                                const challengers = watchingCandidates.map((w: any) => ({
+                                    stock_code: w.stock_code,
+                                    stock_name: w.stock_name,
+                                    dossier: dossiersMap[w.stock_name] || `[${w.stock_name}] 현재 관심종목 (매력도 ${w.conviction_score}점)`
+                                }));
+
+                                const pm3Result = await this.runPhase3_SwapReview({
+                                    currentHeld: {
+                                        stock_code: candidate.stock_code,
+                                        stock_name: candidate.stock_name,
+                                        entry_reason: candidate.last_signal_reason || '이전 PM2 매수 판정',
+                                        dossier: dossiersMap[candidate.stock_name] || `[${candidate.stock_name}] 현재 보유 중 (매력도 ${candidate.conviction_score}점)`
+                                    },
+                                    challengers
+                                });
+
+                                if (pm3Result.decision === 'REPLACE' && pm3Result.winnerCode) {
+                                    // REPLACE: 기존 HELD DROP + 도전자 HELD 승급
+                                    const winner = watchingCandidates.find((w: any) => w.stock_code === pm3Result.winnerCode);
+                                    this.db.dropHeldForReplacement(
+                                        candidate.stock_code,
+                                        candidate.stock_name,
+                                        candidate.current_price || candidate.entry_price || 0,
+                                        candidate.profit_rate || 0
+                                    );
+                                    if (winner) {
+                                        // 도전자를 HELD로 승급
+                                        this.db.upsertPortfolioWatchlist({ ...winner, status: 'HELD' });
+                                        this.db.logPortfolioEvent(winner.stock_code, winner.stock_name, 'BUY_UPGRADED', 'WATCHING', 'HELD', `PM3 재심사 교체 승급: ${pm3Result.reason}`, winner.current_price || 0);
+                                        console.log(`[PM3] ✅ REPLACE 확정: [${candidate.stock_name}] → [${winner.stock_name}] 교체 완료`);
+                                    }
+                                    try {
+                                        const { TelegramService } = await import('../TelegramService');
+                                        TelegramService.getInstance().sendMessage(
+                                            `🔄 [PM3 교체 확정]\n매도: ${candidate.stock_name}\n매수: ${winner?.stock_name || pm3Result.winnerCode}\n이유: ${pm3Result.reason}`
+                                        );
+                                    } catch (_) {}
+                                } else {
+                                    // KEEP: 해당 HELD 유지 → WATCHING 최하위 1개를 대신 DROP
+                                    const kept = this.db.dropLowestWatching(
+                                        `PM3 재심사 KEEP: [${candidate.stock_name}] 보유 유지 — Cap 조정을 위해 관심종목 최하위 탈락`
+                                    );
+                                    console.log(`[PM3] 🛡️ KEEP 확정: [${candidate.stock_name}] 보유 유지. 사유: ${pm3Result.reason}`);
+                                    try {
+                                        const { TelegramService } = await import('../TelegramService');
+                                        TelegramService.getInstance().sendMessage(
+                                            `🛡️ [PM3 KEEP]\n보유 유지: ${candidate.stock_name}\n사유: ${pm3Result.reason}`
+                                        );
+                                    } catch (_) {}
+                                }
+                            } catch (pm3Err: any) {
+                                // PM3 오류 시 보수적 KEEP (기존 보유 종목 유지)
+                                console.warn(`[PM3] ${candidate.stock_name} 재심사 오류 → 보수적 보유 유지:`, pm3Err.message);
+                                this.db.dropLowestWatching(`PM3 오류 보수 처리: [${candidate.stock_name}] 보유 유지`);
+                            }
+                        }
+                        console.log(`[PortfolioManager] ✅ PM3 재심사 완료.`);
+                    }
+
                     // BUG FIX #3: AI 응답 누락 좀비 종목 정리 + DB 최종 10개 보장
+
                     try {
                         const processedCodes = new Set(finalProcessed.map((d: any) => d.finalCode).filter(Boolean));
                         const zombieRows = rawDb.prepare(
@@ -706,8 +826,9 @@ ${chartRiskSkill}
                             const excess = finalWatching.slice(10);
                             excess.forEach((s: any) => {
                                 // entry_price = 0이면 실제 매수 이력 없으므로 was_held 오마킹 리셋
+                                // [드로 경로 ④ 방어] HELD/IMMEDIATE_BUY 상태 종목은 여기서 강제 DROP 제외 — 실제 WATCHING에서 넘친 종목만 없애야 함
                                 rawDb.prepare(
-                                    "UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ?, was_held = CASE WHEN entry_price > 0 THEN was_held ELSE 0 END WHERE stock_code = ?"
+                                    "UPDATE maiis_portfolio SET status = 'DROPPED', last_signal_reason = ?, updated_at = ?, was_held = CASE WHEN entry_price > 0 THEN was_held ELSE 0 END WHERE stock_code = ? AND status NOT IN ('HELD', 'IMMEDIATE_BUY')"
                                 ).run('WATCHING 10개 한도 초과 — DB 최종 트리밍', this.db.getKstTimestamp(), s.stock_code);
                             });
                             console.log(`[PortfolioManager] ✂️ DB 최종 확인: WATCHING 10개 초과 ${excess.length}개 제거 완료`);
@@ -856,6 +977,98 @@ ${chartRiskSkill}
                 }
             }
             throw e;
+        }
+    }
+
+    /**
+     * [Phase 3] PM3 교체 재심사
+     * Cap 초과로 HELD 종목을 DROP해야 하는 상황에서 호출.
+     * 두 조건이 동시에 충족되어야만 "REPLACE"를 리턴:
+     *   1) 매수 당시 논리(Buy Thesis)가 현재 무너졌는가
+     *   2) 대체 종목의 기대 상승률이 현 종목보다 minUpsideDiffPct(%p) 이상 높은가
+     *
+     * @returns { decision: 'KEEP' | 'REPLACE'; winnerCode?: string; reason: string }
+     */
+    public async runPhase3_SwapReview(params: {
+        currentHeld: {
+            stock_code: string;
+            stock_name: string;
+            entry_reason: string;   // 최초 매수 시 근거
+            dossier: string;        // 현재 팩트시트
+        };
+        challengers: Array<{
+            stock_code: string;
+            stock_name: string;
+            dossier: string;
+        }>;
+        minUpsideDiffPct?: number;  // 기본값 15 (%p)
+    }): Promise<{ decision: 'KEEP' | 'REPLACE'; winnerCode?: string; reason: string }> {
+        const minDiff = params.minUpsideDiffPct ?? 15;
+
+        const PM3_SYSTEM_PROMPT = `당신은 포트폴리오 안정성을 최우선으로 하는 리스크 관리자입니다.
+현재 보유 중인 종목을 교체할지 여부를 판단합니다.
+교체는 극도로 보수적으로 결정해야 하며, 아래 두 조건을 동시에 충족할 때만 "REPLACE"를 리턴합니다.
+
+▶ 조건 1 — 매수 논리 붕괴 확인 (필수)
+최초 매수 시 제시된 근거가 현재도 유효한지 판단하십시오.
+- 모멘텀 소멸, 재료 소진, 수급 이탈, 테마 소멸 → thesis_status: "BROKEN"
+- 근거가 여전히 유효 → thesis_status: "VALID" → 즉시 KEEP 리턴
+
+▶ 조건 2 — 기대 상승률 격차 확인 (필수, 조건 1이 BROKEN인 경우만)
+현 종목 대비 교체 후보 종목들의 향후 기대 상승률 차이를 추정하십시오.
+격차가 +${minDiff}%p 미만 → upside_gap: "INSUFFICIENT" → KEEP 리턴
+격차가 +${minDiff}%p 이상 → upside_gap: "JUSTIFIED" → REPLACE 가능
+
+▶ 최종 판정 규칙
+BROKEN + JUSTIFIED 동시 충족 → decision: "REPLACE", winner_code에 최우선 대체 종목 코드 기입
+그 외 모든 경우 → decision: "KEEP"
+
+반드시 JSON만 응답:
+\`\`\`json
+{
+    "thesis_status": "VALID | BROKEN",
+    "upside_gap": "INSUFFICIENT | JUSTIFIED | N/A",
+    "decision": "KEEP | REPLACE",
+    "winner_code": "종목코드 또는 null",
+    "reason": "판단 근거 요약 (2~3문장)"
+}
+\`\`\``;
+
+        const prompt = `[현재 보유 종목]
+종목명: ${params.currentHeld.stock_name} (${params.currentHeld.stock_code})
+최초 매수 근거: ${params.currentHeld.entry_reason}
+
+${params.currentHeld.dossier}
+
+---
+[교체 후보 종목들]
+${params.challengers.map((c, i) => `${i + 1}. ${c.stock_name} (${c.stock_code})\n${c.dossier}`).join('\n\n')}`;
+
+        try {
+            const response = await AiExecutionQueue.getInstance().enqueue({
+                agentId: 'PM3_SWAP_REVIEW',
+                agentName: `PM3 교체 재심사 — ${params.currentHeld.stock_name}`,
+                triggerType: 'CRON',
+                targetType: 'gemini',
+                prompt,
+                systemInstruction: PM3_SYSTEM_PROMPT
+            });
+
+            const jsonMatch = response.match(/```(?:json)?\n?([\s\S]*?)\n?```/);
+            const jsonStr = jsonMatch?.[1] || response.match(/\{[\s\S]*\}/)?.[0] || '';
+            const parsed = JSON.parse(jsonStr);
+
+            console.log(`[PM3] ${params.currentHeld.stock_name} 교체 재심사 결과: ${parsed.decision} (thesis=${parsed.thesis_status}, gap=${parsed.upside_gap})`);
+
+            return {
+                decision: parsed.decision === 'REPLACE' ? 'REPLACE' : 'KEEP',
+                winnerCode: parsed.winner_code || undefined,
+                reason: parsed.reason || '판단 근거 없음'
+            };
+        } catch (e: any) {
+            // AI 응답 실패 시 보수적으로 KEEP
+            console.warn(`[PM3] ${params.currentHeld.stock_name} 재심사 실패 → 보수적 KEEP:`, e.message);
+            return { decision: 'KEEP', reason: 'PM3 AI 응답 실패 — 보수적 보유 유지' };
         }
     }
 }

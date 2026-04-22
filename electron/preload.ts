@@ -264,6 +264,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getCrossPeriodProfile: (topN?: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-cross-period-profile', { topN, peakoutSettings }),
     getSimTradePicks: () => ipcRenderer.invoke('v2:get-sim-trade-picks'),
     forceRefreshSimTradePrices: () => ipcRenderer.invoke('v2:force-refresh-sim-trade-prices'),
+    runOhlcvCollection: () => ipcRenderer.invoke('v2:run-ohlcv-collection'),
     runTrackABuyAgent: (date?: string) => ipcRenderer.invoke('track-a:run-buy-agent', date),
     runTrackBBuyAgent: (date?: string) => ipcRenderer.invoke('track-b:run-buy-agent', date),
     runTrackCBuyAgent: (date?: string) => ipcRenderer.invoke('track-c:run-buy-agent', date),
@@ -399,6 +400,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteTradeHistoryItem: (id: number) => ipcRenderer.invoke('ai-analyst:delete-trade-history-item', id),
     deleteAnalystPick: (id: number) => ipcRenderer.invoke('ai-analyst:delete-pick', id),
     deleteEventLog: (id: number) => ipcRenderer.invoke('ai-analyst:delete-event-log', id),
+    runPerformanceOptimizer: (picks: any[]) => ipcRenderer.invoke('ai-analyst:run-performance-optimizer', picks),
     syncEntryPrice: (stockCode: string, price: number, entryDate: string) => ipcRenderer.invoke('ai-analyst:sync-entry-price', stockCode, price, entryDate),
 
     // ── Mega Theme Ledger ──
@@ -429,7 +431,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // ── Moonshot 텐베거 발굴 전용 추가 API ──
     getSmartMoneyFlow: (stk_cd: string) => ipcRenderer.invoke('kiwoom:get-smart-money-flow', stk_cd),
     getFundamentalInfo: (stk_cd: string) => ipcRenderer.invoke('kiwoom:get-fundamental-info', stk_cd),
-    validateMoonshotStocks: (stocks: any[]) => ipcRenderer.invoke('moonshot:validate-stocks', stocks),
+    validateMoonshotStocks: (stocks: any[], ignoreCooldown?: boolean) => ipcRenderer.invoke('moonshot:validate-stocks', stocks, ignoreCooldown),
     onMoonshotProgressLog: (callback: (data: { code: string, log: any }) => void) => {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('moonshot:progress-log', listener)
@@ -444,6 +446,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('moonshot:eval-complete', listener)
         return () => ipcRenderer.removeListener('moonshot:eval-complete', listener)
+    },
+    runMoonshotDailyTracker: () => ipcRenderer.invoke('moonshot:run-daily-tracker'),
+    onMoonshotTrackerProgress: (callback: (log: any) => void) => {
+        const listener = (_event: any, log: any) => callback(log)
+        ipcRenderer.on('moonshot:tracker-progress', listener)
+        return () => ipcRenderer.removeListener('moonshot:tracker-progress', listener)
     },
 })
 

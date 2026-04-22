@@ -760,6 +760,34 @@ export class DatabaseService {
         `);
         // ─────────────────────────────────────────────────────────────────────
 
+        // 이전 잘못된 상태/계산 수정 (앱 실행마다 1회 데이터 무결성 체크)
+        try {
+            this.db.exec(`
+                UPDATE maiis_trade_history 
+                SET profit_rate = ROUND(((exit_price - entry_price) / entry_price) * 100, 2)
+                WHERE status = 'CLOSED' 
+                AND exit_price > 0 
+                AND entry_price > 0;
+
+                UPDATE maiis_portfolio_events 
+                SET profit_rate = 0 
+                WHERE event_type IN ('BUY_UPGRADED', 'IMMEDIATE_BUY', 'BUY_EXECUTED');
+                
+                INSERT INTO maiis_portfolio_events (stock_code, stock_name, event_type, old_status, new_status, price, profit_rate, reason, created_at)
+                SELECT h.stock_code, h.stock_name, 'DROPPED', 'HELD', 'CLEARED', h.exit_price, h.profit_rate, h.exit_reason, h.exit_at
+                FROM maiis_trade_history h
+                WHERE h.status = 'CLOSED' 
+                  AND NOT EXISTS (
+                      SELECT 1 FROM maiis_portfolio_events e 
+                      WHERE e.stock_code = h.stock_code 
+                        AND e.event_type = 'DROPPED' 
+                        AND DATE(e.created_at) = DATE(h.exit_at)
+                  );
+            `);
+        } catch (e: any) {
+            console.warn('[DB] Failed to auto-fix profit_rate / events anomalies:', e.message);
+        }
+
         // Theme Ontology
         const createThemeOntologyTable = `
             CREATE TABLE IF NOT EXISTS theme_ontology (
@@ -992,6 +1020,81 @@ export class DatabaseService {
         try { this.db.exec("ALTER TABLE maiis_portfolio ADD COLUMN entry_pending INTEGER DEFAULT 0") } catch (e) { }
 
         // Phase 2 Tracker: Daily NAV snapshot table
+        
+        // Moonshot Active Tracking Table (Ten-Bagger Portfolio Dedicated DB)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS moonshot_active_tracking (
+                stock_code TEXT PRIMARY KEY,
+                stock_name TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                tbp_score INTEGER,
+                mega_trend TEXT,
+                bull_case TEXT,
+                bear_case TEXT,
+                milestones_json TEXT,
+                invalidation_condition TEXT,
+                entry_price REAL DEFAULT 0,
+                current_price REAL DEFAULT 0,
+                entry_date TEXT NOT NULL,
+                is_invalidated INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        `);
+        try { this.db.exec("ALTER TABLE moonshot_active_tracking ADD COLUMN narrative TEXT") } catch (e) { }
+        // Moonshot Evaluation History for Cooldown
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS moonshot_eval_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                status TEXT NOT NULL,  -- 'passed' or 'failed'
+                tbp_score INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_moonshot_eval_code ON moonshot_eval_history(stock_code);
+            CREATE INDEX IF NOT EXISTS idx_moonshot_eval_date ON moonshot_eval_history(created_at);
+        `);
+
+        // Moonshot Daily Review Log (트래커 에이전트 매일 복기 결과)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS moonshot_daily_review (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                alpha_score INTEGER DEFAULT 0,
+                daily_narrative TEXT,
+                hypothesis_intact INTEGER DEFAULT 1,
+                drop_reason TEXT,
+                reviewed_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_moonshot_review_code ON moonshot_daily_review(stock_code);
+            CREATE INDEX IF NOT EXISTS idx_moonshot_review_date ON moonshot_daily_review(reviewed_at);
+        `);
+
+        // Moonshot Archive Table (Hall of Fame & Graveyard)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS moonshot_archive (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                tag TEXT,
+                original_thesis TEXT,
+                bull_case TEXT,
+                bear_case TEXT,
+                entry_price REAL,
+                sell_price REAL,
+                return_rate REAL,
+                buy_date TEXT,
+                sell_date TEXT,
+                success INTEGER DEFAULT 0,
+                final_narrative TEXT
+            );
+        `);
+
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS maiis_portfolio_daily (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2423,8 +2526,15 @@ export class DatabaseService {
                     THEN excluded.entry_price
                     ELSE maiis_portfolio.entry_price  -- WATCHING 등 비매수 상태에서는 절대 덮어쓰지 않음
                 END,
+                profit_rate = CASE
+                    WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
+                    THEN 0
+                    ELSE maiis_portfolio.profit_rate
+                END,
                 entry_date = CASE
                     WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
+                    THEN excluded.entry_date
+                    WHEN maiis_portfolio.status = 'DROPPED' AND excluded.status != 'DROPPED'
                     THEN excluded.entry_date
                     ELSE maiis_portfolio.entry_date
                 END,
@@ -2472,7 +2582,9 @@ export class DatabaseService {
         this.enforcePortfolioCaps();
     }
 
-    private enforcePortfolioCaps() {
+    public enforcePortfolioCaps(protectedCodes?: Set<string>): { pm3Candidates: any[] } {
+        const pm3Candidates: any[] = [];
+
         try {
             const aiSettings: any = store.get('ai_settings') || {};
             // 구버전 키(SWING/VALUE) 감지 → 새 기준(THEME/PULLBACK/MOMENTUM/REPORT)으로 자동 재설정
@@ -2501,7 +2613,7 @@ export class DatabaseService {
 
                 // 1. 해당 타입의 모든 종목 가져오기
                 const allItems = this.db.prepare(`
-                    SELECT stock_code, stock_name, strategy, conviction_score 
+                    SELECT stock_code, stock_name, strategy, conviction_score, current_price, entry_price, profit_rate, last_signal_reason
                     FROM maiis_portfolio 
                     WHERE ${statusCondition}
                     ORDER BY 
@@ -2535,11 +2647,45 @@ export class DatabaseService {
                 if (passed.length < totalLimit && failed.length > 0) {
                     // failed는 이미 conviction_score DESC로 정렬되어 있음
                     const availableSlots = totalLimit - passed.length;
-                    const rescued = failed.slice(0, availableSlots);
                     dropItems = failed.slice(availableSlots);
                 }
 
-                // 4. 최종 탈락 종목 처리
+                // [Phase 1] BUY 판정 보호: HELD 타입 트리밍 시 PM2가 명시적으로 BUY/HOLD 판정한 종목은 강제 생존
+                // WATCHING은 관심 단계이므로 보호 불필요 — HELD(실제 매수 포지션)만 적용
+                if (type === 'HELD' && protectedCodes && protectedCodes.size > 0) {
+                    const protectedDropped = dropItems.filter(r => protectedCodes.has(r.stock_code));
+                    dropItems = dropItems.filter(r => !protectedCodes.has(r.stock_code));
+                    if (protectedDropped.length > 0) {
+                        console.log(`[DatabaseService] 🛡️ AI BUY 판정 보호: ${protectedDropped.map((r: any) => r.stock_name).join(', ')} (${protectedDropped.length}개) Cap 트리밍 면제`);
+                    }
+                }
+
+                // [Phase 3] HELD 종목은 즉시 DROP 대신 PM3 재심사 후보로 반환하되, 절대 한도(15개) 초과분은 즉시 강제 컷오프
+                if (type === 'HELD' && dropItems.length > 0) {
+                    const ABSOLUTE_MAX_HELD = 15;
+                    const definitelySurvivingCount = allItems.length - dropItems.length;
+                    const allowedPm3Count = Math.max(0, ABSOLUTE_MAX_HELD - definitelySurvivingCount);
+
+                    if (dropItems.length > allowedPm3Count) {
+                        const pm3Keep = dropItems.slice(0, allowedPm3Count);
+                        const hardDrop = dropItems.slice(allowedPm3Count);
+                        
+                        console.log(`[DatabaseService] 🚨 HELD 절대 한도(${ABSOLUTE_MAX_HELD}) 초과! 하위 ${hardDrop.length}개 즉시 강제 DROP, ${pm3Keep.length}개 PM3 대기`);
+                        
+                        if (pm3Keep.length > 0) {
+                            pm3Candidates.push(...pm3Keep);
+                        }
+                        
+                        // hardDrop 명단만 아래 '최종 탈락 종목 처리' 로직을 타도록 덮어씌움
+                        dropItems = hardDrop;
+                    } else {
+                        console.log(`[DatabaseService] ⚖️ HELD Cap 초과 ${dropItems.length}개 → PM3 재심사 대기: ${dropItems.map((r: any) => r.stock_name).join(', ')}`);
+                        pm3Candidates.push(...dropItems);
+                        continue; // HELD는 PM3 결과 나올 때까지 DROP 보류
+                    }
+                }
+
+                // 4. 최종 탈락 종목 처리 (WATCHING은 즉시 DROP)
                 if (dropItems.length > 0) {
                     const codes = dropItems.map(r => `'${r.stock_code.replace(/'/g, "''")}'`).join(',');
                     const info = this.db.prepare(`
@@ -2550,12 +2696,34 @@ export class DatabaseService {
                     `).run(this.getKstTimestamp());
 
                     dropItems.forEach(r => {
+                        const dropReason = '관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락';
+                        
                         this.demoteToIncubator({
                             stock_code: r.stock_code,
                             stock_name: r.stock_name || '알수없음',
                             current_price: 0,
-                            last_signal_reason: '관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락'
+                            last_signal_reason: dropReason
                         });
+
+                        if (type === 'HELD') {
+                            const freshPrice = r.current_price || r.entry_price || 0;
+                            this.logPortfolioEvent(
+                                r.stock_code, 
+                                r.stock_name || '알수없음', 
+                                'DROPPED', 
+                                'HELD', 
+                                'CLEARED', 
+                                dropReason, 
+                                freshPrice
+                            );
+                            
+                            this.closeTradeRecord({
+                                stock_code: r.stock_code,
+                                exit_price: freshPrice,
+                                exit_reason: dropReason,
+                                profit_rate: r.profit_rate || 0
+                            });
+                        }
                     });
 
                     console.log(`[DatabaseService] ✂️ 캡(${totalLimit}) 초과로 인한 Flexible 트리밍: ${info.changes}개 DROPPED (${type})`);
@@ -2564,11 +2732,105 @@ export class DatabaseService {
         } catch (e) {
             console.error(`[DatabaseService] 포트폴리오 캡 검사 중 오류:`, e);
         }
+
+        return { pm3Candidates };
     }
+
+    /**
+     * [Phase 3] PM3 재심사 결과: KEEP → 해당 HELD 유지, 대신 WATCHING 최하위를 DROP
+     * PM3 결과가 REPLACE인 경우는 PortfolioManagerAgent에서 직접 처리
+     */
+    public dropLowestWatching(reason: string): boolean {
+        try {
+            const lowest = this.db.prepare(`
+                SELECT stock_code, stock_name, conviction_score, current_price, entry_price, profit_rate
+                FROM maiis_portfolio
+                WHERE status = 'WATCHING'
+                ORDER BY conviction_score ASC
+                LIMIT 1
+            `).get() as any;
+
+            if (!lowest) {
+                console.log('[DatabaseService] PM3 KEEP: 대신 DROP할 WATCHING 종목 없음. Cap 일시 초과 허용.');
+                return false;
+            }
+
+            this.db.prepare(`
+                UPDATE maiis_portfolio
+                SET status = 'DROPPED', last_signal_reason = ?, updated_at = ?,
+                    was_held = CASE WHEN entry_price > 0 THEN was_held ELSE 0 END
+                WHERE stock_code = ?
+            `).run(reason, this.getKstTimestamp(), lowest.stock_code);
+
+            this.demoteToIncubator({
+                stock_code: lowest.stock_code,
+                stock_name: lowest.stock_name,
+                current_price: lowest.current_price || 0,
+                last_signal_reason: reason
+            });
+
+            console.log(`[DatabaseService] 🔄 PM3 KEEP → WATCHING 최하위 [${lowest.stock_name}] 대신 DROP`);
+            return true;
+        } catch (e: any) {
+            console.warn('[DatabaseService] dropLowestWatching 오류:', e.message);
+            return false;
+        }
+    }
+
+    /**
+     * [Phase 3] PM3 재심사 결과: REPLACE → 기존 HELD를 실제로 DROP 처리
+     */
+    public dropHeldForReplacement(stockCode: string, stockName: string, currentPrice: number, profitRate: number): void {
+        const reason = 'PM3 재심사 결과: 매수 논리 붕괴 + 대체 종목 상승여력 우위로 교체';
+        this.db.prepare(`
+            UPDATE maiis_portfolio
+            SET status = 'DROPPED', last_signal_reason = ?, updated_at = ?,
+                was_held = CASE WHEN entry_price > 0 THEN was_held ELSE 0 END
+            WHERE stock_code = ?
+        `).run(reason, this.getKstTimestamp(), stockCode);
+
+        this.demoteToIncubator({
+            stock_code: stockCode,
+            stock_name: stockName,
+            current_price: currentPrice,
+            last_signal_reason: reason
+        });
+
+        this.logPortfolioEvent(stockCode, stockName, 'DROPPED', 'HELD', 'CLEARED', reason, currentPrice);
+        this.closeTradeRecord({ stock_code: stockCode, exit_price: currentPrice, exit_reason: reason, profit_rate: profitRate });
+
+        console.log(`[DatabaseService] 🔄 PM3 REPLACE → [${stockName}] HELD DROP 완료`);
+    }
+
+
 
     public getActivePortfolio() {
         return this.db.prepare("SELECT * FROM maiis_portfolio WHERE status NOT IN ('DROPPED', 'HIT') ORDER BY conviction_score DESC").all();
     }
+
+    /**
+     * [Phase 2] 오늘 HELD→DROPPED 이력이 있는 종목 코드 집합 반환
+     * 14:05 미니 리뷰에서 오전에 이미 DROP된 종목의 재진입을 차단하는 데 사용
+     */
+    public getTodayHeldDroppedCodes(dateStr: string): Set<string> {
+        try {
+            const rows = this.db.prepare(`
+                SELECT DISTINCT stock_code FROM maiis_portfolio_events
+                WHERE event_type = 'DROPPED'
+                  AND old_status IN ('HELD', 'IMMEDIATE_BUY')
+                  AND DATE(created_at) = ?
+            `).all(dateStr) as any[];
+            const codes = new Set(rows.map((r: any) => r.stock_code));
+            if (codes.size > 0) {
+                console.log(`[DB] 당일 HELD→DROPPED 종목 ${codes.size}개 확인: ${Array.from(codes).join(', ')}`);
+            }
+            return codes;
+        } catch (e: any) {
+            console.warn('[DB] getTodayHeldDroppedCodes 조회 실패 (안전하게 빈 Set 반환):', e.message);
+            return new Set();
+        }
+    }
+
 
     /**
      * 장마감 채점(Judge)용 — 매수 포지션(HELD)만 반환
@@ -2923,7 +3185,13 @@ export class DatabaseService {
     public logPortfolioEvent(stockCode: string, stockName: string, eventType: string, oldStatus: string | null, newStatus: string, reason: string, price: number) {
         try {
             const pf = this.getPortfolioItem(stockCode);
-            const profitRate = pf ? pf.profit_rate : 0;
+            let profitRate = pf ? pf.profit_rate : 0;
+            
+            // 신규 진입 상태 전환일 경우, 이전 거래의 잔류 수익률 표기를 방지하고 0%로 초기화
+            if (eventType.includes('BUY_UPGRADED') || eventType.includes('IMMEDIATE_BUY') || eventType.includes('BUY_EXECUTED')) {
+                profitRate = 0;
+            }
+
             this.db.prepare(`
                 INSERT INTO maiis_portfolio_events (stock_code, stock_name, event_type, old_status, new_status, price, profit_rate, reason, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -3009,9 +3277,9 @@ export class DatabaseService {
             const now = this.getKstTimestamp();
             const today = this.getKstDate();
 
-            // profit_rate 계산: 명시된 값이 없으면 가격 기반 산출
+            // profit_rate 계산: 매도/파기되는 가격(exit_price)을 기준으로 재계산하여 정확도 보장
             let profitRate = params.profit_rate ?? 0;
-            if (profitRate === 0 && openTrade.entry_price > 0 && params.exit_price > 0) {
+            if (openTrade.entry_price > 0 && params.exit_price > 0) {
                 profitRate = ((params.exit_price - openTrade.entry_price) / openTrade.entry_price) * 100;
             }
 
@@ -4304,6 +4572,95 @@ export class DatabaseService {
         } catch (e) {
             console.error('[DB] getHistoricalPeakTrough error:', e);
             return { peak_return_pct: 0, trough_return_pct: 0, entry_vs_ma5_pct: 0, entry_vs_ma20_pct: 0 };
+        }
+    }
+
+    public runPerformanceOptimizer(picks: any[]) {
+        try {
+            const activePicks = picks.filter(p => (p.status === 'ACTIVE' || p.status === 'CLOSED') && p.entry_date && p.stock_code);
+            
+            const yieldTargets = [3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20];
+            const holdDaysTargets = [1, 2, 3, 4, 5, 7, 10];
+            
+            const ohlcCache: Record<string, any[]> = {};
+            
+            // 프리페치
+            const query = this.db.prepare('SELECT date, high, close FROM market_ohlcv_history WHERE stock_code = ? AND date >= ? ORDER BY date ASC LIMIT 15');
+            for (const p of activePicks) {
+                const key = `${p.stock_code}_${p.entry_date}`;
+                if (!ohlcCache[key]) {
+                    ohlcCache[key] = query.all(p.stock_code, p.entry_date) as any[];
+                }
+            }
+
+            const results: Record<string, any> = {};
+            const categories = Array.from(new Set(activePicks.map(p => p.category)));
+
+            for (const cat of categories) {
+                const catPicks = activePicks.filter(p => p.category === cat);
+                if (catPicks.length === 0) continue;
+
+                let bestCombo = null;
+                let maxAvgReturn = -999;
+
+                for (const targetYield of yieldTargets) {
+                    for (const targetDays of holdDaysTargets) {
+                        let totalReturn = 0;
+                        let hits = 0;
+                        
+                        for (const p of catPicks) {
+                            const history = ohlcCache[`${p.stock_code}_${p.entry_date}`];
+                            const entryPrice = Number(p.entry_price || p.current_price);
+                            if (!history || history.length === 0 || !entryPrice) continue;
+                            
+                            let tradeReturn = 0;
+                            let isHit = false;
+                            
+                            // 인덱스 0은 당일. targetDays 일 보유 시 최대 targetDays+1 개의 봉
+                            const maxLen = Math.min(history.length, targetDays + 1);
+                            
+                            for (let i = 0; i < maxLen; i++) {
+                                const dayData = history[i];
+                                const dayHighRet = ((Number(dayData.high) / entryPrice) - 1) * 100;
+                                if (dayHighRet >= targetYield) {
+                                    isHit = true;
+                                    tradeReturn = targetYield;
+                                    break;
+                                }
+                            }
+                            
+                            if (!isHit) {
+                                const lastDayData = history[maxLen - 1]; // Time stop
+                                tradeReturn = ((Number(lastDayData.close) / entryPrice) - 1) * 100;
+                            }
+                            
+                            totalReturn += tradeReturn;
+                            if (isHit || tradeReturn >= 3) hits++;
+                        }
+                        
+                        const avgReturn = totalReturn / catPicks.length;
+                        const winRate = (hits / catPicks.length) * 100;
+                        
+                        if (avgReturn > maxAvgReturn) {
+                            maxAvgReturn = avgReturn;
+                            bestCombo = {
+                                targetYield,
+                                targetDays,
+                                avgReturn,
+                                winRate
+                            };
+                        }
+                    }
+                }
+
+                if (bestCombo) {
+                    results[cat] = bestCombo;
+                }
+            }
+            return { success: true, optimized: results };
+        } catch (e: any) {
+            console.error('[DB] runPerformanceOptimizer error:', e);
+            return { success: false, error: e.message };
         }
     }
 }

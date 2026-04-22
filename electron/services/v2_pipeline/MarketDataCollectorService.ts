@@ -124,13 +124,15 @@ export class MarketDataCollectorService {
     /**
      * 전 종목 코스피/코스닥 60일치 일봉 데이터를 수집합니다.
      */
-    public async runDailyCollection(days: number = 100): Promise<void> {
+    public async runDailyCollection(days: number = 100): Promise<{ success: boolean; collected: number; failed: number }> {
         if (this.isCollecting) {
             console.log('[MarketDataCollector] 이미 전 종목 수집이 진행 중입니다.');
-            return;
+            return { success: false, collected: 0, failed: 0 };
         }
 
         this.isCollecting = true;
+        let successCount = 0;
+        let failCount = 0;
         eventBus.emit(SystemEvent.LOG_INFO, '[Data Pump] 전 종목 차트(OHLCV) 수집 엔진 가동 시작');
 
         try {
@@ -170,12 +172,23 @@ export class MarketDataCollectorService {
             });
             const allStocks = Array.from(allStocksMap.values());
 
-            console.log(`[MarketDataCollector] 수집 대상 종목 수: ${allStocks.length}개`);
-            eventBus.emit(SystemEvent.LOG_INFO, `[Data Pump] 수집 대상 종목 수: ${allStocks.length}개 (KOSPI/KOSDAQ)`);
-
             const db = (this.dbService as any).db;
-            let successCount = 0;
-            let failCount = 0;
+            
+            // Resume(이어하기) 로직: 오늘 이미 수집된 종목은 제외
+            const today = getKstDate();
+            let existingSet = new Set<string>();
+            try {
+                const existingRows = db.prepare(`SELECT DISTINCT stock_code FROM market_ohlcv_history WHERE date = ?`).all(today) as any[];
+                existingSet = new Set(existingRows.map(r => r.stock_code));
+            } catch (e) {
+                console.warn('[MarketDataCollector] 기존 데이터 확인 실패, 전체 수집 진행', e);
+            }
+            
+            const pendingStocks = allStocks.filter(s => !existingSet.has(s.stock_code));
+            successCount = existingSet.size;
+
+            console.log(`[MarketDataCollector] 수집 대상 종목 수: ${pendingStocks.length}개 (이미 수집됨: ${existingSet.size}개)`);
+            eventBus.emit(SystemEvent.LOG_INFO, `[Data Pump] 수집 대상 종목 수: ${pendingStocks.length}개 (KOSPI/KOSDAQ)`);
 
             const insertStmt = db.prepare(`
                 INSERT OR REPLACE INTO market_ohlcv_history 
@@ -198,8 +211,8 @@ export class MarketDataCollectorService {
                 currentBatch = [];
             };
 
-            for (let i = 0; i < allStocks.length; i++) {
-                const stock = allStocks[i];
+            for (let i = 0; i < pendingStocks.length; i++) {
+                const stock = pendingStocks[i];
 
                 try {
                     // API Call: getDailyChartData 호출 (기본 80개, 우리는 days만큼 사용)
@@ -250,7 +263,7 @@ export class MarketDataCollectorService {
 
                     // 진행상황 로깅
                     if ((i + 1) % 100 === 0) {
-                        console.log(`[MarketDataCollector] 진행율: ${i + 1} / ${allStocks.length} ... (성공: ${successCount}, 실패: ${failCount})`);
+                        console.log(`[MarketDataCollector] 진행율: ${i + 1} / ${pendingStocks.length} ... (총 성공: ${successCount}, 이번 실패: ${failCount})`);
                     }
 
                 } catch (err: any) {
@@ -274,8 +287,26 @@ export class MarketDataCollectorService {
         } catch (error: any) {
             console.error('[MarketDataCollector] 수집 엔진 에러:', error);
             eventBus.emit(SystemEvent.LOG_ERROR, `[Data Pump] 수집 엔진 에러: ${error.message}`);
+            return { success: false, collected: successCount, failed: failCount };
         } finally {
             this.isCollecting = false;
+        }
+
+        const isSuccess = successCount >= 2000;
+        return { success: isSuccess, collected: successCount, failed: failCount };
+    }
+
+    /**
+     * 오늘 날짜의 OHLCV 데이터가 정상적으로 최소 요건(2000개 이상) 수집되었는지 확인합니다.
+     */
+    public verifyTodayDataIntegrity(): boolean {
+        try {
+            const today = getKstDate();
+            const db = (this.dbService as any).db;
+            const row = db.prepare(`SELECT COUNT(DISTINCT stock_code) as cnt FROM market_ohlcv_history WHERE date = ?`).get(today) as { cnt: number };
+            return row && row.cnt >= 2000;
+        } catch (e) {
+            return false;
         }
     }
 }

@@ -141,14 +141,10 @@ export class CrossPeriodAnalyzer {
             // 6. 전 종목 중 60일 기간의 총 유효종목 수 파악 (랭크 계산 기준)
             const totalStocks = ohlcv60.size;
 
-            // [거래정지 종목 필터링 로직 추가]
-            // 전체 시장 OHLCV 중 '가장 최근 거래일(today)'을 추출
-            let latestMarketDate = '';
-            for (const rows of ohlcv60.values()) {
-                if (rows.length > 0 && rows[rows.length - 1].date > latestMarketDate) {
-                    latestMarketDate = rows[rows.length - 1].date;
-                }
-            }
+            // [거래정지 종목 필터링 로직 개선]
+            // 수집 지연/장애로 인한 파편화(Partial Update) 시 정상 종목이 무더기로 삭제되는 것을 방지하기 위해,
+            // '가장 최근 거래일'과 정확히 일치하는지 보지 않고, 최근 3영업일 이내의 데이터가 있는지 확인합니다.
+            const cutoffDate = this.svc.getTradingDateCutoff(3);
 
             // allCodes(5/10/20/60일 리더 후보) 중 현재 거래정지 상태인 종목 파기
             for (const code of Array.from(allCodes)) {
@@ -158,9 +154,9 @@ export class CrossPeriodAnalyzer {
                     continue;
                 }
                 const lastRow = rows[rows.length - 1];
-                // 1) 오늘 날짜 데이터 누락 (상장폐지 등)
-                // 2) 오늘 거래대금 0 (거래정지)
-                if (lastRow.date !== latestMarketDate || !lastRow.tradingValue || lastRow.tradingValue === 0) {
+                // 1) 최근 3영업일 내 데이터가 없음 (상장폐지 등)
+                // 2) 마지막 거래일 거래대금 0 (거래정지)
+                if (lastRow.date < cutoffDate || !lastRow.tradingValue || lastRow.tradingValue === 0) {
                     allCodes.delete(code);
                 }
             }

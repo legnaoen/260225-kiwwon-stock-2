@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { TrendingUp, RefreshCw, Target, BarChart2, Award, Clock, ArrowUpRight, ArrowDownRight, Minus, Trash2, Settings, X, Save } from 'lucide-react'
+import { TrendingUp, RefreshCw, Target, BarChart2, Award, Clock, ArrowUpRight, ArrowDownRight, Minus, Trash2, Settings, X, Save, MoreHorizontal, Database } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import { StockDetailModal } from '../common/StockDetailModal'
@@ -146,7 +146,7 @@ export const SimTradeTab: React.FC = () => {
     const [guidelineContent, setGuidelineContent] = useState('')
     const [activeGuidelineTab, setActiveGuidelineTab] = useState<'phase1' | 'phase2'>('phase1')
     const [isPerformanceModalOpen, setIsPerformanceModalOpen] = useState(false)
-
+    const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false)
     const fetchPicks = async () => {
         setLoading(true)
         try {
@@ -469,32 +469,76 @@ export const SimTradeTab: React.FC = () => {
                             <Settings className="w-3.5 h-3.5" />
                             옵션
                         </button>
-                        <button
-                            onClick={async () => {
-                                setLoading(true);
-                                try {
-                                    const res = await (window as any).electronAPI.forceRefreshSimTradePrices();
-                                    if(res.success) {
-                                        await fetchPicks();
-                                    } else {
-                                        alert('원격 갱신 실패: ' + res.error);
-                                    }
-                                } finally { setLoading(false); }
-                            }}
-                            disabled={loading}
-                            className="text-xs text-indigo-400 border border-indigo-500/50 hover:bg-indigo-500/10 px-2 py-1 rounded transition-colors flex items-center gap-1"
-                        >
-                            <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
-                            현재가 즉시 수동 갱신
-                        </button>
-                        <button
-                            onClick={fetchPicks}
-                            disabled={loading}
-                            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/30 transition-colors flex items-center gap-1"
-                        >
-                            <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
-                            새로고침
-                        </button>
+                        {/* 더보기 (More Options) 컨텍스트 메뉴 */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                                className="text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded hover:bg-muted/30 transition-colors flex items-center justify-center border border-transparent hover:border-border/50"
+                                title="더보기"
+                            >
+                                <MoreHorizontal className="w-4 h-4" />
+                            </button>
+                            {isMoreMenuOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsMoreMenuOpen(false)} />
+                                    <div className="absolute right-0 top-full mt-1 w-52 bg-background border border-border/50 rounded-md shadow-xl z-50 py-1 overflow-hidden">
+                                        <button
+                                            onClick={async () => {
+                                                setIsMoreMenuOpen(false);
+                                                setLoading(true);
+                                                try {
+                                                    alert('전 종목 OHLCV 수집을 시작합니다. 약 15~25분 소요될 수 있습니다.');
+                                                    const res = await (window as any).electronAPI.runOhlcvCollection();
+                                                    if(res.success) {
+                                                        alert('수집이 완료되었습니다.');
+                                                    } else {
+                                                        alert('OHLCV 수집 실패: ' + res.error);
+                                                    }
+                                                } catch(e: any) {
+                                                    alert('에러 발생: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-muted transition-colors flex items-center gap-2 text-amber-400 border-b border-border/30"
+                                        >
+                                            <Database className="w-3.5 h-3.5" />
+                                            OHLCV 전체 수동 수집
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                setIsMoreMenuOpen(false);
+                                                setLoading(true);
+                                                try {
+                                                    const res = await (window as any).electronAPI.forceRefreshSimTradePrices();
+                                                    if(res.success) {
+                                                        await fetchPicks();
+                                                    } else {
+                                                        alert('원격 갱신 실패: ' + res.error);
+                                                    }
+                                                } finally { setLoading(false); }
+                                            }}
+                                            disabled={loading}
+                                            className="w-full text-left px-4 py-2 text-xs font-medium hover:bg-muted transition-colors flex items-center gap-2 text-indigo-400 disabled:opacity-50"
+                                        >
+                                            <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+                                            현재가 즉시 수동 갱신
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setIsMoreMenuOpen(false);
+                                                fetchPicks();
+                                            }}
+                                            disabled={loading}
+                                            className="w-full text-left px-4 py-2 text-xs font-medium hover:bg-muted transition-colors flex items-center gap-2 disabled:opacity-50 text-foreground"
+                                        >
+                                            <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+                                            새로고침
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     </div>
                 </div>
 

@@ -296,6 +296,39 @@ export const PortfolioManagerTab: React.FC = () => {
     const [showRetroModal, setShowRetroModal] = useState(false)
     const [retroModalTab, setRetroModalTab] = useState<'summary' | 'pm1' | 'pm2' | 'patterns'>('summary')
 
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>(() => {
+        const saved = localStorage.getItem('portfolio_sortConfig');
+        if (saved) {
+            try { return JSON.parse(saved); } catch (e) {}
+        }
+        return { key: 'created_at', direction: 'asc' }; // 가장 오래된 종목부터 상위 노출
+    });
+
+    const handleSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        const newConfig = { key, direction };
+        setSortConfig(newConfig);
+        localStorage.setItem('portfolio_sortConfig', JSON.stringify(newConfig));
+    };
+
+    const SortableHeader = ({ title, sortKey, align = 'left', className = '' }: { title: string, sortKey: string, align?: 'left'|'center'|'right', className?: string }) => {
+        const isActive = sortConfig.key === sortKey;
+        const justifyCls = align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start';
+        return (
+            <th className={cn(`py-2 font-bold cursor-pointer hover:text-foreground select-none group transition-colors`, className)} onClick={() => handleSort(sortKey)}>
+                <div className={`flex items-center gap-1 ${justifyCls}`}>
+                    {title}
+                    <span className={cn('text-[10px]', isActive ? 'text-indigo-400' : 'text-transparent group-hover:text-muted-foreground/50')}>
+                        {isActive && sortConfig.direction === 'desc' ? '▼' : '▲'}
+                    </span>
+                </div>
+            </th>
+        );
+    }
+
     const handleShowSkill = async () => {
         setShowSkillModal(true);
         setSkillContent('문서를 불러오는 중입니다...');
@@ -497,17 +530,57 @@ export const PortfolioManagerTab: React.FC = () => {
         HIT: -1000,
         DROPPED: -2000,
     }
+    const getProfitRate = (p: any) => {
+        const ep = p.entry_price || p.actual_entry_price || p.current_price;
+        if (p.profit_rate != null) return Number(p.profit_rate);
+        if (ep && p.current_price) return ((p.current_price - ep) / ep) * 100;
+        return 0;
+    };
 
-    const sortBySignal = (list: any[]) => list.sort((a, b) => {
-        const sigA = a.last_signal || a.status;
-        const sigB = b.last_signal || b.status;
-        const weightA = (SIGNAL_WEIGHT[sigA] || 0) + (a.conviction_score || 0);
-        const weightB = (SIGNAL_WEIGHT[sigB] || 0) + (b.conviction_score || 0);
-        return weightB - weightA;
-    })
+    const getRemainingLifespan = (p: any) => {
+        const daysHeld = p.days_held ?? 0;
+        const lifespan = p.lifespan_days ?? 20;
+        return lifespan - daysHeld;
+    };
+
+    const dynamicSort = (list: any[]) => {
+        return list.sort((a, b) => {
+            let valA: any = a[sortConfig.key];
+            let valB: any = b[sortConfig.key];
+
+            if (sortConfig.key === 'status') {
+                const sigA = a.last_signal || a.status;
+                const sigB = b.last_signal || b.status;
+                valA = (SIGNAL_WEIGHT[sigA] || 0) + (a.conviction_score || 0);
+                valB = (SIGNAL_WEIGHT[sigB] || 0) + (b.conviction_score || 0);
+            } else if (sortConfig.key === 'profit') {
+                valA = getProfitRate(a);
+                valB = getProfitRate(b);
+            } else if (sortConfig.key === 'lifespan') {
+                valA = getRemainingLifespan(a);
+                valB = getRemainingLifespan(b);
+            } else if (sortConfig.key === 'created_at') {
+                valA = new Date(a.entry_date || a.created_at || 0).getTime();
+                valB = new Date(b.entry_date || b.created_at || 0).getTime();
+            } else if (sortConfig.key === 'name') {
+                valA = a.stock_name || '';
+                valB = b.stock_name || '';
+            } else if (sortConfig.key === 'strategy') {
+                valA = a.strategy || '';
+                valB = b.strategy || '';
+            } else if (sortConfig.key === 'conviction') {
+                valA = a.conviction_score || 0;
+                valB = b.conviction_score || 0;
+            }
+
+            if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+            if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+    };
 
     // 💰 매수 포지션: status === HELD + HIT/DROPPED 이력 (구 IMMEDIATE_BUY 포함)
-    const buyRows = sortBySignal(portfolio.filter(p => {
+    const buyRows = dynamicSort(portfolio.filter(p => {
         if (p.status !== 'HELD' && p.status !== 'IMMEDIATE_BUY') {
             return false;
         }
@@ -518,7 +591,7 @@ export const PortfolioManagerTab: React.FC = () => {
     }))
 
     // 👀 관심종목: status === WATCHING (구 WATCHLIST 포함)
-    const watchRows = sortBySignal(portfolio.filter(p => {
+    const watchRows = dynamicSort(portfolio.filter(p => {
         return p.status === 'WATCHING' || p.status === 'WATCHLIST' || p.status === 'WAIT_DIP';
     }))
 
@@ -604,14 +677,14 @@ export const PortfolioManagerTab: React.FC = () => {
                         <table className="w-full text-sm text-left whitespace-nowrap">
                             <thead className="sticky top-0 z-10 bg-background">
                                 <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
-                                    <th className="py-2 pr-3 font-bold w-8">상태</th>
-                                    <th className="py-2 pr-4 font-bold w-36 min-w-[144px]">종목</th>
-                                    <th className="py-2 pr-4 font-bold text-center w-16">분류</th>
-                                    <th className="py-2 pr-4 font-bold">시그널 / 매력도</th>
+                                    <SortableHeader title="상태" sortKey="status" className="pr-3 w-8" />
+                                    <SortableHeader title="종목" sortKey="name" className="pr-4 w-36 min-w-[144px]" />
+                                    <SortableHeader title="분류" sortKey="strategy" align="center" className="pr-4 w-16" />
+                                    <SortableHeader title="시그널 / 매력도" sortKey="conviction" className="pr-4" />
                                     <th className="py-2 pr-4 font-bold text-center">추천 AI</th>
-                                    <th className="py-2 pr-4 font-bold text-center">추가일</th>
-                                    <th className="py-2 pr-4 font-bold text-right">진입가 / 수익률</th>
-                                    <th className="py-2 pr-4 font-bold text-right">수명</th>
+                                    <SortableHeader title="추가일" sortKey="created_at" align="center" className="pr-4" />
+                                    <SortableHeader title="진입가 / 수익률" sortKey="profit" align="right" className="pr-4" />
+                                    <SortableHeader title="수명" sortKey="lifespan" align="right" className="pr-4" />
                                     <th className="py-2 w-6" />
                                 </tr>
                             </thead>
@@ -709,13 +782,13 @@ export const PortfolioManagerTab: React.FC = () => {
                                                 <AnalystBadges json={p.analysts_json} />
                                             </td>
 
-                                            {/* 포착 시간 */}
+                                            {/* 포착/진입 시간 */}
                                             <td className="py-2 pr-4 text-center">
                                                 <div className="font-mono">
                                                     <span className="text-xs text-muted-foreground">
-                                                        {p.created_at
-                                                            ? p.created_at.substring(5, 16).replace(/-/g, '.')
-                                                            : p.entry_date ? p.entry_date.substring(5, 10).replace(/-/g, '.') : '-'}
+                                                        {p.entry_date
+                                                            ? p.entry_date.substring(5, 10).replace(/-/g, '.')
+                                                            : p.created_at ? p.created_at.substring(5, 16).replace(/-/g, '.') : '-'}
                                                     </span>
                                                 </div>
                                             </td>
@@ -843,9 +916,9 @@ export const PortfolioManagerTab: React.FC = () => {
                                             <td className="py-2 pr-4 text-center">
                                                 <div className="font-mono">
                                                     <span className="text-xs text-muted-foreground">
-                                                        {p.created_at
-                                                            ? p.created_at.substring(5, 16).replace(/-/g, '.')
-                                                            : p.entry_date ? p.entry_date.substring(5, 10).replace(/-/g, '.') : '-'}
+                                                        {p.entry_date
+                                                            ? p.entry_date.substring(5, 10).replace(/-/g, '.')
+                                                            : p.created_at ? p.created_at.substring(5, 16).replace(/-/g, '.') : '-'}
                                                     </span>
                                                 </div>
                                             </td>
@@ -1335,7 +1408,7 @@ export const PortfolioManagerTab: React.FC = () => {
                                             {/* 청산가 */}
                                             <td className="py-2 pr-4 text-right">
                                                 <div className="font-mono text-[12px] text-muted-foreground">
-                                                    {p.closed_price ? p.closed_price.toLocaleString() : (p.current_price ? p.current_price.toLocaleString() : '─')}
+                                                    {p.exit_price ? p.exit_price.toLocaleString() : (p.current_price ? p.current_price.toLocaleString() : '─')}
                                                 </div>
                                                 <div className="text-[10px] text-muted-foreground/60">원</div>
                                             </td>

@@ -41,6 +41,31 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
     const [startDate, setStartDate] = useState<string>('');
     const [endDate, setEndDate] = useState<string>('');
 
+    const [isOptimizing, setIsOptimizing] = useState(false);
+    const [optimizedResults, setOptimizedResults] = useState<Record<string, any> | null>(null);
+
+    const handleOptimize = async () => {
+        setIsOptimizing(true);
+        try {
+            const validPicks = picks.filter(p => (p.status === 'ACTIVE' || p.status === 'CLOSED') && p.entry_date && p.stock_code);
+            let filteredPicks = validPicks;
+            if (startDate) filteredPicks = filteredPicks.filter(p => p.pick_date >= startDate);
+            if (endDate) filteredPicks = filteredPicks.filter(p => p.pick_date <= endDate);
+            
+            const res = await (window as any).electronAPI.runPerformanceOptimizer(filteredPicks);
+            if (res && res.success) {
+                setOptimizedResults(res.optimized);
+            } else {
+                alert(`최적화 실패: ${res?.error || '알 수 없는 오류'}`);
+            }
+        } catch (e) {
+            console.error(e);
+            alert('최적화 중 오류가 발생했습니다.');
+        } finally {
+            setIsOptimizing(false);
+        }
+    }
+
     // 필터링 및 로직 처리
     const stats = useMemo(() => {
         let validPicks = picks.filter(p => p.status === 'ACTIVE' || p.status === 'CLOSED');
@@ -144,6 +169,11 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
 
     }, [picks, targetReturn, useFavorableCloseOption, startDate, endDate]);
 
+    // Cleanup optimize results when filter changes
+    React.useEffect(() => {
+        setOptimizedResults(null);
+    }, [picks, startDate, endDate]);
+
     if (!isOpen) return null;
 
     return (
@@ -233,9 +263,28 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
                         </div>
                     </div>
 
-                    {/* 카테고리별 테이블 */}
+                    {/* 카테고리별 테이블 상단 제목 & 버튼 영역 */}
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-semibold">📋 전술(Track)별 성과 비교 보드</h3>
+                        <button
+                            onClick={handleOptimize}
+                            disabled={isOptimizing}
+                            className="text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                            {isOptimizing ? (
+                                <>
+                                    <span className="animate-spin w-3 h-3 border-2 border-white/30 border-t-white rounded-full"></span>
+                                    <span>시나리오 연산 중...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span>🪄</span>
+                                    <span>AI 최적 파라미터 검색 (Grid Search)</span>
+                                </>
+                            )}
+                        </button>
+                    </div>
                     <div>
-                        <h3 className="text-sm font-semibold mb-3">📋 전술(Track)별 성과 비교 보드</h3>
                         <div className="overflow-x-auto border border-border rounded-lg">
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-muted/50 text-xs uppercase text-muted-foreground border-b border-border">
@@ -251,19 +300,40 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
                                 <tbody>
                                     {stats.catArray.map((row, i) => {
                                         const meta = CATEGORY_META[row.category] || { icon: '❓', label: row.category, color: '' };
+                                        const optResult = optimizedResults ? optimizedResults[row.category] : null;
+                                        
                                         return (
-                                            <tr key={i} className="border-b border-border/50 hover:bg-muted/10">
-                                                <td className="px-4 py-3 font-medium">
-                                                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${meta.color}`}>
-                                                        {meta.icon} {meta.label}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3 text-right text-muted-foreground">{row.count}건</td>
-                                                <td className="px-4 py-3 text-right font-bold text-emerald-500">{row.winRate.toFixed(1)}%</td>
-                                                <td className="px-4 py-3 text-right font-semibold text-red-500">{row.avgPeak > 0 ? '+' : ''}{row.avgPeak.toFixed(2)}%</td>
-                                                <td className="px-4 py-3 text-right font-semibold">{row.avgClose > 0 ? '+' : ''}{row.avgClose.toFixed(2)}%</td>
-                                                <td className="px-4 py-3 text-right text-muted-foreground">D+{row.avgPeakDays.toFixed(1)}일</td>
-                                            </tr>
+                                            <React.Fragment key={i}>
+                                                <tr className="border-b border-border/50 hover:bg-muted/10">
+                                                    <td className="px-4 py-3 font-medium">
+                                                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${meta.color}`}>
+                                                            {meta.icon} {meta.label}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-muted-foreground">{row.count}건</td>
+                                                    <td className="px-4 py-3 text-right font-bold text-emerald-500">{row.winRate.toFixed(1)}%</td>
+                                                    <td className="px-4 py-3 text-right font-semibold text-red-500">{row.avgPeak > 0 ? '+' : ''}{row.avgPeak.toFixed(2)}%</td>
+                                                    <td className="px-4 py-3 text-right font-semibold">{row.avgClose > 0 ? '+' : ''}{row.avgClose.toFixed(2)}%</td>
+                                                    <td className="px-4 py-3 text-right text-muted-foreground">D+{row.avgPeakDays.toFixed(1)}일</td>
+                                                </tr>
+                                                {optResult && (
+                                                    <tr className="bg-indigo-500/5 border-b border-border/50">
+                                                        <td colSpan={6} className="px-4 py-2">
+                                                            <div className="flex flex-wrap items-center gap-3 text-xs">
+                                                                <span className="font-bold text-indigo-400">✨ AI 딥러닝 최적화 추천:</span>
+                                                                <span className="text-muted-foreground">
+                                                                    목표가 <span className="font-bold text-foreground">{optResult.targetYield}%</span> 익절선 세팅 후 
+                                                                    최대 <span className="font-bold text-foreground">{optResult.targetDays}일</span>간 보유 시 수익 가장 극대화!
+                                                                </span>
+                                                                <span className="ml-auto flex items-center gap-2">
+                                                                    <span className="text-muted-foreground border-r border-border/50 pr-2">예상 평균수익: <span className="font-bold text-red-500">+{optResult.avgReturn.toFixed(2)}%</span></span>
+                                                                    <span className="text-muted-foreground">예상 승률: <span className="font-bold text-emerald-500">{optResult.winRate.toFixed(1)}%</span></span>
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
                                         );
                                     })}
                                     {stats.catArray.length === 0 && (

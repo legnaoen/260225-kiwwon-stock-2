@@ -923,6 +923,18 @@ ipcMain.handle('v2:force-refresh-sim-trade-prices', async () => {
     }
 });
 
+// ── 전종목 OHLCV 수동 갱신 (모의매매 탭 전용 더보기 메뉴용) ──
+ipcMain.handle('v2:run-ohlcv-collection', async () => {
+    try {
+        const { MarketDataCollectorService } = await import('./services/v2_pipeline/MarketDataCollectorService');
+        const result = await MarketDataCollectorService.getInstance().runDailyCollection();
+        return { success: true, result };
+    } catch (error: any) {
+        console.error('[MarketDataCollector] runDailyCollection error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
 // [Track A] 대장주 모의매매 AI 수동 실행
 ipcMain.handle('track-a:run-buy-agent', async (_event, date?: string) => {
     try {
@@ -1109,6 +1121,178 @@ ipcMain.handle('track-b:save-guideline', async (_event, data: { fileName: string
         return { success: true };
     } catch (e: any) {
         return { success: false, error: e.message };
+    }
+});
+
+// ═══ Project Moonshot (Ten-Bagger) ═══
+ipcMain.handle('moonshot:get-active-tracking', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        const records = db.prepare(`
+            SELECT 
+                mat.*,
+                COALESCE(
+                    (SELECT close FROM market_ohlcv_history 
+                     WHERE stock_code = REPLACE(mat.stock_code, 'A', '') 
+                     ORDER BY date DESC LIMIT 1),
+                    mat.current_price
+                ) AS dynamic_current_price,
+                mdr.daily_narrative AS latest_daily_narrative,
+                mdr.verdict AS latest_verdict,
+                mdr.reviewed_at AS latest_reviewed_at
+            FROM moonshot_active_tracking mat
+            LEFT JOIN (
+                SELECT stock_code, daily_narrative, verdict, reviewed_at,
+                       ROW_NUMBER() OVER(PARTITION BY stock_code ORDER BY reviewed_at DESC) as rn
+                FROM moonshot_daily_review
+            ) mdr ON mdr.stock_code = mat.stock_code AND mdr.rn = 1
+            ORDER BY mat.created_at DESC
+        `).all();
+        
+        // Map dynamic_current_price to current_price for UI consumption
+        const processedRecords = records.map((r: any) => {
+            const row = { ...r };
+            row.current_price = row.dynamic_current_price;
+            delete row.dynamic_current_price;
+            return row;
+        });
+
+        return { success: true, data: processedRecords };
+    } catch (error: any) {
+        console.error('[Moonshot] get-active-tracking error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('moonshot:delete-active-tracking', async (_event, stock_code: string) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        
+        // 보관(Archive) 처리
+        const stockInfo = db.prepare(`
+            SELECT mat.*, mdr.daily_narrative, mdr.verdict
+            FROM moonshot_active_tracking mat
+            LEFT JOIN (
+                SELECT stock_code, daily_narrative, verdict,
+                       ROW_NUMBER() OVER(PARTITION BY stock_code ORDER BY reviewed_at DESC) as rn
+                FROM moonshot_daily_review
+            ) mdr ON mat.stock_code = mdr.stock_code AND mdr.rn = 1
+            WHERE mat.stock_code = ?
+        `).get(stock_code) as any;
+
+        if (stockInfo) {
+            const sellPrice = stockInfo.current_price || 0;
+            const returnRate = stockInfo.entry_price > 0 ? ((sellPrice / stockInfo.entry_price) - 1) * 100 : 0;
+            const success = returnRate > 0 ? 1 : 0;
+            const finalNarrative = stockInfo.daily_narrative || '사용자에 의한 등재 취소 및 수동 폐기';
+
+            db.prepare(`
+                INSERT INTO moonshot_archive 
+                (stock_code, stock_name, tag, original_thesis, bull_case, bear_case, entry_price, sell_price, return_rate, buy_date, sell_date, success, final_narrative)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?)
+            `).run(
+                stockInfo.stock_code,
+                stockInfo.stock_name,
+                stockInfo.tag,
+                stockInfo.narrative,
+                stockInfo.bull_case,
+                stockInfo.bear_case,
+                stockInfo.entry_price,
+                sellPrice,
+                returnRate,
+                stockInfo.entry_date,
+                success,
+                finalNarrative
+            );
+        }
+
+        const info = db.prepare('DELETE FROM moonshot_active_tracking WHERE stock_code = ?').run(stock_code);
+        if (info.changes > 0) {
+            console.log(`[Moonshot] Deleted and Archived Active Tracking stock: ${stock_code}`);
+            return { success: true };
+        }
+        return { success: false, error: '삭제할 대상이 없습니다.' };
+    } catch (error: any) {
+        console.error('[Moonshot] delete-active-tracking error:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('moonshot:get-archive', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        return db.prepare('SELECT * FROM moonshot_archive ORDER BY sell_date DESC').all();
+    } catch (error: any) {
+        console.error('[Moonshot] get-archive error:', error);
+        return [];
+    }
+});
+
+// Settings Handlers
+ipcMain.handle('moonshot:get-settings', () => {
+    return store.get('moonshot_settings') || {
+        scannerCronTime: '15:00',
+        trackerCronTime: '15:30',
+        enabled: true
+    };
+});
+
+ipcMain.handle('moonshot:save-settings', (_event, settings) => {
+    store.set('moonshot_settings', settings);
+    // Reload scheduler logic
+    schedulerService.initSchedules();
+    return true;
+});
+
+
+ipcMain.handle('moonshot:enroll-active', async (_event, evaluationResult: any) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        const kiwoom = kiwoomService;
+
+        // Fetch precise real-time price if possible
+        let entryPrice = 0;
+        try {
+            const priceStr = await kiwoom.getCurrentPrice(evaluationResult.code.replace(/^A/, ''));
+            if (priceStr) {
+                entryPrice = Math.abs(parseInt(priceStr, 10)); // Price might have sign
+            }
+        } catch (e) {
+            console.warn(`[Moonshot] Failed to fetch realtime price for ${evaluationResult.code}`);
+        }
+
+        const now = DatabaseService.getInstance().getKstTimestamp();
+        
+        db.prepare(`
+            INSERT OR REPLACE INTO moonshot_active_tracking 
+            (stock_code, stock_name, tag, tbp_score, mega_trend, bull_case, bear_case, milestones_json, invalidation_condition, entry_price, current_price, entry_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            evaluationResult.code,
+            evaluationResult.name,
+            evaluationResult.tag,
+            evaluationResult.tbpScore,
+            evaluationResult.megaTrend || '',
+            evaluationResult.bullCase || '',
+            evaluationResult.bearCase || '',
+            JSON.stringify(evaluationResult.milestones || []),
+            evaluationResult.invalidationCondition || '',
+            entryPrice,
+            entryPrice, // initial current price is the entry price
+            now.split('T')[0],
+            now,
+            now
+        );
+
+        console.log(`[Moonshot] Enrolled Active Tracking: ${evaluationResult.name} at ${entryPrice} KRW`);
+        return { success: true, entryPrice };
+    } catch (error: any) {
+        console.error('[Moonshot] enroll error:', error);
+        return { success: false, error: error.message };
     }
 });
 
@@ -2491,16 +2675,27 @@ ipcMain.handle('youtube:sync-videos', async () => {
 });
 
 // ── Moonshot IPC Handlers ──
-ipcMain.handle('moonshot:validate-stocks', async (event, stocks: any[]) => {
+ipcMain.handle('moonshot:validate-stocks', async (event, stocks: any[], ignoreCooldown: boolean = false) => {
     try {
         const { MoonshotValidationAgent } = await import('./services/v2_agents/MoonshotValidationAgent');
         const agent = MoonshotValidationAgent.getInstance();
-        const results = await agent.runValidation(stocks, win || undefined);
+        const results = await agent.runValidation(stocks, win || undefined, ignoreCooldown);
         return { success: true, data: results };
     } catch (err: any) {
         return { success: false, error: err.message };
     }
 });
+
+ipcMain.handle('moonshot:run-daily-tracker', async () => {
+    try {
+        const { MoonshotTrackerAgent } = await import('./services/v2_agents/MoonshotTrackerAgent');
+        const results = await MoonshotTrackerAgent.getInstance().runDailyReview(win || undefined);
+        return { success: true, data: results };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+});
+
 
 ipcMain.handle('youtube:collect-now', async (_event, channelId?: string) => {
     try {
@@ -2847,6 +3042,15 @@ ipcMain.handle('ai-analyst:delete-trade-history-item', async (_event, id: number
     try {
         const { DatabaseService } = await import('./services/DatabaseService')
         return DatabaseService.getInstance().deleteTradeHistoryItem(id)
+    } catch (err: any) {
+        return { deleted: false, error: err.message }
+    }
+})
+
+ipcMain.handle('ai-analyst:run-performance-optimizer', async (_event, picks: any[]) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService')
+        return DatabaseService.getInstance().runPerformanceOptimizer(picks)
     } catch (err: any) {
         return { deleted: false, error: err.message }
     }

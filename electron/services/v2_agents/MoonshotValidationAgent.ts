@@ -12,6 +12,11 @@ export interface MoonshotEvaluationResult {
     status: 'passed' | 'failed';
     narrative: string;
     tbpScore: number;
+    megaTrend?: string;
+    bullCase?: string;
+    bearCase?: string;
+    milestones?: string[];
+    invalidationCondition?: string;
     inputData: string;
     prompt: string;
     rawResult: string;
@@ -62,13 +67,67 @@ export class MoonshotValidationAgent {
     }
 
     public async runValidation(
-        stocks: { code: string; name: string; tag: string }[],
-        win?: BrowserWindow
+        stocks: { code: string; name: string; tag: string, price?: number }[],
+        win?: BrowserWindow,
+        ignoreCooldown: boolean = false
     ): Promise<MoonshotEvaluationResult[]> {
         const results: MoonshotEvaluationResult[] = [];
+        const { DatabaseService } = await import('../DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        const now = DatabaseService.getInstance().getKstTimestamp();
+        const nowDate = new Date(now);
+
+        // 1. Fetch currently active tracking stocks to skip
+        const activeRecords = db.prepare('SELECT stock_code FROM moonshot_active_tracking').all();
+        const activeSet = new Set(activeRecords.map((r: any) => r.stock_code));
+
+        // 2. Fetch evaluation history for cooldown logic
+        const evalHistory = db.prepare('SELECT stock_code, tag, created_at FROM moonshot_eval_history ORDER BY created_at DESC').all();
+        const cooldownMap = new Map<string, number>(); // latest eval time per code+tag
         
+        for (const record of evalHistory) {
+            const key = `${record.stock_code}_${record.tag}`;
+            if (!cooldownMap.has(key)) {
+                cooldownMap.set(key, new Date(record.created_at).getTime());
+            }
+        }
+
+        const filteredStocks = [];
+        for (const stock of stocks) {
+            if (!ignoreCooldown) {
+                // Check active skip:
+                if (activeSet.has(stock.code) || activeSet.has(stock.code.replace(/^A/, ''))) {
+                    console.log(`[MoonshotAgent] Skipping ${stock.name} (${stock.code}): Already in Active Tracking.`);
+                    continue;
+                }
+
+                // Check cooldown skip:
+                const tagChar = stock.tag.replace(/[^ABC]/g, '');
+                const cooldownDays = tagChar === 'A' ? 3 : tagChar === 'B' ? 7 : tagChar === 'C' ? 7 : 0;
+                const lastEvalTime = cooldownMap.get(`${stock.code}_${stock.tag}`);
+                
+                if (lastEvalTime && cooldownDays > 0) {
+                    const daysSince = (nowDate.getTime() - lastEvalTime) / (1000 * 60 * 60 * 24);
+                    if (daysSince < cooldownDays) {
+                        console.log(`[MoonshotAgent] Skipping ${stock.name} (${stock.code}): On cooldown (${daysSince.toFixed(1)} / ${cooldownDays} days for Track ${tagChar})`);
+                        continue;
+                    }
+                }
+            } else {
+                console.log(`[MoonshotAgent] Force evaluate ${stock.name} (${stock.code}) - Cooldown and Active checks bypassed.`);
+            }
+
+            filteredStocks.push(stock);
+        }
+
+        if (filteredStocks.length === 0) {
+            console.log(`[MoonshotAgent] No stocks left to validate after applying Anti-Duplicate & Cooldown filters.`);
+            return [];
+        }
+
         let batchHarnessLogs: { [code: string]: any[] } = {};
         let batchDistilledFacts: { [code: string]: string } = {};
+        let batchPhase1Outputs: { [code: string]: { bullCase: string, bearCase: string } } = {};
 
         // ===============================================
         // [PHASE 1] 진짜 인텔리전트 하네스 - 종목별 독립 실행
@@ -78,7 +137,7 @@ export class MoonshotValidationAgent {
         //   [D] Bear Case 반박 Call
         //   [E] Synthesis 최종 피치 Call → 제미나이에게 전달
         // ===============================================
-        for (const stock of stocks) {
+        for (const stock of filteredStocks) {
             const logs: any[] = [];
             const addLog = (step: string, msg: string, type: 'info' | 'warning' | 'success' | 'error') => {
                 const log = { time: new Date().toLocaleTimeString('en-US', { hour12: false }), step, msg, type };
@@ -259,6 +318,7 @@ ${financeMarkdown ? `[상세 재무/기업개요]\n${financeMarkdown}` : ''}
                 addLog('STEP 2', `최종 피치 시트 완성. 제미나이 배틀로얄 대기열 입장.`, 'success');
 
                 batchDistilledFacts[stock.code] = finalPitch;
+                batchPhase1Outputs[stock.code] = { bullCase, bearCase };
 
             } catch (error: any) {
                 console.error(`[MoonshotAgent] Harness Error for ${stock.code}:`, error);
@@ -351,9 +411,12 @@ ${factsText}
     "isPass": true 또는 false,
     "tbpScore": 0~100 (상대평가 랭킹 반영),
     "shortNarrative": "[타 종목 대비 우위/열위 포함 핵심 1줄]",
-    "keyCatalyst": "[텐베거 핵심 폭발 동력 - 어떤 내러티브가 10배를 만드는가?]",
-    "milestoneToTrack": "[향후 추적 마일스톤 - 홀딩하면서 매일 확인할 지표]",
-    "invalidationCondition": "[아이디어 폐기 조건 - 이런 뉴스나 지표면 즉시 매도]"
+    "megaTrend": "[산업 트렌드를 관통하는 단어 2~3개, 예: AI 반도체 / 전력 인프라]",
+    "milestones": [
+        "[최우선 달성해야할 핵심 성과 1]",
+        "[지속 성장을 뒷받침할 핵심 지표 2]"
+    ],
+    "invalidationCondition": "[아이디어 폐기 조건 - 이런 뉴스나 지표가 나오면 즉시 매도]"
   }
 ]`;
 
@@ -401,11 +464,17 @@ ${factsText}
 
                         const rawReport = `[${aiResult.isPass ? '배틀로얄 승리 - 편입 통과' : '집단 상대평가 탈락'} | ${categoryTag} 기준]
 
-🚀 **핵심 폭발 동력 (Key Catalyst)**
-${aiResult.keyCatalyst || '-'}
+💡 **메가트렌드 (Mega Trend)**
+${aiResult.megaTrend || '-'}
 
-🔭 **향후 추적 마일스톤 (Milestone to Track)**
-${aiResult.milestoneToTrack || '-'}
+🚀 **강세 근거 (Bull Case)**
+${aiResult.bullCase || '-'}
+
+⚠️ **약세 리스크 (Bear Case)**
+${aiResult.bearCase || '-'}
+
+🔭 **향후 추적 마일스톤 (Milestones)**
+${Array.isArray(aiResult.milestones) ? aiResult.milestones.map((m: string) => `- ${m}`).join('\n') : '-'}
 
 💥 **아이디어 폐기 및 손절 조건 (Invalidation)**
 ${aiResult.invalidationCondition || '-'}
@@ -413,20 +482,70 @@ ${aiResult.invalidationCondition || '-'}
 💡 **최종 심판문 요약**
 ${aiResult.shortNarrative || '-'}`;
 
-                        const resultObj: MoonshotEvaluationResult = {
-                            code: stock.code, name: stock.name, tag: stock.tag,
-                            status: aiResult.isPass ? 'passed' : 'failed',
-                            narrative: aiResult.shortNarrative,
-                            tbpScore: aiResult.tbpScore,
-                            inputData: batchDistilledFacts[stock.code],
-                            prompt: `※ [${categoryTag}] 카테고리 전용 배틀로얄 기준으로 평가된 종목입니다.`,
-                            rawResult: rawReport,
+                        const status = aiResult.isPass ? 'passed' : 'failed';
+                        const score = aiResult.tbpScore || 0;
+
+                        const finalEval: MoonshotEvaluationResult = {
+                            code: stock.code,
+                            name: stock.name,
+                            tag: categoryTag,
+                            status: status,
+                            narrative: aiResult.shortNarrative || '판단 보류',
+                            tbpScore: score,
+                            megaTrend: aiResult.megaTrend,
+                            bullCase: batchPhase1Outputs[stock.code]?.bullCase || '',
+                            bearCase: batchPhase1Outputs[stock.code]?.bearCase || '',
+                            milestones: aiResult.milestones,
+                            invalidationCondition: aiResult.invalidationCondition,
+                            inputData: batchDistilledFacts[stock.code] || '',
+                            prompt: judgePrompt,
+                            rawResult: JSON.stringify(aiResult, null, 2),
                             harnessLogs: batchHarnessLogs[stock.code]
                         };
 
-                        results.push(resultObj);
+                        results.push(finalEval);
+
+                        // ===== Cooldown History Write =====
+                        try {
+                            db.prepare(`INSERT INTO moonshot_eval_history (stock_code, stock_name, tag, status, tbp_score, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(
+                                finalEval.code, finalEval.name, finalEval.tag, finalEval.status, finalEval.tbpScore, now
+                            );
+                        } catch (err) {
+                            console.error('[MoonshotAgent] Eval history insert error:', err);
+                        }
+
+                        // ===== Auto-Enroll Active Tracking =====
+                        if (finalEval.status === 'passed') {
+                            try {
+                                const { kiwoomService } = await import('../kiwoomService');
+                                let entryPrice = 0;
+                                try {
+                                    const priceStr = await kiwoomService.getCurrentPrice(finalEval.code.replace(/^A/, ''));
+                                    if (priceStr) entryPrice = Math.abs(parseInt(priceStr, 10));
+                                    else if (stock.price) entryPrice = stock.price;
+                                } catch (e) {
+                                    console.warn(`[MoonshotAgent] Failed realtime price for auto-enroll ${finalEval.code}, fallbacking to scanner price`);
+                                    if (stock.price) entryPrice = stock.price;
+                                }
+
+                                db.prepare(`
+                                    INSERT OR REPLACE INTO moonshot_active_tracking 
+                                    (stock_code, stock_name, tag, tbp_score, mega_trend, bull_case, bear_case, milestones_json, invalidation_condition, entry_price, current_price, entry_date, created_at, updated_at, narrative)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                `).run(
+                                    finalEval.code, finalEval.name, finalEval.tag, finalEval.tbpScore, 
+                                    finalEval.megaTrend || '', finalEval.bullCase || '', finalEval.bearCase || '', 
+                                    JSON.stringify(finalEval.milestones || []), finalEval.invalidationCondition || '', 
+                                    entryPrice, entryPrice, now.split('T')[0].replace(/-/g, '.'), now, now, finalEval.narrative || ''
+                                );
+                                console.log(`🚀 [MoonshotAgent] AUTO-ENROLLED: ${finalEval.name} (${finalEval.code}) at ${entryPrice} KRW`);
+                            } catch (err) {
+                                console.error('[MoonshotAgent] Auto-enroll insertion error:', err);
+                            }
+                        }
+
                         if (win && !win.isDestroyed()) {
-                            win.webContents.send('moonshot:eval-complete', { code: stock.code, result: resultObj });
+                            win.webContents.send('moonshot:eval-complete', { code: stock.code, result: finalEval });
                         }
                         await new Promise(r => setTimeout(r, 200));
                     }

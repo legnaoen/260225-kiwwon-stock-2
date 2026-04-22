@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Rocket, ShieldAlert, Flame, Activity, Zap, CheckCircle2, ChevronRight, Lock, Archive, History, BookOpen, TrendingUp, TrendingDown, Telescope, Database, Filter, BrainCircuit, XCircle, Search, Fingerprint, LayoutGrid, Table, Copy, Check, Settings, Loader2, Terminal } from 'lucide-react'
+import { Rocket, ShieldAlert, Flame, Activity, Zap, CheckCircle2, ChevronRight, Lock, Archive, History, BookOpen, TrendingUp, TrendingDown, Telescope, Database, Filter, BrainCircuit, XCircle, Search, Fingerprint, LayoutGrid, Table, Copy, Check, Settings, Loader2, Terminal, AlertCircle, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { clsx, type ClassValue } from 'clsx'
@@ -19,7 +19,7 @@ const DUMMY_MOONSHOTS = [
         status: '가설 순항',
         statusColor: 'text-green-500',
         trend: 'AI / HBM 밸류체인',
-        signals: ['🔥 CAPEX +300%', '💰 스마트머니 매집'],
+        signals: ['🟢 외인 3일 연속 매집', '🟢 20일선 지지 반등'],
         bullCase: '글로벌 AI 반도체 수요 급증에 따른 글로벌 벤더들의 HBM 증설 필수 요건. 독점적 후공정 장비 공급 지위.',
         bearCase: '시총이 너무 무거워 추가 상승 탄력이 둔화되고 있으며, 경쟁사의 TC 본더 진입 가능성이 거론됨.',
         milestones: [
@@ -44,7 +44,7 @@ const DUMMY_MOONSHOTS = [
         status: '목표 초과 달성',
         statusColor: 'text-blue-500',
         trend: '전력 인프라 슈퍼사이클',
-        signals: ['📈 흑자 턴어라운드', '🔥 OPM 20% 점프'],
+        signals: ['🟢 신고가 돌파 직전', '🟡 거래량 감소 (매물 소화)'],
         bullCase: '미국 전력망 교체 주기 및 AI 데이터센터 가동으로 인한 변압기 숏티지. 북미 수출 급증에 따른 레버리지.',
         bearCase: '최근 단기 급등으로 밸류에이션 부담 가중 및 테마주 엮임으로 인한 변동성 심화 우려.',
         milestones: [
@@ -69,7 +69,7 @@ const DUMMY_MOONSHOTS = [
         status: '경고 누적 (1/3)',
         statusColor: 'text-orange-500',
         trend: 'K-뷰티 / 플랫폼',
-        signals: ['📈 매분기 서프라이즈', '💸 최근 매도세 출회'],
+        signals: ['🔴 5일선 하향 이탈 경고', '🔴 수급 이탈 점진 가속'],
         bullCase: '미국/유럽향 인디 브랜드 화장품 수출의 독보적 유통 플랫폼. 물류 인프라 선점에 따른 구조적 진입장벽 구축.',
         bearCase: '단기 실적 피크아웃 우려 및 기관의 차익 실현 출회 조짐.',
         milestones: [
@@ -87,36 +87,7 @@ const DUMMY_MOONSHOTS = [
     }
 ]
 
-const DUMMY_ARCHIVE = [
-    {
-        id: '101',
-        name: '에코프로',
-        code: '086520',
-        buyDate: '2023.01.10',
-        sellDate: '2023.08.15',
-        duration: '7개월',
-        returnRate: 850,
-        success: true,
-        originalThesis: '글로벌 전기차 침투율 급증과 배터리 핵심 소재(양극재) 내재화 및 수직계열화 구축 기반의 독점 프리미엄 부여.',
-        sellReason: '가설 적중 및 목표 초과 달성. 개인투자자 광기 지표(FOMO) 과열 및 스마트머니 대량 이탈 포착으로 분할 익절 완료.',
-        trackType: 'A',
-        trackBadge: 'A안'
-    },
-    {
-        id: '102',
-        name: '에디슨EV',
-        code: '136510',
-        buyDate: '2021.05.02',
-        sellDate: '2021.08.20',
-        duration: '3개월',
-        returnRate: -35,
-        success: false,
-        originalThesis: '전기버스 시장 점유율 확대 및 쌍용차 인수 기대감에 따른 폭발적 기업가치 레벨업 전환 기대.',
-        sellReason: '투자 가설 심각한 훼손. M&A 불확실성 지속 및 재무제표 현금흐름 경색 징후 발생 인지 즉시 컷오프(손절) 실행.',
-        trackType: 'B',
-        trackBadge: 'B안'
-    }
-]
+
 
 export default function MoonshotTab() {
     // 시뮬레이션: API 동기화 클릭 시 받아오는 더미 데이터 풀
@@ -131,7 +102,134 @@ export default function MoonshotTab() {
     ]
 
     const [viewMode, setViewMode] = useState<'scanner' | 'active' | 'archive'>('scanner') // scanner를 기본값으로
-    const [selectedStock, setSelectedStock] = useState(DUMMY_MOONSHOTS[1])
+    
+    // Active Tracking 탭의 동적 상태 관리를 위한 State
+    const [activeStocks, setActiveStocks] = useState<any[]>([])
+    const [selectedStockId, setSelectedStockId] = useState<string | null>(null)
+    const selectedStock = activeStocks.find(s => s.id === selectedStockId) || activeStocks[0] || null
+
+    const [archiveStocks, setArchiveStocks] = useState<any[]>([])
+    const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null)
+    const selectedArchive = archiveStocks.find(s => s.stock_code === selectedArchiveId) || archiveStocks[0] || null
+
+    useEffect(() => {
+        if (viewMode === 'archive') {
+            const fetchArchive = async () => {
+                const { electronAPI } = window as any;
+                if (!electronAPI || !electronAPI.invoke) return;
+                try {
+                    const res = await electronAPI.invoke('moonshot:get-archive');
+                    if (res) setArchiveStocks(res);
+                } catch (e) { console.error(e); }
+            }
+            fetchArchive();
+        }
+    }, [viewMode])
+
+    useEffect(() => {
+        if (viewMode === 'active') {
+            const fetchActiveStocks = async () => {
+                const { electronAPI } = window as any;
+                if (!electronAPI || !electronAPI.invoke) return;
+                try {
+                    const res = await electronAPI.invoke('moonshot:get-active-tracking');
+                    if (res.success && res.data) {
+                        const mapped = res.data.map((row: any) => {
+                            const returnRate = row.entry_price > 0 ? ((row.current_price - row.entry_price) / row.entry_price * 100).toFixed(1) : 0;
+                            let statusColor = "bg-green-500/10 text-green-600";
+                            let statusText = "가설 검증중";
+                            if (row.is_invalidated) {
+                                statusText = "가설 훼손컷";
+                                statusColor = "bg-red-500/10 text-red-600";
+                            } else if (Number(returnRate) > 5) {
+                                statusText = "가설 순항중";
+                            }
+                            let milestones = [];
+                            try { milestones = JSON.parse(row.milestones_json || '[]'); } catch(e){}
+                            if (typeof milestones[0] === 'string') {
+                                // transform old string array
+                                milestones = milestones.map((m: string) => ({ desc: m, checked: false }));
+                            }
+
+                            return {
+                                id: row.stock_code,
+                                code: row.stock_code,
+                                name: row.stock_name,
+                                trackType: row.tag.replace('안', ''),
+                                trackBadge: row.tag,
+                                marketCap: 'N/A',
+                                weight: '가벼움',
+                                entryPrice: row.entry_price,
+                                currentPrice: row.current_price,
+                                entryDate: row.entry_date,
+                                returnRate: Number(returnRate),
+                                status: statusText,
+                                statusColor,
+                                trend: row.mega_trend || '',
+                                dailyAction: 'AI 데일리 복기 대기중',
+                                tbpScore: row.tbp_score || 0,
+                                isInvalidated: !!row.is_invalidated,
+                                originalThesis: row.narrative || '이전 버전에서 편입된 종목이라 제미나이 최종 심사평 데이터가 DB에 없습니다. (재검증 후 신규 편입 시 정상 표시됩니다.)',
+                                dailyNarrative: row.latest_daily_narrative || null,
+                                dailyVerdict: row.latest_verdict || null,
+                                dailyReviewedAt: row.latest_reviewed_at || null,
+                                bullCase: row.bull_case,
+                                bearCase: row.bear_case,
+                                invalidationCondition: row.invalidation_condition,
+                                milestones: milestones,
+                                signals: []
+                            };
+                        });
+                        setActiveStocks(mapped);
+                    }
+                } catch (e) {
+                    console.error('Fetch active tracking error:', e);
+                }
+            };
+            fetchActiveStocks();
+        }
+    }, [viewMode]);
+    
+    const toggleMilestone = (milestoneIndex: number) => {
+        setActiveStocks(prev => prev.map(stock => {
+            if(stock.id === selectedStockId) {
+                const newMilestones = [...stock.milestones];
+                newMilestones[milestoneIndex] = {...newMilestones[milestoneIndex], checked: !newMilestones[milestoneIndex].checked};
+                return {...stock, milestones: newMilestones};
+            }
+            return stock;
+        }));
+    };
+
+    const toggleInvalidation = () => {
+        setActiveStocks(prev => prev.map(stock => {
+            if(stock.id === selectedStockId) {
+                return {...stock, isInvalidated: !stock.isInvalidated};
+            }
+            return stock;
+        }));
+    };
+
+    const handleDeleteActiveTracking = async () => {
+        if (!selectedStock) return;
+        if (!confirm(`[${selectedStock.name}] 종목을 액티브 트래킹 명부에서 완전히 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+        
+        const { electronAPI } = window as any;
+        if (!electronAPI || !electronAPI.invoke) return;
+
+        try {
+            const res = await electronAPI.invoke('moonshot:delete-active-tracking', selectedStock.code);
+            if (res.success) {
+                setActiveStocks(prev => prev.filter(s => s.code !== selectedStock.code));
+                setSelectedStockId(null);
+            } else {
+                alert('삭제 실패: ' + res.error);
+            }
+        } catch(e: any) {
+            alert('IPC 에러: ' + e.message);
+        }
+    };
+
     // Scanner States
     const [selectedConditionA, setSelectedConditionA] = useState(() => localStorage.getItem('moonshot_condA') || '101')
     const [selectedConditionB, setSelectedConditionB] = useState(() => localStorage.getItem('moonshot_condB') || '201')
@@ -143,11 +241,115 @@ export default function MoonshotTab() {
     const [selectedDetailId, setSelectedDetailId] = useState<string | null>(null)
     const [activeModalStep, setActiveModalStep] = useState<number>(3)
     const [isCopied, setIsCopied] = useState(false)
+    const [ignoreCooldown, setIgnoreCooldown] = useState(false)
+    const [isRunningTracker, setIsRunningTracker] = useState(false)
+    const [trackerLogs, setTrackerLogs] = useState<{time: string, step: string, msg: string, type: string}[]>([]);
 
-    // Playground 상태
-    const [showPlayground, setShowPlayground] = useState(false)
-    const [playgroundLogs, setPlaygroundLogs] = useState<{time: string, msg: string, json?: any}[]>([])
-    const [showConditionSettings, setShowConditionSettings] = useState(false)
+    // Settings 상태
+    const [showSettings, setShowSettings] = useState(false);
+    const [moonshotSettings, setMoonshotSettings] = useState({
+        scannerCronTime: '15:00',
+        trackerCronTime: '15:30',
+        enabled: true
+    });
+    const [showConditionSettings, setShowConditionSettings] = useState(false);
+
+    useEffect(() => {
+        const fetchSettings = async () => {
+            const { electronAPI } = window as any;
+            if (electronAPI && electronAPI.invoke) {
+                const s = await electronAPI.invoke('moonshot:get-settings');
+                if (s) setMoonshotSettings(s);
+            }
+        };
+        fetchSettings();
+    }, []);
+
+    const handleSaveSettings = async () => {
+        const { electronAPI } = window as any;
+        if (electronAPI && electronAPI.invoke) {
+            await electronAPI.invoke('moonshot:save-settings', moonshotSettings);
+        }
+        setShowSettings(false);
+        // Toast message
+        alert('Moonshot AI 스케줄 설정이 저장되었습니다.');
+    };
+
+    const handleRunDailyTracker = async () => {
+        const { electronAPI } = window as any;
+        if (!electronAPI?.runMoonshotDailyTracker) return;
+        setIsRunningTracker(true);
+        setTrackerLogs([]);
+
+        const unsub = electronAPI.onMoonshotTrackerProgress?.((log: any) => {
+            setTrackerLogs(prev => [...prev, log]);
+        });
+
+        try {
+            const res = await electronAPI.runMoonshotDailyTracker();
+            if (!res.success) {
+                alert('데일리 리뷰 실패: ' + res.error);
+            } else {
+                // ✅ Fix: viewMode 토글 없이 직접 DB 재조회 후 상태 갱신
+                const refetchRes = await electronAPI.invoke('moonshot:get-active-tracking');
+                if (refetchRes.success && refetchRes.data) {
+                    const mapped = refetchRes.data.map((row: any) => {
+                        const returnRate = row.entry_price > 0
+                            ? ((row.current_price - row.entry_price) / row.entry_price * 100).toFixed(1)
+                            : 0;
+                        let statusColor = "bg-green-500/10 text-green-600";
+                        let statusText = "가설 검증중";
+                        if (row.is_invalidated) {
+                            statusText = "가설 훼손컷";
+                            statusColor = "bg-red-500/10 text-red-600";
+                        } else if (Number(returnRate) > 5) {
+                            statusText = "가설 순항중";
+                        }
+                        let milestones = [];
+                        try { milestones = JSON.parse(row.milestones_json || '[]'); } catch(e){}
+                        if (typeof milestones[0] === 'string') {
+                            milestones = milestones.map((m: string) => ({ desc: m, checked: false }));
+                        }
+                        return {
+                            id: row.stock_code,
+                            code: row.stock_code,
+                            name: row.stock_name,
+                            trackType: row.tag.replace('안', ''),
+                            trackBadge: row.tag,
+                            marketCap: 'N/A',
+                            weight: '가벼움',
+                            entryPrice: row.entry_price,
+                            currentPrice: row.current_price,
+                            entryDate: row.entry_date,
+                            returnRate: Number(returnRate),
+                            status: statusText,
+                            statusColor,
+                            trend: row.mega_trend || '',
+                            dailyAction: 'AI 데일리 복기 완료',
+                            tbpScore: row.tbp_score || 0,
+                            isInvalidated: !!row.is_invalidated,
+                            originalThesis: row.narrative || '이전 버전에서 편입된 종목입니다.',
+                            dailyNarrative: row.latest_daily_narrative || null,
+                            dailyVerdict: row.latest_verdict || null,
+                            dailyReviewedAt: row.latest_reviewed_at || null,
+                            bullCase: row.bull_case,
+                            bearCase: row.bear_case,
+                            invalidationCondition: row.invalidation_condition,
+                            milestones,
+                            signals: []
+                        };
+                    });
+                    setActiveStocks(mapped);
+                }
+            }
+        } catch(e: any) {
+            alert('IPC 에러: ' + e.message);
+        } finally {
+            setIsRunningTracker(false);
+            unsub?.();
+        }
+    };
+
 
     // 실시간 동기화 상태
     const [isSyncing, setIsSyncing] = useState(false)
@@ -474,7 +676,7 @@ export default function MoonshotTab() {
         setScannedResults([]);
         
         try {
-            const res = await electronAPI.validateMoonshotStocks(targetStocks);
+            const res = await electronAPI.validateMoonshotStocks(targetStocks, ignoreCooldown);
             if (!res.success) {
                 console.error("Moonshot Validation Error:", res.error);
                 alert("평가 중 에러가 발생했습니다: " + res.error);
@@ -493,6 +695,7 @@ export default function MoonshotTab() {
         if (reportFilter === 'all') return true
         return r.status === reportFilter
     })
+
 
     const handleCopyAll = () => {
         if (!selectedDetail) return
@@ -532,14 +735,7 @@ ${selectedDetail.rawResult}
                 </div>
 
                 <div className="flex items-center gap-4">
-                    {/* 테스트 대시보드 진입점 */}
-                    <button 
-                        onClick={() => setShowPlayground(true)}
-                        className="hidden md:flex px-4 py-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 hover:bg-purple-500/20 rounded-xl font-bold text-sm transition-colors items-center gap-2"
-                    >
-                        <span className="text-lg leading-none">🧪</span> 개발자 테스트 (Playground)
-                    </button>
-                    
+
                     {/* 탭 토글 영역 */}
                     <div className="flex p-1 bg-muted/50 rounded-xl border">
                     <button 
@@ -570,6 +766,15 @@ ${selectedDetail.rawResult}
                         <Archive size={16} /> History Archive
                     </button>
                     </div>
+
+                    {/* 설정 버튼 */}
+                    <button 
+                        onClick={() => setShowSettings(true)}
+                        className="p-2 hover:bg-muted rounded-xl transition-colors text-muted-foreground flex items-center justify-center border shadow-sm bg-background ml-2"
+                        title="자동화 크론 스케줄 설정"
+                    >
+                        <Settings size={20} />
+                    </button>
                 </div>
             </div>
 
@@ -673,7 +878,21 @@ ${selectedDetail.rawResult}
                                     </table>
                                 )}
                             </div>
-                            <div className="mt-4 grid grid-cols-2 gap-2">
+                            
+                            <div className="mt-4 flex items-center gap-2 mb-2 ml-1">
+                                <input 
+                                    type="checkbox" 
+                                    id="ignoreCooldown" 
+                                    checked={ignoreCooldown} 
+                                    onChange={e => setIgnoreCooldown(e.target.checked)} 
+                                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                />
+                                <label htmlFor="ignoreCooldown" className="text-xs font-bold text-muted-foreground cursor-pointer select-none">
+                                    쿨타임 및 편입 무시 (강제 재검증 / 개발자 테스트용)
+                                </label>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2">
                                 <button 
                                     onClick={() => handleStartValidation('A')}
                                     disabled={isScanning || syncedStocks.length === 0}
@@ -778,7 +997,13 @@ ${selectedDetail.rawResult}
                                                 <h2 className="text-2xl font-black flex items-center gap-3">
                                                     {activeResult.name}
                                                     {activeResult.status === 'passed' ? (
-                                                        <span className="bg-green-50 text-green-600 dark:bg-green-500/10 dark:text-green-500 px-2.5 py-1 rounded-md text-xs font-bold border border-green-200 dark:border-green-500/20 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5"/> 샌드박스 편입 승인</span>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="bg-green-50 text-green-600 dark:bg-green-500/10 dark:text-green-500 px-2.5 py-1 rounded-md text-xs font-bold border border-green-200 dark:border-green-500/20 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5"/> 샌드박스 편입 승인</span>
+                                                            <span className="bg-primary text-primary-foreground px-3 py-1 rounded-md text-xs font-bold shadow-sm flex items-center gap-1 ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse">
+                                                                <Rocket className="w-3.5 h-3.5" />
+                                                                Active 자동 편입 완료
+                                                            </span>
+                                                        </div>
                                                     ) : activeResult.status === 'pending' ? (
                                                         <span className="bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-500 px-2.5 py-1 rounded-md text-xs font-bold border border-amber-200 dark:border-amber-500/20 flex items-center gap-1"><Loader2 className="w-3.5 h-3.5 animate-spin"/> AI 배틀로얄 심사 중...</span>
                                                     ) : (
@@ -872,24 +1097,62 @@ ${selectedDetail.rawResult}
                 <div className="flex-1 flex gap-6 min-h-0">
                     {/* 좌측 메인 대시보드 (Active Tracking) */}
                     <div className="flex-1 flex flex-col min-w-0 overflow-y-auto pr-4 scrollbar-hide">
+
+                        {/* 데일리 리뷰 컨트롤 바 */}
+                        <div className="flex items-center justify-between mb-3 px-1">
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Active Tracking 명부</span>
+                                <span className="text-xs bg-primary/10 text-primary font-bold px-2 py-0.5 rounded-md">{activeStocks.length}종목</span>
+                            </div>
+                            <button
+                                onClick={handleRunDailyTracker}
+                                disabled={isRunningTracker || activeStocks.length === 0}
+                                className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-bold text-xs transition-colors"
+                            >
+                                {isRunningTracker ? (
+                                    <><span className="inline-block w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></span> 데일리 리뷰 실행 중...</>
+                                ) : (
+                                    <><span>🧠</span> AI 데일리 리뷰 실행</>
+                                )}
+                            </button>
+                        </div>
+
+                        {/* 트래커 진행 로그 패널 */}
+                        {trackerLogs.length > 0 && (
+                            <div className="mb-4 bg-muted/30 border rounded-xl p-3 space-y-1 max-h-48 overflow-y-auto">
+                                <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-2">🧠 데일리 리뷰 진행 로그</div>
+                                {trackerLogs.map((log, i) => (
+                                    <div key={i} className={`flex items-start gap-2 text-xs font-mono ${
+                                        log.type === 'success' ? 'text-green-500' :
+                                        log.type === 'warning' ? 'text-amber-500' :
+                                        log.type === 'error' ? 'text-red-500' : 'text-muted-foreground'
+                                    }`}>
+                                        <span className="shrink-0 text-muted-foreground/50">{log.time}</span>
+                                        <span>{log.msg}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
                         {/* Candidate List (단독 확장) */}
                         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                             <div className="overflow-y-auto w-full">
                                 <table className="w-full text-sm text-left">
                                     <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b">
                                         <tr>
-                                            <th className="px-4 py-3 font-semibold text-left">종목명 / 시총</th>
+                                            <th className="px-4 py-3 font-semibold text-left">종목명 / 메가트렌드</th>
                                             <th className="px-4 py-3 font-semibold text-right">편입 정보</th>
                                             <th className="px-4 py-3 font-semibold text-right">현재가 / 수익률</th>
                                             <th className="px-4 py-3 font-semibold text-center">가설 상태</th>
-                                            <th className="px-4 py-3 font-semibold text-left">메가 트렌드 & 시그널</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {DUMMY_MOONSHOTS.map((stock) => (
+                                        {activeStocks.length === 0 ? (
+                                            <tr><td colSpan={4} className="py-10 text-center text-muted-foreground">Active Tracking 중인 종목이 없습니다. 신규 발굴(Scanner)에서 편입해주세요.</td></tr>
+                                        ) : activeStocks.map((stock) => (
                                             <tr 
                                                 key={stock.id} 
-                                                onClick={() => setSelectedStock(stock)}
+                                                onClick={() => setSelectedStockId(stock.id)}
                                                 className={cn(
                                                     "border-b last:border-b-0 cursor-pointer transition-colors",
                                                     selectedStock?.id === stock.id ? "bg-primary/5 border-l-2 border-l-primary" : "hover:bg-muted/30 border-l-2 border-l-transparent"
@@ -906,9 +1169,8 @@ ${selectedDetail.rawResult}
                                                             stock.trackType === 'B' ? "bg-orange-500/20 text-orange-400" : "bg-purple-500/20 text-purple-400"
                                                         )}>{stock.trackBadge}</span>
                                                     </div>
-                                                    <div className="flex items-center gap-1 text-xs font-medium mt-1">
-                                                        <div className={cn("w-1.5 h-1.5 rounded-full", stock.weight === '가벼움' ? 'bg-green-500' : 'bg-amber-500')} />
-                                                        <span className="text-muted-foreground">{stock.marketCap}</span>
+                                                    <div className="flex items-center gap-1.5 text-[11px] font-medium mt-1.5">
+                                                        <span className="text-muted-foreground truncate max-w-[200px]">{stock.trend}</span>
                                                     </div>
                                                 </td>
 
@@ -943,15 +1205,241 @@ ${selectedDetail.rawResult}
                                                     </div>
                                                 </td>
 
-                                                {/* 메가 트렌드 & 시ਗ널 */}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 우측 사이드 패널: Conviction Lock-up */}
+                    {selectedStock ? (
+                        <div className="w-[480px] shrink-0 flex flex-col border-l h-full overflow-hidden">
+                        <div className={cn("p-5 px-6 text-primary-foreground relative shrink-0 transition-colors duration-500", selectedStock.isInvalidated ? "bg-red-600 dark:bg-red-700" : "bg-primary")}>
+                            <div className="absolute right-[-20px] top-[-20px] opacity-10">
+                                {selectedStock.isInvalidated ? <XCircle size={100} /> : <Lock size={100} />}
+                            </div>
+                            <div className="relative z-10 flex items-start justify-between">
+                                <div>
+                                    <h2 className="text-3xl font-bold">{selectedStock.name}</h2>
+                                    <div className="flex items-center gap-2 mt-2">
+                                        <span className="bg-primary-foreground/20 px-2 py-1 rounded text-xs font-mono">{selectedStock.code}</span>
+                                        <span className={cn("px-2 py-1 rounded text-xs font-bold", selectedStock.isInvalidated ? "text-red-200" : "text-green-300")}>
+                                            {selectedStock.isInvalidated ? "폐기됨" : "Target: 300% 상승"}
+                                        </span>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={handleDeleteActiveTracking}
+                                    className="p-1.5 hover:bg-black/20 rounded-md transition-colors text-white/70 hover:text-white"
+                                    title="이 종목 모니터링 폐기"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="p-6 flex-1 overflow-y-auto space-y-6 scrollbar-hide">
+                            {/* 1. Synthesis 피치 시트 */}
+                            <div className="space-y-4">
+                                <h3 className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
+                                    <Telescope size={14} className="text-primary" />
+                                    Final Judgment (AI 심사 요약)
+                                </h3>
+                                <div className="bg-primary/5 border border-primary/20 p-3 rounded-xl mb-4">
+                                    <p className="text-sm font-bold leading-relaxed">{selectedStock.originalThesis}</p>
+                                </div>
+                                
+                                <div className="w-full h-px bg-border/50 my-6" />
+
+                                {/* 2. 최신 AI 데일리 판결 로그 */}
+                                <div className="mb-6">
+                                    <h3 className="flex items-center gap-2 text-[11px] font-bold text-amber-600 dark:text-amber-500 uppercase tracking-widest mb-3">
+                                        <Activity size={14} /> 최신 데일리 리뷰 (AI 심사평)
+                                    </h3>
+                                    <div className="bg-amber-500/5 border border-amber-500/10 p-4 rounded-xl space-y-2">
+                                        <div className="flex items-center justify-between border-b border-amber-500/10 pb-2 mb-2">
+                                            <span className="text-[10px] font-bold text-amber-700/70 dark:text-amber-500/70">
+                                                {selectedStock?.dailyReviewedAt ? `${selectedStock.dailyReviewedAt.substring(5, 16).replace('T', ' ')} 업데이트` : '업데이트 대기중'}
+                                            </span>
+                                            {selectedStock?.dailyVerdict === 'drop' ? (
+                                                <span className="text-[10px] font-bold text-red-600 dark:text-red-500">🔴 가설 폐기 (DROP)</span>
+                                            ) : selectedStock?.dailyVerdict === 'warning' ? (
+                                                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-500">🟡 리스크 관망 (WARNING)</span>
+                                            ) : selectedStock?.dailyVerdict === 'hold' ? (
+                                                <span className="text-[10px] font-bold text-green-600 dark:text-green-500">🟢 가설 순항 (HOLD)</span>
+                                            ) : (
+                                                <span className="text-[10px] font-bold text-muted-foreground">-</span>
+                                            )}
+                                        </div>
+                                        <div className="text-[13px] leading-relaxed font-bold text-foreground/90 break-all whitespace-pre-wrap">
+                                            {selectedStock?.dailyNarrative || '아직 오늘자 데일리 복기(AI 리뷰)가 실행되지 않았습니다.'}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 3. 체크리스트 - Milestone & Invalidation */}
+                                <div className="space-y-4">
+                                    <div>
+                                        <h3 className="flex items-center justify-between text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-3">
+                                            <div className="flex items-center gap-2"><CheckCircle2 size={14} className="text-blue-500" /> 핵심 마일스톤</div>
+                                        </h3>
+                                        <div className="space-y-3">
+                                            {selectedStock.milestones?.map((m: any, i: number) => (
+                                                <div key={i} className="flex items-start gap-2.5 p-1.5 -ml-1.5 rounded-lg transition-colors">
+                                                    <div className={cn("shrink-0 mt-0.5", m.checked ? "text-blue-500" : "text-foreground/40")}>
+                                                        <CheckCircle2 size={14} />
+                                                    </div>
+                                                    <p className={cn("text-[13.5px] tracking-tight leading-relaxed transition-all", m.checked ? "font-bold text-foreground line-through decoration-blue-500/50 decoration-2 opacity-50" : "text-foreground font-semibold")}>{m.desc || m}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="pt-2">
+                                        <h3 className="flex items-center gap-2 text-[10px] font-bold text-red-500 mb-2 uppercase tracking-widest">
+                                            <XCircle size={12} /> 손절 / 가설 훼손 조건
+                                        </h3>
+                                        <div className="flex items-start gap-2.5 p-1.5 -ml-1.5 rounded-lg transition-colors">
+                                            <div className={cn("shrink-0 mt-0.5", selectedStock.isInvalidated ? "text-red-500" : "text-foreground/40")}>
+                                                <XCircle size={14} />
+                                            </div>
+                                            <p className={cn("text-[13.5px] tracking-tight leading-relaxed transition-all", selectedStock.isInvalidated ? "font-bold text-red-500" : "text-foreground font-semibold")}>
+                                                {selectedStock.invalidationCondition}
+                                            </p>
+                                        </div>
+                                        
+                                        {selectedStock.isInvalidated && (
+                                            <div className="mt-4 border border-red-500/30 bg-red-500/5 text-red-500 font-bold flex items-center justify-center gap-2 py-2 rounded text-[11px] tracking-widest uppercase animate-in fade-in zoom-in duration-300">
+                                                <AlertCircle size={14} /> 가설 파기 : 포트폴리오 편출 요망
+                                            </div>
+                                        )}
+                                        {(!selectedStock.isInvalidated && selectedStock.milestones?.every((m:any) => m.checked)) && (
+                                            <div className="mt-4 border border-blue-500/30 bg-blue-500/5 text-blue-600 dark:text-blue-400 font-bold flex items-center justify-center gap-2 py-2 rounded text-[11px] tracking-widest uppercase animate-in fade-in zoom-in duration-300">
+                                                🏆 텐베거 마일스톤 전면 달성
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="w-full h-px bg-border/50" />
+
+                            {/* 3. Bull / Bear Views */}
+                            <div className="flex flex-col gap-6">
+                                <div className="space-y-2 bg-green-500/5 border border-green-500/10 p-4 rounded-xl">
+                                    <div className="text-[10px] font-bold text-green-600 dark:text-green-500 flex items-center gap-1 uppercase tracking-widest"><TrendingUp size={12}/> Bull's View</div>
+                                    <div className="text-[13px] leading-relaxed text-foreground/90 font-medium break-all prose prose-sm dark:prose-invert max-w-none prose-p:m-0 prose-p:mb-2 last:prose-p:mb-0 prose-ul:m-0 prose-li:m-0">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedStock.bullCase}</ReactMarkdown>
+                                    </div>
+                                </div>
+                                <div className="space-y-2 bg-red-500/5 border border-red-500/10 p-4 rounded-xl">
+                                    <div className="text-[10px] font-bold text-red-600 dark:text-red-500 flex items-center gap-1 uppercase tracking-widest"><TrendingDown size={12}/> Bear's Warning</div>
+                                    <div className="text-[13px] leading-relaxed text-foreground/90 font-medium break-all prose prose-sm dark:prose-invert max-w-none prose-p:m-0 prose-p:mb-2 last:prose-p:mb-0 prose-ul:m-0 prose-li:m-0">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedStock.bearCase}</ReactMarkdown>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="w-full h-px bg-border/50" />
+
+                            {/* 5. Daily AI Review Log (Archive) */}
+                            <div>
+                                <h3 className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-4">
+                                    <Activity size={14} className="text-muted-foreground" />
+                                    전체 데일리 리뷰 로그
+                                </h3>
+                                <div className="space-y-5">
+                                    <div className="space-y-2 opacity-60 hover:opacity-100 transition-opacity">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] font-mono text-muted-foreground">어제 장마감 판결</span>
+                                            <span className="text-[10px] font-bold text-muted-foreground">리스크 관망</span>
+                                        </div>
+                                        <p className="text-[13px] leading-relaxed font-medium text-foreground/80">
+                                            특이 수급 이탈 없음. 가설 진행 상황 특이사항 없음.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        </div>
+                    ) : (
+                        <div className="w-[480px] shrink-0 flex flex-col border-l h-full overflow-hidden bg-muted/10 items-center justify-center p-8 text-center text-muted-foreground">
+                            <Telescope strokeWidth={1} size={80} className="mb-6 opacity-20" />
+                            <h3 className="font-bold text-lg mb-2 opacity-80">선택된 종목이 없습니다</h3>
+                            <p className="text-sm opacity-60 leading-relaxed">
+                                좌측 리스트에서 트래킹 중인 종목을 선택하거나<br/>신규 발굴 탭에서 새로운 종목을 편입해주세요.
+                            </p>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {viewMode === 'archive' && (
+                <div className="flex-1 flex min-h-0 bg-card border rounded-2xl overflow-hidden shadow-sm">
+                    {/* 좌측 패널 (목록) */}
+                    <div className="flex-1 flex flex-col min-w-0 overflow-y-auto pr-4 scrollbar-hide py-4 pl-4">
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h2 className="text-xl font-bold flex items-center gap-2">
+                                    <History className="text-primary" /> 관리 이력 및 복기 (Hall of Fame & Graveyard)
+                                </h2>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                    과거 텐베거 후보군들의 발굴, 보유, 편출 내역 및 사후 분석 로그입니다.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 flex flex-col min-h-0 overflow-hidden mt-2">
+                            <div className="overflow-y-auto w-full pr-2">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b">
+                                        <tr>
+                                            <th className="px-4 py-3 font-semibold text-left">종목명 / 태그</th>
+                                            <th className="px-4 py-3 font-semibold text-right">편입 정보</th>
+                                            <th className="px-4 py-3 font-semibold text-right">매도 정보</th>
+                                            <th className="px-4 py-3 font-semibold text-center">최종 결과</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {archiveStocks.length === 0 ? (
+                                            <tr><td colSpan={4} className="py-10 text-center text-muted-foreground">보관된 히스토리가 없습니다.</td></tr>
+                                        ) : archiveStocks.map((arc) => (
+                                            <tr 
+                                                key={arc.id} 
+                                                onClick={() => setSelectedArchiveId(arc.stock_code)}
+                                                className={cn(
+                                                    "border-b last:border-b-0 cursor-pointer transition-colors",
+                                                    selectedArchive?.stock_code === arc.stock_code ? "bg-primary/5 border-l-2 border-l-primary" : "hover:bg-muted/30 border-l-2 border-l-transparent"
+                                                )}
+                                            >
                                                 <td className="px-4 py-4 text-left">
-                                                    <div className="font-medium text-xs text-muted-foreground mb-1.5">{stock.trend}</div>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {stock.signals.map((s, i) => (
-                                                            <span key={i} className="px-1.5 py-0.5 bg-red-500/10 text-red-500 rounded text-[10px] font-bold">
-                                                                {s}
-                                                            </span>
-                                                        ))}
+                                                    <div className="font-bold text-base flex items-center gap-2">
+                                                        {arc.stock_name} 
+                                                        <span className="text-xs text-muted-foreground font-normal">{arc.stock_code}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 text-[11px] font-medium mt-1.5">
+                                                        <span className="text-muted-foreground truncate max-w-[200px]">{arc.tag}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-4 text-right">
+                                                    <div className="text-sm font-bold opacity-80">{arc.entry_price ? arc.entry_price.toLocaleString() : 0}원</div>
+                                                    <div className="text-xs text-muted-foreground font-mono mt-1">{arc.buy_date}</div>
+                                                </td>
+                                                <td className="px-4 py-4 text-right">
+                                                    <div className="text-sm font-bold relative inline-block">
+                                                        {arc.sell_price ? arc.sell_price.toLocaleString() : 0}원
+                                                    </div>
+                                                    <div className="text-xs text-muted-foreground font-mono mt-1">{arc.sell_date ? arc.sell_date.split(' ')[0] : '-'}</div>
+                                                </td>
+                                                <td className="px-4 py-4">
+                                                    <div className="flex items-center justify-center flex-col gap-1">
+                                                        <span className={cn("text-lg font-bold font-mono tracking-tighter", arc.success ? "text-green-500" : "text-red-500")}>
+                                                            {arc.return_rate > 0 ? '+' : ''}{Number(arc.return_rate).toFixed(1)}%
+                                                        </span>
+                                                        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-sm", arc.success ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-600")}>
+                                                            {arc.success ? "표적 익절" : "가설 훼손컷"}
+                                                        </span>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -962,192 +1450,82 @@ ${selectedDetail.rawResult}
                         </div>
                     </div>
 
-                    {/* 우측 사이드 패널: Conviction Lock-up */}
-                    <div className="w-[380px] shrink-0 flex flex-col border-l h-full overflow-hidden">
-                        <div className="bg-primary p-6 text-primary-foreground relative shrink-0">
-                            <div className="absolute right-[-20px] top-[-20px] opacity-10">
-                                <Lock size={120} />
-                            </div>
-                            <div className="relative z-10">
-                                <div className="flex items-center gap-2 mb-4 opacity-80">
-                                    <ShieldAlert size={16} />
-                                    <span className="text-xs font-bold tracking-widest uppercase">Conviction Lock-up</span>
+                    {/* 우측 사이드 패널: 복기 상세 뷰 */}
+                    {selectedArchive ? (
+                        <div className="w-[480px] shrink-0 flex flex-col border-l h-full overflow-hidden bg-muted/5">
+                            <div className={cn("p-5 px-6 text-primary-foreground relative shrink-0 transition-colors duration-500", selectedArchive.success ? "bg-green-600 dark:bg-green-700" : "bg-muted-foreground")}>
+                                <div className="absolute right-[-20px] top-[-20px] opacity-10">
+                                    <Archive size={100} />
                                 </div>
-                                <h2 className="text-3xl font-bold">{selectedStock.name}</h2>
-                                <div className="flex items-center gap-2 mt-3">
-                                    <span className="bg-primary-foreground/20 px-2 py-1 rounded text-xs font-mono">{selectedStock.code}</span>
-                                    <span className="px-2 py-1 rounded text-xs font-bold text-green-300">Target: 300% 상승</span>
-                                </div>
-                                {/* 상세 정보 요약 블록 추가 */}
-                                <div className="mt-5 grid grid-cols-2 gap-4 bg-black/20 p-3 rounded-xl border border-white/10">
+                                <div className="relative z-10 flex items-start justify-between">
                                     <div>
-                                        <p className="text-[10px] opacity-70 mb-0.5 uppercase tracking-wider">Current / Return</p>
-                                        <div className="flex items-baseline gap-2">
-                                            <span className="text-lg font-bold">{selectedStock.currentPrice.toLocaleString()}</span>
-                                            <span className={cn("text-sm font-bold", selectedStock.returnRate > 0 ? "text-green-400" : "text-red-400")}>
-                                                {selectedStock.returnRate > 0 ? '+' : ''}{selectedStock.returnRate}%
+                                        <h2 className="text-3xl font-bold">{selectedArchive.stock_name}</h2>
+                                        <div className="flex items-center gap-2 mt-2">
+                                            <span className="bg-primary-foreground/20 px-2 py-1 rounded text-xs font-mono">{selectedArchive.stock_code}</span>
+                                            <span className={cn("px-2 py-1 rounded text-xs font-bold", selectedArchive.success ? "text-green-100" : "text-gray-200")}>
+                                                최종 수익률 {selectedArchive.return_rate > 0 ? '+' : ''}{Number(selectedArchive.return_rate).toFixed(1)}%
                                             </span>
                                         </div>
-                                    </div>
-                                    <div className="border-l border-white/10 pl-4">
-                                        <p className="text-[10px] opacity-70 mb-0.5 uppercase tracking-wider">Entry Info</p>
-                                        <div className="text-sm font-bold">{selectedStock.entryPrice.toLocaleString()}</div>
-                                        <div className="text-[10px] font-mono opacity-60 mt-0.5">{selectedStock.entryDate} 편입</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="p-6 flex-1 overflow-y-auto space-y-6 scrollbar-hide">
-                            {/* 1. Synthesis 피치 시트 */}
-                            <div className="space-y-4">
-                                <h3 className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
-                                    <Telescope size={14} className="text-primary" />
-                                    Original Thesis
-                                </h3>
-                                <div>
-                                    <p className="text-sm font-bold leading-relaxed">{selectedStock.investThesis}</p>
-                                </div>
-                                
-                                <div className="grid grid-cols-2 gap-6 pt-2">
-                                    <div className="space-y-2">
-                                        <div className="text-[10px] font-bold text-green-600 dark:text-green-500 flex items-center gap-1 uppercase tracking-widest"><TrendingUp size={12}/> Bull's View</div>
-                                        <p className="text-xs leading-relaxed text-muted-foreground">{selectedStock.bullCase}</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <div className="text-[10px] font-bold text-red-600 dark:text-red-500 flex items-center gap-1 uppercase tracking-widest"><TrendingDown size={12}/> Bear's Warning</div>
-                                        <p className="text-xs leading-relaxed text-muted-foreground">{selectedStock.bearCase}</p>
                                     </div>
                                 </div>
                             </div>
                             
-                            <div className="w-full h-px bg-border/50" />
-
-                            {/* 2. 체크리스트 - Milestone & Invalidation */}
-                            <div className="space-y-4">
-                                <div>
-                                    <h3 className="flex items-center justify-between text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-3">
-                                        <div className="flex items-center gap-2"><CheckCircle2 size={14} className="text-blue-500" /> 핵심 마일스톤</div>
-                                    </h3>
-                                    <div className="space-y-3">
-                                        {selectedStock.milestones?.map((m: any, i: number) => (
-                                            <div key={i} className="flex items-start gap-2.5">
-                                                <div className={cn("shrink-0 mt-0.5", m.checked ? "text-blue-500" : "text-muted-foreground/30")}>
-                                                    <CheckCircle2 size={14} />
-                                                </div>
-                                                <p className={cn("text-xs leading-relaxed", m.checked ? "font-bold text-foreground" : "text-muted-foreground")}>{m.text}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className="pt-2">
-                                    <h3 className="flex items-center gap-2 text-[10px] font-bold text-red-500 mb-2 uppercase tracking-widest">
-                                        <XCircle size={12} /> 손절 / 가설 훼손 조건
-                                    </h3>
-                                    <p className="text-xs font-bold text-red-600/80 dark:text-red-400/80 leading-relaxed">
-                                        {selectedStock.invalidation}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="w-full h-px bg-border/50" />
-
-                            {/* 3. Daily AI Review Log */}
-                            <div>
-                                <h3 className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-4">
-                                    <Activity size={14} className="text-amber-500" />
-                                    Daily Hypothesis Review
-                                </h3>
-                                <div className="space-y-5">
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-[10px] font-mono text-muted-foreground">오늘 장마감 판결</span>
-                                            <span className="text-[10px] font-bold text-green-600 dark:text-green-500">가설 순항 (STRONG)</span>
-                                        </div>
-                                        <p className="text-xs leading-relaxed font-medium">
-                                            주가 4.5% 하락 발생. 그러나 금일 AI가 뉴스/수급을 추적한 결과, 'Bear's Warning' 요인은 발현되지 않음. 핵심 마일스톤인 글로벌 수주 관련 긍정적 내러티브 지속 유효. 기계적 손절매 우회 처리 및 가설 유지(HOLD).
-                                        </p>
-                                    </div>
-                                    <div className="w-full h-px border-t border-dashed border-border/50" />
-                                    <div className="space-y-2 opacity-60 hover:opacity-100 transition-opacity">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-[10px] font-mono text-muted-foreground">어제 장마감 판결</span>
-                                            <span className="text-[10px] font-bold text-muted-foreground">리스크 관망</span>
-                                        </div>
-                                        <p className="text-xs leading-relaxed text-muted-foreground">
-                                            특이 수급 이탈 없음. 가설 진행 상황 특이사항 없음.
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {viewMode === 'archive' && (
-                /* Archive 히스토리 화면 */
-                <div className="flex-1 flex flex-col min-h-0 bg-card border rounded-2xl p-6 overflow-hidden">
-                    <div className="mb-6 flex items-center justify-between">
-                        <div>
-                            <h2 className="text-xl font-bold flex items-center gap-2">
-                                <History className="text-primary" /> 관리 이력 및 복기 (Hall of Fame & Graveyard)
-                            </h2>
-                            <p className="text-sm text-muted-foreground mt-1">
-                                과거 텐베거 후보군들의 발굴, 보유, 편출(매도) 내역과 AI의 사후 분석 로그입니다.
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto space-y-4 scrollbar-hide pr-2">
-                        {DUMMY_ARCHIVE.map((arc, i) => (
-                            <div key={i} className="flex gap-4 border rounded-xl p-5 bg-background shadow-sm relative overflow-hidden transition-all hover:border-primary/50 group">
-                                {/* Success Indicator Strip */}
-                                <div className={cn("absolute left-0 top-0 bottom-0 w-2", arc.success ? "bg-green-500" : "bg-red-500")} />
-                                
-                                {/* 좌측 종목/수익률 요약 */}
-                                <div className="w-[200px] shrink-0 border-r pr-6 pl-2 flex flex-col justify-center">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <h3 className="text-lg font-bold">{arc.name}</h3>
-                                        <span className="text-xs text-muted-foreground font-mono">{arc.code}</span>
-                                    </div>
-                                    <div className="mb-2">
-                                         <span className={cn(
-                                            "text-[10px] px-1.5 py-0.5 rounded font-bold",
-                                            arc.trackType === 'A' ? "bg-blue-500/20 text-blue-400" : "bg-orange-500/20 text-orange-400"
-                                        )}>{arc.trackBadge}</span>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mb-4">보유기간: {arc.duration} <br/> ({arc.buyDate} ~ {arc.sellDate})</p>
-                                    <div className="flex items-center gap-2">
-                                        {arc.success ? <TrendingUp className="text-green-500" size={24} /> : <TrendingDown className="text-red-500" size={24} />}
-                                        <span className={cn("text-2xl font-bold font-mono tracking-tighter", arc.success ? "text-green-500" : "text-red-500")}>
-                                            {arc.returnRate > 0 ? '+' : ''}{arc.returnRate}%
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {/* 우측 복기 리포트 */}
-                                <div className="flex-1 pl-2 space-y-4">
+                            <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-hide">
+                                <div className="space-y-8">
+                                    {/* 1. Final Judgment */}
                                     <div>
-                                        <h4 className="text-xs font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1">
-                                            <BookOpen size={14}/> 최초 투자 가설
-                                        </h4>
-                                        <p className="text-sm border-b pb-3 border-border/50 text-foreground/80 leading-relaxed">
-                                            {arc.originalThesis}
-                                        </p>
+                                        <h3 className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-3">
+                                            <BookOpen size={14} className="text-primary" /> 최초 투자 가설 (Original Thesis)
+                                        </h3>
+                                        <div className="bg-muted/50 rounded-xl p-4 border border-border/50 text-[13px] leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                                            {selectedArchive.original_thesis}
+                                        </div>
                                     </div>
-                                    <div className={cn("p-3 rounded-lg border", arc.success ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20")}>
-                                        <h4 className={cn("text-xs font-bold uppercase mb-1.5", arc.success ? "text-green-600" : "text-red-600")}>
-                                            최종 결과 및 매도 사유 (복기)
-                                        </h4>
-                                        <p className="text-sm font-medium leading-relaxed">
-                                            {arc.sellReason}
-                                        </p>
+
+                                    <div className="w-full h-px bg-border/50" />
+
+                                    {/* 2. 사후 분석 */}
+                                    <div>
+                                        <h3 className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-3">
+                                            <Activity size={14} className={selectedArchive.success ? "text-green-500" : "text-red-500"} /> 최종 사후 분석 명세서
+                                        </h3>
+                                        <div className={cn("p-4 rounded-xl border border-dashed space-y-2", selectedArchive.success ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20")}>
+                                            <div className="text-[13px] leading-relaxed font-bold text-foreground/90 whitespace-pre-wrap">
+                                                {selectedArchive.final_narrative || '사후 분석 기록이 없습니다.'}
+                                            </div>
+                                        </div>
                                     </div>
+
+                                    {/* 3. Bull / Bear Cases */}
+                                    <div className="grid grid-cols-1 gap-4">
+                                        <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-4">
+                                            <h4 className="flex items-center gap-2 text-xs font-bold text-blue-600 mb-2">
+                                                <TrendingUp size={14} /> Bull's View (최초 검토시)
+                                            </h4>
+                                            <div className="prose prose-sm dark:prose-invert prose-p:leading-snug prose-li:my-0 text-[12px] text-foreground/80 opacity-80 break-words whitespace-normal space-y-1">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedArchive.bull_case || 'N/A'}</ReactMarkdown>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-red-500/5 border border-red-500/10 rounded-xl p-4">
+                                            <h4 className="flex items-center gap-2 text-xs font-bold text-red-500 mb-2">
+                                                <TrendingDown size={14} /> Bear's Warning (최초 검토시)
+                                            </h4>
+                                            <div className="prose prose-sm dark:prose-invert prose-p:leading-snug prose-li:my-0 text-[12px] text-foreground/80 opacity-80 break-words whitespace-normal space-y-1">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedArchive.bear_case || 'N/A'}</ReactMarkdown>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                 </div>
                             </div>
-                        ))}
-                    </div>
+                        </div>
+                    ) : (
+                        <div className="w-[480px] shrink-0 border-l flex flex-col items-center justify-center text-muted-foreground bg-muted/5">
+                            <History size={48} className="opacity-20 mb-4" />
+                            <p>좌측에서 복기(Archive)된 종목을 선택하세요.</p>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -1317,88 +1695,7 @@ ${selectedDetail.rawResult}
                     </div>
             )}
 
-            {/* Developer Playground Modal */}
-            {showPlayground && (
-                <div className="fixed inset-0 z-[60] bg-background/80 backdrop-blur-sm flex items-center justify-center p-6">
-                    <div className="bg-card w-full max-w-5xl border rounded-2xl shadow-xl flex flex-col h-[80vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                        {/* Header */}
-                        <div className="px-6 py-4 border-b flex items-center justify-between bg-muted/30 shrink-0">
-                            <div className="flex items-center gap-3">
-                                <span className="text-xl">🧪</span>
-                                <div>
-                                    <h2 className="text-lg font-black tracking-tight">AI Toolbelt Playground</h2>
-                                    <p className="text-[11px] text-muted-foreground font-bold mt-0.5">백엔드 연동 전 단일 파이프라인(OpenAPI, DB, 크롤러) 모듈 무결성 테스트 보드</p>
-                                </div>
-                            </div>
-                            <button onClick={() => { setShowPlayground(false); setPlaygroundLogs([]); }} className="px-4 py-2 hover:bg-muted font-bold text-sm rounded-lg transition-colors text-muted-foreground">
-                                닫기
-                            </button>
-                        </div>
-                        
-                        <div className="flex-1 flex min-h-0 overflow-hidden">
-                            {/* Left: Tools */}
-                            <div className="w-full md:w-[320px] bg-muted/10 border-r p-6 overflow-y-auto scrollbar-hide flex flex-col gap-3 shrink-0">
-                                <div className="text-[11px] font-black text-muted-foreground uppercase tracking-wider mb-2">테스트 가능 모듈 (Phase 0)</div>
-                                
-                                <button onClick={() => handleTestTool("키움 조건검색 (TR: condition)")} className="text-left p-4 rounded-xl border bg-background hover:border-primary/50 transition-colors shadow-sm active:scale-[0.98]">
-                                    <div className="text-sm font-bold text-foreground">1. 키움 조건검색 호출</div>
-                                    <div className="text-[10px] text-muted-foreground mt-1">REST API 수신 결과 패스스루 확인</div>
-                                </button>
-                                
-                                <button onClick={() => handleTestTool("투자자매매동향 (TR: opt10059)")} className="text-left p-4 rounded-xl border bg-background hover:border-primary/50 transition-colors shadow-sm active:scale-[0.98]">
-                                    <div className="text-sm font-bold text-foreground">2. 스마트머니 수급 조회</div>
-                                    <div className="text-[10px] text-muted-foreground mt-1">외인/기관 대금 (Rate limit 방어 검증)</div>
-                                </button>
-                                
-                                <button onClick={() => handleTestTool("주식기본정보 (TR: opt10001)")} className="text-left p-4 rounded-xl border bg-background hover:border-primary/50 transition-colors shadow-sm active:scale-[0.98]">
-                                    <div className="text-sm font-bold text-foreground">3. 펀더멘털 및 신용 추출</div>
-                                    <div className="text-[10px] text-muted-foreground mt-1">과열 징후(신용비율), PER 추출 확인</div>
-                                </button>
-                                
-                                <button onClick={() => handleTestTool("로컬 DB 히스토리 쿼리")} className="text-left p-4 rounded-xl border bg-background hover:border-primary/50 transition-colors shadow-sm active:scale-[0.98]">
-                                    <div className="text-sm font-bold text-foreground">4. 내부 DB 리서치 기억 모듈</div>
-                                    <div className="text-[10px] text-muted-foreground mt-1">과거 6개월 컷오프 이력 JSON 요약 테스트</div>
-                                </button>
-                                
-                                <button onClick={() => handleTestTool("DART/네이버 크롤러 봇")} className="text-left p-4 rounded-xl border bg-background hover:border-primary/50 transition-colors shadow-sm active:scale-[0.98]">
-                                    <div className="text-sm font-bold text-foreground">5. 우회 데이터 크롤링</div>
-                                    <div className="text-[10px] text-muted-foreground mt-1">캡차 차단 회피 및 헤드라인 수집 무결성</div>
-                                </button>
-                            </div>
-                            
-                            {/* Right: Log Output */}
-                            <div className="flex-1 bg-slate-50 dark:bg-slate-900/50 p-6 font-mono text-[13px] overflow-y-auto relative scrollbar-hide">
-                                <div className="absolute top-4 right-4 text-[10px] font-bold text-muted-foreground/40 select-none">SYSTEM CONSOLE V1.0</div>
-                                {playgroundLogs.length === 0 ? (
-                                    <div className="text-muted-foreground/60 text-center flex flex-col items-center justify-center h-full gap-4 pb-10">
-                                        <div className="opacity-30 text-5xl">💻</div>
-                                        <div className="font-medium text-sm">
-                                            좌측 패널에서 테스트할 모듈을 선택하여 REST API를 발송하십시오.<br/><br/>
-                                            <span className="animate-pulse opacity-70">Waiting for execution...</span>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4 pb-6">
-                                        {playgroundLogs.map((log, idx) => (
-                                            <div key={idx} className="space-y-1.5 animate-in fade-in slide-in-from-bottom-2">
-                                                <div className="flex gap-4 opacity-90 select-none">
-                                                    <span className="text-muted-foreground">[{log.time}]</span>
-                                                    <span className={log.msg.includes('요청') ? "text-amber-600 dark:text-amber-400 font-bold" : "text-blue-600 dark:text-blue-400 font-bold"}>$&gt; {log.msg}</span>
-                                                </div>
-                                                {log.json && (
-                                                    <pre className="bg-white dark:bg-[#0a0a0a] p-3.5 rounded-lg border shadow-sm text-slate-800 dark:text-slate-300 text-[11px] leading-relaxed overflow-x-auto whitespace-pre-wrap ml-[85px] ring-1 ring-black/5 dark:ring-white/5">
-                                                        {JSON.stringify(log.json, null, 2)}
-                                                    </pre>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+
 
             {/* Condition Settings Modal */}
             {showConditionSettings && (
@@ -1452,6 +1749,95 @@ ${selectedDetail.rawResult}
                         <div className="px-5 py-4 border-t bg-muted/10 flex justify-end">
                             <button onClick={() => setShowConditionSettings(false)} className="px-6 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-xl transition-colors shadow-sm active:scale-95">
                                 적용 완료
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* AI Settings Modal */}
+            {showSettings && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-card w-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-border/50">
+                        <div className="p-6 border-b flex items-center justify-between bg-muted/30">
+                            <h2 className="text-xl font-bold flex items-center gap-2">
+                                <Settings className="text-primary" size={24} /> 
+                                Moonshot AI 크론 설정
+                            </h2>
+                            <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-muted hover:text-foreground rounded-full transition-colors text-muted-foreground">
+                                <XCircle size={24} />
+                            </button>
+                        </div>
+                        
+                        <div className="p-6 space-y-6 flex-1">
+                            {/* 설정 아이템 1 */}
+                            <div className="space-y-3">
+                                <label className="text-sm font-bold flex items-center justify-between">
+                                    <span className="flex items-center gap-2">
+                                        <Telescope size={16} className="text-blue-500" />
+                                        신규 발굴 (Scanner AI) 실행 시간
+                                    </span>
+                                </label>
+                                <div className="flex bg-muted/50 p-4 rounded-xl border border-border/50 gap-4 items-center">
+                                    <input 
+                                        type="time" 
+                                        value={moonshotSettings.scannerCronTime} 
+                                        onChange={(e) => setMoonshotSettings(prev => ({...prev, scannerCronTime: e.target.value}))}
+                                        className="bg-background border px-4 py-2 rounded-lg text-lg font-semibold min-w-[150px] shrink-0 outline-none focus:ring-2 focus:ring-primary/50"
+                                    />
+                                    <p className="text-xs text-muted-foreground leading-relaxed flex-1">
+                                        스캐너 검색 결과를 바탕으로 새로운 텐베거 후보를 자동으로 평가하고 액티브 명부에 편입합니다.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* 설정 아이템 2 */}
+                            <div className="space-y-3">
+                                <label className="text-sm font-bold flex items-center justify-between">
+                                    <span className="flex items-center gap-2">
+                                        <Activity size={16} className="text-green-500" />
+                                        액티브 트래킹 리뷰 (Tracker AI) 실행 시간
+                                    </span>
+                                </label>
+                                <div className="flex bg-muted/50 p-4 rounded-xl border border-border/50 gap-4 items-center">
+                                    <input 
+                                        type="time" 
+                                        value={moonshotSettings.trackerCronTime} 
+                                        onChange={(e) => setMoonshotSettings(prev => ({...prev, trackerCronTime: e.target.value}))}
+                                        className="bg-background border px-4 py-2 rounded-lg text-lg font-semibold min-w-[150px] shrink-0 outline-none focus:ring-2 focus:ring-primary/50"
+                                    />
+                                    <p className="text-xs text-muted-foreground leading-relaxed flex-1">
+                                        기존 명부 종목들의 가설 유지 여부를 재평가하고, 정원 초과 시 방출(가설훼손)을 결정합니다.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 pt-2">
+                                <input 
+                                    type="checkbox" 
+                                    id="ms_auto_enabled"
+                                    checked={moonshotSettings.enabled}
+                                    onChange={(e) => setMoonshotSettings(prev => ({...prev, enabled: e.target.checked}))}
+                                    className="w-4 h-4 cursor-pointer"
+                                />
+                                <label htmlFor="ms_auto_enabled" className="text-sm font-bold cursor-pointer">
+                                    Moonshot AI 자동화 스케줄 활성화
+                                </label>
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-muted/50 border-t flex items-center justify-end gap-3">
+                            <button 
+                                onClick={() => setShowSettings(false)}
+                                className="px-4 py-2 hover:bg-muted font-bold text-sm rounded-lg transition-colors text-muted-foreground border bg-background shadow-sm"
+                            >
+                                취소
+                            </button>
+                            <button 
+                                onClick={handleSaveSettings}
+                                className="px-6 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm rounded-lg transition-colors shadow-sm"
+                            >
+                                저장 및 적용
                             </button>
                         </div>
                     </div>

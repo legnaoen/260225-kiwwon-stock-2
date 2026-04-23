@@ -34,7 +34,7 @@ export class PortfolioManagerAgent {
         const log = (msg: string) => {
             const line = `[${new Date().toISOString()}] ${msg}\n`;
             console.log(msg);
-            try { fs.appendFileSync(logPath, line); } catch (_) {}
+            try { fs.appendFileSync(logPath, line); } catch (_) { }
         };
 
         log(`===== PM1 시작: dateStr=${dateStr} =====`);
@@ -49,7 +49,7 @@ export class PortfolioManagerAgent {
             }
 
             const activePortfolio = this.db.getActivePortfolio() as any[];
-            log(`[2] getActivePortfolio() = ${activePortfolio.length}개 (${activePortfolio.map((p:any)=>p.stock_code).join(',')})`);
+            log(`[2] getActivePortfolio() = ${activePortfolio.length}개 (${activePortfolio.map((p: any) => p.stock_code).join(',')})`);
 
             const activeCodeSet = new Set(activePortfolio.map((p: any) => p.stock_code));
             const newPicks = todaysPicks.filter((p: any) => !activeCodeSet.has(p.stock_code));
@@ -88,7 +88,7 @@ export class PortfolioManagerAgent {
                     }
                 }
             }
-            log(`[6] selectedPicks = ${selectedPicks.length}개 (${selectedPicks.map((p:any)=>p.stock_code).join(',')})`);
+            log(`[6] selectedPicks = ${selectedPicks.length}개 (${selectedPicks.map((p: any) => p.stock_code).join(',')})`);
 
             const evalPool: Record<string, any> = {};
             selectedPicks.forEach((pick: any) => {
@@ -137,7 +137,7 @@ export class PortfolioManagerAgent {
             try {
                 const { TelegramService } = await import('../TelegramService');
                 TelegramService.getInstance().sendMessage(`❌ [PM1] 1차 스크리닝 실패: ${e.message}`);
-            } catch (_) {}
+            } catch (_) { }
             return null;
         }
     }
@@ -192,6 +192,44 @@ export class PortfolioManagerAgent {
 
             // 1. Fetch existing active portfolio
             const activePortfolio = this.db.getActivePortfolio() as any[];
+
+            // ── [Pre-refresh] PM2 실행 전 보유 종목 당일 현재가/수익률 DB 갱신 ─────────────────
+            // 문제: AI 프롬프트에 삽입되는 profit_rate가 전날 15:41 채점(PortfolioJudgeScheduler) 기준값이었음.
+            // 해결: PM2 직전에 HELD 종목을 키움 API로 사전 조회하여 DB & 인메모리값을 실시간값으로 덮어씀.
+            //       이후 evalPool 구성 시 p.profit_rate가 당일 실시간 수익률로 전달됩니다.
+            const heldStocks = activePortfolio.filter((p: any) => p.status === 'HELD' || p.status === 'HOLDING');
+            if (heldStocks.length > 0) {
+                console.log(`[PortfolioManager] 📊 [Pre-refresh] ${heldStocks.length}개 보유종목 당일 현재가 갱신 시작...`);
+                const rawDb = (this.db as any).db;
+                for (const stock of heldStocks) {
+                    try {
+                        const priceInfo = await kiwoomSvc.getStockBasicInfo(stock.stock_code);
+                        const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
+                        const rawCur = String(body.stk_prc || body.cur_prc || body.stck_prpr || body.currentPrice || 0).replace(/[^0-9-]/g, '');
+                        const curPrice = Math.abs(parseInt(rawCur, 10)) || 0;
+                        if (curPrice > 0 && stock.entry_price > 0) {
+                            const profitRate = ((curPrice - stock.entry_price) / stock.entry_price) * 100;
+                            rawDb.prepare(
+                                `UPDATE maiis_portfolio SET current_price = ?, profit_rate = ?, updated_at = ? WHERE stock_code = ?`
+                            ).run(curPrice, profitRate, this.db.getKstTimestamp(), stock.stock_code);
+                            // 인메모리 activePortfolio 배열도 즉시 반영 (evalPool 구성 및 프롬프트에 사용됨)
+                            stock.current_price = curPrice;
+                            stock.profit_rate = profitRate;
+                            console.log(`[PortfolioManager]   ✅ ${stock.stock_name}(${stock.stock_code}): ${curPrice.toLocaleString()}원 / ${profitRate > 0 ? '+' : ''}${profitRate.toFixed(2)}%`);
+                        } else if (curPrice > 0) {
+                            // entry_price가 없는 신규 편입 종목: current_price만 갱신
+                            rawDb.prepare(
+                                `UPDATE maiis_portfolio SET current_price = ?, updated_at = ? WHERE stock_code = ?`
+                            ).run(curPrice, this.db.getKstTimestamp(), stock.stock_code);
+                            stock.current_price = curPrice;
+                        }
+                        await new Promise(r => setTimeout(r, 300)); // API Rate limit 보호
+                    } catch (e: any) {
+                        console.warn(`[PortfolioManager]   ⚠️ ${stock.stock_name} 가격 갱신 실패 (기존 DB값 유지):`, e.message);
+                    }
+                }
+                console.log(`[PortfolioManager] ✅ [Pre-refresh] 보유종목 현재가/수익률 갱신 완료`);
+            }
 
             // 2. Group ALL stocks for evaluation (Dossier Pool)
             // 통함 풀 구성: 기존 보유 + 기존 관심 + 1차 취합 신규 추천주
@@ -352,7 +390,7 @@ export class PortfolioManagerAgent {
                     // C. Build specific stock dossier text
                     let ds = `=================================================\n`;
                     ds += `[${s.stock_name} (${s.stock_code})] 📌 소속풀: ${s.source === 'PORTFOLIO' ? '기존 보유/관심종목' : s.source === 'NEW_PICK' ? '금일 신규 추천' : '기존 종목 + 금일 중복 추천'}\n`;
-                    if (s.status) ds += `현재 상태: ${s.status} / 현재 수익률: ${s.profit_rate || 0}%\n`;
+                    if (s.status) ds += `현재 상태: ${s.status} / 현재가: ${(s.current_price || 0).toLocaleString()}원 / 현재 수익률: ${(s.profit_rate || 0) > 0 ? '+' : ''}${Number(s.profit_rate || 0).toFixed(2)}% [당일 실시간 기준]\n`;
                     ds += `-------------------------------------------------\n`;
 
                     const analysisTimeline = DatabaseService.getInstance().getStockAnalysis(s.stock_code);
@@ -440,7 +478,7 @@ export class PortfolioManagerAgent {
                 buy: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
                 watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
             };
-            
+
             // 구버전 키(SWING/VALUE) 감지 → 새 기준으로 자동 마이그레이션 적용
             if (limits.watchlist && ('SWING' in limits.watchlist || 'VALUE' in limits.watchlist)) {
                 limits = {
@@ -451,7 +489,7 @@ export class PortfolioManagerAgent {
 
             const totalBuy = Object.values(limits.buy).reduce((a: any, b: any) => a + Number(b), 0);
             const totalWatch = Object.values(limits.watchlist).reduce((a: any, b: any) => a + Number(b), 0);
-            
+
             // 6. Construct System Prompt Context
             const marketContextHeader = marketContextBlock
                 ? `[🌐 오늘의 시장 맥락 — 종목 판단 전 반드시 숙지]\n\n${marketContextBlock}\n---\n\n`
@@ -542,7 +580,7 @@ ${chartRiskSkill}
                         try {
                             const { TelegramService } = await import('../TelegramService');
                             TelegramService.getInstance().sendMessage(`⚠️ [PM경고] AI가 ${stockList.length}개 중 ${parsed.decisions.length}개의 분석만 반환하여 나머지 ${stockList.length - parsed.decisions.length}종목은 강제 탈락(DROPPED) 처리됩니다.`);
-                        } catch (_) {}
+                        } catch (_) { }
                     }
 
                     // [Phase 5] 매수 및 대기(WATCHING) 슬롯 분리 처리 배열
@@ -616,11 +654,11 @@ ${chartRiskSkill}
                     for (const [strategy, items] of Object.entries(groupedWatchlist)) {
                         // 리뷰 대상 종목들을 점수순 정렬
                         items.sort((a, b) => (b.conviction_score || 0) - (a.conviction_score || 0));
-                        
+
                         const limit = watchLimits[strategy as keyof typeof watchLimits] || 0;
                         const passed = items.slice(0, limit);
                         const failed = items.slice(limit);
-                        
+
                         survivedWatchlist.push(...passed);
                         failed.forEach(item => {
                             item.finalStatus = 'DROPPED';
@@ -650,7 +688,7 @@ ${chartRiskSkill}
                         let curPrice = 0;
                         let upperLimitPrice = 0;
                         const isImmediateBuy = dec.finalStatus === 'HELD';
-                        
+
                         try {
                             const priceInfo = await kiwoomSvc.getStockBasicInfo(dec.finalCode);
                             const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
@@ -662,7 +700,7 @@ ${chartRiskSkill}
                             const match = specificContext.match(/현재가: ([0-9,]+)원/);
                             if (match && match[1]) curPrice = parseInt(match[1].replace(/,/g, ''), 10);
                         }
-                        
+
                         pricesMap[dec.finalCode] = curPrice;
 
                         // AI가 직접 DROP한 것도 처리 (컷오프 서바이벌로 밀려난 종목들도 포함)
@@ -670,7 +708,30 @@ ${chartRiskSkill}
                             const previousInfo = activePortfolio.find(p => p.stock_code === dec.finalCode);
                             if (previousInfo) {
                                 // 기존에 포트폴리오에 있었던 종목이 밀려난 거라면 DB 상태 변경
-                                this.db.updatePortfolioStatus(dec.finalCode, 'DROPPED', dec.last_signal_reason || '관심종목 서바이벌 컷오프 탈락');
+                                const reason = dec.last_signal_reason || '관심종목 서바이벌 컷오프 탈락';
+                                this.db.updatePortfolioStatus(dec.finalCode, 'DROPPED', reason);
+                                
+                                // ✅ HELD 포지션이 명시적 탈락/컷오프된 경우에만 이벤트 기록 및 Trade Record 닫기
+                                // (DB에서 Cap 초과로 잘린 경우는 enforcePortfolioCaps 내부에서 이미 처리됨)
+                                if (previousInfo.status === 'HELD' || previousInfo.status === 'IMMEDIATE_BUY') {
+                                    this.db.logPortfolioEvent(dec.finalCode, dec.stock_name, 'DROPPED', previousInfo.status, 'CLEARED', reason, curPrice);
+                                    const droppedPf = this.db.getDb().prepare("SELECT profit_rate FROM maiis_portfolio WHERE stock_code = ?").get(dec.finalCode) as any;
+                                    this.db.closeTradeRecord({
+                                        stock_code: dec.finalCode,
+                                        exit_price: curPrice,
+                                        exit_reason: reason,
+                                        profit_rate: droppedPf?.profit_rate || 0
+                                    });
+                                }
+
+                                // 인큐베이터 강등 (WATCHING/HELD 모두 대상)
+                                this.db.demoteToIncubator({
+                                    stock_code: dec.finalCode,
+                                    stock_name: dec.stock_name,
+                                    current_price: curPrice,
+                                    last_signal_reason: reason,
+                                    id: previousInfo.id
+                                });
                             }
                             continue; // 그 외 신규 픽이었다가 탈락한 건 DB에 넣을 필요 없으므로 생략
                         }
@@ -699,7 +760,7 @@ ${chartRiskSkill}
                             created_at: this.db.getKstTimestamp(),
                             raw_context: specificContext,
                             current_price: curPrice,
-                            entry_price: curPrice 
+                            entry_price: curPrice
                         });
 
                         if (isImmediateBuy && curPrice > 0) {
@@ -774,7 +835,7 @@ ${chartRiskSkill}
                                         TelegramService.getInstance().sendMessage(
                                             `🔄 [PM3 교체 확정]\n매도: ${candidate.stock_name}\n매수: ${winner?.stock_name || pm3Result.winnerCode}\n이유: ${pm3Result.reason}`
                                         );
-                                    } catch (_) {}
+                                    } catch (_) { }
                                 } else {
                                     // KEEP: 해당 HELD 유지 → WATCHING 최하위 1개를 대신 DROP
                                     const kept = this.db.dropLowestWatching(
@@ -786,7 +847,7 @@ ${chartRiskSkill}
                                         TelegramService.getInstance().sendMessage(
                                             `🛡️ [PM3 KEEP]\n보유 유지: ${candidate.stock_name}\n사유: ${pm3Result.reason}`
                                         );
-                                    } catch (_) {}
+                                    } catch (_) { }
                                 }
                             } catch (pm3Err: any) {
                                 // PM3 오류 시 보수적 KEEP (기존 보유 종목 유지)
@@ -843,14 +904,14 @@ ${chartRiskSkill}
                         const afterPortfolio = this.db.getActivePortfolio() as any[];
 
                         // 신규 매수 (Before에는 HELD가 아니었는데 After에 HELD가 된 것)
-                        const newBuys = afterPortfolio.filter(a => 
-                            (a.status === 'HELD' || a.status === 'IMMEDIATE_BUY') && 
+                        const newBuys = afterPortfolio.filter(a =>
+                            (a.status === 'HELD' || a.status === 'IMMEDIATE_BUY') &&
                             !activePortfolio.find(b => b.stock_code === a.stock_code && (b.status === 'HELD' || b.status === 'IMMEDIATE_BUY'))
                         );
 
                         // 탈락 종목 (Before에는 HELD 매수 포지션이었으나 지금은 유지되지 못한 경우만)
-                        const droppedList = activePortfolio.filter(b => 
-                            (b.status === 'HELD' || b.status === 'IMMEDIATE_BUY') && 
+                        const droppedList = activePortfolio.filter(b =>
+                            (b.status === 'HELD' || b.status === 'IMMEDIATE_BUY') &&
                             !afterPortfolio.find(a => a.stock_code === b.stock_code && (a.status === 'HELD' || a.status === 'IMMEDIATE_BUY'))
                         );
                         const watchCount = afterPortfolio.filter(a => a.status === 'WATCHING' || a.status === 'WATCHLIST').length;
@@ -861,16 +922,6 @@ ${chartRiskSkill}
 
                         if (newBuys.length > 0) {
                             tgMsg += `\n\n🎉 [신규 매수 승급]`;
-                            
-                            // Load active live trade strategy
-                            let activeLiveStrategy: any = null;
-                            try {
-                                const { LiveTradeLedgerService } = await import('../LiveTradeLedgerService');
-                                const strategies = LiveTradeLedgerService.getInstance().getStrategies();
-                                activeLiveStrategy = strategies.find(s => s.is_active === 1);
-                            } catch (e) {
-                                console.error('[PortfolioManager] Failed to load active live strategy:', e);
-                            }
 
                             for (const b of newBuys) {
                                 tgMsg += `\n- ${b.stock_name} (${b.strategy} | ${b.conviction_score}점)`;
@@ -886,36 +937,16 @@ ${chartRiskSkill}
                                     strategy: b.strategy || 'MOMENTUM',
                                     analysts_json: b.analysts_json || []
                                 });
-
-                                // 🔥 [Live Trade 파이프라인 연동]
-                                // AI가 선택한 종목의 카테고리가 실전 매매에서 설정된 activeStrategy와 일치하면 실제 매수 실행
-                                const pickCategory = b.primaryCategory || b.strategy || 'MOMENTUM';
-                                if (activeLiveStrategy && activeLiveStrategy.strategy_category === pickCategory) {
-                                    try {
-                                        const { LiveTradeExecutionService } = await import('../LiveTradeExecutionService');
-                                        await LiveTradeExecutionService.getInstance().executeBuy({
-                                            stockCode: b.stock_code,
-                                            stockName: b.stock_name,
-                                            category: activeLiveStrategy.strategy_category,
-                                            themes: (b.analysts_json || []).join(', '),
-                                            buyScore: b.conviction_score || 90,
-                                            currentPrice: b.current_price || b.entry_price || 0
-                                        });
-                                        tgMsg += `\n  👉 [실전매매] ${activeLiveStrategy.strategy_category} 전략 자동 매수 완료`;
-                                    } catch (liveTradeErr: any) {
-                                        console.error(`[PortfolioManager] 실전매매 매수 실패: ${b.stock_name}`, liveTradeErr);
-                                        tgMsg += `\n  🚨 [실전매매 실패] ${liveTradeErr.message}`;
-                                    }
-                                }
+                                // ℹ️ 실전 매매 연동은 SchedulerService.ts의 15:05 크론(TrackBuyAgent 완료 직후)에서 처리됩니다.
                             }
                         } else {
                             tgMsg += `\n\n⚠️ [신규 매수 없음]`;
-                            
+
                             // 이미 매수된 종목(HELD)이 아닌, 관심종목 중 가장 점수가 높은 대기 후보군을 찾음
                             const topCandidate = parsed.decisions
                                 .filter((d: any) => d.last_signal !== 'SELL' && d.last_signal !== 'BUY' && d.last_signal !== 'DROP')
                                 .sort((a: any, b: any) => b.conviction_score - a.conviction_score)[0];
-                                
+
                             if (topCandidate) {
                                 tgMsg += `\n대기 중인 후보 [${topCandidate.stock_name}] 등은 매력도 점수가 한도 기준을 넘지 못했거나 포트폴리오 잔여 캡 부족으로 인해 승급이 보류되었습니다.\n👉 PM 의견: ${topCandidate.last_signal_reason}`;
                             } else {
@@ -928,36 +959,6 @@ ${chartRiskSkill}
                             droppedList.forEach(d => {
                                 const droppedDb = rawDb.prepare("SELECT profit_rate FROM maiis_portfolio WHERE stock_code = ?").get(d.stock_code) as any;
                                 tgMsg += `\n- ${d.stock_name} (최종 추정 수익률: ${droppedDb?.profit_rate || d.profit_rate || 0}%)`;
-                                const reasonMatch = parsed.decisions.find((dInfo: any) => dInfo.stock_code === d.stock_code);
-                                // DROP 판정을 직접 받은 경우, 아니면 Cap 초과 탈락인 경우로 추정
-                                const reason = (reasonMatch && (reasonMatch.last_signal === 'SELL' || reasonMatch.last_signal === 'DROP'))
-                                    ? (reasonMatch.last_signal_reason || 'PM 익/손절 판정')
-                                    : '관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락';
-
-                                const freshPrice = pricesMap[d.stock_code] > 0 ? pricesMap[d.stock_code] : (d.current_price || 0);
-
-                                // ✅ 실제 매수(HELD) 포지션이었던 종목만 이벤트 로그 기록
-                                // WATCHING → DROPPED 종목은 성적표/이벤트 로그 대상 아님
-                                if (d.status === 'HELD' || d.status === 'IMMEDIATE_BUY') {
-                                    this.db.logPortfolioEvent(d.stock_code, d.stock_name, 'DROPPED', d.status, 'CLEARED', reason, freshPrice);
-                                    // ✅ [거래 단위] 매도 시 trade_history OPEN 레코드 닫기
-                                    const droppedPf = rawDb.prepare("SELECT profit_rate FROM maiis_portfolio WHERE stock_code = ?").get(d.stock_code) as any;
-                                    this.db.closeTradeRecord({
-                                        stock_code: d.stock_code,
-                                        exit_price: freshPrice,
-                                        exit_reason: reason,
-                                        profit_rate: droppedPf?.profit_rate || 0
-                                    });
-                                }
-                                
-                                // 인큐베이터 강등은 WATCHING/HELD 모두 대상
-                                this.db.demoteToIncubator({
-                                    stock_code: d.stock_code,
-                                    stock_name: d.stock_name,
-                                    current_price: d.current_price || 0,
-                                    last_signal_reason: reason,
-                                    id: d.id
-                                });
                             });
                         }
 

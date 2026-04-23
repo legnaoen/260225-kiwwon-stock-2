@@ -1,8 +1,10 @@
 import { KiwoomService } from './KiwoomService';
 import { LiveTradeLedgerService, LiveTradeTicket } from './LiveTradeLedgerService';
+import { DatabaseService } from './DatabaseService';
 import { calculateOrderPrice } from '../utils/tickSize';
 import { TelegramService } from './TelegramService';
 import { eventBus, SystemEvent } from '../utils/EventBus';
+import { getKstDate } from '../utils/DateUtils';
 
 import Store from 'electron-store';
 
@@ -112,6 +114,21 @@ export class LiveTradeExecutionService {
             console.warn(`[LiveTrade] 이중 매수 방지: ${stockName}(${stockCode}) 이미 매수 처리 중`);
             return;
         }
+
+        // [Guard 2.5] DB 티켓 중복 검사 — 오늘 이미 매수 시도/성공한 티켓이 있는지 확인
+        // buyingInProgress.add() 전에 체크해야 안전 (add 전 차단)
+        const todayKst = getKstDate();
+        const rawDb = (DatabaseService.getInstance() as any).db;
+        const existingTicket = rawDb.prepare(`
+            SELECT ticket_id FROM live_trade_tickets 
+            WHERE stock_code = ? AND entry_date = ?
+        `).get(stockCode, todayKst);
+
+        if (existingTicket) {
+            console.warn(`[LiveTrade] 이중 매수 방지(DB): ${stockName}(${stockCode}) 오늘 이미 발급된 티켓 존재`);
+            return;
+        }
+
         this.buyingInProgress.add(stockCode);
 
         const account = this.getAccountNo();
@@ -138,7 +155,7 @@ export class LiveTradeExecutionService {
             console.warn(`[LiveTrade] Calculated quantity is 0 for ${stockName}. Skip buy.`);
             this.ledger.createTicket({
                 stock_code: stockCode,
-                entry_date: new Date().toISOString().split('T')[0],
+                entry_date: getKstDate(),
                 entry_price: orderPrice,
                 quantity: 0,
                 strategy_category: strategyCategory,
@@ -162,10 +179,10 @@ export class LiveTradeExecutionService {
                 '05' // 조건부 지정가
             );
 
-            // 3. 주문 전송 즉시 티켓 생성 (ACTIVE)
+            // 3. 주문 전송 즉시 티켓 생성 (ACTIVE) — entry_date는 KST 기준
             this.ledger.createTicket({
                 stock_code: stockCode,
-                entry_date: new Date().toISOString().split('T')[0],
+                entry_date: getKstDate(),
                 entry_price: orderPrice,
                 quantity: quantity,
                 strategy_category: strategyCategory,
@@ -179,7 +196,7 @@ export class LiveTradeExecutionService {
             this.emitError('매수 주문', `${stockName}(${stockCode}) 매수 주문 실패`, error?.response?.data ? JSON.stringify(error.response.data) : error.message);
             this.ledger.createTicket({
                 stock_code: stockCode,
-                entry_date: new Date().toISOString().split('T')[0],
+                entry_date: getKstDate(),
                 entry_price: orderPrice,
                 quantity: quantity,
                 strategy_category: strategyCategory,

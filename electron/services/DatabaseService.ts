@@ -4611,6 +4611,227 @@ export class DatabaseService {
         }
     }
 
+    // ═══ Performance Stats: OHLCV 기반 정밀 성과 계산 ═══
+    /**
+     * 각 픽의 실제 OHLCV를 조회하여 목표가 최초 도달일과 고점 도달일을 정밀 계산합니다.
+     * - 매수는 당일 종가 매수이므로 entry_date는 조회에서 제외하고 익일부터 스캔
+     * - 목표 도달일: high >= entry_price * (1 + targetReturnPct/100) 인 최초 캔들 인덱스 (D+N)
+     * - 고점 도달일: 전 기간 high 최대값이 발생한 날의 캔들 인덱스 (D+N)
+     */
+    public computePerformanceStats(picks: any[], targetReturnPct: number): {
+        overall: {
+            totalPicks: number;
+            winRate: number;
+            avgPeak: number;
+            avgClose: number;
+            avgPeakDays: number;
+            avgTargetHitDays: number;
+            targetHitRate: number;
+            alpha: number;
+        };
+        byCategory: Record<string, {
+            count: number;
+            winRate: number;
+            avgPeak: number;
+            avgClose: number;
+            avgPeakDays: number;
+            avgTargetHitDays: number;
+        }>;
+    } {
+        try {
+            // ACTIVE 또는 CLOSED 상태이며 entry_date, stock_code, entry_price 가 있는 픽만 처리
+            const validPicks = picks.filter(p =>
+                (p.status === 'ACTIVE' || p.status === 'CLOSED') &&
+                p.entry_date &&
+                p.stock_code &&
+                Number(p.entry_price) > 0
+            );
+
+            if (validPicks.length === 0) {
+                return {
+                    overall: { totalPicks: 0, winRate: 0, avgPeak: 0, avgClose: 0, avgPeakDays: 0, avgTargetHitDays: 0, targetHitRate: 0, alpha: 0 },
+                    byCategory: {}
+                };
+            }
+
+            // 고유 stock_code 목록 추출하여 OHLCV 배치 조회 (N+1 방지)
+            const stockCodes = Array.from(new Set(validPicks.map(p => p.stock_code as string)));
+            // KST 기준 오늘 날짜 (UTC+9). market_ohlcv_history.date 포맷인 YYYY-MM-DD 그대로 사용
+            const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+            const today = kstNow.toISOString().slice(0, 10); // YYYY-MM-DD
+
+            // stock_code → 날짜순 OHLCV 배열 맵
+            const ohlcvMap: Record<string, Array<{ date: string; high: number; close: number }>> = {};
+            const ohlcvQuery = this.db.prepare(`
+                SELECT stock_code, date, high, close
+                FROM market_ohlcv_history
+                WHERE stock_code = ?
+                ORDER BY date ASC
+            `);
+            for (const code of stockCodes) {
+                const rows = ohlcvQuery.all(code) as Array<{ stock_code: string; date: string; high: number; close: number }>;
+                ohlcvMap[code] = rows.map(r => ({ date: r.date, high: Number(r.high), close: Number(r.close) }));
+            }
+
+            // 종합 집계
+            let totalPicks = validPicks.length;
+            let hits = 0;
+            let sumPeak = 0;
+            let sumClose = 0;
+            let totalPeakDays = 0;
+            let picksWithPeakDays = 0;
+            let totalTargetHitDays = 0;
+            let targetHitCount = 0;
+
+            const categoryStats: Record<string, {
+                count: number; hits: number;
+                sumPeak: number; sumClose: number;
+                sumPeakDays: number; peakDaysCount: number;
+                sumTargetHitDays: number; targetHitCount: number;
+            }> = {};
+
+            for (const p of validPicks) {
+                const entryPrice = Number(p.entry_price);
+                // market_ohlcv_history.date 형식(YYYY-MM-DD)에 맞춰 정규화
+                // entry_date가 'YYYYMMDD'로 저장된 경우와 'YYYY-MM-DD'인 경우 모두 처리
+                const rawEntry = String(p.entry_date ?? '').replace(/-/g, '');
+                const entryDate = rawEntry.length === 8
+                    ? `${rawEntry.slice(0,4)}-${rawEntry.slice(4,6)}-${rawEntry.slice(6,8)}`
+                    : String(p.entry_date).slice(0, 10); // 이미 YYYY-MM-DD 형식
+
+                const rawExit = p.exit_date ? String(p.exit_date).replace(/-/g, '') : null;
+                const exitDateStr = rawExit && rawExit.length === 8
+                    ? `${rawExit.slice(0,4)}-${rawExit.slice(4,6)}-${rawExit.slice(6,8)}`
+                    : (p.exit_date ? String(p.exit_date).slice(0, 10) : null);
+
+                const targetDate = exitDateStr
+                    ? exitDateStr
+                    : (p.target_days ? this._addBusinessDays(entryDate, Number(p.target_days) + 5) : today);
+                const endDate = targetDate < today ? targetDate : today;
+
+                // entry_date 이후 캔들만 필터링 (당일 종가 매수이므로 당일 제외)
+                // 모든 날짜가 YYYY-MM-DD 형식이므로 문자열 대소 비교 정확히 작동
+                const candles = (ohlcvMap[p.stock_code] || []).filter(c => c.date > entryDate && c.date <= endDate);
+
+                // 최종 종가 수익률 (캔들이 없으면 current_price 또는 0 사용)
+                let finalCloseRet = 0;
+                if (candles.length > 0) {
+                    const lastClose = candles[candles.length - 1].close;
+                    finalCloseRet = ((lastClose - entryPrice) / entryPrice) * 100;
+                } else if (p.final_return != null) {
+                    finalCloseRet = Number(p.final_return);
+                } else if (p.current_price) {
+                    finalCloseRet = ((Number(p.current_price) - entryPrice) / entryPrice) * 100;
+                }
+
+                // 고점 수익률 및 고점 도달일 (D+N 기준: 첫 캔들이 D+1)
+                let peakRet = 0;
+                let peakDayIndex = -1;
+                for (let i = 0; i < candles.length; i++) {
+                    const highRet = ((candles[i].high - entryPrice) / entryPrice) * 100;
+                    if (highRet > peakRet) {
+                        peakRet = highRet;
+                        peakDayIndex = i + 1; // D+1 부터 시작
+                    }
+                }
+                // 캔들이 없으면 DB 저장된 peak_return fallback
+                if (candles.length === 0 && p.peak_return != null) {
+                    peakRet = Number(p.peak_return);
+                }
+
+                // 목표 도달일: targetReturnPct 최초 터치 캔들 인덱스
+                let targetHitDayIndex = -1;
+                const targetPrice = entryPrice * (1 + targetReturnPct / 100);
+                for (let i = 0; i < candles.length; i++) {
+                    if (candles[i].high >= targetPrice) {
+                        targetHitDayIndex = i + 1; // D+1 부터
+                        break;
+                    }
+                }
+
+                // 우대 종가 옵션: 고점이 목표 터치 시 종가를 목표치로 고정
+                let calculatedClose = finalCloseRet;
+                if (peakRet >= targetReturnPct) {
+                    calculatedClose = targetReturnPct;
+                }
+
+                // 승리 판정
+                const isHit = peakRet >= targetReturnPct || finalCloseRet >= 3.0;
+                if (isHit) hits++;
+
+                sumPeak += peakRet;
+                sumClose += calculatedClose;
+
+                if (peakDayIndex > 0) {
+                    totalPeakDays += peakDayIndex;
+                    picksWithPeakDays++;
+                }
+                if (targetHitDayIndex > 0) {
+                    totalTargetHitDays += targetHitDayIndex;
+                    targetHitCount++;
+                }
+
+                // 카테고리별 집계
+                const cat = p.category || 'UNKNOWN';
+                if (!categoryStats[cat]) {
+                    categoryStats[cat] = { count: 0, hits: 0, sumPeak: 0, sumClose: 0, sumPeakDays: 0, peakDaysCount: 0, sumTargetHitDays: 0, targetHitCount: 0 };
+                }
+                categoryStats[cat].count++;
+                if (isHit) categoryStats[cat].hits++;
+                categoryStats[cat].sumPeak += peakRet;
+                categoryStats[cat].sumClose += calculatedClose;
+                if (peakDayIndex > 0) {
+                    categoryStats[cat].sumPeakDays += peakDayIndex;
+                    categoryStats[cat].peakDaysCount++;
+                }
+                if (targetHitDayIndex > 0) {
+                    categoryStats[cat].sumTargetHitDays += targetHitDayIndex;
+                    categoryStats[cat].targetHitCount++;
+                }
+            }
+
+            const overall = {
+                totalPicks,
+                winRate: totalPicks > 0 ? (hits / totalPicks) * 100 : 0,
+                avgPeak: totalPicks > 0 ? sumPeak / totalPicks : 0,
+                avgClose: totalPicks > 0 ? sumClose / totalPicks : 0,
+                avgPeakDays: picksWithPeakDays > 0 ? totalPeakDays / picksWithPeakDays : 0,
+                avgTargetHitDays: targetHitCount > 0 ? totalTargetHitDays / targetHitCount : 0,
+                targetHitRate: totalPicks > 0 ? (targetHitCount / totalPicks) * 100 : 0,
+                alpha: totalPicks > 0 ? sumClose / totalPicks : 0, // 시장 기준값은 추후 연동
+            };
+
+            const byCategory: Record<string, any> = {};
+            for (const [cat, s] of Object.entries(categoryStats)) {
+                byCategory[cat] = {
+                    count: s.count,
+                    winRate: s.count > 0 ? (s.hits / s.count) * 100 : 0,
+                    avgPeak: s.count > 0 ? s.sumPeak / s.count : 0,
+                    avgClose: s.count > 0 ? s.sumClose / s.count : 0,
+                    avgPeakDays: s.peakDaysCount > 0 ? s.sumPeakDays / s.peakDaysCount : 0,
+                    avgTargetHitDays: s.targetHitCount > 0 ? s.sumTargetHitDays / s.targetHitCount : 0,
+                };
+            }
+
+            return { overall, byCategory };
+        } catch (e: any) {
+            console.error('[DB] computePerformanceStats error:', e);
+            return {
+                overall: { totalPicks: 0, winRate: 0, avgPeak: 0, avgClose: 0, avgPeakDays: 0, avgTargetHitDays: 0, targetHitRate: 0, alpha: 0 },
+                byCategory: {}
+            };
+        }
+    }
+
+    /** entry_date(YYYY-MM-DD) 에서 N 영업일 후 날짜 추정 — YYYY-MM-DD 반환 */
+    private _addBusinessDays(dateStr: string, n: number): string {
+        // dateStr은 YYYY-MM-DD 형식
+        const d = new Date(dateStr);
+        // 대략적인 영업일 계산 (공휴일 미반영, 충분히 여유있게 +ceil(n*1.5)일)
+        d.setDate(d.getDate() + Math.ceil(n * 1.5));
+        return d.toISOString().slice(0, 10); // YYYY-MM-DD 형식 그대로 반환
+    }
+
     public runPerformanceOptimizer(picks: any[]) {
         try {
             const activePicks = picks.filter(p => (p.status === 'ACTIVE' || p.status === 'CLOSED') && p.entry_date && p.stock_code);
@@ -4620,12 +4841,18 @@ export class DatabaseService {
             
             const ohlcCache: Record<string, any[]> = {};
             
-            // 프리페치
-            const query = this.db.prepare('SELECT date, high, close FROM market_ohlcv_history WHERE stock_code = ? AND date >= ? ORDER BY date ASC LIMIT 15');
+            // 프리페치: entry_date 다음날부터 조회 (당일 종가 매수이므로 당일 제외)
+            // date > entry_date 조건으로 D+1부터 시작, 최대 보유일(10) + 여유(2) = 12개 봉
+            const query = this.db.prepare('SELECT date, high, close FROM market_ohlcv_history WHERE stock_code = ? AND date > ? ORDER BY date ASC LIMIT 12');
             for (const p of activePicks) {
                 const key = `${p.stock_code}_${p.entry_date}`;
                 if (!ohlcCache[key]) {
-                    ohlcCache[key] = query.all(p.stock_code, p.entry_date) as any[];
+                    // entry_date: YYYY-MM-DD 또는 YYYYMMDD 양방향 지원
+                    const rawEntry = String(p.entry_date ?? '').replace(/-/g, '');
+                    const entryDateFmt = rawEntry.length === 8
+                        ? `${rawEntry.slice(0,4)}-${rawEntry.slice(4,6)}-${rawEntry.slice(6,8)}`
+                        : String(p.entry_date).slice(0, 10);
+                    ohlcCache[key] = query.all(p.stock_code, entryDateFmt) as any[];
                 }
             }
 
@@ -4636,25 +4863,41 @@ export class DatabaseService {
                 const catPicks = activePicks.filter(p => p.category === cat);
                 if (catPicks.length === 0) continue;
 
-                let bestCombo = null;
-                let maxAvgReturn = -999;
+                // ── 카테고리별 일평균 픽 수(picks_per_day) 계산 ──
+                // 관찰 기간(영업일) = 픽 날짜 범위 × 5/7
+                const allPickDates = catPicks.map(p => String(p.pick_date ?? '')).filter(Boolean).sort();
+                let picksPerDay = 1; // 기본값
+                if (allPickDates.length >= 2) {
+                    const firstDate = new Date(allPickDates[0]);
+                    const lastDate  = new Date(allPickDates[allPickDates.length - 1]);
+                    const calDays   = (lastDate.getTime() - firstDate.getTime()) / 86400000 + 1;
+                    const bizDays   = Math.max(Math.round(calDays * 5 / 7), 1);
+                    picksPerDay     = catPicks.length / bizDays;
+                }
+
+                // ── 최적화: 두 가지 목적함수 병행 탐색 ──
+                let bestRawCombo: any       = null;
+                let maxRawReturn            = -999;
+
+                let bestEfficiencyCombo: any = null;
+                let maxEfficiencyScore      = -999;
 
                 for (const targetYield of yieldTargets) {
                     for (const targetDays of holdDaysTargets) {
                         let totalReturn = 0;
                         let hits = 0;
-                        
+
                         for (const p of catPicks) {
                             const history = ohlcCache[`${p.stock_code}_${p.entry_date}`];
                             const entryPrice = Number(p.entry_price || p.current_price);
                             if (!history || history.length === 0 || !entryPrice) continue;
-                            
+
                             let tradeReturn = 0;
                             let isHit = false;
-                            
-                            // 인덱스 0은 당일. targetDays 일 보유 시 최대 targetDays+1 개의 봉
-                            const maxLen = Math.min(history.length, targetDays + 1);
-                            
+
+                            // history[0] = D+1 (당일 제외됐으므로). targetDays일 보유 = D+1 ~ D+targetDays
+                            const maxLen = Math.min(history.length, targetDays);
+
                             for (let i = 0; i < maxLen; i++) {
                                 const dayData = history[i];
                                 const dayHighRet = ((Number(dayData.high) / entryPrice) - 1) * 100;
@@ -4664,34 +4907,55 @@ export class DatabaseService {
                                     break;
                                 }
                             }
-                            
+
                             if (!isHit) {
-                                const lastDayData = history[maxLen - 1]; // Time stop
+                                const lastDayData = history[maxLen - 1]; // Time stop: 마지막 캔들 종가
                                 tradeReturn = ((Number(lastDayData.close) / entryPrice) - 1) * 100;
                             }
-                            
+
                             totalReturn += tradeReturn;
                             if (isHit || tradeReturn >= 3) hits++;
                         }
-                        
+
                         const avgReturn = totalReturn / catPicks.length;
-                        const winRate = (hits / catPicks.length) * 100;
-                        
-                        if (avgReturn > maxAvgReturn) {
-                            maxAvgReturn = avgReturn;
-                            bestCombo = {
+                        const winRate   = (hits / catPicks.length) * 100;
+
+                        // ① 개별 수익 최대 (기존 로직)
+                        if (avgReturn > maxRawReturn) {
+                            maxRawReturn = avgReturn;
+                            bestRawCombo = { targetYield, targetDays, avgReturn, winRate };
+                        }
+
+                        // ② 자본효율 최대: avg_return / holding_days
+                        // 포폴 연환산 수익률 ≈ 252 × avg_return / target_days
+                        const efficiencyScore  = avgReturn / targetDays;       // %/영업일
+                        const annualizedReturn = efficiencyScore * 252;         // 연환산 %
+                        const maxConcurrent   = Math.max(picksPerDay * targetDays, 1);
+                        const capitalPerPos   = 100 / maxConcurrent;           // 종목당 비중 %
+
+                        if (efficiencyScore > maxEfficiencyScore) {
+                            maxEfficiencyScore  = efficiencyScore;
+                            bestEfficiencyCombo = {
                                 targetYield,
                                 targetDays,
                                 avgReturn,
-                                winRate
+                                winRate,
+                                efficiencyScore,
+                                annualizedReturn,
+                                maxConcurrent,
+                                capitalPerPos,
                             };
                         }
                     }
                 }
 
-                if (bestCombo) {
-                    results[cat] = bestCombo;
-                }
+                results[cat] = {
+                    // 기존 호환: bestCombo = bestRawCombo
+                    ...bestRawCombo,
+                    // 신규: 효율 최적 콤보
+                    bestEfficiencyCombo,
+                    picksPerDay,
+                };
             }
             return { success: true, optimized: results };
         } catch (e: any) {

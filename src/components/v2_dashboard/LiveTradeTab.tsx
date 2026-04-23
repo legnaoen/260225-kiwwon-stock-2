@@ -98,6 +98,11 @@ export const LiveTradeTab: React.FC = () => {
     const [isErrorLogOpen, setIsErrorLogOpen] = useState(false);
     const [isCopied, setIsCopied] = useState(false);
 
+    // ─── Grid Search 최적 파라미터 ─────────────────────────────────────────────
+    const [gridSearchResults, setGridSearchResults] = useState<Record<string, any> | null>(null);
+    const [gridSearchCachedAt, setGridSearchCachedAt] = useState<string | null>(null);
+    const [isLoadingGridSearch, setIsLoadingGridSearch] = useState(false);
+
     // ─── 실시간 현재가 Map (종목코드 → 현재가) ────────────────────────────────
     // 동일 종목코드를 여러 티켓이 추적해도 Map에는 1개 엔트리만 유지됨
     const [livePrices, setLivePrices] = useState<Record<string, number>>({});
@@ -159,6 +164,43 @@ export const LiveTradeTab: React.FC = () => {
             setEditForm({ amt: 1000000, days: 7, tp: 10, isActive: false });
         }
     }, [activeStrategy, strategies]);
+
+    // ─── Grid Search 결과 로드 (모달 열릴 때마다) ──────────────────────────────
+    useEffect(() => {
+        if (!isSettingsOpen) return;
+        const load = async () => {
+            if (!window.electronAPI?.getGridSearchResults) return;
+            setIsLoadingGridSearch(true);
+            try {
+                const cached = await window.electronAPI.getGridSearchResults();
+                if (cached?.optimized) {
+                    setGridSearchResults(cached.optimized);
+                    setGridSearchCachedAt(cached.cachedAt || null);
+                } else {
+                    setGridSearchResults(null);
+                    setGridSearchCachedAt(null);
+                }
+            } catch (e) {
+                console.error('[LiveTradeTab] getGridSearchResults error:', e);
+            } finally {
+                setIsLoadingGridSearch(false);
+            }
+        };
+        load();
+    }, [isSettingsOpen]);
+
+    // ─── 최적 파라미터 적용 ────────────────────────────────────────────────────
+    const applyOptimalParams = (type: 'profit' | 'efficiency') => {
+        const result = gridSearchResults?.[activeStrategy];
+        if (!result) return;
+        if (type === 'profit') {
+            setEditForm(prev => ({ ...prev, days: result.targetDays, tp: result.targetYield }));
+        } else {
+            const eff = result.bestEfficiencyCombo;
+            if (!eff) return;
+            setEditForm(prev => ({ ...prev, days: eff.targetDays, tp: eff.targetYield }));
+        }
+    };
 
     // ─── WebSocket 구독 관리 ───────────────────────────────────────────────────
     // tickets가 바뀔 때마다 ACTIVE/SELLING 종목코드를 기준으로
@@ -670,6 +712,89 @@ export const LiveTradeTab: React.FC = () => {
                                                     </div>
                                                 </div>
                                             </div>
+                                        </div>
+
+                                        {/* ── Grid Search 최적 파라미터 패널 ── */}
+                                        <div className={cn(
+                                            "rounded-xl border p-4 space-y-3 transition-all",
+                                            gridSearchResults?.[activeStrategy]
+                                                ? "border-indigo-500/20 bg-gradient-to-b from-indigo-500/5 to-transparent"
+                                                : "border-border/30 bg-muted/10"
+                                        )}>
+                                            <div className="flex items-center justify-between">
+                                                <div className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
+                                                    <span>📊</span>
+                                                    <span>모의매매 Grid Search 최적 파라미터</span>
+                                                </div>
+                                                {gridSearchCachedAt && (
+                                                    <span className="text-[10px] text-muted-foreground/60">
+                                                        분석일: {new Date(gridSearchCachedAt).toLocaleDateString('ko-KR')}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {isLoadingGridSearch ? (
+                                                <div className="flex items-center gap-2 py-2">
+                                                    <span className="animate-spin w-3.5 h-3.5 border-2 border-muted-foreground/30 border-t-indigo-500 rounded-full" />
+                                                    <span className="text-xs text-muted-foreground">분석 결과 로딩 중...</span>
+                                                </div>
+                                            ) : gridSearchResults?.[activeStrategy] ? (
+                                                <div className="space-y-2">
+                                                    {/* 수익 극대 */}
+                                                    {(() => {
+                                                        const r = gridSearchResults[activeStrategy];
+                                                        return (
+                                                            <div className="flex items-center gap-2 bg-indigo-500/8 rounded-lg px-3 py-2 border border-indigo-500/15">
+                                                                <span className="text-[11px] font-black text-indigo-400 whitespace-nowrap w-16 shrink-0">✨ 수익극대</span>
+                                                                <div className="flex-1 text-[11px] text-muted-foreground">
+                                                                    목표 <span className="font-bold text-foreground">{r.targetYield}%</span> 익절 후
+                                                                    최대 <span className="font-bold text-foreground">{r.targetDays}일</span> 보유
+                                                                    <span className="ml-2 text-emerald-500 font-bold">승률 {r.winRate?.toFixed(1)}%</span>
+                                                                    <span className="ml-1 text-rose-500 font-bold">평균 +{r.avgReturn?.toFixed(2)}%</span>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => applyOptimalParams('profit')}
+                                                                    className="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-md bg-indigo-500 hover:bg-indigo-600 text-white transition-colors"
+                                                                >
+                                                                    적용
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })()}
+
+                                                    {/* 효율 극대 — 수익극대와 다를 때만 표시 */}
+                                                    {(() => {
+                                                        const r = gridSearchResults[activeStrategy];
+                                                        const eff = r?.bestEfficiencyCombo;
+                                                        if (!eff) return null;
+                                                        const isSame = eff.targetYield === r.targetYield && eff.targetDays === r.targetDays;
+                                                        if (isSame) return null;
+                                                        return (
+                                                            <div className="flex items-center gap-2 bg-amber-500/8 rounded-lg px-3 py-2 border border-amber-500/15">
+                                                                <span className="text-[11px] font-black text-amber-400 whitespace-nowrap w-16 shrink-0">⚡ 효율극대</span>
+                                                                <div className="flex-1 text-[11px] text-muted-foreground">
+                                                                    목표 <span className="font-bold text-foreground">{eff.targetYield}%</span> 익절 후
+                                                                    최대 <span className="font-bold text-foreground">{eff.targetDays}일</span> 보유
+                                                                    <span className="ml-2 text-amber-400 font-bold">+{eff.efficiencyScore?.toFixed(2)}%/일</span>
+                                                                    <span className="ml-1 text-orange-400 font-bold">연환산 +{Math.round(eff.annualizedReturn ?? 0)}%</span>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => applyOptimalParams('efficiency')}
+                                                                    className="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+                                                                >
+                                                                    적용
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-2 py-1">
+                                                    <span className="text-[11px] text-muted-foreground/70">
+                                                        ⚠️ 데이터 없음 — Performance 탭 &gt; <span className="font-bold">AI 최적 파라미터 검색 (Grid Search)</span>을 먼저 실행하세요.
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
                                     </>
                                 )

@@ -18,9 +18,15 @@ export class SchedulerService {
     private kiwoom = KiwoomService.getInstance()
 
     private scheduledJobs: cron.ScheduledTask[] = []
-    
+
     // OHLCV 중앙 상태 관리
     private ohlcvCollectionStatus: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'FAILED' = 'IDLE';
+
+    // ─── 타임아웃 자동 복구 큐 ───────────────────────────────────
+    // 타임아웃으로 실패한 크론 작업을 전부 보관 → 재연결 후 순서대로 재실행
+    private retryQueue: Array<{ name: string; fn: () => Promise<void> }> = [];
+    private isRecovering: boolean = false;
+    // ──────────────────────────────────────────────────────────────
 
     private async waitForOhlcv(timeoutMinutes: number = 40): Promise<boolean> {
         const start = Date.now();
@@ -62,12 +68,82 @@ export class SchedulerService {
     }
 
     /**
+     * 타임아웃으로 실패한 크론 작업들을 순서대로 재실행
+     */
+    private async flushRetryQueue() {
+        // 현재 큐를 스냅샷으로 가져와서 처리 (실행 중 새 항목 추가 방지)
+        const tasks = [...this.retryQueue];
+        this.retryQueue = [];
+        for (const task of tasks) {
+            console.log(`[SchedulerService] 🔄 보류 작업 재실행: [${task.name}]`);
+            try {
+                await task.fn();
+                this.telegram.sendMessage(`✅ [복구 완료] ${task.name}`);
+            } catch (e: any) {
+                console.error(`[SchedulerService] ❌ [복구 재실패] ${task.name}:`, e.message);
+                this.telegram.sendMessage(`❌ [복구 재실패] ${task.name}\n오류: ${e.message}`);
+            }
+        }
+    }
+
+    /**
+     * 타임아웃 자동 복구 래퍼
+     * 개별 크론의 기존 재시도 로직과 완전 독립으로 동작.
+     * 타임아웃 계열 에러가 발생하면 retryQueue에 등록하고 조용히 종료.
+     * (타임아웃이 아닌 에러는 기존 방식대로 처리)
+     */
+    private withRetryOnTimeout(name: string, fn: () => Promise<void>): () => Promise<void> {
+        return async () => {
+            try {
+                await fn();
+            } catch (e: any) {
+                const isTimeout = e.code === 'ETIMEDOUT' || e.code === 'ECONNABORTED'
+                    || (e.message && e.message.includes('Circuit Breaker'));
+                if (isTimeout) {
+                    console.warn(`[Scheduler] ⏸️ [${name}] 타임아웃 감지 → 복구 큐 등록`);
+                    // 중복 등록 방지
+                    if (!this.retryQueue.find(t => t.name === name)) {
+                        this.retryQueue.push({ name, fn });
+                    }
+                }
+                // 타임아웃이 아닌 에러는 래퍼 밖으로 throw하지 않음
+                // (각 크론의 catch 블록에서 이미 처리됨)
+            }
+        };
+    }
+
+    /**
      * 자동화 스케줄 초기화 (저장된 설정 기반)
      */
     public async initSchedules() {
         // 기존 작업 중지 및 초기화
         this.scheduledJobs.forEach(job => job.stop())
         this.scheduledJobs = []
+
+        // ─── 타임아웃 자동 복구 리스너 등록 ────────────────────────
+        // 기존 리스너가 있으면 중복 등록 방지
+        eventBus.removeAllListeners(SystemEvent.KIWOOM_TIMEOUT);
+        eventBus.on(SystemEvent.KIWOOM_TIMEOUT, async ({ code }: { code: string }) => {
+            if (this.isRecovering) {
+                console.log('[SchedulerService] 복구 이미 진행 중 — 중복 트리거 무시');
+                return;
+            }
+            this.isRecovering = true;
+            console.warn(`[SchedulerService] 🚨 KIWOOM_TIMEOUT 수신 (${code}). 강제 재연결 시작...`);
+            this.telegram.sendMessage(`🚨 키움 타임아웃 감지 (${code})\n→ 자동 재연결 시도 중...`);
+
+            const ok = await this.kiwoom.forceReconnect();
+
+            if (ok) {
+                const queueLen = this.retryQueue.length;
+                this.telegram.sendMessage(`✅ 재연결 성공!${queueLen > 0 ? `\n보류된 크론 작업 ${queueLen}개를 순서대로 재실행합니다.` : '\n(재시도 대기 작업 없음)'}`);
+                await this.flushRetryQueue();
+            } else {
+                this.telegram.sendMessage(`🚨 재연결 실패.\n수동으로 앱을 재시작해주세요.`);
+            }
+            this.isRecovering = false;
+        });
+        // ────────────────────────────────────────────────────────────
 
         // ═══ [Step 1] NewsDataHub 크론 (AI보다 반드시 먼저 등록) ═══
         const hubSettings = store.get('news_hub_settings') as NewsHubSettings || DEFAULT_NEWS_HUB_SETTINGS
@@ -227,7 +303,7 @@ export class SchedulerService {
 
             // ─── 종목 AI 파이프라인 (3단계, 5분 간격) ───────────────────────
             // [Step 1] 09:35 수급 AI: NaverFlow(09:26) 데이터 확보 후 급등/거래대금 교차 분석
-            const momentumJob = cron.schedule('35 09 * * 1-5', async () => {
+            const momentumJob = cron.schedule('35 09 * * 1-5', this.withRetryOnTimeout('수급AI-09:35', async () => {
                 console.log('[Scheduler] 📈 수급 AI (MomentumAnalyst) 자동 실행 시작...')
                 try {
                     const { MomentumAnalystAgent } = await import('./v2_agents/MomentumAnalystAgent')
@@ -235,7 +311,7 @@ export class SchedulerService {
                 } catch (e: any) {
                     console.error('[Scheduler] 수급 AI 오류:', e.message)
                 }
-            }, { timezone: 'Asia/Seoul' })
+            }), { timezone: 'Asia/Seoul' })
 
             // [Step 2] 09:41 리포트 AI: 증권사 리포트 기반 펀더멘탈 우량주 발굴 (스웜 AI 충돌 회피로 1분 지연)
             const fundamentalJob = cron.schedule('41 09 * * 1-5', async () => {
@@ -264,7 +340,7 @@ export class SchedulerService {
             //   이전에는 09:45(PM1)과 09:48(PM2)이 별개 크론으로 실행되어
             //   PM1의 신규 픽(newPicks) 반환값이 PM2로 전달되지 않는 데이터 체인 단절 버그가 있었음.
             //   runDailyReview()는 내부에서 PM1→PM2를 순서대로 실행하며 결과를 직접 전달함.
-            const pmDailyJob = cron.schedule('45 09 * * 1-5', async () => {
+            const pmDailyJob = cron.schedule('45 09 * * 1-5', this.withRetryOnTimeout('PM통합리뷰-09:45', async () => {
                 console.log('[Scheduler] 🧑‍💼 포트폴리오 매니저 (PM1→PM2 통합 리뷰) 실행 시작...')
                 try {
                     const { PortfolioManagerAgent } = await import('./v2_agents/PortfolioManagerAgent')
@@ -272,7 +348,7 @@ export class SchedulerService {
                 } catch (e: any) {
                     console.error('[Scheduler] PM 통합 리뷰 오류:', e.message)
                 }
-            }, { timezone: 'Asia/Seoul' })
+            }), { timezone: 'Asia/Seoul' })
 
             // [Step 4-B] 14:05 PM 장중 2차 미니 리뷰 (포트폴리오 중간 점검 및 리밸런싱) - 잦은 매매 방지를 위해 비활성화
             /*
@@ -357,7 +433,7 @@ export class SchedulerService {
             // 수집 데이터: 장 마감 약 15~25분 전 가격 (오늘 종가와 오차 < 1%)
             // CrossPeriodAnalyzer는 이 오늘 데이터를 포함한 60봉을 기반으로 분석
             // 진입가 최종 보정은 15:32에 실제 동시호가 확정 종가로 덮어쓰기
-            const marketDailyJob = cron.schedule('05 15 * * 1-5', async () => {
+            const marketDailyJob = cron.schedule('05 15 * * 1-5', this.withRetryOnTimeout('OHLCV수집+모의매매-15:05', async () => {
                 this.ohlcvCollectionStatus = 'RUNNING';
                 const startTime = new Date()
                 const fmt = (d: Date) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
@@ -418,19 +494,113 @@ export class SchedulerService {
                     let trackEMsg = pickResultE.success 
                         ? `Track E (단기눌림): 매수 후보 ${pickResultE.saved}개 저장, 제외 ${pickResultE.skipped}개`
                         : `Track E 오류: ${pickResultE.error ?? '후보 없음'}`
-                    
+
+                    // ─────────────────────────────────────────────────────────────────
+                    // 🔥 [실전 매매 연동] 모의매매 선정 완료 직후
+                    // 계획서 2.3: "모의매매 파이프라인이 종목을 선별할 때,
+                    //              실전 매매 활성 전략과 일치하는 종목이 선별되면
+                    //              그 즉시 실전 매수 주문 파이프라인으로 넘겨 실행"
+                    // ─────────────────────────────────────────────────────────────────
+                    try {
+                        const { LiveTradeLedgerService } = await import('./LiveTradeLedgerService')
+                        const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService')
+                        const strategies = LiveTradeLedgerService.getInstance().getStrategies()
+                        const activeLiveStrategy = strategies.find((s: any) => s.is_active === 1)
+
+                        if (activeLiveStrategy) {
+                            const activeCategory = activeLiveStrategy.strategy_category as string
+                            const maxHoldDays = activeLiveStrategy.max_hold_days as number
+
+                            // 전략 카테고리 → Track 픽 테이블 매핑
+                            // UI 카테고리 키와 TrackBuyAgent BUY_CATEGORIES가 동일한 문자열을 사용
+                            const CATEGORY_TO_PICK_TABLE: Record<string, string> = {
+                                'TRUE_LEADER':             'track_a_buy_picks',
+                                'EMERGING_STAR':           'track_b_buy_picks',
+                                'PULLBACK_REBOUND':        'track_c_buy_picks',
+                                'PULLBACK_DIP':            'track_c_buy_picks',
+                                'INTRADAY_SURGE':          'track_d_buy_picks',
+                                'SHORT_TERM_CONSOLIDATION':'track_e_buy_picks',
+                            }
+
+                            const pickTable = CATEGORY_TO_PICK_TABLE[activeCategory]
+
+                            if (pickTable) {
+                                const today = (await import('../utils/DateUtils')).getKstDate()
+                                const rawDb = (DatabaseService.getInstance() as any).db
+
+                                // 모의매매 상태와 무관하게 오늘 선정된 종목 조회 (완전 분리)
+                                // category 필터: 동일 테이블에 여러 카테고리가 섞여 있는 경우 방지
+                                // (예: track_c에 PULLBACK_REBOUND, PULLBACK_DIP 모두 저장됨)
+                                const todayPicks: any[] = rawDb.prepare(`
+                                    SELECT stock_code, stock_name, current_price, entry_price
+                                    FROM ${pickTable}
+                                    WHERE pick_date = ? AND category = ?
+                                `).all(today, activeCategory)
+
+                                if (todayPicks.length > 0) {
+                                    // targetExitDate: 오늘부터 maxHoldDays 영업일 후 계산
+                                    const calcTargetExitDate = (fromDate: string, businessDays: number): string => {
+                                        const d = new Date(fromDate)
+                                        let added = 0
+                                        while (added < businessDays) {
+                                            d.setDate(d.getDate() + 1)
+                                            const dow = d.getDay()
+                                            if (dow !== 0 && dow !== 6) added++ // 주말 제외
+                                        }
+                                        return d.toISOString().split('T')[0]
+                                    }
+                                    const targetExitDate = calcTargetExitDate(today, maxHoldDays)
+
+                                    let liveTradeLog = `\n\n🔥 [실전 매매 자동 매수 연동] 전략: ${activeCategory} | 목표일: ${targetExitDate}`
+                                    for (const pick of todayPicks) {
+                                        // track_X_buy_picks의 current_price/entry_price는 INSERT 시 항상 0
+                                        // → 15:05 OHLCV 수집으로 저장된 market_ohlcv_history.close를 사용
+                                        const ohlcvRow: any = rawDb.prepare(`
+                                            SELECT close FROM market_ohlcv_history
+                                            WHERE stock_code = ? AND date = ?
+                                        `).get(pick.stock_code, today)
+                                        const currentPrice: number = ohlcvRow?.close ?? 0
+
+                                        if (currentPrice <= 0) {
+                                            liveTradeLog += `\n  ⚠️ ${pick.stock_name}: OHLCV 현재가 없음 → 매수 스킵`
+                                            continue
+                                        }
+                                        try {
+                                            await LiveTradeExecutionService.getInstance().executeBuy(
+                                                pick.stock_code,
+                                                pick.stock_name,
+                                                activeCategory,
+                                                currentPrice,
+                                                targetExitDate
+                                            )
+                                            liveTradeLog += `\n  ✅ ${pick.stock_name}(${pick.stock_code}): ${currentPrice.toLocaleString()}원 매수 발동`
+                                        } catch (buyErr: any) {
+                                            liveTradeLog += `\n  🚨 ${pick.stock_name} 매수 실패: ${buyErr.message}`
+                                        }
+                                    }
+                                    trackAMsg = trackAMsg // 기존 메시지 유지
+                                    this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정${liveTradeLog}`)
+                                    return // 실전매매 연동 시 텔레그램 중복 발송 방지
+                                }
+                            }
+                        }
+                    } catch (liveTradeConnErr: any) {
+                        console.error('[Scheduler] 실전 매매 연동 중 오류 (무시하고 계속):', liveTradeConnErr.message)
+                        this.telegram.sendMessage(`⚠️ [실전 매매 연동 오류]\n모의매매 선정은 완료되었으나 실전 매수 연동 중 오류가 발생했습니다.\n오류: ${liveTradeConnErr.message}`)
+                    }
+
                     this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정`)
                 } catch (e: any) {
                     this.ohlcvCollectionStatus = 'FAILED';
                     console.error('[Scheduler] 데이터 수집 / 모의매매 선정 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:05] OHLCV 수집 또는 모의매매 선정 실패\n오류: ${e.message}\n→ 주도주 탭에서 수동 실행 필요`)
                 }
-            }, { timezone: 'Asia/Seoul' })
+            }), { timezone: 'Asia/Seoul' })
 
             // [Track A, B, C, D, E] 15:32 진입가 최종 보정 (동시호가 종료 2분 후)
             // ① 오늘 PENDING 종목의 종가를 Kiwoom API로 재수집 (동시호가 확정 종가 반영)
             // ② 갱신된 market_ohlcv_history.close를 읽어 entry_price 확정 (PENDING → ACTIVE)
-            const trackEntryJob = cron.schedule('32 15 * * 1-5', async () => {
+            const trackEntryJob = cron.schedule('32 15 * * 1-5', this.withRetryOnTimeout('진입가확정-15:32', async () => {
                 const isReady = await this.waitForOhlcv();
                 if (!isReady) {
                     console.log('[Scheduler] 💰 진입가 확정 취소: OHLCV 선행 작업 미완료');
@@ -485,7 +655,7 @@ export class SchedulerService {
                     console.error('[Scheduler] Track 진입가 확정 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:32] 진입가 확정 실패\n오류: ${e.message}`)
                 }
-            }, { timezone: 'Asia/Seoul' })
+            }), { timezone: 'Asia/Seoul' })
 
             // [Step 2-C] 09:43 메가 테마 관리: 오전 테마 AI(09:41) 실행 후 집계 (개선 작업 중 -> 활성화)
             const megaThemeJob = cron.schedule('43 09 * * 1-5', async () => {
@@ -518,7 +688,7 @@ export class SchedulerService {
                     // Ignore background errors
                 }
             }, { timezone: 'Asia/Seoul' });
-            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, phase2MiniJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob, liveTradeMonitorJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
+            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob, liveTradeMonitorJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)
@@ -582,8 +752,13 @@ export class SchedulerService {
                             this.telegram.sendMessage(`🚀 [Moonshot] 텐베거 자동 신규 발굴 스캐너(Scanner AI)가 백그라운드에서 실행되었습니다. 지정된 조건검색을 수집합니다.`);
                             
                             try {
-                                // 설정된 조건식이 없으면 UI의 기본값(101, 201, 301)을 대체로 사용
-                                const activeConditions = moonshotSettings.conditions || ['101', '201', '301']; 
+                                // 사용자가 저장한 조건식을 그대로 사용. 미설정 시 경고 후 중단.
+                                const activeConditions: string[] = moonshotSettings.conditions || [];
+                                if (activeConditions.length === 0) {
+                                    console.warn('[SchedulerService] Moonshot Scanner: 저장된 조건식이 없어 스캔을 건너뜁니다.');
+                                    this.telegram.sendMessage(`⚠️ [Moonshot Scanner] 조건식이 설정되지 않았습니다.\n텐베거 AI 탭 > 우상단 설정(⚙️)에서 A/B/C안 조건식을 지정 후 저장하세요.`);
+                                    return;
+                                }
                                 const targetSeqs = activeConditions;
 
                                 let allFoundStocks: any[] = [];

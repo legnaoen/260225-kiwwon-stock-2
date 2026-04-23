@@ -43,12 +43,12 @@ export class LiveTradeReconciliationService {
     public async reconcileDailyExecutions(): Promise<void> {
         try {
             console.log('[LiveTradeReconciliation] Starting daily execution reconciliation...');
-            this.telegram.sendMessage('🔍 **[장 마감 정산 시작]**\n실전매매 티켓과 실제 키움 계좌 잔고를 대조하여 체결 수량을 정산합니다.');
+            this.telegram.sendMessage('🔍 **[실전매매 잔고 정합 확인 시작]**\n실전매매 장부(DB 티켓)와 실제 키움 계좌 잔고를 대조하여 체결 수량을 확인합니다.');
 
             // 1. 계좌번호 가져오기 (electron-store 기반)
             const Store = (await import('electron-store')).default;
             const store = new Store();
-            const settings = store.get('settings') as any;
+            const settings = store.get('autotrade_settings') as any;
             const accountNo = settings?.selectedAccount;
 
             if (!accountNo) {
@@ -159,7 +159,7 @@ export class LiveTradeReconciliationService {
             }
 
             console.log('[LiveTradeReconciliation] Reconciliation completed.');
-            this.telegram.sendMessage(`✅ **[장 마감 정산 완료]**\n- 처리된 변경 사항: ${changesCount}건\n- 장부 동기화가 완료되었습니다.`);
+            this.telegram.sendMessage(`✅ **[실전매매 잔고 정합 확인 완료]**\n- 처리된 변경 사항: ${changesCount}건\n- 장부 동기화가 완료되었습니다.`);
 
         } catch (error: any) {
             console.error('[LiveTradeReconciliation] Error during daily reconciliation:', error);
@@ -169,7 +169,7 @@ export class LiveTradeReconciliationService {
                 message: '장 마감 정산(Reconciliation) 중 에러 발생',
                 detail: error.message
             });
-            this.telegram.sendMessage(`🚨 **[장 마감 정산 에러]**\n정산 중 오류가 발생했습니다.\n- 에러: ${error.message}`);
+            this.telegram.sendMessage(`🚨 **[실전매매 잔고 정합 확인 에러]**\n잔고 대조 중 오류가 발생했습니다.\n- 에러: ${error.message}`);
         }
     }
 }

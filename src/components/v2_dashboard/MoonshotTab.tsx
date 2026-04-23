@@ -259,7 +259,13 @@ export default function MoonshotTab() {
             const { electronAPI } = window as any;
             if (electronAPI && electronAPI.invoke) {
                 const s = await electronAPI.invoke('moonshot:get-settings');
-                if (s) setMoonshotSettings(s);
+                if (s) {
+                    setMoonshotSettings(s);
+                    // 저장된 조건식 ID 복원 (실제 키움 조건식 목록이 로드되기 전이므로 localStorage 덮어쓰기)
+                    if (s.conditions && s.conditions.length >= 1) setSelectedConditionA(s.conditions[0]);
+                    if (s.conditions && s.conditions.length >= 2) setSelectedConditionB(s.conditions[1]);
+                    if (s.conditions && s.conditions.length >= 3) setSelectedConditionC(s.conditions[2]);
+                }
             }
         };
         fetchSettings();
@@ -268,10 +274,14 @@ export default function MoonshotTab() {
     const handleSaveSettings = async () => {
         const { electronAPI } = window as any;
         if (electronAPI && electronAPI.invoke) {
-            await electronAPI.invoke('moonshot:save-settings', moonshotSettings);
+            // A/B/C안 조건식 ID를 conditions 배열로 묶어서 함께 저장 → 백엔드 크론이 사용
+            const settingsToSave = {
+                ...moonshotSettings,
+                conditions: [selectedConditionA, selectedConditionB, selectedConditionC].filter(Boolean)
+            };
+            await electronAPI.invoke('moonshot:save-settings', settingsToSave);
         }
         setShowSettings(false);
-        // Toast message
         alert('Moonshot AI 스케줄 설정이 저장되었습니다.');
     };
 

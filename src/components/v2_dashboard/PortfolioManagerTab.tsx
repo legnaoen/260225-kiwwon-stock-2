@@ -488,6 +488,32 @@ export const PortfolioManagerTab: React.FC = () => {
         }
     }
 
+    const [isRefreshingPrices, setIsRefreshingPrices] = useState(false)
+
+    const handleRefreshHeldPrices = async () => {
+        setIsRefreshingPrices(true)
+        appendLog(`📡 보유 종목(HELD) 당일 현재가 수동 갱신 시작...`)
+        try {
+            const result = await (window.electronAPI as any).refreshHeldPrices()
+            if (!result?.success) {
+                appendLog(`❌ 갱신 실패: ${result?.error || result?.message || '알 수 없는 오류'}`)
+            } else {
+                appendLog(`✅ 갱신 완료: ${result.updated}개 성공, ${result.failed}개 실패`)
+                // 성공한 종목 목록을 로그로 간략히 출력
+                if (result.results && result.results.length > 0) {
+                    const sample = result.results.slice(0, 3).map((r: any) => `${r.name}(${r.rate > 0 ? '+' : ''}${r.rate.toFixed(2)}%)`).join(', ');
+                    const more = result.results.length > 3 ? ` 외 ${result.results.length - 3}개` : '';
+                    appendLog(`  ↳ 갱신 내역: ${sample}${more}`);
+                }
+                fetchPortfolio()
+            }
+        } catch (e: any) {
+            appendLog(`❌ 오류: ${e.message}`)
+        } finally {
+            setIsRefreshingPrices(false)
+        }
+    }
+
     // ── Derived stats ──
     const activeList = portfolio.filter(p => p.status !== 'DROPPED')
 
@@ -623,12 +649,36 @@ export const PortfolioManagerTab: React.FC = () => {
                             {activeList.length} / 20
                         </span>
                     </div>
-                    <button
-                        onClick={fetchPortfolio}
-                        className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted/30 transition-colors"
-                    >
-                        ⟳ 새로고침
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handleRefreshHeldPrices}
+                            disabled={isRefreshingPrices}
+                            className={cn(
+                                "flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded transition-colors font-semibold border",
+                                isRefreshingPrices 
+                                    ? "bg-muted text-muted-foreground border-transparent cursor-not-allowed" 
+                                    : "bg-indigo-500/10 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20"
+                            )}
+                        >
+                            {isRefreshingPrices ? (
+                                <>
+                                    <div className="w-3 h-3 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+                                    갱신 중...
+                                </>
+                            ) : (
+                                <>
+                                    <Activity className="w-3.5 h-3.5" />
+                                    보유종목 현재가 갱신
+                                </>
+                            )}
+                        </button>
+                        <button
+                            onClick={fetchPortfolio}
+                            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded hover:bg-muted/30 transition-colors"
+                        >
+                            ⟳ 새로고침
+                        </button>
+                    </div>
                 </div>
 
                 {/* Tab Switcher */}

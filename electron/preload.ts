@@ -264,6 +264,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMarketLeaders: (days: number, topN: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN, peakoutSettings }),
     getCrossPeriodProfile: (topN?: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-cross-period-profile', { topN, peakoutSettings }),
     getSimTradePicks: () => ipcRenderer.invoke('v2:get-sim-trade-picks'),
+    getPerformanceStats: (picks: any[], targetReturn: number) => ipcRenderer.invoke('v2:get-performance-stats', { picks, targetReturn }),
     forceRefreshSimTradePrices: () => ipcRenderer.invoke('v2:force-refresh-sim-trade-prices'),
     runOhlcvCollection: () => ipcRenderer.invoke('v2:run-ohlcv-collection'),
     runTrackABuyAgent: (date?: string) => ipcRenderer.invoke('track-a:run-buy-agent', date),
@@ -370,6 +371,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     clearAiPicks: () => ipcRenderer.invoke('ai-analyst:clear-picks'),
     // 관심종목(WAIT_DIP/HOLD/WATCHLIST)에 잘못 기록된 진입가·수익률만 선택적 초기화
     cleanupWatchlistPrices: () => ipcRenderer.invoke('ai-analyst:cleanup-watchlist-prices'),
+    refreshHeldPrices: () => ipcRenderer.invoke('ai-analyst:refresh-held-prices'),
     // [TEST] 종목 차트 다이제스트 테스트
     testChartDigest: (code: string, name: string) => ipcRenderer.invoke('ai-analyst:test-chart-digest', code, name),
     // 서브 AI 오답노트 작성 (수동)
@@ -468,6 +470,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('livetrade:error', listener)
         return () => ipcRenderer.removeListener('livetrade:error', listener)
     },
+    // Grid Search 최적 파라미터 캐시 조회
+    getGridSearchResults: () => ipcRenderer.invoke('optimizer:get-grid-search-results'),
 })
 
 

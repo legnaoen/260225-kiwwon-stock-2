@@ -607,6 +607,68 @@ ipcMain.handle('ai-analyst:clear-picks', async () => {
 
 // 관심종목(WAIT_DIP/HOLD/WATCHLIST)에 잘못 기록된 진입가·수익률 초기화
 // 이전 버전 데이터 정합성 복구용 (전체 삭제 아님, 해당 필드만 0으로 리셋)
+// ── 보유 종목(HELD) 당일 현재가·수익률 수동 갱신 ──────────────────────────────────────────
+// PM2 자동 사전갱신과 동일한 로직을 사용자가 UI에서 즉시 호출 가능하게 노출합니다.
+ipcMain.handle('ai-analyst:refresh-held-prices', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const { KiwoomService } = await import('./services/KiwoomService');
+        const db = DatabaseService.getInstance();
+        const rawDb = (db as any).db;
+        const kiwoom = KiwoomService.getInstance();
+
+        const heldStocks: any[] = rawDb.prepare(
+            `SELECT stock_code, stock_name, entry_price FROM maiis_portfolio WHERE status IN ('HELD', 'HOLDING')`
+        ).all();
+
+        if (heldStocks.length === 0) {
+            return { success: true, updated: 0, failed: 0, message: '갱신할 보유 종목이 없습니다.' };
+        }
+
+        let updated = 0;
+        let failed = 0;
+        const results: { name: string; price: number; rate: number }[] = [];
+
+        for (const stock of heldStocks) {
+            try {
+                const priceInfo = await kiwoom.getStockBasicInfo(stock.stock_code);
+                const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
+                const rawCur = String(body.stk_prc || body.cur_prc || body.stck_prpr || body.currentPrice || 0).replace(/[^0-9-]/g, '');
+                const curPrice = Math.abs(parseInt(rawCur, 10)) || 0;
+
+                if (curPrice > 0) {
+                    if (stock.entry_price > 0) {
+                        const profitRate = ((curPrice - stock.entry_price) / stock.entry_price) * 100;
+                        rawDb.prepare(
+                            `UPDATE maiis_portfolio SET current_price = ?, profit_rate = ?, updated_at = ? WHERE stock_code = ?`
+                        ).run(curPrice, profitRate, db.getKstTimestamp(), stock.stock_code);
+                        results.push({ name: stock.stock_name, price: curPrice, rate: profitRate });
+                        console.log(`[Main:refresh-held] ✅ ${stock.stock_name}: ${curPrice.toLocaleString()}원 / ${profitRate > 0 ? '+' : ''}${profitRate.toFixed(2)}%`);
+                    } else {
+                        rawDb.prepare(
+                            `UPDATE maiis_portfolio SET current_price = ?, updated_at = ? WHERE stock_code = ?`
+                        ).run(curPrice, db.getKstTimestamp(), stock.stock_code);
+                        results.push({ name: stock.stock_name, price: curPrice, rate: 0 });
+                    }
+                    updated++;
+                } else {
+                    failed++;
+                    console.warn(`[Main:refresh-held] ⚠️ ${stock.stock_name}: 현재가 조회 실패`);
+                }
+                await new Promise(r => setTimeout(r, 300)); // API Rate limit
+            } catch (e: any) {
+                failed++;
+                console.warn(`[Main:refresh-held] ⚠️ ${stock.stock_name} 오류: ${e.message}`);
+            }
+        }
+
+        return { success: true, updated, failed, results };
+    } catch (e: any) {
+        console.error('[Main] refresh-held-prices 오류:', e);
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('ai-analyst:cleanup-watchlist-prices', async () => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService');
@@ -860,6 +922,20 @@ ipcMain.handle('v2:get-sim-trade-picks', async () => {
     } catch (error: any) {
         console.error('[SimTrade] get-sim-trade-picks error:', error);
         return { picks: [] };
+    }
+})
+
+// ─── [Performance] OHLCV 기반 목표가/고점 도달일 정밀 계산 ───
+ipcMain.handle('v2:get-performance-stats', async (_event, { picks, targetReturn }: { picks: any[], targetReturn: number }) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().computePerformanceStats(picks, targetReturn);
+    } catch (e: any) {
+        console.error('[PerformanceStats] error:', e);
+        return {
+            overall: { totalPicks: 0, winRate: 0, avgPeak: 0, avgClose: 0, avgPeakDays: 0, avgTargetHitDays: 0, targetHitRate: 0, alpha: 0 },
+            byCategory: {}
+        };
     }
 })
 
@@ -3107,10 +3183,22 @@ ipcMain.handle('ai-analyst:delete-trade-history-item', async (_event, id: number
 ipcMain.handle('ai-analyst:run-performance-optimizer', async (_event, picks: any[]) => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService')
-        return DatabaseService.getInstance().runPerformanceOptimizer(picks)
+        const result = DatabaseService.getInstance().runPerformanceOptimizer(picks)
+        // Grid Search 결과를 electron-store에 캐싱 (실전 전략 설정 모달에서 활용)
+        if (result?.success && result?.optimized) {
+            store.set('grid_search_results', {
+                optimized: result.optimized,
+                cachedAt: new Date().toISOString()
+            })
+        }
+        return result
     } catch (err: any) {
         return { deleted: false, error: err.message }
     }
+})
+
+ipcMain.handle('optimizer:get-grid-search-results', () => {
+    return store.get('grid_search_results') || null
 })
 
 ipcMain.handle('ai-analyst:delete-event-log', async (_event, id: number) => {

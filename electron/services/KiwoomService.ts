@@ -32,7 +32,14 @@ export class KiwoomService {
     });
 
     private constructor() {
-        // Setup axios interceptors for diagnostic logging on the scoped instance
+        this.setupInterceptors();
+    }
+
+    /**
+     * axios 인터셉터 설정 (진단 로깅 + 에러 이벤트 발행)
+     * forceReconnect() 시 재등록할 수 있도록 별도 메서드로 분리
+     */
+    private setupInterceptors() {
         this.kiwoomAxios.interceptors.request.use((config) => {
             (config as any).metadata = { startTime: new Date() };
             return config;
@@ -110,6 +117,11 @@ export class KiwoomService {
                             time: logEntry.time,
                             level
                         });
+
+                        // ★ 타임아웃 전용 이벤트: SchedulerService 자동 복구 트리거
+                        if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+                            eventBus.emit(SystemEvent.KIWOOM_TIMEOUT, { code: error.code });
+                        }
                     }
                 }
                 throw error;
@@ -276,6 +288,40 @@ export class KiwoomService {
         this.isCircuitHalted = false;
         this.lastHaltTime = 0;
         this.pendingRequestsCount = 0;
+    }
+
+    /**
+     * 강제 재연결 (타임아웃 자동 복구용)
+     * 프로그램 재시작과 동일한 효과: requestQueue + 토큰 + axios 인스턴스 리셋
+     */
+    public async forceReconnect(): Promise<boolean> {
+        console.log('[KiwoomService] 🔄 강제 재연결 시작 (requestQueue + 토큰 + 연결 풀 리셋)...');
+        try {
+            // 1. requestQueue 리셋 — Promise 체인 오염 해소
+            this.requestQueue = Promise.resolve();
+            this.pendingRequestsCount = 0;
+
+            // 2. Circuit Breaker 해제
+            this.isCircuitHalted = false;
+            this.lastHaltTime = 0;
+
+            // 3. 토큰 강제 재발급 — 서버와 세션 재동기화
+            this.tokenManager.clearTokens();
+            await this.tokenManager.getAccessToken(true);
+
+            // 4. axios 인스턴스 재생성 — TCP 연결 풀(Keep-Alive) 초기화
+            this.kiwoomAxios = axios.create({
+                baseURL: BASE_URL,
+                timeout: 12000,
+            });
+            this.setupInterceptors();
+
+            console.log('[KiwoomService] ✅ 강제 재연결 성공');
+            return true;
+        } catch (e: any) {
+            console.error('[KiwoomService] ❌ 강제 재연결 실패:', e.message);
+            return false;
+        }
     }
 
     // [LEGACY] 키움 계좌 목록 조회 (V2 전환으로 비활성화 -> 복구)

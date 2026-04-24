@@ -46,6 +46,8 @@ export default function Settings() {
     const [aiSettings, setAiSettings] = useState({
         geminiKey: '',
         modelName: 'gemini-1.5-flash',
+        deepModelName: 'gemini-3.1-pro-preview',
+        deepModelAgents: [] as string[],
         virtualInitialBalance: 1000000,
         buyStartTime: '09:10',
         buyEndTime: '15:00',
@@ -164,6 +166,8 @@ export default function Settings() {
                 setAiSettings({
                     geminiKey: savedAiSettings.geminiKey || '',
                     modelName: savedAiSettings.modelName || 'gemini-1.5-flash',
+                    deepModelName: savedAiSettings.deepModelName || 'gemini-3.1-pro-preview',
+                    deepModelAgents: savedAiSettings.deepModelAgents || [],
                     virtualInitialBalance: savedAiSettings.virtualInitialBalance ?? 1000000,
                     buyStartTime: savedAiSettings.buyStartTime || '09:10',
                     buyEndTime: savedAiSettings.buyEndTime || '15:00',
@@ -410,15 +414,16 @@ export default function Settings() {
         }
         setIsTestingAi(true)
         setStatusAi('idle')
-        setMessageAi('Gemini API 연결 테스트 중...')
+        setMessageAi('Gemini 기본 및 심층 모델 연결 테스트 중...')
         try {
             const result = await window.electronAPI.testAiConnection({
                 geminiKey: aiSettings.geminiKey,
-                modelName: aiSettings.modelName
+                modelName: aiSettings.modelName,
+                deepModelName: aiSettings.deepModelName
             })
             if (result.success) {
                 setStatusAi('success')
-                setMessageAi(`연결 성공! 응답: ${result.response}`)
+                setMessageAi(result.response)
             } else {
                 setStatusAi('error')
                 setMessageAi(`연결 실패: ${result.error}`)
@@ -1268,28 +1273,127 @@ export default function Settings() {
                                                 />
                                             </div>
 
-                                            <div className="space-y-3">
-                                                <label className="text-sm font-bold">사용할 모델명</label>
-                                                <select
-                                                    value={aiSettings.modelName}
-                                                    onChange={(e) => setAiSettings({ ...aiSettings, modelName: e.target.value })}
-                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors font-medium"
-                                                >
-                                                    <optgroup label="Gemini 3 최신 라인업 (Preview)">
-                                                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 및 에이전트 특화)</option>
-                                                        <option value="gemini-3-flash-preview">Gemini 3 Flash (프런티어급 성능 가성비)</option>
-                                                        <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (경량형 초고속)</option>
-                                                    </optgroup>
-                                                    <optgroup label="Gemini 2.5 안정화 버전 (GA)">
-                                                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (안정적 추천)</option>
-                                                        <option value="gemini-2.5-flash">Gemini 2.5 Flash (표준 속도)</option>
-                                                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (경량형 가성비)</option>
-                                                    </optgroup>
-                                                    <optgroup label="Discontinued / Legacy">
-                                                        <option value="gemini-2.0-flash" disabled>Gemini 2.0 Flash (지원 중단)</option>
-                                                        <option value="gemini-1.5-flash" disabled>Gemini 1.5 Flash (지원 중단)</option>
-                                                    </optgroup>
-                                                </select>
+                                            <div className="space-y-6">
+                                                <div className="space-y-3">
+                                                    <label className="text-sm font-bold text-muted-foreground">기본 AI 모델 (Fallback)</label>
+                                                    <select
+                                                        value={aiSettings.modelName}
+                                                        onChange={(e) => setAiSettings({ ...aiSettings, modelName: e.target.value })}
+                                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors font-medium"
+                                                    >
+                                                        <optgroup label="Gemini 3 최신 라인업 (Preview)">
+                                                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 및 에이전트 특화)</option>
+                                                            <option value="gemini-3-flash-preview">Gemini 3 Flash (프런티어급 성능 가성비)</option>
+                                                            <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (경량형 초고속)</option>
+                                                        </optgroup>
+                                                        <optgroup label="Gemini 2.5 안정화 버전 (GA)">
+                                                            <option value="gemini-2.5-pro">Gemini 2.5 Pro (안정적 추천)</option>
+                                                            <option value="gemini-2.5-flash">Gemini 2.5 Flash (표준 속도)</option>
+                                                            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (경량형 가성비)</option>
+                                                        </optgroup>
+                                                    </select>
+                                                    <p className="text-[11px] text-muted-foreground">선택되지 않은 모든 AI 크론잡이 이 모델을 사용합니다.</p>
+                                                </div>
+
+                                                <div className="space-y-3">
+                                                    <label className="text-sm font-bold text-primary">심층 AI 모델 (High Intelligence)</label>
+                                                    <select
+                                                        value={aiSettings.deepModelName}
+                                                        onChange={(e) => setAiSettings({ ...aiSettings, deepModelName: e.target.value })}
+                                                        className="flex h-10 w-full rounded-md border border-primary/50 bg-primary/5 px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 transition-colors font-medium"
+                                                    >
+                                                        <optgroup label="Gemini 3 최신 라인업 (Preview)">
+                                                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 및 에이전트 특화)</option>
+                                                            <option value="gemini-3-flash-preview">Gemini 3 Flash (프런티어급 성능 가성비)</option>
+                                                            <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (경량형 초고속)</option>
+                                                        </optgroup>
+                                                        <optgroup label="Gemini 2.5 안정화 버전 (GA)">
+                                                            <option value="gemini-2.5-pro">Gemini 2.5 Pro (안정적 추천)</option>
+                                                            <option value="gemini-2.5-flash">Gemini 2.5 Flash (표준 속도)</option>
+                                                            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (경량형 가성비)</option>
+                                                        </optgroup>
+                                                    </select>
+                                                    <p className="text-[11px] text-muted-foreground">아래에서 체크된 주요 에이전트만 이 모델을 사용합니다.</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-4 pt-4 border-t border-border/30">
+                                                <label className="text-sm font-bold">심층 AI 모델 적용 대상 (Whitelist)</label>
+                                                <div className="space-y-3">
+                                                    {[
+                                                        {
+                                                            name: "📈 시황 AI",
+                                                            agents: [
+                                                                { id: 'MCA', label: '시장 상황 판단' },
+                                                                { id: 'MRA', label: '시장 회고 작성' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "🔥 주도주 AI",
+                                                            agents: [
+                                                                { id: 'TRACK_A', label: 'Track A (진성 대장)' },
+                                                                { id: 'TRACK_B,TRACK_C', label: 'Track B/C (알파 역상관)' },
+                                                                { id: 'TRACK_D,TRACK_E', label: 'Track D/E (당일 급등)' },
+                                                                { id: 'PORTFOLIO_JUDGE', label: '종합 심사 AI' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "🧬 테마 AI",
+                                                            agents: [
+                                                                { id: 'THEME', label: '테마 AI' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "🚀 텐배거 AI",
+                                                            agents: [
+                                                                { id: 'MOONSHOT_VALIDATION', label: '텐배거 스캐너 (1차 심사)' },
+                                                                { id: 'MOONSHOT_TRACKER', label: '액티브 트래킹 (일일 리뷰)' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "💼 종목 AI (포트폴리오)",
+                                                            agents: [
+                                                                { id: 'PORTFOLIO_MANAGER', label: 'PM2 리밸런싱' },
+                                                                { id: 'PM3_SWAP_REVIEW', label: 'PM3 교체 스왑 심사' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "💬 기타 도구",
+                                                            agents: [
+                                                                { id: 'COPILOT', label: 'AI 코파일럿' }
+                                                            ]
+                                                        }
+                                                    ].map((category, idx) => (
+                                                        <div key={idx} className="bg-secondary/20 p-4 rounded-xl border border-border/50">
+                                                            <div className="text-xs font-bold text-muted-foreground mb-3">{category.name}</div>
+                                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                                {category.agents.map(agent => (
+                                                                    <label key={agent.id} className="flex items-center space-x-2 cursor-pointer p-2 hover:bg-background/50 rounded-lg transition-colors">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            className="rounded border-gray-300 text-primary focus:ring-primary w-4 h-4 flex-shrink-0"
+                                                                            checked={agent.id.split(',').every(id => aiSettings.deepModelAgents.includes(id))}
+                                                                            onChange={(e) => {
+                                                                                const checked = e.target.checked;
+                                                                                const ids = agent.id.split(',');
+                                                                                setAiSettings(prev => {
+                                                                                    let newAgents = [...prev.deepModelAgents];
+                                                                                    if (checked) {
+                                                                                        ids.forEach(i => { if (!newAgents.includes(i)) newAgents.push(i) });
+                                                                                    } else {
+                                                                                        newAgents = newAgents.filter(i => !ids.includes(i));
+                                                                                    }
+                                                                                    return { ...prev, deepModelAgents: newAgents };
+                                                                                });
+                                                                            }}
+                                                                        />
+                                                                        <span className="text-xs font-medium text-foreground">{agent.label}</span>
+                                                                    </label>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
 
 
@@ -1318,9 +1422,9 @@ export default function Settings() {
                                         </div>
 
                                         {messageAi && (
-                                            <div className={`p-4 rounded-xl border text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-1 ${statusAi === 'success' ? 'bg-green-500/5 border-green-500/20 text-green-600' : 'bg-destructive/5 border-destructive/20 text-destructive'}`}>
-                                                {statusAi === 'success' ? <ShieldCheck size={14} /> : <AlertCircle size={14} />}
-                                                {messageAi}
+                                            <div className={`p-4 rounded-xl border text-xs flex items-start gap-2 animate-in fade-in slide-in-from-top-1 ${statusAi === 'success' ? 'bg-green-500/5 border-green-500/20 text-green-600' : 'bg-destructive/5 border-destructive/20 text-destructive'}`}>
+                                                {statusAi === 'success' ? <ShieldCheck size={14} className="mt-0.5 shrink-0" /> : <AlertCircle size={14} className="mt-0.5 shrink-0" />}
+                                                <div className="whitespace-pre-line">{messageAi}</div>
                                             </div>
                                         )}
                                         <div className="p-6 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl space-y-3">

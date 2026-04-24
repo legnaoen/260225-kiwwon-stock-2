@@ -255,17 +255,35 @@ export class PortfolioManagerAgent {
             // ─── 신규 추천주 주입 ────────────────────────────────────────────────
             // (A) runDailyReview()로 순차 실행 시 PM1 결과물이 직접 전달됨
             if (newPicksParams && newPicksParams.length > 0) {
+                // 당일 DROP 종목 재진입 차단 (PM1에서 넘어온 경우에도 적용)
+                const todayDroppedCodes = this.db.getTodayHeldDroppedCodes(dateStr);
+
                 newPicksParams.forEach((p: any) => {
+                    if (todayDroppedCodes.has(p.stock_code)) {
+                        console.log(`[PortfolioManager] 🚫 당일 DROP 종목 PM2 신규 추천 차단: ${p.stock_name}(${p.stock_code})`);
+                        return;
+                    }
+
                     codeMap[p.stock_name] = p.stock_code;
-                    evalPool[p.stock_name] = {
-                        stock_code: p.stock_code,
-                        stock_name: p.stock_name,
-                        source: 'NEW_PICK',
-                        status: 'NEW',
-                        profit_rate: 0,
-                        conviction_score: 50,
-                        analysts: p.today_analysts || []
-                    };
+
+                    if (evalPool[p.stock_name]) {
+                        // 기존 보유/관심 종목이라면 NEW_PICK으로 덮어쓰지 않고 상태 보존 (신분 세탁 방지)
+                        // 단, 오늘 추가된 하위 AI의 의견은 참고할 수 있도록 애널리스트 배열에 병합
+                        const existingAnalysts = evalPool[p.stock_name].analysts || [];
+                        const newAnalysts = p.today_analysts || [];
+                        evalPool[p.stock_name].analysts = [...existingAnalysts, ...newAnalysts];
+                    } else {
+                        // 완전 신규 종목
+                        evalPool[p.stock_name] = {
+                            stock_code: p.stock_code,
+                            stock_name: p.stock_name,
+                            source: 'NEW_PICK',
+                            status: 'NEW',
+                            profit_rate: 0,
+                            conviction_score: 50,
+                            analysts: p.today_analysts || []
+                        };
+                    }
                 });
             } else {
                 // (B) Fallback: 스케줄러 단독 호출 또는 PM1 실패 시 DB에서 직접 당일 WATCHLIST 종목 조회

@@ -54,6 +54,7 @@ export interface AiExecutionLogEntry {
     prompt?: string
     systemInstruction?: string
     result?: string
+    modelName?: string
 }
 
 export class AiExecutionQueue {
@@ -99,6 +100,24 @@ export class AiExecutionQueue {
         const priorityMap = { CRON: 1, MANUAL: 2, CHAT: 3 }
         const jobTarget = params.targetType || 'gemini'
 
+        // 중앙 라우팅: 사용자가 설정한 심층 모델 에이전트인지 확인 (Fall-back: 기본 모델)
+        let finalCustomModel = params.customModel;
+        try {
+            const Store = require('electron-store');
+            const store = new Store();
+            const aiSettings = store.get('ai_settings') as any;
+            if (aiSettings && aiSettings.deepModelName && Array.isArray(aiSettings.deepModelAgents)) {
+                // 앞부분 일치 또는 포함 여부 검사 (ex: MRA_DAILY 가 MRA 매칭되도록)
+                const isMatch = aiSettings.deepModelAgents.some((id: string) => params.agentId.includes(id) || params.agentId.startsWith(id));
+                if (isMatch) {
+                    finalCustomModel = params.customModel || aiSettings.deepModelName;
+                    console.log(`[AiQueue] 🧠 심층 모델 할당됨: ${params.agentName} -> ${finalCustomModel}`);
+                }
+            }
+        } catch (e) {
+            console.warn('[AiQueue] 심화 모델 설정 확인 실패, 기본 설정으로 진행');
+        }
+
         const job: AiQueueJob = {
             id: `aiq_${++this.jobCounter}_${Date.now()}`,
             agentId: params.agentId,
@@ -109,7 +128,7 @@ export class AiExecutionQueue {
             prompt: params.prompt,
             systemInstruction: params.systemInstruction,
             customMessages: params.customMessages,
-            customModel: params.customModel,
+            customModel: finalCustomModel,
             customKey: params.customKey,
             status: 'QUEUED',
             queuedAt: Date.now(),
@@ -286,6 +305,7 @@ export class AiExecutionQueue {
             prompt: job.prompt,
             systemInstruction: job.systemInstruction,
             result: job.result,
+            modelName: job.customModel,
         }
 
         this.executionLog.unshift(logEntry)

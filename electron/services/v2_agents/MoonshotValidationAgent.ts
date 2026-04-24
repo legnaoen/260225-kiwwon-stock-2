@@ -421,7 +421,15 @@ ${factsText}
 ]`;
 
                 try {
-                    const aiResponseChunk = await this.aiService.askGemini(judgePrompt, "You must return a valid JSON array only.");
+                    const { AiExecutionQueue } = await import('../AiExecutionQueue');
+                    const aiResponseChunk = await AiExecutionQueue.getInstance().enqueue({
+                        agentId: 'MOONSHOT_VALIDATION',
+                        agentName: '텐배거 스캐너 (검증)',
+                        triggerType: 'MANUAL',
+                        targetType: 'gemini',
+                        prompt: judgePrompt,
+                        systemInstruction: "You must return a valid JSON array only."
+                    });
                     let aiResultArray: any[] = [];
 
                     try {

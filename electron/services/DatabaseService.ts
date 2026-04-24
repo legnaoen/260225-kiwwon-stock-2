@@ -295,9 +295,12 @@ export class DatabaseService {
                 error TEXT,
                 prompt TEXT,
                 system_instruction TEXT,
-                result TEXT
+                result TEXT,
+                model_name TEXT
             );
         `
+        this.db.exec(createAiExecutionLogTable)
+        try { this.db.exec("ALTER TABLE ai_execution_log ADD COLUMN model_name TEXT;"); } catch { }
 
         const createMaiisInventoryTable = `
             CREATE TABLE IF NOT EXISTS maiis_data_inventory (
@@ -1344,7 +1347,8 @@ export class DatabaseService {
                 error TEXT,
                 prompt TEXT,
                 systemInstruction TEXT,
-                result TEXT
+                result TEXT,
+                modelName TEXT
             );
         `
         this.db.exec(createAiExecutionLogsTable)
@@ -1352,6 +1356,7 @@ export class DatabaseService {
         try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN prompt TEXT;"); } catch { }
         try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN systemInstruction TEXT;"); } catch { }
         try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN result TEXT;"); } catch { }
+        try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN modelName TEXT;"); } catch { }
 
         // [HOTFIX] SQLite의 문자열 정렬(DESC) 시 '오전/오후' 한글 문자열로 인해 정렬 오작동이 발생했음.
         // 이를 수정하기 위해 이전 포맷을 사용한 로그들을 삭제하여 테이블 포맷을 초기화합니다.
@@ -3890,11 +3895,11 @@ export class DatabaseService {
             INSERT OR REPLACE INTO ai_execution_log (
                 id, agent_id, agent_name, trigger_type, target_type, status,
                 queued_at, started_at, finished_at, duration_ms, error,
-                prompt, system_instruction, result
+                prompt, system_instruction, result, model_name
             ) VALUES (
                 @id, @agentId, @agentName, @triggerType, @targetType, @status,
                 @queuedAt, @startedAt, @finishedAt, @durationMs, @error,
-                @prompt, @systemInstruction, @result
+                @prompt, @systemInstruction, @result, @modelName
             )
         `)
         stmt.run({
@@ -3911,7 +3916,8 @@ export class DatabaseService {
             error: log.error || null,
             prompt: log.prompt || null,
             systemInstruction: log.systemInstruction || null,
-            result: log.result || null
+            result: log.result || null,
+            modelName: log.modelName || null
         })
     }
 
@@ -3930,7 +3936,8 @@ export class DatabaseService {
             error: r.error,
             prompt: r.prompt,
             systemInstruction: r.system_instruction,
-            result: r.result
+            result: r.result,
+            modelName: r.model_name
         }));
     }
 

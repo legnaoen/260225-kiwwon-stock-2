@@ -155,6 +155,7 @@ interface ExecutionLogEntry {
     prompt?: string
     systemInstruction?: string
     result?: string
+    modelName?: string
 }
 
 const TRIGGER_BADGES: Record<string, { label: string; className: string }> = {
@@ -210,7 +211,7 @@ export default function AiOrchestratorTab() {
 
     const handleCopyFullLog = () => {
         if (!selectedLog) return;
-        const formattedLog = `📋 AI 관제센터 작업 상세 리포트\n────────────────────────────────────────\n[기본 정보]\n- 동작 에이전트 : ${selectedLog.agentName} (${selectedLog.agentId})\n- 실행 결과 상태: ${selectedLog.status}\n- 발생(실행)시각: ${selectedLog.startedAt || selectedLog.queuedAt}\n- 소요 시간     : ${selectedLog.durationMs ? (selectedLog.durationMs / 1000).toFixed(1) + 's' : '-'}\n- 요청(트리거)  : ${TRIGGER_BADGES[selectedLog.triggerType]?.label || selectedLog.triggerType}\n\n[시스템 프롬프트 (System)]\n${selectedLog.systemInstruction || '없음'}\n\n[입력 데이터 (Prompt)]\n${selectedLog.prompt || '없음'}\n${selectedLog.error ? `\n[오류 내용 (Error)]\n${selectedLog.error}\n` : ''}\n[출력 결과 (Result)]\n${selectedLog.result || '없음'}\n────────────────────────────────────────\nReport Generated: ${now.toLocaleString('ko-KR')}`;
+        const formattedLog = `📋 AI 관제센터 작업 상세 리포트\n────────────────────────────────────────\n[기본 정보]\n- 동작 에이전트 : ${selectedLog.agentName} (${selectedLog.agentId})\n- 실행 결과 상태: ${selectedLog.status}\n- 발생(실행)시각: ${selectedLog.startedAt || selectedLog.queuedAt}\n- 소요 시간     : ${selectedLog.durationMs ? (selectedLog.durationMs / 1000).toFixed(1) + 's' : '-'}\n- 요청(트리거)  : ${TRIGGER_BADGES[selectedLog.triggerType]?.label || selectedLog.triggerType}\n- 사용 AI 모델  : ${selectedLog.modelName || '기본 모델 (gemini-3.0-flash)'}\n\n[시스템 프롬프트 (System)]\n${selectedLog.systemInstruction || '없음'}\n\n[입력 데이터 (Prompt)]\n${selectedLog.prompt || '없음'}\n${selectedLog.error ? `\n[오류 내용 (Error)]\n${selectedLog.error}\n` : ''}\n[출력 결과 (Result)]\n${selectedLog.result || '없음'}\n────────────────────────────────────────\nReport Generated: ${now.toLocaleString('ko-KR')}`;
         
         const fallbackCopy = () => {
             const textArea = document.createElement("textarea");
@@ -568,7 +569,16 @@ export default function AiOrchestratorTab() {
                                                     <td className="py-4 pl-8 font-mono text-muted-foreground whitespace-nowrap">
                                                         {entry.startedAt ? entry.startedAt.split(' ').pop()?.replace(/:\d{2}$/, '') : '-'}
                                                     </td>
-                                                    <td className="py-4 font-semibold text-foreground">{entry.agentName}</td>
+                                                    <td className="py-4 font-semibold text-foreground">
+                                                        <div className="flex items-center gap-2">
+                                                            <span>{entry.agentName}</span>
+                                                            {entry.modelName && (
+                                                                <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 text-[10px] rounded font-bold whitespace-nowrap">
+                                                                    🌟 심층
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </td>
                                                     <td className="py-4">
                                                     <span className={`px-2 py-1 rounded-md border text-xs font-bold ${TRIGGER_BADGES[entry.triggerType]?.className || 'bg-muted text-muted-foreground border-border'}`}>
                                                         {TRIGGER_BADGES[entry.triggerType]?.label || entry.triggerType}
@@ -659,6 +669,18 @@ export default function AiOrchestratorTab() {
                                 <div>
                                     <p className="text-muted-foreground text-xs font-semibold mb-1">소요 시간</p>
                                     <p className="font-mono font-bold">{selectedLog.durationMs ? `${(selectedLog.durationMs / 1000).toFixed(1)}s` : '-'}</p>
+                                </div>
+                                <div className="col-span-2 mt-2 pt-4 border-t border-border/50">
+                                    <p className="text-muted-foreground text-xs font-semibold mb-1">사용 AI 모델</p>
+                                    <p className="font-mono text-sm font-bold text-primary flex items-center gap-2">
+                                        {selectedLog.modelName ? (
+                                            <>
+                                                🌟 {selectedLog.modelName} <span className="text-xs text-indigo-500 bg-indigo-500/10 px-1.5 py-0.5 rounded ml-1">심층 모델</span>
+                                            </>
+                                        ) : (
+                                            '기본 모델 (gemini-3.0-flash 등)'
+                                        )}
+                                    </p>
                                 </div>
                             </div>
                             

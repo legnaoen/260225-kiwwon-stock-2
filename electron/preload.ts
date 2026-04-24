@@ -155,7 +155,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncStrategyConfig: () => ipcRenderer.invoke('ai-trade:sync-strategy-config'),
     saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance?: number, buyStartTime?: string, buyEndTime?: string, portfolioLimits?: any }) => ipcRenderer.invoke('ai:save-settings', settings),
     getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
-    testAiConnection: (settings: { geminiKey: string, modelName: string }) => ipcRenderer.invoke('ai:test-connection', settings),
+    testAiConnection: (settings: { geminiKey: string, modelName: string, deepModelName?: string }) => ipcRenderer.invoke('ai:test-connection', settings),
 
     // Market Condition Agent V2
     getIntradayTechnicalDigest: () => ipcRenderer.invoke('mca:get-technical-digest'),

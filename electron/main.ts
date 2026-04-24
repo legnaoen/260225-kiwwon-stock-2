@@ -2516,15 +2516,27 @@ ipcMain.handle('ai:get-settings', () => {
     return store.get('ai_settings') || null
 })
 
-ipcMain.handle('ai:test-connection', async (_event, { geminiKey, modelName }: { geminiKey: string, modelName: string }) => {
+ipcMain.handle('ai:test-connection', async (_event, { geminiKey, modelName, deepModelName }: { geminiKey: string, modelName: string, deepModelName?: string }) => {
     try {
-        const response = await AiService.getInstance().askGemini(
-            'Hello, this is a connection test. Please respond with "Connected".',
+        const response1 = await AiService.getInstance().askGemini(
+            '연결 테스트입니다. "기본 모델 연결 정상"이라고 짧게 대답해주세요.',
             undefined,
             geminiKey,
             modelName
         )
-        return { success: true, response }
+        let finalResponse = `[기본 (${modelName})] ${response1}`;
+
+        if (deepModelName && deepModelName !== modelName) {
+            const response2 = await AiService.getInstance().askGemini(
+                '연결 테스트입니다. "심층 모델 연결 정상"이라고 짧게 대답해주세요.',
+                undefined,
+                geminiKey,
+                deepModelName
+            )
+            finalResponse += `\n[심층 (${deepModelName})] ${response2}`;
+        }
+
+        return { success: true, response: finalResponse }
     } catch (err: any) {
         return { success: false, error: err.message }
     }

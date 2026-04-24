@@ -356,14 +356,11 @@ export class KiwoomService {
         return { data: response.data, headers: response.headers };
     }
 
-    // [LEGACY] 예수금 내역 조회 (V2 전환으로 비활성화)
+    // 예수금 내역 조회 (kt00016) — 복원됨
     public async getDeposit(accountNo: string) {
-        return { output: { dnca_tot_amt: "0", prvs_rcvbl_amt: "0" } };
-        /*
         const url = `/api/dostk/acnt`
         const today = DatabaseService.getInstance().getKstDate().replace(/-/g, '')
         const sevenDaysAgoDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-        // Correctly get 7 days ago in YYYYMMDD format for KST
         const formatter = new Intl.DateTimeFormat('sv-SE', {
             timeZone: 'Asia/Seoul',
             year: 'numeric',
@@ -384,7 +381,6 @@ export class KiwoomService {
             }
         }))
         return response.data;
-        */
     }
 
     public async getAllStocks(marketType: string) {

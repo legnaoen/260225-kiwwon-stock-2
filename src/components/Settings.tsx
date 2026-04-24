@@ -1275,161 +1275,24 @@ export default function Settings() {
                                                     onChange={(e) => setAiSettings({ ...aiSettings, modelName: e.target.value })}
                                                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors font-medium"
                                                 >
-                                                    <optgroup label="Gemini 3.1 / 3 (2026 Latest Preview)">
-                                                        <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (세계 최상위 지능)</option>
-                                                        <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview (극도로 빠름)</option>
-                                                        <option value="gemini-3-flash-preview">gemini-3-flash-preview (최신 Flash 미리보기)</option>
+                                                    <optgroup label="Gemini 3 최신 라인업 (Preview)">
+                                                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 및 에이전트 특화)</option>
+                                                        <option value="gemini-3-flash-preview">Gemini 3 Flash (프런티어급 성능 가성비)</option>
+                                                        <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (경량형 초고속)</option>
                                                     </optgroup>
-                                                    <optgroup label="Gemini 2.5 (Stable GA)">
-                                                        <option value="gemini-2.5-pro">gemini-2.5-pro (안정적 Pro, 추천)</option>
-                                                        <option value="gemini-2.5-flash">gemini-2.5-flash (표준 Flash, 추천)</option>
-                                                        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (경량형 가성비)</option>
+                                                    <optgroup label="Gemini 2.5 안정화 버전 (GA)">
+                                                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (안정적 추천)</option>
+                                                        <option value="gemini-2.5-flash">Gemini 2.5 Flash (표준 속도)</option>
+                                                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (경량형 가성비)</option>
                                                     </optgroup>
                                                     <optgroup label="Discontinued / Legacy">
-                                                        <option value="gemini-2.0-flash" disabled>gemini-2.0-flash (지원 중단)</option>
-                                                        <option value="gemini-1.5-flash" disabled>gemini-1.5-flash (지원 중단)</option>
+                                                        <option value="gemini-2.0-flash" disabled>Gemini 2.0 Flash (지원 중단)</option>
+                                                        <option value="gemini-1.5-flash" disabled>Gemini 1.5 Flash (지원 중단)</option>
                                                     </optgroup>
                                                 </select>
                                             </div>
 
-                                            <div className="space-y-3">
-                                                <div className="flex items-center justify-between">
-                                                    <label className="text-sm font-bold">가상계좌 초기 자본금 (KRW)</label>
-                                                    <span className="text-xs text-indigo-500 font-bold">
-                                                        ₩ {aiSettings.virtualInitialBalance?.toLocaleString() || '1,000,000'}
-                                                    </span>
-                                                </div>
-                                                <Input
-                                                    type="number"
-                                                    step="100000"
-                                                    value={aiSettings.virtualInitialBalance}
-                                                    onChange={(e) => setAiSettings({ ...aiSettings, virtualInitialBalance: Number(e.target.value) })}
-                                                    placeholder="예: 1000000"
-                                                />
-                                                <p className="text-[10px] text-muted-foreground ml-1">
-                                                    * 자본금을 변경하고 저장하면 이후 RESET 시 위 금액으로 시작합니다.
-                                                </p>
-                                            </div>
 
-                                            <div className="grid grid-cols-2 gap-4 pt-2">
-                                                <div className="space-y-3">
-                                                    <label className="text-sm font-bold flex items-center gap-2">
-                                                        <Clock size={14} className="text-indigo-500" />
-                                                        매수 시작 시간
-                                                    </label>
-                                                    <Input
-                                                        type="time"
-                                                        value={aiSettings.buyStartTime}
-                                                        onChange={(e) => setAiSettings({ ...aiSettings, buyStartTime: e.target.value })}
-                                                    />
-                                                </div>
-                                                <div className="space-y-3">
-                                                    <label className="text-sm font-bold flex items-center gap-2">
-                                                        <Clock size={14} className="text-destructive/70" />
-                                                        매수 종료 시간
-                                                    </label>
-                                                    <Input
-                                                        type="time"
-                                                        value={aiSettings.buyEndTime}
-                                                        onChange={(e) => setAiSettings({ ...aiSettings, buyEndTime: e.target.value })}
-                                                    />
-                                                </div>
-                                            </div>
-                                            <p className="text-[10px] text-muted-foreground ml-1 mb-6">
-                                                * 장 초반 노이즈 방지를 위해 09:10 이후를 권장하며, 마감 전 진입은 15:00 이전을 권장합니다.
-                                            </p>
-
-                                            <div className="space-y-3 pt-6 border-t border-border/40">
-                                                <div className="flex items-center justify-between">
-                                                    <label className="text-sm font-bold flex items-center gap-2">
-                                                        <Activity size={16} className="text-emerald-500" />
-                                                        1차 평가 (루키 오디션) 통과 인원
-                                                    </label>
-                                                    <span className="text-xs text-emerald-500 font-bold">
-                                                        {aiSettings.phase1PassLimit || 10} 종목
-                                                    </span>
-                                                </div>
-                                                <Input
-                                                    type="number"
-                                                    min="1"
-                                                    max="50"
-                                                    value={aiSettings.phase1PassLimit}
-                                                    onChange={(e) => setAiSettings({ ...aiSettings, phase1PassLimit: Number(e.target.value) })}
-                                                    placeholder="기본값: 10"
-                                                />
-                                                <p className="text-[10px] text-muted-foreground ml-1">
-                                                    * 매일 수십 개의 추천주 중 상위 몇 개만 2차 심사(관심종목)로 올릴지 결정합니다. 숫자가 적을수록 토큰이 획기적으로 절약됩니다.
-                                                </p>
-                                            </div>
-
-                                            {/* 포트폴리오 쿼터제 (Capacity Limits) 추가 */}
-                                            <div className="pt-6 mt-6 border-t border-border/40">
-                                                <div className="space-y-4">
-                                                    <div className="flex items-center justify-between">
-                                                        <label className="text-sm font-bold flex items-center gap-2">
-                                                            <Activity size={16} className="text-pink-500" />
-                                                            포트폴리오 전략별 용량 제한 (하드캡)
-                                                        </label>
-                                                    </div>
-                                                    <p className="text-xs text-muted-foreground -mt-2 mb-4">
-                                                        AI 포트폴리오 매니저가 유지할 수 있는 포지션별(매수/관심) 종목 한도입니다.
-                                                    </p>
-                                                    <div className="grid grid-cols-2 gap-8">
-                                                        {/* 매수 (BUY) 캡 */}
-                                                        <div className="space-y-3 bg-muted/20 p-4 rounded-xl border border-border/40">
-                                                            <div className="flex items-center justify-between border-b pb-2">
-                                                                <span className="font-bold text-sm text-rose-500">매수 포지션 (HELD)</span>
-                                                                <span className="text-xs font-bold text-muted-foreground">총 {Object.values(aiSettings.portfolioLimits.buy).reduce((a, b) => a + Number(b), 0)}개</span>
-                                                            </div>
-                                                            {(Object.keys(aiSettings.portfolioLimits.buy) as Array<keyof typeof aiSettings.portfolioLimits.buy>).map(strategy => (
-                                                                <div key={`buy-${strategy}`} className="flex items-center justify-between">
-                                                                    <span className="text-xs font-semibold w-24">{strategy}</span>
-                                                                    <Input 
-                                                                        type="number" 
-                                                                        min="0"
-                                                                        max="20"
-                                                                        className="w-20 h-8 text-xs font-bold text-right pl-2 pr-2"
-                                                                        value={aiSettings.portfolioLimits.buy[strategy]}
-                                                                        onChange={(e) => setAiSettings({
-                                                                            ...aiSettings, 
-                                                                            portfolioLimits: {
-                                                                                ...aiSettings.portfolioLimits,
-                                                                                buy: { ...aiSettings.portfolioLimits.buy, [strategy]: Math.max(0, parseInt(e.target.value) || 0) }
-                                                                            }
-                                                                        })}
-                                                                    />
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                        {/* 관심 (WATCHLIST) 캡 */}
-                                                        <div className="space-y-3 bg-muted/20 p-4 rounded-xl border border-border/40">
-                                                            <div className="flex items-center justify-between border-b pb-2">
-                                                                <span className="font-bold text-sm text-sky-500">관심/대기 (WATCHING)</span>
-                                                                <span className="text-xs font-bold text-muted-foreground">총 {Object.values(aiSettings.portfolioLimits.watchlist).reduce((a, b) => a + Number(b), 0)}개</span>
-                                                            </div>
-                                                            {(Object.keys(aiSettings.portfolioLimits.watchlist) as Array<keyof typeof aiSettings.portfolioLimits.watchlist>).map(strategy => (
-                                                                <div key={`watch-${strategy}`} className="flex items-center justify-between">
-                                                                    <span className="text-xs font-semibold w-24">{strategy}</span>
-                                                                    <Input 
-                                                                        type="number" 
-                                                                        min="0"
-                                                                        max="30"
-                                                                        className="w-20 h-8 text-xs font-bold text-right pl-2 pr-2"
-                                                                        value={aiSettings.portfolioLimits.watchlist[strategy]}
-                                                                        onChange={(e) => setAiSettings({
-                                                                            ...aiSettings, 
-                                                                            portfolioLimits: {
-                                                                                ...aiSettings.portfolioLimits,
-                                                                                watchlist: { ...aiSettings.portfolioLimits.watchlist, [strategy]: Math.max(0, parseInt(e.target.value) || 0) }
-                                                                            }
-                                                                        })}
-                                                                    />
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
 
                                         </div>
 

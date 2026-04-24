@@ -122,7 +122,7 @@ export class PortfolioManagerAgent {
                         conviction_score: 50,
                         analysts_json: pick.today_analysts.map((a: any) => a.agent),
                         last_signal_reason: '[PM 1차 오디션 수집] 2차 통합 심사 대기 중'
-                    });
+                    }, true);
                     savedCount++;
                     log(`[7-OK] upsert 성공: ${pick.stock_code} ${pick.stock_name}`);
                 } catch (upsertErr: any) {
@@ -516,7 +516,7 @@ ${chartRiskSkill}
 [매수 및 관심종목 판단 이원화 원칙 — 이 지침이 규칙의 알파이자 오메가다]
 1. **[매수(HELD) 포지션 엄격 분리]**: 지금 당장 "실제 현금으로 매수"할 만한 초A급 주도주에만 "BUY" 또는 기존 매수종목 유지 시 "HOLD" 판정을 내려라. 매수 조건은 극도로 엄격하게 적용하며, 상단 저항, 재료 소멸, 추격매수 시에는 가차없이 제외한다. (매도는 "SELL" 지시)
 
-1-A. **[수익/손실 제로베이스 평가 (Sunk Cost 무시) — 절대 규칙]**: 현재 종목이 +20% 수익이든 -10% 손실이든 과거의 숫자는 '매몰비용(Sunk Cost)'으로 취급하라. 기계적인 익절이나 기계적인 손절(Panic Sell)은 절대 금지한다. 종목을 유지(HOLD)할지 매도(SELL)할지는 오직 단 하나, **"현시점을 기준으로 앞으로 이 종목이 다른 관심 종목(WATCHING) 후보들보다 더 크게 상승할 여력(Upside Potential)과 시장 주도력이 남아있는가?"**만을 잣대로 삼아 제로베이스에서 판단하라. 모멘텀과 수급이 살아있다면 마이너스 상태라도 과감히 홀드(HOLD)하며 최대 수익을 추구하고, 반대로 상승 추세가 무너지고(Alpha 급락, 재료 소멸, 상단 저항+거래량 고갈) 가망이 없다면 단 -1% 손실이더라도 가차없이 매도(SELL)하라.
+1-A. **[수익/손실 무시 및 추세 유지 원칙 (Let winners ride)]**: Sunk Cost를 무시하라는 것은 계좌에 찍힌 과거 수익률 숫자에 집착하지 말라는 뜻이다. 종목이 가진 '상승 추세의 관성'마저 무시하라는 뜻이 아니다. 기계적인 익절/손절은 금지한다. 이미 시장의 수급이 입증되어 20일선 위에서 탄탄하게 상승 중인 주도주는, 명백한 이탈 신호(대량 거래를 동반한 장대음봉 등)가 확인되기 전까지는 쉽게 팔지 말고 홀딩(HOLD)하라. 신규 후보 종목으로의 교체(SELL 후 BUY)는 신규 종목의 추세와 모멘텀이 기존 종목을 **'압도적'**으로 능가할 때만 단행하라. 단, 상승 추세가 무너지고(Alpha 급락, 재료 소멸, 상단 저항+거래량 고갈) 가망이 없다면 단 -1% 손실이더라도 가차없이 매도(SELL)하라.
 2. **[강제 T/O 서바이벌 스코어링]**: 매수(BUY / HOLD / SELL)로 판정된 최상위 종목 혹은 청산종목을 제외한 >>나머지 모든 종목<<(기존 관심종목 + 새로 올라온 추천주 전체)에 대해서는 무단으로 탈락(DROP)시키지 마라.
 대신에, 이들을 관심종목 후보(WATCHING)로 두고 0점~100점의 **매력도 점수(conviction_score)** 를 매우 촘촘하게(상대적인 랭킹을 매긴다는 느낌으로) 평가하라.
 시스템적으로 각 카테고리별 최대 허용 개수는 시스템 로직(코드)이 알아서 계산하여 하위권 종목들을 정밀하게 탈락(DROP)시킬 것이다. 네가 임의로 종목을 누락시키면 심각한 시스템 오류가 발생하므로, 무조건 입력된 전체 ${stockList.length}개 종목 모두에 대하여 리스트에 담아 판정 결과를 반환해라. 즉, 너의 역할은 모든 후보 종목 간의 성적표(등수별 점수)를 냉정하게 매기는 것이다!
@@ -761,7 +761,7 @@ ${chartRiskSkill}
                             raw_context: specificContext,
                             current_price: curPrice,
                             entry_price: curPrice
-                        });
+                        }, true);
 
                         if (isImmediateBuy && curPrice > 0) {
                             try {
@@ -826,7 +826,7 @@ ${chartRiskSkill}
                                     );
                                     if (winner) {
                                         // 도전자를 HELD로 승급
-                                        this.db.upsertPortfolioWatchlist({ ...winner, status: 'HELD' });
+                                        this.db.upsertPortfolioWatchlist({ ...winner, status: 'HELD' }, true);
                                         this.db.logPortfolioEvent(winner.stock_code, winner.stock_name, 'BUY_UPGRADED', 'WATCHING', 'HELD', `PM3 재심사 교체 승급: ${pm3Result.reason}`, winner.current_price || 0);
                                         console.log(`[PM3] ✅ REPLACE 확정: [${candidate.stock_name}] → [${winner.stock_name}] 교체 완료`);
                                     }
@@ -955,11 +955,37 @@ ${chartRiskSkill}
                         }
 
                         if (droppedList.length > 0) {
-                            tgMsg += `\n\n🗑️ [포트폴리오 탈락(매도)]`;
+                            tgMsg += `\n\n---`;
+
+                            const profitList: string[] = [];
+                            const lossList: string[] = [];
+
                             droppedList.forEach(d => {
                                 const droppedDb = rawDb.prepare("SELECT profit_rate FROM maiis_portfolio WHERE stock_code = ?").get(d.stock_code) as any;
-                                tgMsg += `\n- ${d.stock_name} (최종 추정 수익률: ${droppedDb?.profit_rate || d.profit_rate || 0}%)`;
+                                const rate = droppedDb?.profit_rate ?? d.profit_rate ?? 0;
+                                const formattedRate = `${rate > 0 ? '+' : ''}${Number(rate).toFixed(2)}%`;
+                                const itemStr = `${d.stock_name} (${formattedRate})`;
+
+                                if (rate > 0) {
+                                    profitList.push(itemStr);
+                                } else {
+                                    lossList.push(itemStr);
+                                }
                             });
+
+                            if (profitList.length > 0) {
+                                tgMsg += `\n[매도 종목: 수익]`;
+                                profitList.forEach((item, i) => {
+                                    tgMsg += `\n${i + 1}. ${item}`;
+                                });
+                            }
+
+                            if (lossList.length > 0) {
+                                tgMsg += profitList.length > 0 ? `\n\n[매도 종목: 손절]` : `\n[매도 종목: 손절]`;
+                                lossList.forEach((item, i) => {
+                                    tgMsg += `\n${i + 1}. ${item}`;
+                                });
+                            }
                         }
 
                         TelegramService.getInstance().sendMessage(tgMsg);

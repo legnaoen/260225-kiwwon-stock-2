@@ -2513,7 +2513,7 @@ export class DatabaseService {
         return this.db.prepare('SELECT raw_text FROM ai_daily_raw_logs WHERE date = ? AND agent_type = ?').get(date, agent_type) as { raw_text: string } | undefined;
     }
 
-    public upsertPortfolioWatchlist(item: any) {
+    public upsertPortfolioWatchlist(item: any, skipEnforceCaps: boolean = false) {
         // 시그널 타입이 아닌 실제 포지션(팩트) 기반 분류
         const isWatchStatus = item.status === 'WATCHING';
         const isHeldStatus = item.status === 'HELD';
@@ -2614,8 +2614,10 @@ export class DatabaseService {
             was_held: isHeldStatus ? 1 : (item.was_held || 0)
         });
 
-        // [추가] 관심종목 및 매수포지션 캡(Quota) 적용
-        this.enforcePortfolioCaps();
+        if (!skipEnforceCaps) {
+            // [추가] 관심종목 및 매수포지션 캡(Quota) 적용
+            this.enforcePortfolioCaps();
+        }
     }
 
     public enforcePortfolioCaps(protectedCodes?: Set<string>): { pm3Candidates: any[] } {
@@ -2670,20 +2672,35 @@ export class DatabaseService {
                     const maxForCat = limitMap[cat] || 0;
                     if (!categoryCounts[cat]) categoryCounts[cat] = 0;
 
-                    if (categoryCounts[cat] < maxForCat) {
+                    if (type === 'HELD') {
+                        // HELD는 카테고리 캡 해제 (절대 한도로만 커버)
                         passed.push(item);
-                        categoryCounts[cat]++;
                     } else {
-                        failed.push(item);
+                        if (categoryCounts[cat] < maxForCat) {
+                            passed.push(item);
+                            categoryCounts[cat]++;
+                        } else {
+                            failed.push(item);
+                        }
                     }
                 }
 
                 // 3. 남은 슬롯이 있다면 Failed 목록에서 높은 점수순으로 생존(Flexible Quota)
                 let dropItems = failed;
-                if (passed.length < totalLimit && failed.length > 0) {
-                    // failed는 이미 conviction_score DESC로 정렬되어 있음
-                    const availableSlots = totalLimit - passed.length;
-                    dropItems = failed.slice(availableSlots);
+                const ABSOLUTE_MAX_HELD = 15;
+                const activeTotalLimit = type === 'HELD' ? ABSOLUTE_MAX_HELD : totalLimit;
+
+                if (type === 'HELD') {
+                    // HELD는 failed가 없으므로 passed에서 절대 한도 초과분만 dropItems로 넘김
+                    if (passed.length > ABSOLUTE_MAX_HELD) {
+                        dropItems = passed.splice(ABSOLUTE_MAX_HELD);
+                    }
+                } else {
+                    if (passed.length < activeTotalLimit && failed.length > 0) {
+                        // failed는 이미 conviction_score DESC로 정렬되어 있음
+                        const availableSlots = activeTotalLimit - passed.length;
+                        dropItems = failed.slice(availableSlots);
+                    }
                 }
 
                 // [Phase 1] BUY 판정 보호: HELD 타입 트리밍 시 PM2가 명시적으로 BUY/HOLD 판정한 종목은 강제 생존

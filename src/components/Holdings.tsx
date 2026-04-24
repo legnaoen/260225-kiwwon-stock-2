@@ -88,36 +88,24 @@ export default function Holdings() {
         setError(null)
         try {
             console.log('Holdings: Fetching data for account:', accountNo)
+            // kt00018 하나로 보유종목 + 예수금(prsm_dpst_aset_amt) 모두 처리
             const hResult = await window.electronAPI.getHoldings({ accountNo })
-            // kt00016 provides deposit (entr_to) and other summary metrics
-            const dResult = await window.electronAPI.getDeposit({ accountNo })
 
-            setDebugData((prev: any) => ({ ...prev, holdings: hResult.data, deposit: dResult.data }))
+            setDebugData((prev: any) => ({ ...prev, holdings: hResult.data }))
 
-            if (hResult.success && dResult.success) {
+            if (hResult.success) {
                 console.log('Holdings Result:', hResult.data);
-                console.log('Deposit Result:', dResult.data);
 
-                // IPC 핸들러(main.ts)의 스프레드 방식과 직접 data 객체 전달 방식 모두 대응
                 let hData = hResult.data || hResult;
-                let dData = dResult.data || dResult;
-
                 if (typeof hData === 'string') try { hData = JSON.parse(hData); } catch (e) { }
-                if (typeof dData === 'string') try { dData = JSON.parse(dData); } catch (e) { }
 
                 const hBody = hData?.Body || hData
-                const dBody = dData?.Body || dData
 
-                // Use the key from the Python reference for holdings list
+                // 보유 종목 리스트
                 const listData = hBody?.acnt_evlt_remn_indv_tot || hBody?.output1 || hBody?.list || hBody?.grid || []
                 const list = Array.isArray(listData) ? listData : [listData].filter(Boolean)
 
-                // Pick the most recent record from kt00016 for current deposit
-                const dList = dBody?.daily_acnt_prft_tot || dBody?.list || dBody?.output1 || []
-                const dRecord = Array.isArray(dList) && dList.length > 0 ? dList[dList.length - 1] : (Object.keys(dBody || {}).length > 0 ? dBody : dData)
-
-                const deposit = parseNumber(dRecord?.entr_to || dBody?.entr_to || dBody?.d2_entra || 0)
-
+                // 개별 종목 파싱
                 const holdings = list.map((item: any) => ({
                     code: item.stk_cd || item.pdno || '',
                     name: item.stk_nm || item.prdt_nm || '',
@@ -128,13 +116,24 @@ export default function Holdings() {
                     avgPrice: parseNumber(item.pchs_avg_pric || 0)
                 }))
 
+                // 총 평가금액: kt00018 body의 tot_evlt_amt 우선, 없으면 개별 합산 폴백
+                const apiTotalEval = parseNumber(hBody?.tot_evlt_amt || hBody?.tot_evl_amt || 0)
+                const totalEvaluation = apiTotalEval > 0
+                    ? apiTotalEval
+                    : holdings.reduce((sum, h) => sum + h.value, 0)
+
+                // D+2 예수금: kt00018 body의 prsm_dpst_aset_amt (추정 예수금 자산)
+                const deposit = parseNumber(
+                    hBody?.prsm_dpst_aset_amt || 0
+                )
+
                 setData({
                     holdings,
                     summary: {
-                        totalPurchase: parseNumber(hBody.tot_pur_amt || hBody.pchs_amt_tot || 0),
-                        totalEvaluation: parseNumber(hBody.tot_evlt_amt || hBody.tot_evl_amt || hBody.evlt_amt_tot || 0),
-                        totalProfit: parseNumber(hBody.tot_evlt_pl || hBody.evlt_erng_amt_tot || 0),
-                        profitRate: parseNumber(hBody.tot_prft_rt || hBody.evlt_erng_rt_tot || 0),
+                        totalPurchase: parseNumber(hBody?.tot_pur_amt || hBody?.pchs_amt_tot || 0),
+                        totalEvaluation,
+                        totalProfit: parseNumber(hBody?.tot_evlt_pl || hBody?.evlt_erng_amt_tot || 0),
+                        profitRate: parseNumber(hBody?.tot_prft_rt || hBody?.evlt_erng_rt_tot || 0),
                         deposit
                     }
                 })
@@ -152,8 +151,7 @@ export default function Holdings() {
                 fetchHistory();
             } else {
                 const hError = hResult.error?.message || JSON.stringify(hResult.error) || '보유종목 조회 실패'
-                const dError = dResult.error?.message || JSON.stringify(dResult.error) || '예수금 조회 실패'
-                setError(`${hError} / ${dError}`)
+                setError(`${hError}`)
             }
         } catch (err: any) {
             console.error('FetchData error:', err)

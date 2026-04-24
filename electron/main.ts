@@ -2107,6 +2107,20 @@ ipcMain.handle('kiwoom:get-holdings', async (_event, { accountNo, nextKey = "" }
     try {
         const result = await kiwoomService.getHoldings(accountNo, nextKey)
 
+        // [DEBUG] kt00018 body 상단 요약 필드 확인 (list 제외)
+        try {
+            const hBody = result?.data?.Body || result?.data;
+            const summaryFields: any = {}
+            if (hBody && typeof hBody === 'object') {
+                for (const key of Object.keys(hBody)) {
+                    if (!Array.isArray(hBody[key])) {
+                        summaryFields[key] = hBody[key]
+                    }
+                }
+            }
+            console.log('[DEBUG:kt00018] 요약 필드:', JSON.stringify(summaryFields, null, 2))
+        } catch (debugErr) { /* ignore */ }
+
         // Sync holding history with DB automatically
         try {
             const hBody = result?.data?.Body || result?.data;

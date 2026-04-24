@@ -5,11 +5,11 @@ import { twMerge } from 'tailwind-merge'
 import TitleBar from './components/TitleBar'
 import Sidebar, { menuItems } from './components/Sidebar'
 // ─── V2 Active Components ────────────────────────────────────────────────────
-import Dashboard from './components/Dashboard'
+// import Dashboard from './components/Dashboard' // 사용자 요청으로 제거
 import Holdings from './components/Holdings'
 import Settings from './components/Settings'
 // import MaiisCommandCenter from './components/MaiisCommandCenter' // 사용자 요청으로 제거
-import MacroDashboard from './components/MacroDashboard'
+// import MacroDashboard from './components/MacroDashboard' // 사용자 요청으로 제거
 import PipelineMonitorTab from './components/v2_dashboard/PipelineMonitorTab'
 import MarketAgentTab from './components/v2_dashboard/MarketAgentTab'
 import IssueManagementTab from './components/v2_dashboard/IssueManagementTab'
@@ -256,7 +256,7 @@ function AppContent() {
         }
     }, [])
 
-    const [activeTab, setActiveTab] = useState('dashboard')
+    const [activeTab, setActiveTab] = useState('holdings')
     const [navTarget, setNavTarget] = useState<{ tabId: string, entityId?: string } | null>(null);
 
     // Graph RAG: 탭 간 Cross-Reference 네비게이션
@@ -356,11 +356,11 @@ function AppContent() {
                 <main className="flex-1 overflow-hidden bg-background flex flex-col">
                     <div className="w-full h-full flex flex-col min-h-0">
                         {/* ── V2 Active Routes ── */}
-                        {activeTab === 'dashboard' && <Dashboard />}
+                        {/* {activeTab === 'dashboard' && <Dashboard />} */}
                         {activeTab === 'holdings' && <Holdings />}
                         {activeTab === 'settings' && <Settings />}
                         {/* {activeTab === 'maiis-command' && <MaiisCommandCenter />} */}
-                        {activeTab === 'macro-dashboard' && <MacroDashboard />}
+                        {/* {activeTab === 'macro-dashboard' && <MacroDashboard />} */}
                         {activeTab === 'pipeline-monitor' && <PipelineMonitorTab />}
                         {activeTab === 'market-agent' && <MarketAgentTab onNavigate={navigateTo} />}
                         {activeTab === 'issue-agent' && <IssueManagementTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'issue-agent' ? navTarget.entityId : undefined} />}

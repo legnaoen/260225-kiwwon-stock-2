@@ -489,7 +489,12 @@ export class TrackDBuyAgent {
   "reasoning": "이 종목을 내일 종가베팅 대상에 포함해야 하는가? (1줄 요약)"
 }`;
 
-        for (const c of candidates) {
+        const Store = require('electron-store');
+        const store = new Store();
+        const aiSettings = store.get('ai_settings') || {};
+        const isBypass = Array.isArray(aiSettings.lightweightCloudAgents) && aiSettings.lightweightCloudAgents.some((id: string) => 'TRACK_B_GEMMA_RESEARCH'.includes(id) || 'TRACK_B_GEMMA_RESEARCH'.startsWith(id));
+
+        const processCandidate = async (c: any) => {
             // 종목별 뉴스 조회 (Phase 2에서 수집된 것 포함)
             let news: any[] = [];
             try {
@@ -596,7 +601,7 @@ ${marketContext}
                         system_prompt: systemPrompt,
                         raw_ai_response: rawResponse,
                     });
-                    continue;
+                    return;
                 }
 
                 const parsed = JSON.parse(jsonMatch[0]) as GemmaStockReport;
@@ -644,6 +649,17 @@ ${marketContext}
                     reasoning: `Gemma 호출 실패: ${e.message}`,
                 };
                 reports.push(fallback);
+            }
+                };
+
+        if (isBypass) {
+            console.log(`[TrackDBuyAgent] ☁️ 클라우드 전환 감지 -> ${candidates.length}개 종목 병렬 리서치 시작`);
+            this.telegram.sendMessage(`[TrackD] ☁️ 클라우드 쾌속 분석 모드 (병렬 ${candidates.length}개) 작동 중...`);
+            await Promise.all(candidates.map(c => processCandidate(c)));
+        } else {
+            console.log(`[TrackDBuyAgent] 🖥️ 로컬 처리 감지 -> 순차 리서치 시작`);
+            for (const c of candidates) {
+                await processCandidate(c);
             }
         }
 

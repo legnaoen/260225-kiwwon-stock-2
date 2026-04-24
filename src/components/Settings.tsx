@@ -48,6 +48,8 @@ export default function Settings() {
         modelName: 'gemini-1.5-flash',
         deepModelName: 'gemini-3.1-pro-preview',
         deepModelAgents: [] as string[],
+        lightweightCloudAgents: [] as string[],
+        lightweightCloudModel: 'gemini-1.5-flash',
         virtualInitialBalance: 1000000,
         buyStartTime: '09:10',
         buyEndTime: '15:00',
@@ -168,6 +170,8 @@ export default function Settings() {
                     modelName: savedAiSettings.modelName || 'gemini-1.5-flash',
                     deepModelName: savedAiSettings.deepModelName || 'gemini-3.1-pro-preview',
                     deepModelAgents: savedAiSettings.deepModelAgents || [],
+                    lightweightCloudAgents: savedAiSettings.lightweightCloudAgents || [],
+                    lightweightCloudModel: savedAiSettings.lightweightCloudModel || 'gemini-1.5-flash',
                     virtualInitialBalance: savedAiSettings.virtualInitialBalance ?? 1000000,
                     buyStartTime: savedAiSettings.buyStartTime || '09:10',
                     buyEndTime: savedAiSettings.buyEndTime || '15:00',
@@ -1393,6 +1397,110 @@ export default function Settings() {
                                                             </div>
                                                         </div>
                                                     ))}
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-4 pt-4 border-t border-border/30">
+                                                <div className="space-y-1">
+                                                    <label className="text-sm font-bold text-teal-600 flex items-center gap-2">
+                                                        <MonitorSmartphone size={16} /> 클라우드 전환 대상 로컬 크론 (Whitelist)
+                                                    </label>
+                                                    <p className="text-[11px] text-muted-foreground">원래 로컬 AI(LM Studio)로 동작하는 크론 작업 중, <strong>Gemini 클라우드로 우회하여 초고속 병렬 처리</strong>를 적용할 작업을 선택합니다. 미선택 시 기본 로컬 AI로 동작합니다.</p>
+                                                </div>
+                                                
+                                                <div className="flex items-center gap-3 bg-teal-500/10 p-3 rounded-lg border border-teal-500/20">
+                                                    <label className="text-xs font-bold text-teal-800 shrink-0">적용할 클라우드 모델 :</label>
+                                                    <select
+                                                        value={(aiSettings as any).lightweightCloudModel || 'gemini-1.5-flash'}
+                                                        onChange={(e) => setAiSettings({ ...aiSettings, lightweightCloudModel: e.target.value })}
+                                                        className="flex h-8 w-full max-w-[280px] rounded-md border border-teal-500/30 bg-background px-3 py-1 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 transition-colors font-medium"
+                                                    >
+                                                        <optgroup label="Gemini 3 최신 라인업 (Preview)">
+                                                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 및 에이전트 특화)</option>
+                                                            <option value="gemini-3-flash-preview">Gemini 3 Flash (프런티어급 성능 가성비)</option>
+                                                            <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (경량형 초고속)</option>
+                                                        </optgroup>
+                                                        <optgroup label="Gemini 2.5 안정화 버전 (GA)">
+                                                            <option value="gemini-2.5-pro">Gemini 2.5 Pro (안정적 추천)</option>
+                                                            <option value="gemini-2.5-flash">Gemini 2.5 Flash (표준 속도)</option>
+                                                            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (경량형 가성비)</option>
+                                                        </optgroup>
+                                                    </select>
+                                                </div>
+
+                                                <div className="space-y-3">
+                                                    {[
+                                                        {
+                                                            name: "📈 시황 AI",
+                                                            agents: [
+                                                                { id: 'ANALYST_CHART,ANALYST_NEWS', label: '시황 판단 보조 (차트/뉴스)' },
+                                                                { id: 'MRA_DAILY_FEEDBACK,MRA_DAILY_RETRO', label: '시장 회고 보조 (피드백)' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "🔥 주도주 AI",
+                                                            agents: [
+                                                                { id: 'TRACK_A_GEMMA_RESEARCH', label: 'Track A 심층 리서치 (병렬 권장)' },
+                                                                { id: 'TRACK_B_GEMMA_RESEARCH,TRACK_C_GEMMA_RESEARCH,TRACK_D_GEMMA_RESEARCH,TRACK_E_GEMMA_RESEARCH', label: 'Track B~E 심층 리서치 (병렬 권장)' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "🤖 관제 센터 (AI 스웜)",
+                                                            agents: [
+                                                                { id: 'SWARM_MONITOR,INTRADAY_MONITOR', label: '장중 스웜 패널 (다중 투표)' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "📰 뉴스 허브",
+                                                            agents: [
+                                                                { id: 'ITA', label: '이슈 트래커 (뉴스/공시 전처리)' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "💬 기타 도구",
+                                                            agents: [
+                                                                { id: 'COPILOT', label: 'AI 코파일럿 (로컬 백업)' }
+                                                            ]
+                                                        }
+                                                    ].map((category, idx) => (
+                                                        <div key={idx} className="bg-teal-500/5 p-4 rounded-xl border border-teal-500/20">
+                                                            <div className="text-xs font-bold text-teal-700/70 mb-3">{category.name}</div>
+                                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                                {category.agents.map(agent => (
+                                                                    <label key={agent.id} className="flex items-center space-x-2 cursor-pointer p-2 hover:bg-white/50 rounded-lg transition-colors">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            className="rounded border-gray-300 text-teal-600 focus:ring-teal-500 w-4 h-4 flex-shrink-0"
+                                                                            checked={agent.id.split(',').every(id => (aiSettings as any).lightweightCloudAgents?.includes(id))}
+                                                                            onChange={(e) => {
+                                                                                const checked = e.target.checked;
+                                                                                const ids = agent.id.split(',');
+                                                                                setAiSettings(prev => {
+                                                                                    let newAgents = [...(prev as any).lightweightCloudAgents || []];
+                                                                                    if (checked) {
+                                                                                        ids.forEach(i => { if (!newAgents.includes(i)) newAgents.push(i) });
+                                                                                    } else {
+                                                                                        newAgents = newAgents.filter(i => !ids.includes(i));
+                                                                                    }
+                                                                                    return { ...prev, lightweightCloudAgents: newAgents };
+                                                                                });
+                                                                            }}
+                                                                        />
+                                                                        <span className="text-xs font-medium text-foreground">{agent.label}</span>
+                                                                    </label>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                <div className="bg-muted/30 rounded-xl p-4 flex gap-3 items-start border border-border/40 mt-2">
+                                                    <Info className="text-teal-600 mt-0.5 shrink-0" size={16} />
+                                                    <div className="space-y-1">
+                                                        <p className="text-xs text-muted-foreground leading-relaxed">
+                                                            체크된 항목은 로컬 LM Studio 대신 <strong>기본 AI 모델(Gemini Flash 등)</strong>을 사용하여 API로 처리됩니다. 특히 종목 리서치 체크 시 <strong>병렬(Promise.all) 처리</strong>가 활성화되어 실행 속도가 수십 배 개선됩니다.
+                                                        </p>
+                                                    </div>
                                                 </div>
                                             </div>
 

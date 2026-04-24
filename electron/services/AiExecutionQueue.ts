@@ -37,6 +37,7 @@ export interface AiQueueJob {
     durationMs?: number
     result?: string
     error?: string
+    isCloudBypass?: boolean
 }
 
 export interface AiExecutionLogEntry {
@@ -98,24 +99,39 @@ export class AiExecutionQueue {
         customKey?: string
     }): Promise<string> {
         const priorityMap = { CRON: 1, MANUAL: 2, CHAT: 3 }
-        const jobTarget = params.targetType || 'gemini'
+        let jobTarget = params.targetType || 'gemini'
+        let isCloudBypass = false;
 
-        // 중앙 라우팅: 사용자가 설정한 심층 모델 에이전트인지 확인 (Fall-back: 기본 모델)
+        // 중앙 라우팅: 설정값 기반의 동적 라우팅
         let finalCustomModel = params.customModel;
         try {
             const Store = require('electron-store');
             const store = new Store();
             const aiSettings = store.get('ai_settings') as any;
-            if (aiSettings && aiSettings.deepModelName && Array.isArray(aiSettings.deepModelAgents)) {
-                // 앞부분 일치 또는 포함 여부 검사 (ex: MRA_DAILY 가 MRA 매칭되도록)
-                const isMatch = aiSettings.deepModelAgents.some((id: string) => params.agentId.includes(id) || params.agentId.startsWith(id));
-                if (isMatch) {
-                    finalCustomModel = params.customModel || aiSettings.deepModelName;
-                    console.log(`[AiQueue] 🧠 심층 모델 할당됨: ${params.agentName} -> ${finalCustomModel}`);
+            
+            if (aiSettings) {
+                // 1. 로컬 크론 클라우드 우회 라우팅 처리
+                if (jobTarget === 'local' && Array.isArray(aiSettings.lightweightCloudAgents)) {
+                    const isBypass = aiSettings.lightweightCloudAgents.some((id: string) => params.agentId.includes(id) || params.agentId.startsWith(id));
+                    if (isBypass) {
+                        jobTarget = 'gemini'; // 로컬 타겟을 강제로 제미나이(클라우드)로 우회
+                        finalCustomModel = aiSettings.lightweightCloudModel || 'gemini-1.5-flash';
+                        isCloudBypass = true;
+                        console.log(`[AiQueue] ☁️ 로컬 크론 클라우드 우회됨: ${params.agentName} -> ${finalCustomModel}`);
+                    }
+                }
+
+                // 2. 심층 모델 적용 대상 확인 (우회 대상이더라도 심층 모델이 우선 체크되면 덮어씀)
+                if (aiSettings.deepModelName && Array.isArray(aiSettings.deepModelAgents)) {
+                    const isMatch = aiSettings.deepModelAgents.some((id: string) => params.agentId.includes(id) || params.agentId.startsWith(id));
+                    if (isMatch) {
+                        finalCustomModel = params.customModel || aiSettings.deepModelName;
+                        console.log(`[AiQueue] 🧠 심층 모델 할당됨: ${params.agentName} -> ${finalCustomModel}`);
+                    }
                 }
             }
         } catch (e) {
-            console.warn('[AiQueue] 심화 모델 설정 확인 실패, 기본 설정으로 진행');
+            console.warn('[AiQueue] AI 설정 확인 실패, 기본 설정으로 진행', e);
         }
 
         const job: AiQueueJob = {
@@ -132,6 +148,7 @@ export class AiExecutionQueue {
             customKey: params.customKey,
             status: 'QUEUED',
             queuedAt: Date.now(),
+            isCloudBypass: isCloudBypass,
         }
 
         // 라우팅 분기
@@ -305,7 +322,7 @@ export class AiExecutionQueue {
             prompt: job.prompt,
             systemInstruction: job.systemInstruction,
             result: job.result,
-            modelName: job.customModel,
+            modelName: job.isCloudBypass ? `${job.customModel} (☁️ 우회)` : job.customModel,
         }
 
         this.executionLog.unshift(logEntry)

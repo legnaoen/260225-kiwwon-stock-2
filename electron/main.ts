@@ -2510,6 +2510,7 @@ ipcMain.handle('ai-trade:sync-strategy-config', () => {
 })
 ipcMain.handle('ai:save-settings', (_event, settings: any) => {
     store.set('ai_settings', settings)
+    console.log(`[Settings] ⚙️ AI 설정 저장 완료 | 기본모델: ${settings.modelName} | 클라우드 우회: ${settings.lightweightCloudAgents?.length || 0}건 (${settings.lightweightCloudModel})`)
     return { success: true }
 })
 ipcMain.handle('ai:get-settings', () => {

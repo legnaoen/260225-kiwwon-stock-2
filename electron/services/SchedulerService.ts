@@ -137,6 +137,10 @@ export class SchedulerService {
             if (ok) {
                 const queueLen = this.retryQueue.length;
                 this.telegram.sendMessage(`✅ 재연결 성공!${queueLen > 0 ? `\n보류된 크론 작업 ${queueLen}개를 순서대로 재실행합니다.` : '\n(재시도 대기 작업 없음)'}`);
+                
+                // UI 에러 배너 자동 해제 신호 전송
+                eventBus.emit(SystemEvent.SYSTEM_ERROR, null);
+                
                 await this.flushRetryQueue();
             } else {
                 this.telegram.sendMessage(`🚨 재연결 실패.\n수동으로 앱을 재시작해주세요.`);

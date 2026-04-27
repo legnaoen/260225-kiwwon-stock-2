@@ -1337,8 +1337,7 @@ export default function Settings() {
                                                             agents: [
                                                                 { id: 'TRACK_A', label: 'Track A (진성 대장)' },
                                                                 { id: 'TRACK_B,TRACK_C', label: 'Track B/C (알파 역상관)' },
-                                                                { id: 'TRACK_D,TRACK_E', label: 'Track D/E (당일 급등)' },
-                                                                { id: 'PORTFOLIO_JUDGE', label: '종합 심사 AI' }
+                                                                { id: 'TRACK_D,TRACK_E', label: 'Track D/E (당일 급등)' }
                                                             ]
                                                         },
                                                         {

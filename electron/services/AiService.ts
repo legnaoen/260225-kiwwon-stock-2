@@ -35,7 +35,7 @@ export class AiService {
         console.log(`[AiService] Calling Gemini API (Model: ${model})...`);
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60초 타임아웃
+        const timeoutId = setTimeout(() => controller.abort(), 300000); // 300초 타임아웃
 
         try {
             const response = await fetch(url, {

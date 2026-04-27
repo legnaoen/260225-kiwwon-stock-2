@@ -153,7 +153,7 @@ export class KiwoomConditionWebSocketManager {
                 }
 
                 // EventBus를 통해 AutoTradeService 등으로 종목 포착 시그널 전송
-                eventBus.emit(SystemEvent.CONDITION_MATCHED, mappedStocks)
+                eventBus.emit(SystemEvent.CONDITION_MATCHED, { seq: data.seq, stocks: mappedStocks })
                 
                 // UI(Playground)로 목록 전송
                 console.log(`[ConditionWS] IPC 전송 - seq: ${data.seq}, mappedStocks: ${mappedStocks.length}건, mainWindow: ${!!this.mainWindow}`)

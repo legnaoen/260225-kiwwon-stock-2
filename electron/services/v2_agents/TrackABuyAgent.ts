@@ -827,20 +827,9 @@ ${marketContext}
                 `\n*제공된 리스트는 살아남은 진성 대장주들의 전체 목록입니다.\n최종 종목을 추천할 때 위의 대장주 섹터 밀집도(주도 테마 순위) 현황을 적극 참고하여 제안하십시오.*\n\n`;
         }
 
-        // 팩트시트 텍스트 조립
-        const factSheets = eligibleCandidates.map((c, i) => {
-            const r = reportMap.get(c.stockCode);
-            if (!r) {
-                return `${i + 1}. [${c.stockCode}] ${c.stockName} | ${c.category} | Gemma 분석 없음`;
-            }
-            return `${i + 1}. [${c.stockCode}] ${c.stockName} | ${c.category} | 확신도:${Math.round(c.convictionScore)}
-   Gemma 점수: ${r.buy_score} / 상승확률: ${r.upside_probability} / 1차판단: ${r.preliminary_decision}
-   테마 연관: ${r.market_theme_link}
-   핵심 호재: ${r.catalyst_summary}
-   [차트/피크아웃 분석]: ${r.price_action_analysis || 'Gemma 피크아웃 분석 누락'}
-   리스크: ${r.risk_factors}
-   근거: ${r.reasoning}`;
-        }).join('\n\n');
+        const { ChunkUtils } = await import('../utils/ChunkUtils');
+        const chunks = ChunkUtils.createBalancedChunks(eligibleCandidates, 15);
+        const allPicks: AiBuyPick[] = [];
 
         // 2차 가이드라인 로드
         let phase2Guideline = '';
@@ -875,8 +864,23 @@ ${phase2Guideline || '[추가 판단 기준]\n1. 촉매 타이밍\n2. 포트폴�
 decision: "BUY" | "WATCH"
 theme_lifespan: "SHORT"(3일 미만) | "MEDIUM"(1~2주) | "LONG"(1달+) | "UNKNOWN"`;
 
-        const userPrompt = `[오늘 날짜: ${date}]
-[분석 대상: ${eligibleCandidates.length}개 진성 대장주 종목]
+        await Promise.all(chunks.map(async (chunkCandidates, chunkIndex) => {
+            const factSheets = chunkCandidates.map((c, i) => {
+                const r = reportMap.get(c.stockCode);
+                if (!r) {
+                    return `${i + 1}. [${c.stockCode}] ${c.stockName} | ${c.category} | Gemma 분석 없음`;
+                }
+                return `${i + 1}. [${c.stockCode}] ${c.stockName} | ${c.category} | 확신도:${Math.round(c.convictionScore)}
+   Gemma 점수: ${r.buy_score} / 상승확률: ${r.upside_probability} / 1차판단: ${r.preliminary_decision}
+   테마 연관: ${r.market_theme_link}
+   핵심 호재: ${r.catalyst_summary}
+   [차트/피크아웃 분석]: ${r.price_action_analysis || 'Gemma 피크아웃 분석 누락'}
+   리스크: ${r.risk_factors}
+   근거: ${r.reasoning}`;
+            }).join('\n\n');
+
+            const userPrompt = `[오늘 날짜: ${date}]
+[분석 대상: ${chunkCandidates.length}개 진성 대장주 종목 (그룹 ${chunkIndex + 1}/${chunks.length})]
 
 ${themeDensityText}${factSheets}
 
@@ -884,34 +888,36 @@ ${themeDensityText}${factSheets}
 위 팩트시트를 기반으로 1개월(20영업일) 내 +20% 이상 달성 가능성 기준으로
 최종 Top ${TARGET_PICKS}개를 BUY로 선정하고, 나머지는 WATCH로 처리하십시오.`;
 
-        try {
-            const result = await AiExecutionQueue.getInstance().enqueue({
-                agentId: 'TRACK_A_BUY_AGENT',
-                agentName: '모의매매 매수 선정 AI',
-                triggerType: 'CRON',
-                prompt: userPrompt,
-                systemInstruction,
-            });
+            try {
+                const result = await AiExecutionQueue.getInstance().enqueue({
+                    agentId: 'TRACK_A_BUY_AGENT',
+                    agentName: `모의매매 매수 선정 AI (그룹 ${chunkIndex + 1})`,
+                    triggerType: 'CRON',
+                    prompt: userPrompt,
+                    systemInstruction,
+                });
 
-            if (!result) {
-                console.error('[TrackABuyAgent] Phase4 AI 응답 없음');
-                return [];
+                if (!result) {
+                    console.error(`[TrackABuyAgent] Phase4 AI 응답 없음 (그룹 ${chunkIndex + 1})`);
+                    return;
+                }
+
+                const jsonMatch = result.match(/\[[\s\S]*\]/);
+                if (!jsonMatch) {
+                    console.error(`[TrackABuyAgent] Phase4 JSON 추출 실패 (그룹 ${chunkIndex + 1}):`, result.slice(0, 200));
+                    return;
+                }
+
+                const picks: AiBuyPick[] = JSON.parse(jsonMatch[0]);
+                allPicks.push(...picks);
+
+            } catch (err: any) {
+                console.error(`[TrackABuyAgent] Phase4 AI 분석 오류 (그룹 ${chunkIndex + 1}):`, err.message);
             }
+        }));
 
-            const jsonMatch = result.match(/\[[\s\S]*\]/);
-            if (!jsonMatch) {
-                console.error('[TrackABuyAgent] Phase4 JSON 추출 실패:', result.slice(0, 200));
-                return [];
-            }
-
-            const picks: AiBuyPick[] = JSON.parse(jsonMatch[0]);
-            console.log(`[TrackABuyAgent] Phase4 결과: BUY ${picks.filter(p => p.decision === 'BUY').length}개, WATCH ${picks.filter(p => p.decision === 'WATCH').length}개`);
-            return picks;
-
-        } catch (err: any) {
-            console.error('[TrackABuyAgent] Phase4 AI 분석 오류:', err.message);
-            return [];
-        }
+        console.log(`[TrackABuyAgent] Phase4 통합 결과: BUY ${allPicks.filter(p => p.decision === 'BUY').length}개, WATCH ${allPicks.filter(p => p.decision === 'WATCH').length}개`);
+        return allPicks;
     }
 
     // ─────────────────────────────────────────────────────────

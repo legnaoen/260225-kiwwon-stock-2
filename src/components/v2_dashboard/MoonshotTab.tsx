@@ -285,6 +285,23 @@ export default function MoonshotTab() {
         alert('Moonshot AI 스케줄 설정이 저장되었습니다.');
     };
 
+    const handleSaveConditionSettings = async () => {
+        localStorage.setItem('moonshot_condA', selectedConditionA);
+        localStorage.setItem('moonshot_condB', selectedConditionB);
+        localStorage.setItem('moonshot_condC', selectedConditionC);
+        
+        const { electronAPI } = window as any;
+        if (electronAPI && electronAPI.invoke) {
+            const settingsToSave = {
+                ...moonshotSettings,
+                conditions: [selectedConditionA, selectedConditionB, selectedConditionC].filter(Boolean)
+            };
+            await electronAPI.invoke('moonshot:save-settings', settingsToSave);
+        }
+        setShowConditionSettings(false);
+        alert('조건검색 매핑이 시스템에 저장되었습니다.');
+    };
+
     const handleRunDailyTracker = async () => {
         const { electronAPI } = window as any;
         if (!electronAPI?.runMoonshotDailyTracker) return;
@@ -1755,9 +1772,8 @@ ${selectedDetail.rawResult}
                             </div>
                         </div>
                         
-                        {/* Footer */}
                         <div className="px-5 py-4 border-t bg-muted/10 flex justify-end">
-                            <button onClick={() => setShowConditionSettings(false)} className="px-6 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-xl transition-colors shadow-sm active:scale-95">
+                            <button onClick={handleSaveConditionSettings} className="px-6 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-xl transition-colors shadow-sm active:scale-95">
                                 적용 완료
                             </button>
                         </div>

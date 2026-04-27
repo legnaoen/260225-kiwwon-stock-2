@@ -782,12 +782,15 @@ export class SchedulerService {
                                             }
                                         }, 10000); // 최대 10초 대기
 
-                                        const onConditionMatched = (matchedStocks: any[]) => {
-                                            if (!handled && matchedStocks && matchedStocks.length > 0 && String(matchedStocks[0].seq) === String(seq)) {
+                                        const onConditionMatched = (payload: any) => {
+                                            const payloadSeq = Array.isArray(payload) ? (payload.length > 0 ? payload[0].seq : undefined) : payload.seq;
+                                            const stocks = Array.isArray(payload) ? payload : (payload.stocks || []);
+
+                                            if (!handled && String(payloadSeq) === String(seq)) {
                                                 handled = true;
                                                 clearTimeout(timeoutId);
                                                 eventBus.removeListener(SystemEvent.CONDITION_MATCHED, onConditionMatched);
-                                                resolve(matchedStocks);
+                                                resolve(stocks);
                                             }
                                         };
 

@@ -432,7 +432,8 @@ export class AutoTradeService {
     /**
      * 2. 조건 검색결과 수신 시 예산 분할 및 큐 투입 (Throttling 준비)
      */
-    private async handleConditionMatched(stocks: any[]) {
+    private async handleConditionMatched(payload: any) {
+        const stocks = Array.isArray(payload) ? payload : (payload?.stocks || []);
         if (!this.isRunning || this.isLiquidationMode) return;
 
         this.broadcastLog(`조건 검색 결과 수신: ${stocks.length} 종목 포착`, 'INFO');

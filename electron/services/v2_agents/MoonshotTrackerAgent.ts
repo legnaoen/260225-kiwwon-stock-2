@@ -187,15 +187,20 @@ ${smDataPreview}
         for (const [categoryTag, stocks] of Object.entries(categoryGroups)) {
             this.sendProgress(win, `⚔️ [${categoryTag}] 제미나이 포트폴리오 심사 중 (${stocks.length}개 종목)...`, 'info');
 
-            const factsText = stocks.map(s =>
-                `----- [${s.stock_name} | ${s.stock_code}] -----\n` +
-                `[편입 이유] ${s.narrative || s.bull_case || '없음'}\n` +
-                `[아이디어 폐기 조건] ${s.invalidation_condition || '-'}\n` +
-                `[오늘의 데일리 브리핑]\n${dailyBriefings[s.stock_code] || '브리핑 없음'}`
-            ).join('\n\n');
+            const { ChunkUtils } = await import('../utils/ChunkUtils');
+            const chunks = ChunkUtils.createBalancedChunks(stocks, 15);
+            let aiResultArray: any[] = [];
 
-            const judgePrompt = `당신은 "Project Moonshot" 텐베거 포트폴리오 최고 심판관입니다.
-현재 [${categoryTag}] 카테고리에 아래 ${stocks.length}개 종목이 있습니다.
+            await Promise.all(chunks.map(async (chunkStocks, chunkIndex) => {
+                const factsText = chunkStocks.map(s =>
+                    `----- [${s.stock_name} | ${s.stock_code}] -----\n` +
+                    `[편입 이유] ${s.narrative || s.bull_case || '없음'}\n` +
+                    `[아이디어 폐기 조건] ${s.invalidation_condition || '-'}\n` +
+                    `[오늘의 데일리 브리핑]\n${dailyBriefings[s.stock_code] || '브리핑 없음'}`
+                ).join('\n\n');
+
+                const judgePrompt = `당신은 "Project Moonshot" 텐베거 포트폴리오 최고 심판관입니다.
+현재 [${categoryTag}] 카테고리에 아래 ${chunkStocks.length}개 종목이 있습니다. (그룹 ${chunkIndex + 1}/${chunks.length})
 
 당신의 임무:
 1. 각 종목의 오늘 데일리 브리핑을 보고, 기존 편입 가설이 유효한지 평가
@@ -223,24 +228,28 @@ ${factsText}
   }
 ]`;
 
-            try {
-                const aiResponse = await AiExecutionQueue.getInstance().enqueue({
-                    agentId: 'MOONSHOT_TRACKER',
-                    agentName: '문샷 트래커',
-                    triggerType: 'MANUAL',
-                    prompt: judgePrompt,
-                    systemInstruction: 'You are a portfolio manager. Return only valid JSON array.',
-                });
-
-                let aiResultArray: any[] = [];
                 try {
-                    const cleanJson = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
-                    aiResultArray = JSON.parse(cleanJson);
-                    if (!Array.isArray(aiResultArray)) aiResultArray = [aiResultArray];
+                    const aiResponse = await AiExecutionQueue.getInstance().enqueue({
+                        agentId: 'MOONSHOT_TRACKER',
+                        agentName: `문샷 트래커 (그룹 ${chunkIndex + 1})`,
+                        triggerType: 'MANUAL',
+                        prompt: judgePrompt,
+                        systemInstruction: 'You are a portfolio manager. Return only valid JSON array.',
+                    });
+
+                    try {
+                        const cleanJson = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+                        let parsed = JSON.parse(cleanJson);
+                        if (!Array.isArray(parsed)) parsed = [parsed];
+                        aiResultArray.push(...parsed);
+                    } catch (e) {
+                        this.sendProgress(win, `❌ [${categoryTag}] AI 응답 파싱 실패 (그룹 ${chunkIndex + 1})`, 'error');
+                        console.error('[MoonshotTracker] Parse error:', e, 'Raw:', aiResponse);
+                    }
                 } catch (e) {
-                    this.sendProgress(win, `❌ [${categoryTag}] AI 응답 파싱 실패`, 'error');
-                    console.error('[MoonshotTracker] Parse error:', e, 'Raw:', aiResponse);
+                    console.error(`[MoonshotTracker] Gemini error (그룹 ${chunkIndex + 1}):`, e);
                 }
+            }));
 
                 for (const stock of stocks) {
                     const aiResult = aiResultArray.find((r: any) =>

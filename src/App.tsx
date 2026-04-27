@@ -135,6 +135,21 @@ function AppContent() {
         return () => clearInterval(interval)
     }, [])
 
+    // 타임아웃 등 연결 관련 에러 표시 중일 때, 재연결에 성공하면 에러 배너를 자동 제거
+    useEffect(() => {
+        if (status.connected && systemError) {
+            const isConnectionError = systemError.code === 'ECONNABORTED' || 
+                                      systemError.code === 'ETIMEDOUT' ||
+                                      systemError.code === 'ECONNREFUSED' ||
+                                      systemError.message.includes('응답 지연') ||
+                                      systemError.message.includes('타임아웃');
+            if (isConnectionError) {
+                console.log('[App] Connection restored. Clearing timeout error banner.');
+                clearSystemError();
+            }
+        }
+    }, [status.connected, systemError, clearSystemError]);
+
     // Fetch and Sync Trading Days (Smart Sync Logic)
     useEffect(() => {
         let fetchInterval: NodeJS.Timeout | null = null;

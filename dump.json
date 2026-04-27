@@ -1,0 +1,141 @@
+```json
+{
+    "decisions": [
+        {
+            "stock_code": "000660",
+            "stock_name": "SK하이닉스",
+            "last_signal": "HOLD",
+            "conviction_score": 90,
+            "lifespan_days": 20,
+            "analysts_json": ["MOMENTUM", "REPORT"],
+            "last_signal_reason": "As the undisputed leader of the AI semiconductor supercycle, it continues to absorb massive market liquidity. The stock is comfortably riding the short-term moving averages with no signs of institutional distribution. We will hold the current position to let this mega-winner ride the structural growth trend.",
+            "korean_summary": "AI 반도체 절대 대장주, 추세 지속 홀딩"
+        },
+        {
+            "stock_code": "036930",
+            "stock_name": "주성엔지니어링",
+            "last_signal": "HOLD",
+            "conviction_score": 88,
+            "lifespan_days": 20,
+            "analysts_json": ["MOMENTUM"],
+            "last_signal_reason": "Showing strong hyper-momentum with increasing volume and simultaneous buying from foreign and institutional investors. The stock is well above the MA20, proving its leadership in the equipment sector. Hold the position as long as the volume profile remains robust without overhead supply candles.",
+            "korean_summary": "수급 동반된 장비 대장주, 홀딩 유지"
+        },
+        {
+            "stock_code": "047040",
+            "stock_name": "대우건설",
+            "last_signal": "HOLD",
+            "conviction_score": 80,
+            "lifespan_days": 10,
+            "analysts_json": ["PULLBACK", "MOMENTUM"],
+            "last_signal_reason": "Currently undergoing a healthy consolidation phase with completely dried-up volume, indicating successful supply absorption. The nuclear and reconstruction narratives remain intact. We will maintain the hold position as it prepares for the next leg up from this pullback zone.",
+            "korean_summary": "거래량 급감하며 매물 소화 중, 홀딩"
+        },
+        {
+            "stock_code": "033160",
+            "stock_name": "엠케이전자",
+            "last_signal": "HOLD",
+            "conviction_score": 75,
+            "lifespan_days": 10,
+            "analysts_json": ["MOMENTUM", "THEME"],
+            "last_signal_reason": "Maintains a solid narrative in AI memory packaging materials. The short-term trend is still valid, and there are no critical breakdown signals. We will continue to hold while monitoring the volume expansion on the next upward push.",
+            "korean_summary": "패키징 소재 모멘텀 유지, 홀딩"
+        },
+        {
+            "stock_code": "001440",
+            "stock_name": "대한전선",
+            "last_signal": "HOLD",
+            "conviction_score": 92,
+            "lifespan_days": 20,
+            "analysts_json": ["MOMENTUM"],
+            "last_signal_reason": "Riding a massive mega-theme of AI datacenter power grids with explosive 2.5x volume. This is a textbook hyper-momentum leader that ignores traditional overbought metrics. Hold firmly as the structural demand narrative continues to attract aggressive institutional buying.",
+            "korean_summary": "전력망 메가테마 대장주, 폭발적 수급 홀딩"
+        },
+        {
+            "stock_code": "010140",
+            "stock_name": "삼성중공업",
+            "last_signal": "HOLD",
+            "conviction_score": 78,
+            "lifespan_days": 15,
+            "analysts_json": ["REPORT", "MOMENTUM"],
+            "last_signal_reason": "Despite a slight short-term dip, the shipbuilding supercycle narrative and institutional buying support remain solid. Increased volume on recent moves suggests active accumulation. Hold the position as the underlying fundamentals are strong.",
+            "korean_summary": "조선업 슈퍼사이클 수급 유입, 홀딩"
+        },
+        {
+            "stock_code": "012450",
+            "stock_name": "한화에어로스페이스",
+            "last_signal": "HOLD",
+            "conviction_score": 82,
+            "lifespan_days": 20,
+            "analysts_json": ["MOMENTUM"],
+            "last_signal_reason": "Consolidating constructively near the moving averages after a strong rally. As the top-tier defense leader, it enjoys a deep economic moat and continuous institutional interest. Hold to let the winner ride the geopolitical momentum.",
+            "korean_summary": "방산 대장주 건조한 눌림목, 홀딩"
+        },
+        {
+            "stock_code": "027360",
+            "stock_name": "아주IB투자",
+            "last_signal": "BUY",
+            "conviction_score": 100,
+            "lifespan_days": 20,
+            "analysts_json": ["PULLBACK", "MOMENTUM", "ALPHA_TOP"],
+            "last_signal_reason": "Ranked in the Alpha Top 15 with explosive volume and strong institutional backing. The stock is riding a massive SpaceX narrative, making it a supreme hyper-momentum leader. We will initiate a first tranche here and plan to add more if it dips -5% towards the MA5.",
+            "korean_summary": "알파 랭킹 편입 스페이스X 대장주, 즉시 매수"
+        },
+        {
+            "stock_code": "098460",
+            "stock_name": "고영",
+            "last_signal": "HOLD",
+            "conviction_score": 94,
+            "lifespan_days": 20,
+            "analysts_json": ["MOMENTUM"],
+            "last_signal_reason": "Triggered a massive 8.5x volume breakout backed by record earnings in the AI datacenter segment. This is a pure momentum play driven by actual numbers, not just hype. Keep holding this winner as it establishes a new higher price channel.",
+            "korean_summary": "실적 기반 폭발적 거래량 터진 주도주, 홀딩"
+        },
+        {
+            "stock_code": "288980",
+            "stock_name": "모아데이타",
+            "last_signal": "HOLD",
+            "conviction_score": 90,
+            "lifespan_days": 15,
+            "analysts_json": ["PULLBACK", "ALPHA_TOP"],
+            "last_signal_reason": "Included in the Alpha Top 15 list, confirming its market-beating status. It is currently forming a perfect textbook pullback with volume drying up to 0.1x, indicating zero selling pressure. Hold the position to capture the imminent technical rebound.",
+            "korean_summary": "알파 랭킹 편입, 완벽한 거래량 급감 눌림목"
+        },
+        {
+            "stock_code": "093370",
+            "stock_name": "후성",
+            "last_signal": "HOLD",
+            "conviction_score": 75,
+            "lifespan_days": 10,
+            "analysts_json": ["PULLBACK"],
+            "last_signal_reason": "Experiencing a normal pullback with decreasing volume, which removes the risk of malicious overhead supply. The secondary battery narrative provides a baseline support. Hold for a technical bounce from this oversold short-term condition.",
+            "korean_summary": "거래량 감소 동반한 정상적 눌림목, 홀딩"
+        },
+        {
+            "stock_code": "199800",
+            "stock_name": "툴젠",
+            "last_signal": "SELL",
+            "conviction_score": 40,
+            "lifespan_days": 5,
+            "analysts_json": ["PULLBACK"],
+            "last_signal_reason": "The momentum has faded significantly, and holding onto this biotech name incurs too much opportunity cost. The trend is weakening with negative returns. Execute a strict sell to reallocate capital to stronger hyper-momentum leaders.",
+            "korean_summary": "모멘텀 소멸 및 추세 약화, 즉각 매도 교체"
+        },
+        {
+            "stock_code": "005940",
+            "stock_name": "NH투자증권",
+            "last_signal": "SELL",
+            "conviction_score": 45,
+            "lifespan_days": 5,
+            "analysts_json": ["REPORT"],
+            "last_signal_reason": "While it has steady earnings, the price action is far too slow for our hyper-momentum strategy. The stock lacks the explosive volume and volatility required for top-tier returns. Sell to free up cash for high-conviction tech/infra setups.",
+            "korean_summary": "주도주 대비 탄력 부족, 기회비용 차원 매도"
+        },
+        {
+            "stock_code": "439090",
+            "stock_name": "마녀공장",
+            "last_signal": "HOLD",
+            "conviction_score": 88,
+            "lifespan_days": 15,
+            "analysts_json": ["MOMENTUM"],
+            "last_signal_reason": "Show

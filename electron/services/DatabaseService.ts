@@ -2692,7 +2692,7 @@ export class DatabaseService {
 
                 // 3. 남은 슬롯이 있다면 Failed 목록에서 높은 점수순으로 생존(Flexible Quota)
                 let dropItems = failed;
-                const ABSOLUTE_MAX_HELD = 15;
+                const ABSOLUTE_MAX_HELD = Math.max(15, totalLimit);
                 const activeTotalLimit = type === 'HELD' ? ABSOLUTE_MAX_HELD : totalLimit;
 
                 if (type === 'HELD') {
@@ -2720,7 +2720,7 @@ export class DatabaseService {
 
                 // [Phase 3] HELD 종목은 즉시 DROP 대신 PM3 재심사 후보로 반환하되, 절대 한도(15개) 초과분은 즉시 강제 컷오프
                 if (type === 'HELD' && dropItems.length > 0) {
-                    const ABSOLUTE_MAX_HELD = 15;
+                    const ABSOLUTE_MAX_HELD = Math.max(15, totalLimit);
                     const definitelySurvivingCount = allItems.length - dropItems.length;
                     const allowedPm3Count = Math.max(0, ABSOLUTE_MAX_HELD - definitelySurvivingCount);
 

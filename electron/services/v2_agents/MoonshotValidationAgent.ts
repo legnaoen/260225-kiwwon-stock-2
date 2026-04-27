@@ -383,12 +383,17 @@ ${financeMarkdown ? `[상세 재무/기업개요]\n${financeMarkdown}` : ''}
                     trackCriteria = `[공통 심사 기준]\n- 메가트렌드 부합 여부, 독점력, 스마트머니 매집 연속성을 종합 평가.`;
                 }
 
-                const factsText = categoryStocks.map(s =>
-                    `----- [기호: ${s.code}] 종목명: ${s.name} -----\n${batchDistilledFacts[s.code] || '수집 실패'}`
-                ).join('\n\n');
+                const { ChunkUtils } = await import('../utils/ChunkUtils');
+                const chunks = ChunkUtils.createBalancedChunks(categoryStocks, 15);
+                let aiResultArray: any[] = [];
 
-                const judgePrompt = `당신은 월스트리트 출신의 딥 밸류 퀀트 애널리스트이자 'Project Moonshot' 최고 판단 심판역(Judge)입니다.
-지금부터 당신에게 [${categoryTag}] 카테고리에 속한 총 ${categoryStocks.length}개 종목들의 [텐베거 시나리오 피치]를 제공합니다.
+                await Promise.all(chunks.map(async (chunkStocks, chunkIndex) => {
+                    const factsText = chunkStocks.map(s =>
+                        `----- [기호: ${s.code}] 종목명: ${s.name} -----\n${batchDistilledFacts[s.code] || '수집 실패'}`
+                    ).join('\n\n');
+
+                    const judgePrompt = `당신은 월스트리트 출신의 딥 밸류 퀀트 애널리스트이자 'Project Moonshot' 최고 판단 심판역(Judge)입니다.
+지금부터 당신에게 [${categoryTag}] 카테고리에 속한 총 ${chunkStocks.length}개 종목들의 [텐베거 시나리오 피치] (그룹 ${chunkIndex + 1}/${chunks.length})를 제공합니다.
 
 이 종목들은 모두 "${categoryTag}" 조건검색식을 통과한 동일 전략 후보군입니다.
 아래 ${categoryTag} 전용 심사 기준을 통해 서로 엄격히 **상대 평가(배틀로얄)**하여 진짜 대장 1~2개만 가려내십시오.
@@ -404,7 +409,7 @@ ${trackCriteria}
 [${categoryTag} 후보군 세일즈 피치]
 ${factsText}
 
-위 ${categoryStocks.length}개 종목 전체에 대해 누락 없이 아래의 순수 JSON 배열로만 응답하세요. (마크다운 코드블록 절대 불가)
+위 ${chunkStocks.length}개 종목 전체에 대해 누락 없이 아래의 순수 JSON 배열로만 응답하세요. (마크다운 코드블록 절대 불가)
 [
   {
     "code": "종목코드(6자리)",
@@ -420,28 +425,32 @@ ${factsText}
   }
 ]`;
 
-                try {
-                    const { AiExecutionQueue } = await import('../AiExecutionQueue');
-                    const aiResponseChunk = await AiExecutionQueue.getInstance().enqueue({
-                        agentId: 'MOONSHOT_VALIDATION',
-                        agentName: '텐배거 스캐너 (검증)',
-                        triggerType: 'MANUAL',
-                        targetType: 'gemini',
-                        prompt: judgePrompt,
-                        systemInstruction: "You must return a valid JSON array only."
-                    });
-                    let aiResultArray: any[] = [];
-
                     try {
-                        const cleanJson = aiResponseChunk.replace(/```json/g, '').replace(/```/g, '').trim();
-                        aiResultArray = JSON.parse(cleanJson);
-                        if (!Array.isArray(aiResultArray)) {
-                            if (aiResultArray.results) aiResultArray = aiResultArray.results;
-                            else aiResultArray = [aiResultArray];
+                        const { AiExecutionQueue } = await import('../AiExecutionQueue');
+                        const aiResponseChunk = await AiExecutionQueue.getInstance().enqueue({
+                            agentId: 'MOONSHOT_VALIDATION',
+                            agentName: `텐배거 스캐너 (검증 - 그룹 ${chunkIndex + 1})`,
+                            triggerType: 'MANUAL',
+                            targetType: 'gemini',
+                            prompt: judgePrompt,
+                            systemInstruction: "You must return a valid JSON array only."
+                        });
+
+                        try {
+                            const cleanJson = aiResponseChunk.replace(/```json/g, '').replace(/```/g, '').trim();
+                            let parsed = JSON.parse(cleanJson);
+                            if (!Array.isArray(parsed)) {
+                                if (parsed.results) parsed = parsed.results;
+                                else parsed = [parsed];
+                            }
+                            aiResultArray.push(...parsed);
+                        } catch (e) {
+                            console.error(`[MoonshotAgent] [${categoryTag}] AI Parse Error (그룹 ${chunkIndex + 1}):`, e, 'Raw:', aiResponseChunk);
                         }
                     } catch (e) {
-                        console.error(`[MoonshotAgent] [${categoryTag}] AI Parse Error:`, e, 'Raw:', aiResponseChunk);
+                        console.error(`[MoonshotAgent] [${categoryTag}] AI Request Error (그룹 ${chunkIndex + 1}):`, e);
                     }
+                }));
 
                     for (const stock of categoryStocks) {
                         let aiResult = aiResultArray?.find((r: any) => 

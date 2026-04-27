@@ -191,8 +191,9 @@ ${smDataPreview}
             const chunks = ChunkUtils.createBalancedChunks(stocks, 15);
             let aiResultArray: any[] = [];
 
-            await Promise.all(chunks.map(async (chunkStocks, chunkIndex) => {
-                const factsText = chunkStocks.map(s =>
+            try {
+                await Promise.all(chunks.map(async (chunkStocks, chunkIndex) => {
+                    const factsText = chunkStocks.map(s =>
                     `----- [${s.stock_name} | ${s.stock_code}] -----\n` +
                     `[편입 이유] ${s.narrative || s.bull_case || '없음'}\n` +
                     `[아이디어 폐기 조건] ${s.invalidation_condition || '-'}\n` +

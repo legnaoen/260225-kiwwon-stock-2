@@ -175,6 +175,7 @@ function GemmaReportCard({ report }: { report: GemmaReport }) {
 export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIssues, aiReason, aiRisk, onClose }: StockDetailModalProps) {
     const [gemmaReports, setGemmaReports] = useState<GemmaReport[]>([]);
     const [stockTags, setStockTags] = useState<StockThemeTag[]>([]);
+    const [stockNarrative, setStockNarrative] = useState<{ narrative: string, updated_at: string } | null>(null);
     const [showAllIssues, setShowAllIssues] = useState(false);
 
     useEffect(() => {
@@ -203,6 +204,17 @@ export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIs
                     if (tags) setStockTags(tags);
                 })
                 .catch((e: any) => { console.error('Failed to load stock tags:', e); });
+        }
+
+        // 종목 네러티브 로드
+        if ((window as any).electronAPI?.getStockNarrative) {
+            (window as any).electronAPI.getStockNarrative(stockCode)
+                .then((res: any) => {
+                    if (res?.success && res.data) {
+                        setStockNarrative(res.data);
+                    }
+                })
+                .catch((e: any) => { console.error('Failed to load stock narrative:', e); });
         }
 
         return () => {
@@ -281,6 +293,18 @@ export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIs
                                             )}
                                         </div>
                                     </div>
+                                </div>
+                            )}
+
+                            {/* ── 종목 서사 (Narrative) ── */}
+                            {stockNarrative && (
+                                <div className="bg-gradient-to-br from-indigo-500/5 to-purple-500/5 border border-indigo-500/10 rounded-xl p-4 mb-6 shadow-inner">
+                                    <h4 className="text-[11px] font-bold text-indigo-400 flex items-center gap-1.5 uppercase tracking-wider mb-2">
+                                        <Sparkles size={13} className="text-indigo-500" /> Company Narrative
+                                    </h4>
+                                    <p className="text-[14px] leading-relaxed text-foreground/90 font-medium whitespace-pre-wrap">
+                                        {stockNarrative.narrative}
+                                    </p>
                                 </div>
                             )}
 

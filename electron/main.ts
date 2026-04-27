@@ -1114,6 +1114,18 @@ ipcMain.handle('track-b:get-research-reports', async (_event, stock_code: string
     }
 })
 
+// [종목 네러티브] 종목당 최신 네러티브 조회 (주도주 / 종목AI 모달 공유)
+ipcMain.handle('stock:get-narrative', async (_event, stock_code: string) => {
+    try {
+        const db = DatabaseService.getInstance();
+        return db.getStockNarrative(stock_code);
+    } catch (error: any) {
+        console.error('[Stock] get-narrative error:', error);
+        return null;
+    }
+})
+
+
 // [Track B] 특정 일자의 데이터 전체 삭제
 ipcMain.handle('track-b:delete-by-date', async (_event, date: string) => {
     try {

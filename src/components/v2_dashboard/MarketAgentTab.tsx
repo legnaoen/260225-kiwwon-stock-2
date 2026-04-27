@@ -521,11 +521,6 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
         await window.electronAPI.runMarketConditionAgent('A')
     }
 
-    const handleRunCycleB = async () => {
-        setIsRunning(true)
-        await window.electronAPI.runMarketConditionAgent('B')
-    }
-
     const getPredictIcon = (p: string) => {
         if (p === '상승' || p === 'LONG') return <ArrowUpRight className="text-rose-500 w-3.5 h-3.5" />
         if (p === '하락' || p === 'SHORT') return <ArrowDownRight className="text-blue-500 w-3.5 h-3.5" />
@@ -561,10 +556,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                 <div className="flex items-center gap-3 text-xs">
                     <div className="flex items-center gap-1">
                         <button disabled={isRunning} onClick={handleRunCycleA} className="px-3 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50">
-                            Run A
-                        </button>
-                        <button disabled={isRunning} onClick={handleRunCycleB} className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50">
-                            Run B
+                            수동 실행 (A)
                         </button>
                         <button disabled={isRunning} onClick={async () => { 
                             alert("성과 채점을 요청합니다. 잠시만 기다려주세요.");
@@ -593,21 +585,6 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             📸 이미지 테스트
                         </button>
                         
-                        {/* 수동 스마트 점검 버튼 */}
-                        <div className="flex items-center gap-1 ml-1 bg-emerald-500/10 border border-emerald-500/30 rounded px-1 py-0.5">
-                            <button onClick={async () => {
-                                const now = new Date();
-                                const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-                                try {
-                                    await window.electronAPI.runIntradaySwarmPrediction(currentHHMM);
-                                    await fetchData();
-                                } catch (e: any) {
-                                    alert('오류 발생: ' + e.message);
-                                }
-                            }} className="px-2 py-0.5 text-emerald-500 hover:text-emerald-400 font-bold transition-colors flex items-center gap-1 whitespace-nowrap" title="장중 스마트 변동성 점검 강제 실행">
-                                🤖 실시간 장중 점검
-                            </button>
-                        </div>
                     </div>
                         <button onClick={() => setShowKnowledgeBase(true)} className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 rounded text-xs font-semibold transition-colors">
                             <Brain className="w-3.5 h-3.5" /> Knowledge
@@ -672,7 +649,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                         <div className="flex-1 min-w-0 flex flex-col overflow-hidden gap-2">
                             <div className="flex items-center gap-2 mb-1.5">
                                 <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Latest Report</span>
-                                <span className="text-xs text-muted-foreground opacity-50 ml-auto">{latest ? `${latest.date} · Cycle ${latest.cycle === 'A' ? '장전(A)' : latest.cycle === 'P' ? '장중(P)' : '마감(B)'}` : 'No Data'}</span>
+                                <span className="text-xs text-muted-foreground opacity-50 ml-auto">{latest ? `${latest.date} · 장전(A)` : 'No Data'}</span>
                             </div>
                             {latest ? (
                             <div className="flex-1 min-h-0 overflow-y-auto p-3 bg-muted/20 border border-border/40 rounded-lg text-sm leading-relaxed space-y-2">
@@ -758,25 +735,9 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                     <div className="flex items-center gap-1 bg-muted/30 rounded p-0.5">
                         <button
                             onClick={() => setDecisionTab('classic')}
-                            className={cn(
-                                "px-3 py-1 text-xs font-bold rounded transition-colors",
-                                decisionTab === 'classic'
-                                    ? "bg-background text-foreground shadow-sm"
-                                    : "text-muted-foreground hover:text-foreground"
-                            )}
+                            className="px-3 py-1 text-xs font-bold rounded transition-colors bg-background text-foreground shadow-sm"
                         >
-                            📊 장전·마감 예측
-                        </button>
-                        <button
-                            onClick={() => setDecisionTab('intraday')}
-                            className={cn(
-                                "px-3 py-1 text-xs font-bold rounded transition-colors",
-                                decisionTab === 'intraday'
-                                    ? "bg-background text-foreground shadow-sm"
-                                    : "text-muted-foreground hover:text-foreground"
-                            )}
-                        >
-                            ⚡ 장중 타이밍
+                            📊 장전 예측
                         </button>
                     </div>
                     <div className="flex items-center gap-3">
@@ -802,8 +763,8 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                     ))}
                                 </div>
                                 <div className="flex bg-muted/30 rounded p-0.5 ml-1" title="표시 사이클 선택">
-                                    {['ALL', 'A', 'P', 'B'].map(opt => {
-                                        const labelMap = { 'ALL': '전체', 'A': 'A(장전)', 'P': 'P(장중)', 'B': 'B(마감)' };
+                                    {['ALL', 'A'].map(opt => {
+                                        const labelMap = { 'ALL': '전체', 'A': 'A(장전)' };
                                         return (
                                         <button
                                             key={opt}
@@ -819,59 +780,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                                 </div>
                             </>
                         )}
-                        {decisionTab === 'intraday' && (
-                            <>
-                                <div className="flex items-center gap-4 px-3 py-1 bg-muted/30 rounded border border-border/50 text-xs">
-                                    <div><span className="text-muted-foreground uppercase font-bold mr-1.5">Win</span><span className="font-mono font-bold">{(intradayStats.winRate * 100).toFixed(1)}%</span> <span className="opacity-50">({intradayStats.wins}/{intradayStats.total})</span></div>
-                                    <div className="w-px h-3 bg-border/60" />
-                                    <div><span className="text-muted-foreground uppercase font-bold mr-1.5">Return</span><span className={cn("font-mono font-bold", intradayStats.totalReturn > 0 ? "text-rose-500" : intradayStats.totalReturn < 0 ? "text-blue-500" : "")}>{intradayStats.totalReturn > 0 ? '+' : ''}{intradayStats.totalReturn.toFixed(2)}%</span></div>
-                                </div>
-                                
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setShowIntradayFilterMenu(v => !v)}
-                                        className="flex items-center gap-1.5 px-3 py-1 bg-muted/30 hover:bg-muted/50 border border-border/50 rounded text-[10px] font-bold transition-colors"
-                                    >
-                                        상태 필터 <span className="text-[9px] opacity-60">▼</span>
-                                    </button>
-                                    {showIntradayFilterMenu && (
-                                        <div 
-                                            className="absolute right-0 top-full mt-1 z-[100] bg-background dark:bg-[#0f172a] shadow-lg border border-border/60 rounded-lg w-32 py-1"
-                                            onMouseLeave={() => setShowIntradayFilterMenu(false)}
-                                        >
-                                            {['UP', 'DOWN', 'HOLD'].map(opt => {
-                                                const labelMap = { 'UP': '상승 (LONG)', 'DOWN': '하락 (SHORT)', 'HOLD': '관망 (HOLD)' };
-                                                const isActive = intradayFilters.includes(opt);
-                                                return (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setIntradayFilters(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                                        }}
-                                                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center gap-2 transition-colors"
-                                                    >
-                                                        <div className={cn("w-3 h-3 rounded-sm border flex items-center justify-center transition-colors", isActive ? "bg-indigo-500 border-indigo-500" : "border-border/60")}>
-                                                            {isActive && <span className="text-[8px] text-white">✓</span>}
-                                                        </div>
-                                                        <span className="font-medium">{(labelMap as any)[opt]}</span>
-                                                    </button>
-                                                )
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
 
-                                <button
-                                    onClick={handleFetchDigest}
-                                    disabled={isDigestLoading}
-                                    className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded text-xs font-bold transition-colors disabled:opacity-50"
-                                >
-                                    {isDigestLoading ? <span className="animate-spin text-[10px]">⚙</span> : <Activity className="w-3.5 h-3.5" />}
-                                    전처리 다이제스트
-                                </button>
-                            </>
-                        )}
                         <div className="relative flex items-center" ref={moreMenuRef}>
                             <button
                                 onClick={() => setShowMoreMenu(v => !v)}
@@ -903,7 +812,6 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                     </div>
                 </div>
                 <div className="flex-1 overflow-auto px-4">
-                    {decisionTab === 'classic' ? (
                     <table className="w-full text-sm text-left whitespace-nowrap">
                         <thead className="sticky top-0 z-10 bg-background">
                             <tr className="text-xs uppercase text-muted-foreground border-b border-border/60">
@@ -921,7 +829,7 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             {history.filter(t => historyFilter === 'ALL' || t.cycle === historyFilter).map((t) => (
                                 <tr key={t.id} onClick={() => setSelectedTrade(t)} className="border-b border-border/20 hover:bg-accent/30 cursor-pointer transition-colors group">
                                     <td className="py-2 pr-4 font-mono text-muted-foreground">{t.date}</td>
-                                    <td className="py-2 pr-4 text-center text-xs font-medium">{t.cycle === 'A' ? '장전(A)' : t.cycle === 'P' ? '장중(P)' : '마감(B)'}</td>
+                                    <td className="py-2 pr-4 text-center text-xs font-medium">장전(A)</td>
                                     <td className="py-2 pr-4">
                                         {(() => {
                                             const vPredict = returnView === 'T+5' && t.t5_predict ? t.t5_predict : returnView === 'T+20' && t.t20_predict ? t.t20_predict : t.predict;
@@ -1006,123 +914,6 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
                             ))}
                         </tbody>
                     </table>
-                    ) : (
-                    /* ── 장중 인트라데이 예측 테이블 (장전·마감과 동일 형식) ── */
-                    <table className="w-full text-sm text-left whitespace-nowrap">
-                        <thead className="sticky top-0 z-10 bg-background">
-                            <tr className="text-xs uppercase text-muted-foreground border-b border-border/60">
-                                <th className="py-2 pr-4 font-bold">Date</th>
-                                <th className="py-2 pr-4 font-bold text-center">Time</th>
-                                <th className="py-2 pr-4 font-bold">Position</th>
-                                <th className="py-2 pr-4 font-bold">Smart Report Summary</th>
-                                <th className="py-2 pr-4 font-bold text-right">Entry Price</th>
-                                <th className="py-2 pr-4 font-bold text-right">Max Return</th>
-                                <th className="py-2 pr-4 font-bold text-right">Close Return</th>
-                                <th className="py-2 pr-4 font-bold text-center">Result</th>
-                                <th className="py-2 pr-4 font-bold">Confidence</th>
-                                <th className="py-2"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredIntradayData.length === 0 ? (
-                                <tr><td colSpan={10} className="py-8 text-center text-muted-foreground text-xs">선택한 조건의 장중 예측 데이터가 없습니다.</td></tr>
-                            ) : filteredIntradayData.map((row) => {
-                                let posLabel = row.position || (row.predict === 'UP' ? 'KODEX 200' : row.predict === 'DOWN' ? 'KODEX 인버스' : 'HOLD')
-                                
-                                // 임시 UI 패치: 훼손된 DB 문자열 복구 처리
-                                if (posLabel.includes('HOLD(KODEX 200 기준)') || posLabel === '- HOLD') {
-                                    if (row.time_slot === '09:45' || row.time_slot === '10:15') {
-                                        posLabel = 'KODEX 200';
-                                    } else {
-                                        posLabel = 'HOLD';
-                                    }
-                                }
-
-                                const posStyle = posLabel.includes('200')
-                                    ? 'text-rose-500 bg-rose-500/10 border-rose-500/20'
-                                    : posLabel.includes('인버스')
-                                    ? 'text-blue-500 bg-blue-500/10 border-blue-500/20'
-                                    : 'text-muted-foreground bg-muted/50 border-border'
-                                const posIcon = posLabel.includes('200') ? '↗' : posLabel.includes('인버스') ? '↘' : '—'
-                                
-                                const isUp = posLabel.includes('200')
-                                const isDown = posLabel.includes('인버스')
-                                const code = isUp ? '069500' : isDown ? '114800' : null
-                                
-                                let returnVal = row.return_pct
-                                let isLive = false
-
-                                const tzOffset = new Date().getTimezoneOffset() * 60000;
-                                const todayStr = new Date(Date.now() - tzOffset).toISOString().split('T')[0];
-
-                                // 당일 마감 전(return_pct가 null)이고 진입가가 있으며 실시간 현재가가 존재할 때 (반드시 '오늘' 날짜인 경우에만 실행)
-                                if (returnVal == null && row.entry_price && code && livePrices[code] && row.date === todayStr) {
-                                    const curPrice = livePrices[code]
-                                    returnVal = ((curPrice - row.entry_price) / row.entry_price) * 100
-                                    isLive = true
-                                }
-
-                                const isHold = row.predict === 'HOLD'
-
-                                const resultBadge = row.result === 'HIT'
-                                    ? <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded text-xs font-bold">✅ HIT</span>
-                                    : row.result === 'MISS'
-                                    ? <span className="px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded text-xs font-bold">❌ MISS</span>
-                                    : row.result === 'HOLD' || isHold
-                                    ? <span className="px-2 py-0.5 bg-muted/50 border border-border text-muted-foreground rounded text-xs font-bold">— HOLD</span>
-                                    : isLive && returnVal != null
-                                    ? <span className={cn("px-2 py-0.5 border rounded text-xs font-bold flex items-center gap-1 justify-center w-min mx-auto", returnVal > 0 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-rose-500/10 border-rose-500/20 text-rose-500")}>
-                                          <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse opacity-70" /> RUNNING
-                                      </span>
-                                    : <span className="text-xs text-indigo-400 animate-pulse">⏳</span>
-                                    
-                                return (
-                                    <tr key={row.id} onClick={() => setSelectedIntraday(row)} className="border-b border-border/20 hover:bg-accent/30 cursor-pointer transition-colors group">
-                                        <td className="py-2 pr-4 font-mono text-muted-foreground">{row.date}</td>
-                                        <td className="py-2 pr-4 text-center font-mono text-xs font-bold">{row.time_slot}</td>
-                                        <td className="py-2 pr-4">
-                                            <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-bold', posStyle)}>
-                                                {posIcon} {posLabel}
-                                            </span>
-                                        </td>
-                                        <td className="py-2 pr-4">
-                                            {row.swarm_sentiment ? (
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className={cn("text-[10px] uppercase font-bold px-1.5 py-0.5 rounded", 
-                                                        row.swarm_sentiment.includes('UP') ? "bg-rose-500/10 text-rose-500" :
-                                                        row.swarm_sentiment.includes('DOWN') ? "bg-blue-500/10 text-blue-500" : "bg-muted/30 text-muted-foreground"
-                                                    )}>
-                                                        {row.swarm_sentiment.split(' ')[0]}
-                                                    </span>
-                                                    <span className="text-xs text-muted-foreground opacity-80">{row.swarm_sentiment.split(' ')[1]}</span>
-                                                    
-                                                    {/* 이견 충돌 경고 아이콘 */}
-                                                    {row.predict && row.swarm_sentiment && row.predict !== row.swarm_sentiment.split(' ')[0] && row.swarm_sentiment.split(' ')[0] !== 'HOLD' && (
-                                                        <span className="text-amber-500 ml-1" title="메인 AI와 군집의 예측이 엇갈렸습니다."><ShieldAlert className="w-3.5 h-3.5" /></span>
-                                                    )}
-                                                </div>
-                                            ) : <span className="text-xs text-muted-foreground opacity-50">진행중...</span>}
-                                        </td>
-                                        <td className="py-2 pr-4 font-mono text-right text-muted-foreground">{!row.entry_price ? '-' : row.entry_price.toLocaleString()}</td>
-                                        <td className={cn("py-2 pr-4 font-mono text-right opacity-80", row.max_return_pct > 0 ? "text-rose-500" : row.max_return_pct < 0 ? "text-blue-500" : "text-muted-foreground")}>
-                                            {row.max_return_pct != null ? `${row.max_return_pct > 0 ? '+' : ''}${Number(row.max_return_pct).toFixed(2)}%` : '-'}
-                                        </td>
-                                        <td className={cn("py-2 pr-4 font-mono text-right font-bold", returnVal > 0 ? "text-rose-500" : returnVal < 0 ? "text-blue-500" : "")}>
-                                            {returnVal != null ? (
-                                                <span className={cn(isLive && "opacity-80 transition-all")}>
-                                                    {returnVal > 0 ? '+' : ''}{Number(returnVal).toFixed(2)}%
-                                                </span>
-                                            ) : '⏳'}
-                                        </td>
-                                        <td className="py-2 pr-4 text-center">{resultBadge}</td>
-                                        <td className="py-2 pr-4 font-mono text-xs text-muted-foreground">{row.confidence ?? '-'}%</td>
-                                        <td className="py-2"><ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity" /></td>
-                                    </tr>
-                                )
-                            })}
-                        </tbody>
-                    </table>
-                    )}
                 </div>
             </div>
 

@@ -411,6 +411,13 @@ export class PortfolioManagerAgent {
                     if (s.status) ds += `현재 상태: ${s.status} / 현재가: ${(s.current_price || 0).toLocaleString()}원 / 현재 수익률: ${(s.profit_rate || 0) > 0 ? '+' : ''}${Number(s.profit_rate || 0).toFixed(2)}% [당일 실시간 기준]\n`;
                     ds += `-------------------------------------------------\n`;
 
+                    const narrative = DatabaseService.getInstance().getStockNarrative(s.stock_code);
+                    if (narrative) {
+                        ds += `[종목 배경/서사 (Narrative)]\n${narrative.narrative} (작성: ${narrative.updated_at.substring(0, 10)})\n`;
+                        ds += `-------------------------------------------------\n`;
+                    }
+
+
                     const analysisTimeline = DatabaseService.getInstance().getStockAnalysis(s.stock_code);
                     ds += `[과거~현재 AI 분석 리포트 통합 타임라인 (최신순)]\n`;
                     if (analysisTimeline && analysisTimeline.length > 0) {

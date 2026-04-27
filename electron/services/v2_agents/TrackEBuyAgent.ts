@@ -674,7 +674,7 @@ ${marketContext}
 
         if (isBypass) {
             console.log(`[TrackEBuyAgent] ☁️ 클라우드 전환 감지 -> ${candidates.length}개 종목 병렬 리서치 시작`);
-            this.telegram.sendMessage(`[TrackE] ☁️ 클라우드 쾌속 분석 모드 (병렬 ${candidates.length}개) 작동 중...`);
+            import('../TelegramService').then(m => m.TelegramService.getInstance().sendMessage(`[TrackE] ☁️ 클라우드 쾌속 분석 모드 (병렬 ${candidates.length}개) 작동 중...`));
             await Promise.all(candidates.map(c => processCandidate(c)));
         } else {
             console.log(`[TrackEBuyAgent] 🖥️ 로컬 처리 감지 -> 순차 리서치 시작`);
@@ -795,7 +795,7 @@ ${marketContext}
         }
 
         const systemInstruction = `당신은 대한민국 코스피/코스닥 알파 수익률 전문 투자심의위원회 위원장입니다.
-Gemma AI가 종목별로 작성한 팩트시트와 1차 판단을 검토하여 최종 Top ${${tpVar}}}개를 선발합니다.
+Gemma AI가 종목별로 작성한 팩트시트와 1차 판단을 검토하여 최종 Top ${TARGET_PICKS}개를 선발합니다.
 
 ${phase2Guideline || '[추가 판단 기준]\n1. 촉매 타이밍\n2. 포트폴리오 분산\n3. 리스크 필터링'}
 
@@ -838,7 +838,7 @@ ${themeDensityText}${factSheets}
 
 ---
 위 팩트시트를 기반으로 5영업일 내 +15% 달성 가능성 기준으로
-최종 Top ${${tpVar}}개를 BUY로 선정하고, 나머지는 WATCH로 처리하십시오.`;
+최종 Top ${TARGET_PICKS}개를 BUY로 선정하고, 나머지는 WATCH로 처리하십시오.`;
 
             try {
                 const result = await AiExecutionQueue.getInstance().enqueue({

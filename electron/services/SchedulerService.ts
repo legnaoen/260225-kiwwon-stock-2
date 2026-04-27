@@ -165,19 +165,8 @@ export class SchedulerService {
                 const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
                 await MarketConditionAgent.getInstance().runPrediction('A')
             }, { timezone: 'Asia/Seoul' })
-            // Cycle P (Pivot 검증): 09:30 (개장 직후 30분 수급 실데이터로 08:50 예측과 교차 비판 및 스위칭)
-            const mcaJobP = cron.schedule('30 09 * * 1-5', async () => {
-                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
-                await MarketConditionAgent.getInstance().runPrediction('P')
-            }, { timezone: 'Asia/Seoul' })
 
-            // Cycle B: 15:10 (장마감 전 시장 파악)
-            const mcaJobB = cron.schedule('10 15 * * 1-5', async () => {
-                const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
-                await MarketConditionAgent.getInstance().runPrediction('B')
-            }, { timezone: 'Asia/Seoul' })
-
-            // PerformanceTracker 기록용 (15:35 T+1 / T+5 / T+20) + 장중 인트라데이 평가
+            // PerformanceTracker 기록용 (15:35 T+1 / T+5 / T+20)
             const mcaTrackerJob = cron.schedule('35 15 * * 1-5', async () => {
                 const isReady = await this.waitForOhlcv();
                 if (!isReady) {
@@ -188,8 +177,7 @@ export class SchedulerService {
                     const { PerformanceTracker } = await import('./v2_agents/PerformanceTracker')
                     const tracker = PerformanceTracker.getInstance()
                     await tracker.runDailyTracking()
-                    await tracker.evaluateIntraday()
-                    this.telegram.sendMessage(`✅ [15:35] 성과 추적 완료\nT+1/T+5/T+20 수익률 집계 및 장중 예측 평가 정상 완료`)
+                    this.telegram.sendMessage(`✅ [15:35] 성과 추적 완료\nT+1/T+5/T+20 수익률 집계 정상 완료`)
                 } catch (e: any) {
                     console.error('[Scheduler] 성과추적 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:35] 성과 추적 실패\n오류: ${e.message}`)
@@ -282,28 +270,8 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // Option 1: Pre-Close 일간 피드백 (로컬 감시 스웜) (15:00)
-            const preCloseRetroJob = cron.schedule('0 15 * * 1-5', async () => {
-                const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
-                await MarketReviewAgent.getInstance().runPreCloseFeedback()
-            }, { timezone: 'Asia/Seoul' })
-
-            // Option 2: Post-Market 일간 회고 AI (15:38, 성과추적 3분 후)
-            const dailyRetroJob = cron.schedule('38 15 * * 1-5', async () => {
-                const isReady = await this.waitForOhlcv();
-                if (!isReady) {
-                    console.log('[Scheduler] 일간 회고 취소: OHLCV 선행 작업 미완료');
-                    return;
-                }
-                try {
-                    const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
-                    await MarketReviewAgent.getInstance().runDailyReview()
-                    this.telegram.sendMessage('✅ [15:38] 일간 회고 AI 완료\n오늘 시장 성과 큐리큐 일간 파일 정상 완료')
-                } catch (e: any) {
-                    console.error('[Scheduler] 일간 회고 오류:', e.message)
-                    this.telegram.sendMessage(`❌ [15:38] 일간 회고 AI 실패\n오류: ${e.message}`)
-                }
-            }, { timezone: 'Asia/Seoul' })
+            // Option 1: Pre-Close 일간 피드백 (로컬 감시 스웜) (15:00) - 사용 안함
+            // Option 2: Post-Market 일간 회고 AI (15:38) - 사용 안함
 
             // ─── 종목 AI 파이프라인 (3단계, 5분 간격) ───────────────────────
             // [Step 1] 09:35 수급 AI: NaverFlow(09:26) 데이터 확보 후 급등/거래대금 교차 분석
@@ -692,12 +660,12 @@ export class SchedulerService {
                     // Ignore background errors
                 }
             }, { timezone: 'Asia/Seoul' });
-            this.scheduledJobs.push(mcaJobA, mcaJobP, mcaJobB, mcaTrackerJob, preCloseRetroJob, dailyRetroJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob, liveTradeMonitorJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
+            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob, liveTradeMonitorJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
 
-            console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, CCI, Swarms, Retros)`)
+            console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)
             console.log(`[SchedulerService] 📊 장중 파이프라인: OHLCV수집+모의매매선정(15:05) → 진입가확정(15:32)`)
-            console.log(`[SchedulerService] 📊 장마감 파이프라인: 성과추적(15:35) → 회고(15:38) → 채점(15:41) → 인큐베이터(15:43) → 주간(15:44,금) → 월간(15:47,28일)`)
+            console.log(`[SchedulerService] 📊 장마감 파이프라인: 성과추적(15:35) → 채점(15:41) → 인큐베이터(15:43) → 주간(15:44,금) → 월간(15:47,28일)`)
             console.log(`[SchedulerService] 📈 실전 매매 미체결 루프 활성화 (장중 1분 단위)`)
         }
 
@@ -786,7 +754,7 @@ export class SchedulerService {
                                             const payloadSeq = Array.isArray(payload) ? (payload.length > 0 ? payload[0].seq : undefined) : payload.seq;
                                             const stocks = Array.isArray(payload) ? payload : (payload.stocks || []);
 
-                                            if (!handled && String(payloadSeq) === String(seq)) {
+                                            if (!handled && String(payloadSeq).trim() === String(seq).trim()) {
                                                 handled = true;
                                                 clearTimeout(timeoutId);
                                                 eventBus.removeListener(SystemEvent.CONDITION_MATCHED, onConditionMatched);

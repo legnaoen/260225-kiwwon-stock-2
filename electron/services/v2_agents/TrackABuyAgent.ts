@@ -632,7 +632,7 @@ ${marketContext}
 
         if (isBypass) {
             console.log(`[TrackABuyAgent] ☁️ 클라우드 전환 감지 -> ${candidates.length}개 종목 병렬 리서치 시작`);
-            this.telegram.sendMessage(`[TrackA] ☁️ 클라우드 쾌속 분석 모드 (병렬 ${candidates.length}개) 작동 중...`);
+            import('../TelegramService').then(m => m.TelegramService.getInstance().sendMessage(`[TrackA] ☁️ 클라우드 쾌속 분석 모드 (병렬 ${candidates.length}개) 작동 중...`));
             await Promise.all(candidates.map(c => processCandidate(c)));
         } else {
             console.log(`[TrackABuyAgent] 🖥️ 로컬 처리 감지 -> 순차 리서치 시작`);

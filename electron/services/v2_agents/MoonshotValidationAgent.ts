@@ -387,8 +387,9 @@ ${financeMarkdown ? `[상세 재무/기업개요]\n${financeMarkdown}` : ''}
                 const chunks = ChunkUtils.createBalancedChunks(categoryStocks, 15);
                 let aiResultArray: any[] = [];
 
-                await Promise.all(chunks.map(async (chunkStocks, chunkIndex) => {
-                    const factsText = chunkStocks.map(s =>
+                try {
+                    await Promise.all(chunks.map(async (chunkStocks, chunkIndex) => {
+                        const factsText = chunkStocks.map(s =>
                         `----- [기호: ${s.code}] 종목명: ${s.name} -----\n${batchDistilledFacts[s.code] || '수집 실패'}`
                     ).join('\n\n');
 

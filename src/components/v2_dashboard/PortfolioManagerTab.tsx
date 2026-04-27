@@ -87,6 +87,7 @@ function PortfolioStockModal({ stock, watchlist, onClose, onUpdateStockPrice }: 
     const [copied, setCopied] = useState(false);
     const [eventLogs, setEventLogs] = useState<any[]>([]);
     const [latestPrice, setLatestPrice] = useState<number | null>(null);
+    const [stockNarrative, setStockNarrative] = useState<{ narrative: string, updated_at: string } | null>(null);
 
     let analysts: any[] = []
     try { analysts = typeof stock.analysts_json === 'string' ? JSON.parse(stock.analysts_json) : (stock.analysts_json || []) } catch { }
@@ -103,6 +104,16 @@ function PortfolioStockModal({ stock, watchlist, onClose, onUpdateStockPrice }: 
                 .then((res: any) => {
                     if (res?.success) setEventLogs(res.data || []);
                 });
+
+            if ((window as any).electronAPI?.getStockNarrative) {
+                (window as any).electronAPI.getStockNarrative(stock.stock_code)
+                    .then((res: any) => {
+                        if (res?.success && res.data) {
+                            setStockNarrative(res.data);
+                        }
+                    })
+                    .catch((e: any) => console.error('Failed to load stock narrative in PM modal', e));
+            }
         }
     }, [stock.stock_code]);
 
@@ -209,6 +220,18 @@ function PortfolioStockModal({ stock, watchlist, onClose, onUpdateStockPrice }: 
                                             {stock.last_signal_reason || stock.exit_reason || stock.entry_reason || '분석 내용이 없습니다.'}
                                         </div>
                                     </div>
+
+                                    {/* 2.5 Narrative */}
+                                    {stockNarrative && (
+                                        <div className="bg-gradient-to-br from-indigo-500/5 to-purple-500/5 border border-indigo-500/10 rounded-xl p-4 shadow-inner">
+                                            <h4 className="text-[11px] font-bold text-indigo-400 flex items-center gap-1.5 uppercase tracking-wider mb-2">
+                                                <Sparkles size={13} className="text-indigo-500" /> Company Narrative
+                                            </h4>
+                                            <p className="text-[13px] leading-relaxed text-foreground/90 font-medium whitespace-pre-wrap">
+                                                {stockNarrative.narrative}
+                                            </p>
+                                        </div>
+                                    )}
 
                                     {/* 3. Raw Context */}
                                     {stock.raw_context && (

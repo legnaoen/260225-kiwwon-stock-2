@@ -277,6 +277,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteTrackBPicksByDate: (date: string) => ipcRenderer.invoke('track-b:delete-by-date', date),
     deleteSimTradePickById: (id: number, category: string) => ipcRenderer.invoke('simtrade:delete-pick-by-id', id, category),
     getTrackBResearchReports: (stockCode: string) => ipcRenderer.invoke('track-b:get-research-reports', stockCode),
+    getStockNarrative: (stockCode: string) => ipcRenderer.invoke('stock:get-narrative', stockCode),
+
     getTrackBGuideline: (fileName: string) => ipcRenderer.invoke('track-b:get-guideline', fileName),
     saveTrackBGuideline: (fileName: string, content: string) => ipcRenderer.invoke('track-b:save-guideline', { fileName, content }),
     runThemeOntology: () => ipcRenderer.invoke('v2:run-theme-ontology'),

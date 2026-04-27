@@ -68,10 +68,12 @@ export class MarketLeaderDiscoveryService {
     public getTradingDateCutoff(targetCandles: number): string {
         const db = (this.dbService as any).db;
         try {
+            // DB에 존재하는 전체 시장의 최근 거래일 목록을 추출 (KODEX 200 등 단일 종목 의존도 제거)
             const rows = db.prepare(`
-                SELECT date FROM market_ohlcv_history 
-                WHERE stock_code = '069500' 
-                ORDER BY date DESC LIMIT ?
+                SELECT DISTINCT date 
+                FROM market_ohlcv_history 
+                ORDER BY date DESC 
+                LIMIT ?
             `).all(targetCandles) as { date: string }[];
             
             if (rows && rows.length > 0) {

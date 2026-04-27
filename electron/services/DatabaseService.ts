@@ -1591,6 +1591,17 @@ export class DatabaseService {
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_stock_research_date ON stock_research_reports(date DESC);");
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_stock_research_code ON stock_research_reports(stock_code);");
 
+        // ═══ Stock Narratives (종목 네러티브 — 종목당 최신 1건 유지) ═══
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS stock_narratives (
+                stock_code   TEXT PRIMARY KEY,
+                stock_name   TEXT NOT NULL,
+                narrative    TEXT NOT NULL,
+                agent_source TEXT DEFAULT 'GEMMA',
+                updated_at   TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
         // ═══ Mega Theme Ledger (ThemeContextBuilder) ═══
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS mega_theme_ledger (
@@ -4001,6 +4012,30 @@ export class DatabaseService {
             });
         } catch (e: any) {
             console.error('[DB] saveStockResearchReport Error:', e.message);
+        }
+    }
+
+    // ── 종목 네러티브 (최신 1건 유지) ──────────────────────────────────────
+    public upsertStockNarrative(stock_code: string, stock_name: string, narrative: string, agent_source = 'GEMMA'): void {
+        try {
+            this.db.prepare(`
+                INSERT OR REPLACE INTO stock_narratives (stock_code, stock_name, narrative, agent_source, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+            `).run(stock_code, stock_name, narrative, agent_source, new Date().toISOString());
+        } catch (e: any) {
+            console.error('[DB] upsertStockNarrative Error:', e.message);
+        }
+    }
+
+    public getStockNarrative(stock_code: string): string | null {
+        try {
+            const row = this.db.prepare(`
+                SELECT narrative FROM stock_narratives WHERE stock_code = ?
+            `).get(stock_code) as { narrative: string } | undefined;
+            return row?.narrative ?? null;
+        } catch (e: any) {
+            console.error('[DB] getStockNarrative Error:', e.message);
+            return null;
         }
     }
 

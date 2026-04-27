@@ -2,17 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
-import { RefreshCw, TrendingUp, Calendar, AlertCircle, X, ExternalLink, Sparkles, Link2, Flame } from 'lucide-react';
+import { RefreshCw, TrendingUp, Calendar, AlertCircle, X, ExternalLink, Sparkles, Link2, Flame, Target } from 'lucide-react';
 import { StockDetailModal } from '../common/StockDetailModal';
 import { MegaThemeTab } from './MegaThemeTab';
-
+import { ThemeMockTradingTab } from './ThemeMockTradingTab';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
 export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?: string) => void; initialSelection?: string }> = ({ onNavigate, initialSelection }) => {
-    const [activeTab, setActiveTab] = useState<'trend' | 'mega'>('trend');
+    const [activeTab, setActiveTab] = useState<'trend' | 'mega' | 'mock'>('trend');
     const [viewType, setViewType] = useState<string>('BOTH');
     const [themeData, setThemeData] = useState<any>(null);
     const [sectorData, setSectorData] = useState<any>(null);
@@ -1040,7 +1040,35 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                             <Flame size={13} />
                             메가 테마 관리
                         </button>
+                        <button
+                            onClick={() => setActiveTab('mock')}
+                            className={cn(
+                                'flex items-center gap-2 px-4 py-3 text-xs font-bold border-b-2 transition-colors',
+                                activeTab === 'mock'
+                                    ? 'border-emerald-500 text-emerald-500'
+                                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                            )}
+                        >
+                            <Target size={13} />
+                            모의매매 <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] bg-emerald-500/20 text-emerald-500">NEW</span>
+                        </button>
                     </div>
+
+                    {/* 모의매매 전용 툴바 */}
+                    {activeTab === 'mock' && (
+                        <div className="flex items-center gap-4 py-2">
+                            <button
+                                className={cn(
+                                    'flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-bold transition-colors shadow-sm',
+                                    'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20 hover:border-emerald-500/40'
+                                )}
+                                title="오늘 일자의 모의매매 종목을 AI로 수동 추출합니다."
+                            >
+                                <Sparkles size={13} />
+                                종목 추출 수동실행
+                            </button>
+                        </div>
+                    )}
 
                     {/* 탭 1 전용 툴바 — 탭 1 활성 시에만 표시 */}
                     {activeTab === 'trend' && (
@@ -1118,6 +1146,13 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                 {activeTab === 'mega' && (
                     <div className="flex-1 overflow-hidden">
                         <MegaThemeTab onNavigate={onNavigate} />
+                    </div>
+                )}
+
+                {/* ─── 탭 3: 모의매매 (신규 목업) ─────────────────── */}
+                {activeTab === 'mock' && (
+                    <div className="flex-1 overflow-hidden">
+                        <ThemeMockTradingTab />
                     </div>
                 )}
 

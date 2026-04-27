@@ -141,7 +141,9 @@ export class MarketDataCollectorService {
             const kosdaq = await this.kiwoomService.getAllStocks('10');
             
             // 일반 상장 주식(보통주) 여부 검증 함수
-            const isValidOrdinaryStock = (name: string): boolean => {
+            const isValidOrdinaryStock = (code: string, name: string): boolean => {
+                if (code === '069500') return true; // KODEX 200은 알파 계산용 지표이므로 무조건 수집
+
                 if (!name) return false;
                 
                 // 1. 스팩 (SPAC)
@@ -166,7 +168,7 @@ export class MarketDataCollectorService {
             // 중복 제거 및 특수 종목 제외 후 리스트 합치기
             const allStocksMap = new Map<string, any>();
             [...kospi, ...kosdaq].forEach(s => {
-                if (s && s.stock_code && isValidOrdinaryStock(s.stock_name)) {
+                if (s && s.stock_code && isValidOrdinaryStock(s.stock_code, s.stock_name)) {
                     allStocksMap.set(s.stock_code, s);
                 }
             });

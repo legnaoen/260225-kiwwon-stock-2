@@ -1521,10 +1521,29 @@ ipcMain.handle('naverflow:get-tracker-data', async (_event, type: 'SECTOR' | 'TH
     }
 })
 
+ipcMain.handle('naverflow:get-mock-trading-picks', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance()
+        const data = db.getThemeMockTradingPicks(10);
+        console.log(`[IPC] getThemeMockTradingPicks: 조회된 날짜 그룹 수 = ${data.length}`);
+        return { success: true, data }
+    } catch (err: any) {
+        console.error(`[IPC] getThemeMockTradingPicks Error:`, err);
+        return { success: false, error: err.message }
+    }
+})
+
 ipcMain.handle('naverflow:analyze-themes', async (_event, date: string) => {
     try {
         const { ThemeIntelligenceAgent } = await import('./services/v2_agents/ThemeIntelligenceAgent')
+        const { ThemeMockTradingJudgeAgent } = await import('./services/v2_agents/ThemeMockTradingJudgeAgent')
+        
         const data = await ThemeIntelligenceAgent.getInstance().runBatchAnalysis(date)
+        
+        // 종목 추출 후 바로 판독/업데이트 실행
+        await ThemeMockTradingJudgeAgent.getInstance().evaluatePicks()
+        
         return { success: true, data }
     } catch (err: any) {
         return { success: false, error: err.message }

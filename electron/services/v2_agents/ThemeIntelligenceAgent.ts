@@ -40,9 +40,9 @@ export class ThemeIntelligenceAgent {
                 return null;
             }
 
-            // 1.5 필터링: 테마 20위, 섹터 10위까지 수용하되 전체 카테고리 상승률이 2.0% 이하인 경우는 제외
-            const topThemes = marketFlow.filter(m => m.type === 'THEME' && m.rank_num <= 20 && m.change_rate > 2.0).map(m => m.name);
-            const topSectors = marketFlow.filter(m => m.type === 'SECTOR' && m.rank_num <= 10 && m.change_rate > 2.0).map(m => m.name);
+            // 1.5 필터링: (출력 토큰 제한 방지를 위해 테마 10위, 섹터 5위까지만 엄선)
+            const topThemes = marketFlow.filter(m => m.type === 'THEME' && m.rank_num <= 10 && m.change_rate > 2.0).map(m => m.name);
+            const topSectors = marketFlow.filter(m => m.type === 'SECTOR' && m.rank_num <= 5 && m.change_rate > 2.0).map(m => m.name);
             const targets = Array.from(new Set([...topThemes, ...topSectors]));
 
             // 2. 컨텍스트용 이슈/뉴스 수집
@@ -71,6 +71,7 @@ export class ThemeIntelligenceAgent {
             // 2.5 [핵심 고도화] 테마 파급력(Mega-ness) 등급별 주도주 동적 검색 및 프롬프트 주입
             
             let targetedNewsContext = "\n\n[🔥 최상위 주도 테마/섹터 심층 실시간 뉴스]\n";
+            let themeStocksContext = "\n\n[각 테마/섹터별 주요 상승 종목 리스트]\n";
             
             try {
                 const { NaverSearchCollector } = await import('../v2_pipeline/collectors/NaverSearchCollector');
@@ -82,6 +83,12 @@ export class ThemeIntelligenceAgent {
                     SELECT stock_code, stock_name, change_rate FROM stock_theme_tags 
                     WHERE tag_name = ? AND change_rate > 0.0
                     ORDER BY change_rate DESC 
+                `);
+
+                const stmtGetOhlcv = rawDb.prepare(`
+                    SELECT close FROM market_ohlcv_history
+                    WHERE stock_code = ? AND date <= ? 
+                    ORDER BY date DESC LIMIT 20
                 `);
 
                 const stmtInsertNews = rawDb.prepare(`
@@ -104,8 +111,8 @@ export class ThemeIntelligenceAgent {
 
                 for (const targetName of targets) {
                     const stocks = stmtGetStocks.all(targetName) as any[];
-                    // 너무 미미한 상승(1% 미만)만 있는 테마는 무시
-                    const validStocks = stocks.filter(s => s.change_rate >= 1.0);
+                    // 상승률 1% 이상 ~ 20% 이하 종목만 엄선 (20% 초과 급등/상한가 종목은 윗꼬리 및 고점 매수 리스크로 제외)
+                    const validStocks = stocks.filter(s => s.change_rate >= 1.0 && s.change_rate <= 20.0);
                     if (!validStocks || validStocks.length === 0) continue;
                     
                     const limitUps = validStocks.filter(s => s.change_rate >= 29.5).length;
@@ -113,6 +120,27 @@ export class ThemeIntelligenceAgent {
                     
                     const maxChange = validStocks[0].change_rate;
                     const avgChange = validStocks.reduce((sum, s) => sum + s.change_rate, 0) / validStocks.length;
+
+                    // 해당 테마의 상위 15개 종목을 컨텍스트에 주입 (AI가 여기서 5개를 고르게 함)
+                    themeStocksContext += `\n[${targetName}]\n`;
+                    const contextLines = validStocks.slice(0, 15).map(s => {
+                        const ohlcvs = stmtGetOhlcv.all(s.stock_code, dateStr) as any[];
+                        if (ohlcvs && ohlcvs.length > 0) {
+                            const lastClose = ohlcvs[0].close;
+                            const estimatedPrice = Math.round(lastClose * (1 + s.change_rate / 100));
+                            
+                            const prices = ohlcvs.map((r: any) => r.close);
+                            const ma20Base = prices.slice(0, 19);
+                            const sum = ma20Base.reduce((a: number, b: number) => a + b, 0) + estimatedPrice;
+                            const ma20 = sum / (ma20Base.length + 1);
+                            const disparity = ((estimatedPrice / ma20) * 100).toFixed(1);
+                            
+                            return `- ${s.stock_name} (${s.stock_code}): 당일 등락률 +${s.change_rate.toFixed(2)}%, 추정 현재가 ${estimatedPrice.toLocaleString()}원, 20일선 이격도 ${disparity}%`;
+                        } else {
+                            return `- ${s.stock_name} (${s.stock_code}): 당일 등락률 +${s.change_rate.toFixed(2)}%, 추정 현재가 N/A, 20일선 이격도 N/A`;
+                        }
+                    });
+                    themeStocksContext += contextLines.join('\n') + '\n';
 
                     // 테마/섹터 분석을 위해 각 대상별 1~2개의 대장주의 뉴스를 대표 샘플로 수집합니다.
                     const pickCount = Math.min(2, validStocks.length);
@@ -163,6 +191,7 @@ export class ThemeIntelligenceAgent {
                     console.log(`[ThemeIntelligence] 🎯 주도주 타겟 검색 완료: 뉴스 ${dbRowsToInsert.length}건 DB 저장`);
                     newsContext += targetedNewsContext;
                 }
+                newsContext += themeStocksContext;
             } catch (e) {
                 console.error('[ThemeIntelligence] 주도주 실시간 타겟 뉴스 확보 중 에러:', e);
             }
@@ -232,28 +261,28 @@ export class ThemeIntelligenceAgent {
             // [P2] 테마별 Breadth 지수 (상승 종목 비율 — 수급 확산도)
             let breadthContext = '[테마별 Breadth 지수]\n데이터 누적 부족 (초기 실행)\n';
 
-            const systemInstruction = `당신은 대한민국 주식 시장의 메가트렌드와 테마를 분석하는 최상위 퀀트(Quant) 및 시황 전략가입니다. 뉴스 뿐만 아니라 수급 확산도를 복합적으로 추론합니다.`;
+            const systemInstruction = `당신은 대한민국 주식 시장의 메가트렌드와 테마를 분석하는 최상위 퀀트(Quant) 및 시황 전략가이자 포트폴리오 매니저입니다. 테마의 상승 사유를 분석하고 10거래일 내에 +20% 수익을 달성할 고점 모멘텀 핵심 종목을 추출합니다. 특히, 주어진 핵심 소속 종목의 기술적 지표(등락률, 추정 현재가, 20일선 이격도 등) 수치를 바탕으로, 가격적 리스크 대비 상승 여력을 가치중립적 데이터에서 스스로 판별하여 너무 과열된 고점 종목은 피하고 상승 초입의 가장 적합한 Top Pick을 선정해야 합니다.`;
             
             const userPrompt = `[오늘 분석 대상 주도 섹터 목록]
-$topSectors.join(', ')
+${topSectors.join(', ')}
 
 [오늘 분석 대상 주도 테마 목록]
-$topThemes.join(', ')
+${topThemes.join(', ')}
 
-$marketConditionContext
+${marketConditionContext}
 
 [시장 컨텍스트 (실시간 뉴스 및 이슈 요약)]
-$newsContext
+${newsContext}
 
-$cooccurrenceContext
+${cooccurrenceContext}
 
-$breadthContext
+${breadthContext}
 
 [🔒 현재 시스템에 등록된 활성 거시 이슈 목록 (아래 목록 외의 이슈 ID를 임의로 생성하지 마시오)]
-$issueListForPrompt
+${issueListForPrompt}
 
 ---
-위 컨텍스트를 완벽하게 분석하여, 오늘 분석 대상으로 지정된 총 $targets.length개의 (섹터 + 테마) 항목 전체에 대해 **예외 없이 하나도 누락하지 말고** 심층 브리핑을 작성하시오.
+위 컨텍스트를 완벽하게 분석하여, 오늘 분석 대상으로 지정된 총 ${targets.length}개의 (섹터 + 테마) 항목 전체에 대해 **예외 없이 하나도 누락하지 말고** 심층 브리핑을 작성하시오.
 
 [분석 지침]
 - 각 테마가 왜 오늘 집중적인 수급을 받았는지 구체적인 팩트와 파급 효과를 심층 분석하여 작성하십시오.
@@ -274,7 +303,15 @@ $issueListForPrompt
       "name": "항목 이름",
       "reason": "[헤드라인 한 줄 요약]\\n\\n이슈에 대한 심층적 분석, 파급 효과, 파생될 하위 테마, 대장주의 구체적 흐름 등 최소 3~4문장 이상의 상세한 설명 작성",
       "linked_issue_id": "위 이슈 목록의 ID 중 하나 또는 신규 이슈 ID 또는 null",
-      "linked_issue_path": "이슈→테마 연결 논리 경로 또는 null"
+      "linked_issue_path": "이슈→테마 연결 논리 경로 또는 null",
+      "momentum_status": "UPTREND, PEAKOUT, REBOUND, FADING 중 택 1",
+      "top_picks": [
+        {
+          "stock_name": "종목명",
+          "stock_code": "종목코드",
+          "reason": "10일내 +20% 상승 달성 확률이 높은 추천 사유"
+        }
+      ]
     }
   ]
 }
@@ -318,14 +355,52 @@ $issueListForPrompt
                     type: normalizedType,
                     name: item.name,
                     reason: item.reason || '',
-                    lifespan_type: '', // 더이상 AI가 판별하지 않음
-                    lifespan_reasoning: ''
+                    lifespan_type: '',
+                    lifespan_reasoning: '',
+                    momentum_status: item.momentum_status || 'UPTREND',
+                    top_picks_json: JSON.stringify(item.top_picks || [])
                 };
             });
 
             this.db.upsertThemeIntelligence(mapDataForDb);
             
             console.log(`[ThemeIntelligence] 🤖 성공적으로 ${mapDataForDb.length}개의 테마/섹터 분석결과가 캐싱되었습니다.`);
+
+            // 6.5. (추가) top_picks 의 사유를 stock_research_reports 에도 타임라인으로 기록
+            const researchReportsToSave: any[] = [];
+            for (const item of parsedArray) {
+                if (!item.top_picks || !Array.isArray(item.top_picks)) continue;
+                for (const pick of item.top_picks) {
+                    researchReportsToSave.push({
+                        date: dateStr,
+                        stock_code: pick.stock_code,
+                        stock_name: pick.stock_name,
+                        agent_source: 'THEME_INTELLIGENCE',
+                        market_theme_link: item.name,
+                        theme_durability: item.momentum_status || 'UPTREND',
+                        catalyst_summary: pick.reason,
+                        risk_factors: '',
+                        upside_probability: 'HIGH',
+                        buy_score: 80,
+                        preliminary_decision: 'BUY',
+                        reasoning: `[${item.name} 대장주/주도주 편입] ${pick.reason}`,
+                        injected_context_json: JSON.stringify({ themeReason: item.reason }),
+                        system_prompt: '테마 수명 분석기 (자동 편입)',
+                        raw_ai_response: ''
+                    });
+                }
+            }
+
+            if (researchReportsToSave.length > 0) {
+                try {
+                    for (const rep of researchReportsToSave) {
+                        this.db.saveStockResearchReport(rep);
+                    }
+                    console.log(`[ThemeIntelligence] 🤖 ${researchReportsToSave.length}개 종목의 추천 사유를 타임라인(Research Report)에 기록했습니다.`);
+                } catch (e: any) {
+                    console.error('[ThemeIntelligence] 타임라인 기록 중 오류:', e.message);
+                }
+            }
 
             // 7 (추가). Knowledge Edge 기록: ISSUE → THEME/SECTOR 연결
             const ledgerDb = IssueLedgerDB.getInstance();

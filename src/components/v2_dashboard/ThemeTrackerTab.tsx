@@ -183,6 +183,31 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
         }
     };
 
+    const handleFullPipeline = async () => {
+        if (!targetDate) return;
+        setIsLoading(true);
+        setIsAnalyzing(true);
+        try {
+            const api = window.electronAPI as any;
+            if (api.runPipeline) {
+                await api.runPipeline('PL-NaverFlow', { forceFetch: true });
+            }
+            if (api.analyzeThemes) {
+                const res = await api.analyzeThemes(targetDate);
+                if (res.success) {
+                    await loadData(); // Reload UI with new AI data
+                } else {
+                    console.error('AI 분석 실패:', res.error);
+                }
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsLoading(false);
+            setIsAnalyzing(false);
+        }
+    };
+
     const handleViewRawLog = async () => {
         if (!targetDate) return;
         setShowRawLogModal(true);
@@ -1058,14 +1083,18 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                     {activeTab === 'mock' && (
                         <div className="flex items-center gap-4 py-2">
                             <button
+                                onClick={handleFullPipeline}
+                                disabled={isAnalyzing || isLoading}
                                 className={cn(
                                     'flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-bold transition-colors shadow-sm',
-                                    'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20 hover:border-emerald-500/40'
+                                    (isAnalyzing || isLoading)
+                                        ? 'bg-emerald-500/10 text-emerald-600/50 border-emerald-500/20'
+                                        : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20 hover:border-emerald-500/40'
                                 )}
-                                title="오늘 일자의 모의매매 종목을 AI로 수동 추출합니다."
+                                title="최신 데이터를 먼저 갱신한 후 모의매매 종목을 AI로 재추출합니다."
                             >
-                                <Sparkles size={13} />
-                                종목 추출 수동실행
+                                <Sparkles size={13} className={(isAnalyzing || isLoading) ? 'animate-pulse' : ''} />
+                                {(isAnalyzing || isLoading) ? '분석 중...' : '데이터 최신화 및 종목 추출'}
                             </button>
                         </div>
                     )}

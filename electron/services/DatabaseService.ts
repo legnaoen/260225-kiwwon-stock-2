@@ -537,6 +537,8 @@ export class DatabaseService {
                 reason TEXT,
                 lifespan_type TEXT,
                 lifespan_reasoning TEXT,
+                momentum_status TEXT,
+                top_picks_json TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY(date, type, name)
             );
@@ -614,6 +616,16 @@ export class DatabaseService {
             // Ignore error if column already exists
         }
         this.db.exec(createThemeIntelligenceTable)
+        try {
+            this.db.exec('ALTER TABLE theme_intelligence ADD COLUMN momentum_status TEXT;');
+        } catch (e: any) {
+            // Ignore error if column already exists
+        }
+        try {
+            this.db.exec('ALTER TABLE theme_intelligence ADD COLUMN top_picks_json TEXT;');
+        } catch (e: any) {
+            // Ignore error if column already exists
+        }
         this.db.exec(createThemePriceIndexTable)
         this.db.exec(createNaverNewsFlowTable)
         try {
@@ -3654,8 +3666,8 @@ export class DatabaseService {
             return {
                 ...item,
                 reason: aiData ? aiData.reason : null,
-                lifespan_type: aiData ? aiData.lifespan_type : null,
-                lifespan_reasoning: aiData ? aiData.lifespan_reasoning : null
+                momentum_status: aiData ? aiData.momentum_status : null,
+                top_picks_json: aiData ? aiData.top_picks_json : null
             };
         });
 
@@ -3735,10 +3747,41 @@ export class DatabaseService {
         transaction(items);
     }
 
-    public upsertThemeIntelligence(data: { date: string, type: string, name: string, reason: string, lifespan_type: string, lifespan_reasoning: string }[]) {
+    public getThemeMockTradingPicks(limitDays: number = 10) {
+        const records = this.db.prepare(`
+            SELECT * FROM theme_intelligence 
+            WHERE top_picks_json IS NOT NULL AND top_picks_json != '[]'
+            ORDER BY date DESC
+        `).all() as any[];
+
+        const groupedMap = new Map<string, any[]>();
+        for (const row of records) {
+            if (!groupedMap.has(row.date)) groupedMap.set(row.date, []);
+            try {
+                const picks = JSON.parse(row.top_picks_json);
+                picks.forEach((pick: any) => {
+                    groupedMap.get(row.date)!.push({
+                        ...pick,
+                        theme: row.name,
+                        momentum: row.momentum_status || 'UPTREND',
+                        themeReason: row.reason
+                    });
+                });
+            } catch(e) {}
+        }
+        
+        const result = Array.from(groupedMap.entries()).map(([date, items]) => ({
+            date, 
+            items: items.slice(0, 5) // 하루 최대 5종목만 표시
+        })).sort((a, b) => b.date.localeCompare(a.date));
+
+        return result.slice(0, limitDays);
+    }
+
+    public upsertThemeIntelligence(data: { date: string, type: string, name: string, reason: string, lifespan_type: string, lifespan_reasoning: string, momentum_status?: string, top_picks_json?: string }[]) {
         const stmt = this.db.prepare(`
-            INSERT OR REPLACE INTO theme_intelligence (date, type, name, reason, lifespan_type, lifespan_reasoning)
-            VALUES (@date, @type, @name, @reason, @lifespan_type, @lifespan_reasoning)
+            INSERT OR REPLACE INTO theme_intelligence (date, type, name, reason, lifespan_type, lifespan_reasoning, momentum_status, top_picks_json)
+            VALUES (@date, @type, @name, @reason, @lifespan_type, @lifespan_reasoning, @momentum_status, @top_picks_json)
         `)
         const replaceMany = this.db.transaction((items) => {
             for (const item of items) {

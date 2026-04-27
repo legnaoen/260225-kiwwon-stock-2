@@ -691,13 +691,19 @@ export class SchedulerService {
                         const { V2PipelineManager } = await import('./v2_pipeline/V2PipelineManager')
                         await V2PipelineManager.getInstance().runPipeline('PL-NaverFlow', { forceFetch: true })
 
-                        // 수집 성공 후 테마/섹터 AI 분석 추가 실행
+                        // 시간대 분기: 오전엔 AI 종목 추천, 오후엔 성과 판독(가격 최신화)만
                         try {
-                            console.log(`[SchedulerService] 🤖 ThemeIntelligence AI 일괄 분석 연계 시작`)
-                            const { ThemeIntelligenceAgent } = await import('./v2_agents/ThemeIntelligenceAgent')
-                            await ThemeIntelligenceAgent.getInstance().runBatchAnalysis()
+                            if (hr < 13) {
+                                console.log(`[SchedulerService] 🤖 오전 스케줄 감지: ThemeIntelligence AI 일괄 분석 연계 시작`)
+                                const { ThemeIntelligenceAgent } = await import('./v2_agents/ThemeIntelligenceAgent')
+                                await ThemeIntelligenceAgent.getInstance().runBatchAnalysis()
+                            } else {
+                                console.log(`[SchedulerService] ⚖️ 오후 스케줄 감지: AI 분석 스킵 및 Theme 판독기(종가 업데이트) 가동`)
+                                const { ThemeMockTradingJudgeAgent } = await import('./v2_agents/ThemeMockTradingJudgeAgent')
+                                await ThemeMockTradingJudgeAgent.getInstance().evaluatePicks()
+                            }
                         } catch (aiErr: any) {
-                            console.error(`[SchedulerService] ThemeIntelligence AI 분석 연계 실패:`, aiErr.message)
+                            console.error(`[SchedulerService] 테마 연계 파이프라인 실패:`, aiErr.message)
                         }
                     }, { timezone: 'Asia/Seoul' })
                     this.scheduledJobs.push(nfJob)

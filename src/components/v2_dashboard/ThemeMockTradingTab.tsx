@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Target, TrendingUp, AlertTriangle, Clock, Info, CheckCircle2, BarChart2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
+import { StockDetailModal } from '../common/StockDetailModal';
 import { twMerge } from 'tailwind-merge';
 
 function cn(...inputs: ClassValue[]) {
@@ -8,30 +9,30 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export const ThemeMockTradingTab: React.FC = () => {
-    // 예제 데이터 (수정됨: 날짜 그룹 내에 여러 테마의 종목이 섞임)
-    const mockData = [
-        {
-            date: '2026-04-27 (오늘)',
-            items: [
-                { rank: 1, name: '일진전기', code: '103590', theme: '전선, 전력설비', momentum: 'UPTREND', reason: 'AI 데이터센터 전력망 부족 지속', entryPrice: 109400, currentPrice: 115000, peak: 18.5, return: 5.1, dDay: 10, status: '보유중' },
-                { rank: 2, name: '씨엔지하이테크', code: '264660', theme: '반도체 유리기판', momentum: 'PEAKOUT', reason: '단기 급등에 따른 차익실현 출회', entryPrice: 24650, currentPrice: 24800, peak: 4.5, return: 0.6, dDay: 10, status: '보유중' },
-                { rank: 3, name: '가온전선', code: '000500', theme: '전선, 전력설비', momentum: 'UPTREND', reason: '키맞추기 후발 상승 기대', entryPrice: 42100, currentPrice: 41800, peak: 2.1, return: -0.7, dDay: 10, status: '보유중' },
-            ]
-        },
-        {
-            date: '2026-04-26 (어제)',
-            items: [
-                { rank: 1, name: '태성', code: '323280', theme: '반도체 유리기판', momentum: 'PEAKOUT', reason: '유리기판 대장주 단기 과열', entryPrice: 89500, currentPrice: 87000, peak: 1.0, return: -2.8, dDay: 9, status: '보유중' },
-                { rank: 2, name: '에코프로', code: '086520', theme: '2차전지', momentum: 'REBOUND', reason: '낙폭 과대에 따른 기술적 반등', entryPrice: 120000, currentPrice: 125000, peak: 6.0, return: 4.1, dDay: 9, status: '보유중' },
-            ]
-        },
-        {
-            date: '2026-04-15',
-            items: [
-                { rank: 1, name: '특수건설', code: '026150', theme: '해저터널', momentum: 'FADING', reason: '관련 정책 지연 및 거래대금 급감', entryPrice: 8200, currentPrice: 7500, peak: 8.0, return: -8.5, dDay: 0, status: '청산(만기)' },
-            ]
-        }
-    ];
+    const [mockData, setMockData] = useState<any[]>([]);
+    const [selectedStock, setSelectedStock] = useState<{ stockCode: string; stockName: string; aiReason?: string } | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    React.useEffect(() => {
+        const loadData = async () => {
+            setIsLoading(true);
+            try {
+                const api = window.electronAPI as any;
+                if (api.getThemeMockTradingPicks) {
+                    const res = await api.getThemeMockTradingPicks();
+                    if (res.success) {
+                        // DB에서 가져온 날짜 그룹 데이터를 그대로 세팅
+                        setMockData(res.data || []);
+                    }
+                }
+            } catch (e) {
+                console.error('모의매매 데이터 로드 실패:', e);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        loadData();
+    }, []);
 
     const getMomentumBadge = (status: string) => {
         switch (status) {
@@ -52,6 +53,21 @@ export const ThemeMockTradingTab: React.FC = () => {
     // Table Columns Grid Template
     const gridCols = "grid-cols-[40px_1fr_1fr_80px_2fr_80px_80px_60px_60px_70px_80px]";
 
+    // KPI 계산
+    const allItems = mockData.flatMap((group: any) => group.items || []);
+    const totalPicks = allItems.length;
+    const hitPicks = allItems.filter((item: any) => item.status && (item.status.includes('HIT') || item.status.includes('목표달성'))).length;
+    const hitRate = totalPicks > 0 ? ((hitPicks / totalPicks) * 100).toFixed(1) : '0.0';
+    
+    const activeHoldings = allItems.filter((item: any) => !item.status || !(item.status.includes('청산') || item.status.includes('만료'))).length;
+    
+    // 평균 수익률 및 피크 계산
+    const validReturnItems = allItems.filter((item: any) => item.return !== undefined && item.return !== null);
+    const avgReturn = validReturnItems.length > 0 ? (validReturnItems.reduce((acc: number, curr: any) => acc + curr.return, 0) / validReturnItems.length).toFixed(1) : '0.0';
+    
+    const validPeakItems = allItems.filter((item: any) => item.peak !== undefined && item.peak !== null);
+    const avgPeak = validPeakItems.length > 0 ? (validPeakItems.reduce((acc: number, curr: any) => acc + curr.peak, 0) / validPeakItems.length).toFixed(1) : '0.0';
+
     return (
         <div className="w-full h-full bg-background text-foreground p-5 font-sans overflow-y-auto">
 
@@ -59,22 +75,22 @@ export const ThemeMockTradingTab: React.FC = () => {
             <div className="grid grid-cols-4 gap-4 mb-5">
                 <div className="bg-card border border-border/60 rounded-xl p-4 flex flex-col justify-between shadow-sm">
                     <span className="text-muted-foreground text-xs font-semibold flex items-center gap-1.5"><Target size={14} /> 총 추천</span>
-                    <div className="text-2xl font-bold mt-2">25<span className="text-sm font-normal text-muted-foreground ml-1">건</span></div>
+                    <div className="text-2xl font-bold mt-2">{totalPicks}<span className="text-sm font-normal text-muted-foreground ml-1">건</span></div>
                 </div>
                 <div className="bg-card border border-border/60 rounded-xl p-4 flex flex-col justify-between shadow-sm">
                     <span className="text-muted-foreground text-xs font-semibold flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-500" /> HIT (목표달성)</span>
-                    <div className="text-2xl font-bold text-emerald-500 mt-2">12<span className="text-sm font-normal text-muted-foreground ml-1">건 (48.0%)</span></div>
+                    <div className="text-2xl font-bold text-emerald-500 mt-2">{hitPicks}<span className="text-sm font-normal text-muted-foreground ml-1">건 ({hitRate}%)</span></div>
                 </div>
                 <div className="bg-card border border-border/60 rounded-xl p-4 flex flex-col justify-between shadow-sm">
-                    <span className="text-muted-foreground text-xs font-semibold flex items-center gap-1.5"><TrendingUp size={14} className="text-red-500" /> 평균 수익률 / 피크</span>
+                    <span className="text-muted-foreground text-xs font-semibold flex items-center gap-1.5"><TrendingUp size={14} className={Number(avgReturn) >= 0 ? "text-red-500" : "text-blue-500"} /> 평균 수익률 / 피크</span>
                     <div className="text-2xl font-bold mt-2 flex items-baseline gap-2">
-                        <span className="text-red-500">+4.5%</span>
-                        <span className="text-sm font-normal text-muted-foreground">/ +12.3%</span>
+                        <span className={Number(avgReturn) >= 0 ? "text-red-500" : "text-blue-500"}>{Number(avgReturn) > 0 ? '+' : ''}{avgReturn}%</span>
+                        <span className="text-sm font-normal text-muted-foreground">/ {Number(avgPeak) > 0 ? '+' : ''}{avgPeak}%</span>
                     </div>
                 </div>
                 <div className="bg-card border border-border/60 rounded-xl p-4 flex flex-col justify-between shadow-sm">
                     <span className="text-muted-foreground text-xs font-semibold flex items-center gap-1.5"><BarChart2 size={14} /> 현재 보유</span>
-                    <div className="text-2xl font-bold mt-2 text-blue-400">15<span className="text-sm font-normal text-muted-foreground ml-1">종목</span></div>
+                    <div className="text-2xl font-bold mt-2 text-blue-400">{activeHoldings}<span className="text-sm font-normal text-muted-foreground ml-1">종목</span></div>
                 </div>
             </div>
 
@@ -105,21 +121,32 @@ export const ThemeMockTradingTab: React.FC = () => {
                             </div>
 
                             {/* Group Items */}
-                            {group.items.map((item, itemIdx) => {
-                                const isCleared = item.status.includes('청산');
+                            {group.items.map((item: any, itemIdx: number) => {
+                                const statusStr = item.status || '분석대기';
+                                const isCleared = statusStr.includes('청산');
+                                const dDay = item.dDay !== undefined ? item.dDay : 10;
+                                const returnVal = item.return || 0;
+                                const peakVal = item.peak || 0;
+                                const entryPrice = item.entryPrice || 0;
+                                const currentPrice = item.currentPrice || 0;
+
                                 return (
-                                    <div key={itemIdx} className={cn("grid gap-3 p-3 items-center border-b border-border/40 hover:bg-muted/30 transition-colors", gridCols, isCleared && "opacity-50 grayscale")}>
+                                    <div 
+                                        key={itemIdx} 
+                                        onClick={() => setSelectedStock({ stockCode: item.stock_code || item.code, stockName: item.stock_name || item.name, aiReason: item.reason || item.themeReason })}
+                                        className={cn("grid gap-3 p-3 items-center border-b border-border/40 hover:bg-muted/30 transition-colors cursor-pointer", gridCols, isCleared && "opacity-50 grayscale")}
+                                    >
                                         {/* 순위 */}
                                         <div className="text-center">
-                                            <span className={cn("inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold", item.rank === 1 ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'bg-muted text-muted-foreground border border-border')}>
-                                                {item.rank}
+                                            <span className={cn("inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold", itemIdx === 0 ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'bg-muted text-muted-foreground border border-border')}>
+                                                {itemIdx + 1}
                                             </span>
                                         </div>
 
                                         {/* 종목명 */}
                                         <div>
-                                            <div className="text-[13px] font-bold text-foreground">{item.name}</div>
-                                            <div className="text-[10px] text-muted-foreground font-mono">{item.code}</div>
+                                            <div className="text-[13px] font-bold text-foreground">{item.stock_name || item.name}</div>
+                                            <div className="text-[10px] text-muted-foreground font-mono">{item.stock_code || item.code}</div>
                                         </div>
 
                                         {/* 소속 테마 */}
@@ -139,29 +166,29 @@ export const ThemeMockTradingTab: React.FC = () => {
                                         </div>
 
                                         {/* 진입가 */}
-                                        <div className="text-right text-[12px] text-foreground/80 font-mono">{item.entryPrice.toLocaleString()}</div>
+                                        <div className="text-right text-[12px] text-foreground/80 font-mono">{entryPrice > 0 ? entryPrice.toLocaleString() : '-'}</div>
 
                                         {/* 현재가 */}
-                                        <div className="text-right text-[12px] text-foreground font-mono font-bold">{item.currentPrice.toLocaleString()}</div>
+                                        <div className="text-right text-[12px] text-foreground font-mono font-bold">{currentPrice > 0 ? currentPrice.toLocaleString() : '-'}</div>
 
                                         {/* D-DAY */}
                                         <div className="text-center">
-                                            <span className={cn("text-[11px] font-bold", item.dDay <= 3 && !isCleared ? 'text-amber-500' : 'text-muted-foreground')}>
-                                                D-{item.dDay}
+                                            <span className={cn("text-[11px] font-bold", dDay <= 3 && !isCleared ? 'text-amber-500' : 'text-muted-foreground')}>
+                                                D-{dDay}
                                             </span>
                                         </div>
 
                                         {/* 피크 */}
-                                        <div className="text-right text-[12px] text-muted-foreground font-mono">+{item.peak.toFixed(1)}%</div>
+                                        <div className="text-right text-[12px] text-muted-foreground font-mono">+{peakVal.toFixed(1)}%</div>
 
                                         {/* 현재수익 */}
-                                        <div className={cn("text-right text-[13px] font-bold font-mono", item.return > 0 ? 'text-red-500' : item.return < 0 ? 'text-blue-500' : 'text-muted-foreground')}>
-                                            {item.return > 0 ? '+' : ''}{item.return.toFixed(1)}%
+                                        <div className={cn("text-right text-[13px] font-bold font-mono", returnVal > 0 ? 'text-red-500' : returnVal < 0 ? 'text-blue-500' : 'text-muted-foreground')}>
+                                            {returnVal > 0 ? '+' : ''}{returnVal.toFixed(1)}%
                                         </div>
 
                                         {/* 상태 */}
                                         <div className="text-center">
-                                            {getStatusBadge(item.status)}
+                                            {getStatusBadge(statusStr)}
                                         </div>
                                     </div>
                                 );
@@ -170,6 +197,14 @@ export const ThemeMockTradingTab: React.FC = () => {
                     ))}
                 </div>
             </div>
+
+            {selectedStock && (
+                <StockDetailModal 
+                    stockCode={selectedStock.stockCode} 
+                    stockName={selectedStock.stockName} 
+                    onClose={() => setSelectedStock(null)} 
+                />
+            )}
         </div>
     );
 }

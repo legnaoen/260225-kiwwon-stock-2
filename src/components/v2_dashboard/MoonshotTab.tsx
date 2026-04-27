@@ -244,6 +244,7 @@ export default function MoonshotTab() {
     const [ignoreCooldown, setIgnoreCooldown] = useState(false)
     const [isRunningTracker, setIsRunningTracker] = useState(false)
     const [trackerLogs, setTrackerLogs] = useState<{time: string, step: string, msg: string, type: string}[]>([]);
+    const [playgroundLogs, setPlaygroundLogs] = useState<any[]>([]);
 
     // Settings 상태
     const [showSettings, setShowSettings] = useState(false);

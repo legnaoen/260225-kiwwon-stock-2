@@ -255,6 +255,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // V2 Data Pipeline
     runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => ipcRenderer.invoke('v2-pipeline:run', { pipelineId, options }),
     getThemeTrackerData: (type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => ipcRenderer.invoke('naverflow:get-tracker-data', type, date, limitDays, topN),
+    getThemeMockTradingPicks: () => ipcRenderer.invoke('naverflow:get-mock-trading-picks'),
     analyzeThemes: (date: string) => ipcRenderer.invoke('naverflow:analyze-themes', date),
     resetThemeLedger: () => ipcRenderer.invoke('naverflow:reset-themes'),
     verifyThemeIntelligence: (params: any) => ipcRenderer.invoke('naverflow:verify-theme', params),

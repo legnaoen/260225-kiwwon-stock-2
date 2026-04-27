@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Brain, X, ChevronRight, Settings, Activity, Clock, Trash2, AlertTriangle, FlaskConical, Zap, Check, Copy, ExternalLink } from 'lucide-react'
+import { Brain, X, ChevronRight, Settings, Activity, Clock, Trash2, AlertTriangle, FlaskConical, Zap, Check, Copy, ExternalLink, Sparkles } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 

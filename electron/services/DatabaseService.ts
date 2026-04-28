@@ -847,6 +847,16 @@ export class DatabaseService {
                 updated_at TEXT NOT NULL
             );
         `);
+        
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS live_trade_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                type TEXT NOT NULL,
+                stock_code TEXT,
+                message TEXT NOT NULL
+            );
+        `);
         // ──────────────────────────────────────────────────────────────────
 
         // ═══ V2 Agent Swarm: Market Condition Agent ═══

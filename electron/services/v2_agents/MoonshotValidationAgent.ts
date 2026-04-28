@@ -73,6 +73,11 @@ export class MoonshotValidationAgent {
     ): Promise<MoonshotEvaluationResult[]> {
         const results: MoonshotEvaluationResult[] = [];
         const { DatabaseService } = await import('../DatabaseService');
+        const Store = require('electron-store');
+        const store = new Store();
+        const aiSettings = store.get('ai_settings') || {};
+        const isCloudBypass = Array.isArray(aiSettings.lightweightCloudAgents) && aiSettings.lightweightCloudAgents.some((id: string) => 'MOONSHOT_VALIDATION'.includes(id) || 'MOONSHOT_VALIDATION'.startsWith(id));
+
         const db = DatabaseService.getInstance().getDb();
         const now = DatabaseService.getInstance().getKstTimestamp();
         const nowDate = new Date(now);
@@ -85,7 +90,7 @@ export class MoonshotValidationAgent {
         const evalHistory = db.prepare('SELECT stock_code, tag, created_at FROM moonshot_eval_history ORDER BY created_at DESC').all();
         const cooldownMap = new Map<string, number>(); // latest eval time per code+tag
         
-        for (const record of evalHistory) {
+        for (const record of evalHistory as any[]) {
             const key = `${record.stock_code}_${record.tag}`;
             if (!cooldownMap.has(key)) {
                 cooldownMap.set(key, new Date(record.created_at).getTime());
@@ -246,9 +251,10 @@ export class MoonshotValidationAgent {
                 }
                 addLog('STEP 1', `3각도 탐색 완료. Bull/Bear 분석 진입.`, 'success');
 
-                // ─── [C] Bull Case: 텐베거 근거 작성 ───
-                addLog('STEP 2', `Bull 분석가: ${stock.name}의 3~10배 상승 근거 작성 중...`, 'info');
-                const bullPrompt = `너는 "${stock.name}"에 강하게 투자를 주장하는 Bull(낙관론) 애널리스트야.
+                if (!isCloudBypass) {
+                    // ─── [C] Bull Case: 텐베거 근거 작성 ───
+                    addLog('STEP 2', `Bull 분석가: ${stock.name}의 3~10배 상승 근거 작성 중...`, 'info');
+                    const bullPrompt = `너는 "${stock.name}"에 강하게 투자를 주장하는 Bull(낙관론) 애널리스트야.
 아래 수집된 모든 데이터를 보고, [${stock.tag}] 전략 관점에서 이 종목이 왜 3~10배 갈 수 있는지 가장 강력한 근거를 3줄 이내로 써라.
 억지스러운 주장은 안 된다. 데이터에 실제로 근거가 있는 내용만.
 
@@ -264,12 +270,12 @@ ${localScenarioLens}
 
 Bull Case (3줄 이내):`;
 
-                const bullCase = await this.localAiService.askLocalAi(bullPrompt, "Write a concise bull case in 1-3 bullet points.");
-                addLog('STEP 2', `Bull 완성: "${bullCase.slice(0, 80)}..."`, 'success');
+                    const bullCase = await this.localAiService.askLocalAi(bullPrompt, "Write a concise bull case in 1-3 bullet points.");
+                    addLog('STEP 2', `Bull 완성: "${bullCase.slice(0, 80)}..."`, 'success');
 
-                // ─── [D] Bear Case: Bull 주장 반박 ───
-                addLog('STEP 2', `Bear 분석가: Bull 주장 반박 및 약점 탐색 중...`, 'warning');
-                const bearPrompt = `너는 반대 의견을 가진 Bear(비관론) 애널리스트야. 방금 Bull 애널리스트가 "${stock.name}"에 대해 이렇게 주장했다:
+                    // ─── [D] Bear Case: Bull 주장 반박 ───
+                    addLog('STEP 2', `Bear 분석가: Bull 주장 반박 및 약점 탐색 중...`, 'warning');
+                    const bearPrompt = `너는 반대 의견을 가진 Bear(비관론) 애널리스트야. 방금 Bull 애널리스트가 "${stock.name}"에 대해 이렇게 주장했다:
 
 [Bull 주장]
 ${bullCase}
@@ -286,12 +292,12 @@ ${rawNewsBuffer}
 
 Bear Case (3줄 이내):`;
 
-                const bearCase = await this.localAiService.askLocalAi(bearPrompt, "Write a concise bear case challenging the bull argument in 1-3 bullet points.");
-                addLog('STEP 2', `Bear 완성: "${bearCase.slice(0, 80)}..."`, 'warning');
+                    const bearCase = await this.localAiService.askLocalAi(bearPrompt, "Write a concise bear case challenging the bull argument in 1-3 bullet points.");
+                    addLog('STEP 2', `Bear 완성: "${bearCase.slice(0, 80)}..."`, 'warning');
 
-                // ─── [E] Synthesis: 최종 피치 시트 작성 ───
-                addLog('STEP 2', `종합 분석가: Bull/Bear 충돌 지점 종합 → 제미나이 심판역에 피치 시트 작성 중...`, 'info');
-                const synthesisPrompt = `너는 객관적인 시니어 애널리스트야. Bull과 Bear 두 분석가의 논쟁을 들었다.
+                    // ─── [E] Synthesis: 최종 피치 시트 작성 ───
+                    addLog('STEP 2', `종합 분석가: Bull/Bear 충돌 지점 종합 → 제미나이 심판역에 피치 시트 작성 중...`, 'info');
+                    const synthesisPrompt = `너는 객관적인 시니어 애널리스트야. Bull과 Bear 두 분석가의 논쟁을 들었다.
 
 [종목] ${stock.name} (${stock.code}) | 전략 트랙: ${stock.tag}
 
@@ -314,11 +320,26 @@ ${financeMarkdown ? `[상세 재무/기업개요]\n${financeMarkdown}` : ''}
 - **수급/지표 팩트:** (숫자 기반)
 - **종합 의견:** (균형잡힌 1줄 결론)`;
 
-                const finalPitch = await this.localAiService.askLocalAi(synthesisPrompt, "Write a balanced investment pitch sheet.");
-                addLog('STEP 2', `최종 피치 시트 완성. 제미나이 배틀로얄 대기열 입장.`, 'success');
+                    const finalPitch = await this.localAiService.askLocalAi(synthesisPrompt, "Write a balanced investment pitch sheet.");
+                    addLog('STEP 2', `최종 피치 시트 완성. 제미나이 배틀로얄 대기열 입장.`, 'success');
 
-                batchDistilledFacts[stock.code] = finalPitch;
-                batchPhase1Outputs[stock.code] = { bullCase, bearCase };
+                    batchDistilledFacts[stock.code] = finalPitch;
+                    batchPhase1Outputs[stock.code] = { bullCase, bearCase };
+                } else {
+                    addLog('STEP 2', `클라우드 고속 모드 활성화: 중간 요약 생략 후 원본 데이터를 배틀로얄 심사관에게 직송합니다.`, 'info');
+                    const rawPitch = `[수급/기초 지표]
+수급: ${smDataPreview}
+신용비율: ${funData?.credit_ratio !== undefined ? funData.credit_ratio + '%' : '알수없음'}
+${financeMarkdown ? `[상세 재무/기업개요]\n${financeMarkdown}` : ''}
+
+[뉴스 탐색 요약]
+${rawNewsBuffer}
+
+이 종목의 핵심 성장 근거 및 핵심 리스크를 위 원본 데이터를 토대로 직접 판별할 것.`;
+                    
+                    batchDistilledFacts[stock.code] = rawPitch;
+                    batchPhase1Outputs[stock.code] = { bullCase: "클라우드 묶음 처리로 생략됨", bearCase: "클라우드 묶음 처리로 생략됨" };
+                }
 
             } catch (error: any) {
                 console.error(`[MoonshotAgent] Harness Error for ${stock.code}:`, error);
@@ -334,10 +355,10 @@ ${financeMarkdown ? `[상세 재무/기업개요]\n${financeMarkdown}` : ''}
         //   B안 종목끼리 → 제미나이 B안 렌즈로 1번
         //   C안 종목끼리 → 제미나이 C안 렌즈로 1번
         // ===============================================
-        if (stocks.length > 0) {
+        if (filteredStocks.length > 0) {
             // stocks를 태그(A안/B안/C안)별로 그룹핑
-            const categoryGroups: { [tag: string]: typeof stocks } = {};
-            for (const stock of stocks) {
+            const categoryGroups: { [tag: string]: typeof filteredStocks } = {};
+            for (const stock of filteredStocks) {
                 const tag = stock.tag || '미분류';
                 if (!categoryGroups[tag]) categoryGroups[tag] = [];
                 categoryGroups[tag].push(stock);
@@ -516,7 +537,7 @@ ${aiResult.shortNarrative || '-'}`;
                             milestones: aiResult.milestones,
                             invalidationCondition: aiResult.invalidationCondition,
                             inputData: batchDistilledFacts[stock.code] || '',
-                            prompt: judgePrompt,
+                            prompt: 'Group Batch Evaluation (See chunks)',
                             rawResult: JSON.stringify(aiResult, null, 2),
                             harnessLogs: batchHarnessLogs[stock.code]
                         };
@@ -535,11 +556,15 @@ ${aiResult.shortNarrative || '-'}`;
                         // ===== Auto-Enroll Active Tracking =====
                         if (finalEval.status === 'passed') {
                             try {
-                                const { kiwoomService } = await import('../kiwoomService');
+                                const { KiwoomService } = await import('../KiwoomService');
+                                const kiwoomService = KiwoomService.getInstance();
                                 let entryPrice = 0;
                                 try {
-                                    const priceStr = await kiwoomService.getCurrentPrice(finalEval.code.replace(/^A/, ''));
-                                    if (priceStr) entryPrice = Math.abs(parseInt(priceStr, 10));
+                                    const priceInfo = await kiwoomService.getCurrentPrice(finalEval.code.replace(/^A/, ''));
+                                    const rawData = priceInfo?.Body || priceInfo?.output || priceInfo;
+                                    const target = Array.isArray(rawData) ? rawData[0] : rawData;
+                                    const priceStr = target?.stk_prc || target?.lastPrice || target?.close || target?.prpr || '';
+                                    if (priceStr) entryPrice = Math.abs(parseInt(priceStr.toString().replace(/[^0-9-]/g, ''), 10));
                                     else if (stock.price) entryPrice = stock.price;
                                 } catch (e) {
                                     console.warn(`[MoonshotAgent] Failed realtime price for auto-enroll ${finalEval.code}, fallbacking to scanner price`);

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Target, Settings, BarChart2, Award, TrendingUp, ArrowUpRight, Clock, Trash2, ShieldCheck, Zap, X, ShieldOff, ShieldAlert, AlertTriangle, Copy, CheckCheck } from 'lucide-react';
+import { Target, Settings, BarChart2, Award, TrendingUp, ArrowUpRight, Clock, Trash2, ShieldCheck, Zap, X, ShieldOff, ShieldAlert, AlertTriangle, Copy, CheckCheck, ClipboardList, RefreshCw } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { useAccountStore } from '../../store/useAccountStore';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
 
@@ -86,6 +87,7 @@ const MOCK_PICKS = [
 ];
 
 export const LiveTradeTab: React.FC = () => {
+    const { selectedAccount } = useAccountStore();
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [activeStrategy, setActiveStrategy] = useState('TRUE_LEADER');
     const [strategies, setStrategies] = useState<any[]>([]);
@@ -102,6 +104,33 @@ export const LiveTradeTab: React.FC = () => {
     const [gridSearchResults, setGridSearchResults] = useState<Record<string, any> | null>(null);
     const [gridSearchCachedAt, setGridSearchCachedAt] = useState<string | null>(null);
     const [isLoadingGridSearch, setIsLoadingGridSearch] = useState(false);
+
+    // ─── 테스트 매수 ────────────────────────────────────────────────────────
+    const [isTestModalOpen, setIsTestModalOpen] = useState(false);
+    const [testLogs, setTestLogs] = useState<string[]>([]);
+    const [isTestRunning, setIsTestRunning] = useState(false);
+    const [testIsCopied, setTestIsCopied] = useState(false);
+
+    // ─── 당일 매매 로그 ─────────────────────────────────────────────────────
+    const [isDailyLogsOpen, setIsDailyLogsOpen] = useState(false);
+    const [dailyLogs, setDailyLogs] = useState<any[]>([]);
+    const [isDailyLogsLoading, setIsDailyLogsLoading] = useState(false);
+
+    const loadDailyLogs = async () => {
+        setIsDailyLogsLoading(true);
+        try {
+            const res = await (window.electronAPI as any)?.getLiveTradeDailyLogs?.();
+            if (res && res.success) {
+                setDailyLogs(res.logs || []);
+            } else {
+                alert('로그 불러오기 실패: ' + res?.error);
+            }
+        } catch (e: any) {
+            console.error('[LiveTradeTab] loadDailyLogs error:', e);
+        } finally {
+            setIsDailyLogsLoading(false);
+        }
+    };
 
     // ─── 실시간 현재가 Map (종목코드 → 현재가) ────────────────────────────────
     // 동일 종목코드를 여러 티켓이 추적해도 Map에는 1개 엔트리만 유지됨
@@ -284,6 +313,31 @@ export const LiveTradeTab: React.FC = () => {
         });
     }, [errorLogs]);
 
+    const handleRunTestBuy = async () => {
+        if (!window.electronAPI?.testLiveTradeBuyOrder) return;
+        setIsTestRunning(true);
+        setTestLogs(["테스트 매수 주문을 시작합니다... (삼성전자 1주)"]);
+        try {
+            const res = await window.electronAPI.testLiveTradeBuyOrder('005930', 1, selectedAccount);
+            if (res.success) {
+                setTestLogs(res.logs || ["응답 로그가 없습니다."]);
+            } else {
+                setTestLogs(prev => [...prev, `❌ 테스트 실패: ${res.error}`]);
+            }
+        } catch (e: any) {
+            setTestLogs(prev => [...prev, `❌ 에러 발생: ${e.message}`]);
+        } finally {
+            setIsTestRunning(false);
+        }
+    };
+
+    const handleCopyTestLog = useCallback(() => {
+        navigator.clipboard.writeText(testLogs.join('\n')).then(() => {
+            setTestIsCopied(true);
+            setTimeout(() => setTestIsCopied(false), 2000);
+        });
+    }, [testLogs]);
+
     const handleSaveStrategy = async () => {
         if (!window.electronAPI) return;
         try {
@@ -360,6 +414,23 @@ export const LiveTradeTab: React.FC = () => {
                                 </span>
                             </button>
                         )}
+                        {/* 당일 매매 로그 버튼 */}
+                        <button
+                            onClick={() => { setIsDailyLogsOpen(true); loadDailyLogs(); }}
+                            title="당일 전체 매매(매수/매도/스킵) 로그를 조회합니다."
+                            className="text-xs font-bold px-3 py-1.5 rounded transition-all flex items-center gap-1.5 border bg-background hover:bg-indigo-500/10 text-indigo-500 border-indigo-500/40 hover:border-indigo-500 shadow-sm"
+                        >
+                            <ClipboardList className="w-3.5 h-3.5" />
+                            당일 매매로그
+                        </button>
+                        {/* 테스트 매수 버튼 */}
+                        <button
+                            onClick={() => { setIsTestModalOpen(true); setTestLogs([]); }}
+                            className="text-xs font-bold px-3 py-1.5 rounded transition-all flex items-center gap-1.5 border bg-background hover:bg-emerald-500/10 text-emerald-500 border-emerald-500/40 hover:border-emerald-500"
+                        >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            테스트 매수
+                        </button>
                         {/* Kill-Switch 버튼 */}
                         <button
                             id="live-trade-kill-switch-btn"
@@ -803,6 +874,146 @@ export const LiveTradeTab: React.FC = () => {
                         <div className="p-4 border-t border-border bg-muted/30 flex justify-end gap-2">
                             <button onClick={() => setIsSettingsOpen(false)} className="px-4 py-2 rounded-lg text-sm font-bold text-muted-foreground hover:bg-muted-foreground/10 transition-colors">취소</button>
                             <button onClick={handleSaveStrategy} className="px-4 py-2 rounded-lg text-sm font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-colors shadow-sm">설정 저장 및 적용</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* ── 테스트 매수 팝업 (Modal) ── */}
+            {isTestModalOpen && (
+                <div className="fixed inset-0 z-[120] flex justify-center items-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !isTestRunning && setIsTestModalOpen(false)} />
+                    <div className="relative bg-background border border-border shadow-2xl rounded-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]">
+                        <div className="flex items-center justify-between p-4 border-b border-border bg-emerald-500/5 shrink-0">
+                            <h2 className="text-base font-bold flex items-center gap-2 text-emerald-500">
+                                <ShieldCheck className="w-5 h-5" />
+                                실전 계좌 테스트 매수 (삼성전자 1주)
+                            </h2>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={handleCopyTestLog}
+                                    className={cn(
+                                        'text-xs font-bold px-3 py-1.5 rounded transition-all flex items-center gap-1.5 border',
+                                        testIsCopied
+                                            ? 'bg-emerald-500/20 text-emerald-500 border-emerald-500/40'
+                                            : 'bg-background hover:bg-muted text-muted-foreground border-border hover:text-foreground'
+                                    )}
+                                >
+                                    {testIsCopied ? <CheckCheck className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                                    {testIsCopied ? '복사됨!' : '로그 복사'}
+                                </button>
+                                <button onClick={() => !isTestRunning && setIsTestModalOpen(false)} disabled={isTestRunning} className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="p-5 flex flex-col gap-4 overflow-hidden">
+                            <p className="text-sm text-muted-foreground">
+                                현재 연결된 키움증권 실계좌로 <strong>삼성전자 1주 하한가 지정가 매수주문</strong>을 발송하여 API 연결과 주문 시스템 정상 동작 여부를 검증합니다. 하한가 주문이므로 즉시 체결되지는 않습니다.
+                            </p>
+                            
+                            <div className="flex-1 min-h-[200px] overflow-auto bg-muted/20 border border-border rounded-lg p-3 font-mono text-xs text-foreground space-y-1">
+                                {testLogs.length === 0 ? (
+                                    <div className="text-muted-foreground opacity-50 flex items-center justify-center h-full">
+                                        아래 '테스트 실행' 버튼을 누르세요.
+                                    </div>
+                                ) : (
+                                    testLogs.map((log, i) => (
+                                        <div key={i} className={cn(
+                                            "leading-relaxed whitespace-pre-wrap break-all",
+                                            log.includes('❌') ? 'text-red-400' : log.includes('✅') ? 'text-emerald-400' : 'text-foreground'
+                                        )}>
+                                            {log}
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="p-4 border-t border-border bg-muted/30 flex justify-end gap-2 shrink-0">
+                            <button 
+                                onClick={() => setIsTestModalOpen(false)} 
+                                disabled={isTestRunning}
+                                className="px-4 py-2 rounded-lg text-sm font-bold text-muted-foreground hover:bg-muted-foreground/10 transition-colors disabled:opacity-50"
+                            >
+                                닫기
+                            </button>
+                            <button 
+                                onClick={handleRunTestBuy} 
+                                disabled={isTestRunning}
+                                className="px-5 py-2 rounded-lg text-sm font-bold bg-emerald-500 hover:bg-emerald-600 text-white transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {isTestRunning && <span className="animate-spin w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />}
+                                {isTestRunning ? '테스트 진행중...' : '테스트 실행'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {/* ── 당일 매매 로그 타임라인 (Modal) ── */}
+            {isDailyLogsOpen && (
+                <div className="fixed inset-0 z-[120] flex justify-center items-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsDailyLogsOpen(false)} />
+                    <div className="relative bg-background border border-border shadow-2xl rounded-xl w-full max-w-4xl overflow-hidden flex flex-col h-[85vh]">
+                        <div className="flex items-center justify-between p-4 border-b border-border bg-indigo-500/5 shrink-0">
+                            <h2 className="text-base font-bold flex items-center gap-2 text-indigo-500">
+                                <ClipboardList className="w-5 h-5" />
+                                당일 매매 로그 타임라인
+                            </h2>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={loadDailyLogs}
+                                    disabled={isDailyLogsLoading}
+                                    className="text-xs font-bold px-3 py-1.5 rounded transition-all flex items-center gap-1.5 border bg-background hover:bg-muted shadow-sm"
+                                >
+                                    <RefreshCw className={cn("w-3.5 h-3.5", isDailyLogsLoading && "animate-spin")} />
+                                    새로고침
+                                </button>
+                                <button onClick={() => setIsDailyLogsOpen(false)} className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground hover:text-foreground transition-colors">
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-0 bg-muted/5">
+                            {isDailyLogsLoading && dailyLogs.length === 0 ? (
+                                <div className="flex items-center justify-center h-full text-muted-foreground">로딩 중...</div>
+                            ) : dailyLogs.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                                    <ClipboardList className="w-10 h-10 mb-2 opacity-20" />
+                                    <p>오늘 기록된 매매 로그가 없습니다.</p>
+                                </div>
+                            ) : (
+                                <div className="divide-y divide-border/30">
+                                    {dailyLogs.map((log) => {
+                                        const typeColors: any = {
+                                            'BUY': 'bg-rose-500/10 text-rose-500 border-rose-500/20',
+                                            'SELL': 'bg-blue-500/10 text-blue-500 border-blue-500/20',
+                                            'ERROR': 'bg-red-500/10 text-red-500 border-red-500/20 font-bold',
+                                            'INFO': 'bg-muted text-muted-foreground border-border/50'
+                                        };
+                                        return (
+                                            <div key={log.id} className="px-5 py-3 hover:bg-accent/30 transition-colors flex gap-4 text-[13px]">
+                                                <div className="w-[140px] shrink-0 text-muted-foreground font-mono">
+                                                    {new Date(log.timestamp).toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit' })}
+                                                </div>
+                                                <div className="w-[70px] shrink-0">
+                                                    <span className={cn("px-2 py-0.5 rounded text-[10px] border whitespace-nowrap font-bold", typeColors[log.type] || typeColors['INFO'])}>
+                                                        {log.type}
+                                                    </span>
+                                                </div>
+                                                <div className="w-[80px] shrink-0 font-bold text-foreground">
+                                                    {log.stock_code || '-'}
+                                                </div>
+                                                <div className="flex-1 text-muted-foreground/90 break-keep">
+                                                    {log.message}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

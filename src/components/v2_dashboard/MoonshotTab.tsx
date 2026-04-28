@@ -101,7 +101,7 @@ export default function MoonshotTab() {
         { code: '009150', name: '삼성전기', price: 664000, volume: '210만', conditionId: '301', tag: 'C안' },
     ]
 
-    const [viewMode, setViewMode] = useState<'scanner' | 'active' | 'archive'>('scanner') // scanner를 기본값으로
+    const [viewMode, setViewMode] = useState<'scanner' | 'active' | 'archive'>('active') // active를 기본값으로
     
     // Active Tracking 탭의 동적 상태 관리를 위한 State
     const [activeStocks, setActiveStocks] = useState<any[]>([])
@@ -898,7 +898,7 @@ ${selectedDetail.rawResult}
                                                             </span>
                                                         )}
                                                     </td>
-                                                    <td className="px-3 py-2.5 text-right font-medium">{stock.price.toLocaleString()}</td>
+                                                    <td className="px-3 py-2.5 text-right font-medium">{(stock.price || 0).toLocaleString()}</td>
                                                     <td className="px-3 py-2.5 text-right text-muted-foreground">{stock.volume}</td>
                                                 </tr>
                                             )})}
@@ -1204,13 +1204,13 @@ ${selectedDetail.rawResult}
 
                                                 {/* 편입 정보 (Added Date / Base Price) */}
                                                 <td className="px-4 py-4 text-right">
-                                                    <div className="text-sm font-bold">{stock.entryPrice.toLocaleString()}원</div>
+                                                    <div className="text-sm font-bold">{(stock.entryPrice || 0).toLocaleString()}원</div>
                                                     <div className="text-xs text-muted-foreground mt-1 font-mono">{stock.entryDate}</div>
                                                 </td>
 
                                                 {/* 현재가 & 수익률 */}
                                                 <td className="px-4 py-4 text-right">
-                                                    <div className="text-sm font-bold">{stock.currentPrice.toLocaleString()}원</div>
+                                                    <div className="text-sm font-bold">{(stock.currentPrice || 0).toLocaleString()}원</div>
                                                     <div className={cn(
                                                         "text-xs font-bold mt-1",
                                                         stock.returnRate > 0 ? "text-green-500" : stock.returnRate < 0 ? "text-red-500" : "text-muted-foreground"

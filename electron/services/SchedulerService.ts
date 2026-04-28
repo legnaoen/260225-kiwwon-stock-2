@@ -216,6 +216,9 @@ export class SchedulerService {
                                 console.error(`[Scheduler] ${ticket.stock_code} 기간청산 매도 에러:`, err.message);
                             }
                         }
+                        
+                        // [추가] 기간청산 주문 후 미체결 추적 정정기 가동 (15:00 ~ 15:20)
+                        execSvc.startUnexecutedSellChasing();
                     }
                 } catch (e: any) {
                     console.error('[Scheduler] 실전매매 기간청산 오류:', e.message)
@@ -629,7 +632,8 @@ export class SchedulerService {
                 }
             }), { timezone: 'Asia/Seoul' })
 
-            // [Step 2-C] 09:43 메가 테마 관리: 오전 테마 AI(09:41) 실행 후 집계 (개선 작업 중 -> 활성화)
+            // [비활성화] 메가 테마 관리: 매매와 무관한 단순 브리핑용이므로 스케줄 제외 (사용자 요청)
+            /*
             const megaThemeJob = cron.schedule('43 09 * * 1-5', async () => {
                 console.log('[Scheduler] 🔥 ThemeContextBuilder 메가 테마 집계 시작...')
                 try {
@@ -640,13 +644,13 @@ export class SchedulerService {
                     console.error('[Scheduler] ThemeContextBuilder 오류:', e.message)
                 }
             }, { timezone: 'Asia/Seoul' })
+            */
 
             // [실전 매매] 1분 단위 미체결 주문 모니터링 및 익절 매도 모니터링 (09:00 ~ 15:30 장중)
             const liveTradeMonitorJob = cron.schedule('* 09-14 * * 1-5', async () => {
                 try {
                     const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService');
                     await LiveTradeExecutionService.getInstance().monitorTakeProfit();
-                    await LiveTradeExecutionService.getInstance().monitorUnexecutedOrders();
                 } catch (e: any) {
                     // Ignore background errors or log them silently
                 }
@@ -655,12 +659,11 @@ export class SchedulerService {
                 try {
                     const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService');
                     await LiveTradeExecutionService.getInstance().monitorTakeProfit();
-                    await LiveTradeExecutionService.getInstance().monitorUnexecutedOrders();
                 } catch (e: any) {
                     // Ignore background errors
                 }
             }, { timezone: 'Asia/Seoul' });
-            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, megaThemeJob, liveTradeMonitorJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
+            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, liveTradeMonitorJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)
@@ -672,11 +675,14 @@ export class SchedulerService {
         // ═══ [Step 3] NaverFlow 크론 등록 ═══
         const nfSettings = store.get('naverflow_settings') as any
         if (nfSettings?.enabled && Array.isArray(nfSettings?.scheduleSlots)) {
-            // Collision Avoidance: adjust legacy times
+            // Collision Avoidance & User Request Update
             nfSettings.scheduleSlots.forEach((s: any) => {
                 if (s.time === '09:30') s.time = '09:41'; // 스웜 AI 충돌 회피
                 if (s.time === '15:30') s.time = '15:45';
+                if (s.time === '09:26' || s.time === '09:41') s.time = '09:40'; // 사용자 요청 강제 변경 (09:26 -> 09:40)
             });
+            store.set('naverflow_settings', nfSettings); // 변경사항을 파일(스토어)에도 즉시 저장
+
             nfSettings.scheduleSlots.forEach((slot: any) => {
                 if (!slot.enabled || !slot.time) return
                 try {

@@ -64,6 +64,11 @@ export class MoonshotTrackerAgent {
         const { DatabaseService } = await import('../DatabaseService');
         const db = DatabaseService.getInstance().getDb();
         const now = DatabaseService.getInstance().getKstTimestamp();
+        
+        const Store = (await import('electron-store')).default;
+        const store = new Store();
+        const aiSettings = store.get('ai_settings') as any || {};
+        const isCloudBypass = Array.isArray(aiSettings.lightweightCloudAgents) && aiSettings.lightweightCloudAgents.some((id: string) => 'MOONSHOT_TRACKER'.includes(id) || 'MOONSHOT_TRACKER'.startsWith(id));
 
         this.sendProgress(win, '🔍 Active Tracking 데일리 리뷰 시작...', 'info');
 
@@ -142,8 +147,12 @@ export class MoonshotTrackerAgent {
                     smDataPreview = '수급 수집 실패';
                 }
 
-                // (3) 로컬 AI: 일일 가설 방어력 리포트 생성
-                const briefingPrompt = `당신은 'Moonshot Ten-bagger' 헤지펀드의 시니어 리서치 매니저입니다.
+                // (3) 로컬 AI: 일일 가설 방어력 리포트 생성 (또는 클라우드 우회)
+                if (isCloudBypass) {
+                    dailyBriefings[stock.stock_code] = `[클라우드 묶음 처리로 1차 요약 생략됨]\n\n[오늘 최신 뉴스]\n${rawNewsBuffer || '없음'}\n\n[최근 5일 수급]\n${smDataPreview || '없음'}`;
+                    this.sendProgress(win, `✅ [${stock.stock_name}] 원시 데이터 전송 준비 (Cloud Bypass)`, 'success');
+                } else {
+                    const briefingPrompt = `당신은 'Moonshot Ten-bagger' 헤지펀드의 시니어 리서치 매니저입니다.
 최근 수집된 뉴스와 수급/실적 데이터를 바탕으로, 이 종목의 기존 "투자 가설(Bull Case)"이 여전히 유효한지 
 점검하는 일일 방어력 보고서를 작성하세요. ${fallbackMsg}
 
@@ -164,9 +173,10 @@ ${smDataPreview}
 2. 오늘 핵심 팩트: (중요 뉴스/수급 변화 요약 1줄)
 3. 한줄 복기: (액션 방향성을 제안하는 1줄 코멘트)`;
 
-                const briefing = await this.localAi.askLocalAi(briefingPrompt, 'Write a concise daily briefing in Korean in 3 lines.');
-                dailyBriefings[stock.stock_code] = briefing;
-                this.sendProgress(win, `✅ [${stock.stock_name}] 일일 브리핑 완성`, 'success');
+                    const briefing = await this.localAi.askLocalAi(briefingPrompt, 'Write a concise daily briefing in Korean in 3 lines.');
+                    dailyBriefings[stock.stock_code] = briefing;
+                    this.sendProgress(win, `✅ [${stock.stock_name}] 일일 브리핑 완성`, 'success');
+                }
 
             } catch (err: any) {
                 dailyBriefings[stock.stock_code] = `데이터 수집 실패: ${err.message}`;

@@ -12,7 +12,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?: string) => void; initialSelection?: string }> = ({ onNavigate, initialSelection }) => {
-    const [activeTab, setActiveTab] = useState<'trend' | 'mega' | 'mock'>('trend');
+    const [activeTab, setActiveTab] = useState<'trend' | 'mega' | 'mock'>('mock');
     const [viewType, setViewType] = useState<string>('BOTH');
     const [themeData, setThemeData] = useState<any>(null);
     const [sectorData, setSectorData] = useState<any>(null);

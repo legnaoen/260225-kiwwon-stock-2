@@ -114,8 +114,6 @@ export default function Settings() {
     const [messageNaver, setMessageNaver] = useState('')
     const [isTestingNaver, setIsTestingNaver] = useState(false)
 
-
-
     useEffect(() => {
         const loadKeys = async () => {
             const savedKeys = await window.electronAPI.getApiKeys()
@@ -480,8 +478,6 @@ export default function Settings() {
             setIsTestingNaver(false)
         }
     }
-
-
 
     const handleSaveSchedule = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -1441,6 +1437,13 @@ export default function Settings() {
                                                             agents: [
                                                                 { id: 'TRACK_A_GEMMA_RESEARCH', label: 'Track A 심층 리서치 (병렬 권장)' },
                                                                 { id: 'TRACK_B_GEMMA_RESEARCH,TRACK_C_GEMMA_RESEARCH,TRACK_D_GEMMA_RESEARCH,TRACK_E_GEMMA_RESEARCH', label: 'Track B~E 심층 리서치 (병렬 권장)' }
+                                                            ]
+                                                        },
+                                                        {
+                                                            name: "🚀 텐배거 AI",
+                                                            agents: [
+                                                                { id: 'MOONSHOT_VALIDATION', label: '텐배거 스캐너 (1차 심사)' },
+                                                                { id: 'MOONSHOT_TRACKER', label: '액티브 트래킹 (일일 리뷰)' }
                                                             ]
                                                         },
                                                         {

@@ -111,14 +111,18 @@ export class AiExecutionQueue {
             const aiSettings = store.get('ai_settings') as any;
             
             if (aiSettings) {
-                // 1. 로컬 크론 클라우드 우회 라우팅 처리
-                if (jobTarget === 'local' && Array.isArray(aiSettings.lightweightCloudAgents)) {
+                // 1. 로컬 크론 클라우드 우회 및 경량 모델 라우팅 처리
+                if (Array.isArray(aiSettings.lightweightCloudAgents)) {
                     const isBypass = aiSettings.lightweightCloudAgents.some((id: string) => params.agentId.includes(id) || params.agentId.startsWith(id));
                     if (isBypass) {
-                        jobTarget = 'gemini'; // 로컬 타겟을 강제로 제미나이(클라우드)로 우회
+                        if (jobTarget === 'local') {
+                            isCloudBypass = true;
+                            console.log(`[AiQueue] ☁️ 로컬 크론 클라우드 우회됨: ${params.agentName} -> ${aiSettings.lightweightCloudModel || 'gemini-1.5-flash'}`);
+                        } else {
+                            console.log(`[AiQueue] ⚡ 경량 모델(우회 설정) 적용됨: ${params.agentName} -> ${aiSettings.lightweightCloudModel || 'gemini-1.5-flash'}`);
+                        }
+                        jobTarget = 'gemini'; // 무조건 클라우드로 타겟 설정
                         finalCustomModel = aiSettings.lightweightCloudModel || 'gemini-1.5-flash';
-                        isCloudBypass = true;
-                        console.log(`[AiQueue] ☁️ 로컬 크론 클라우드 우회됨: ${params.agentName} -> ${finalCustomModel}`);
                     }
                 }
 

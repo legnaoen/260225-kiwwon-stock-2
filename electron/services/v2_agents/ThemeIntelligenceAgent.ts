@@ -287,12 +287,13 @@ ${issueListForPrompt}
 [분석 지침]
 - 각 테마가 왜 오늘 집중적인 수급을 받았는지 구체적인 팩트와 파급 효과를 심층 분석하여 작성하십시오.
 - **반드시 당일 이 테마를 이끈 대장주(리드 주식)의 흐름이나 상승 수준에 기반한 설명을 포함**하십시오. 
-- 단답형 금지. 
+- 단답형 금지. 대신, 전체 길이가 길어지지 않도록 핵심만 간결하게 압축하십시오.
 
 [중요 제약]
 - linked_issue_id는 반드시 위 "활성 거시 이슈 목록"에 존재하는 ID만 사용해야 합니다. 
 - 만약 상위 3위 이내의 대장 테마임에도 매핑되는 기존 이슈가 없다면, 이것은 시황 AI가 놓친 신규 메타입니다. 이 경우 빈 칸으로 두지 말고, "ISSUE-NEW-임의의영문명" 형식으로 ID를 새로 생성하여 적으십시오. (시스템이 이를 파싱해 신규 이슈로 자동 등록할 것입니다).
 - 기존 하위 테마인데 매핑할 원인이 없다면 원래대로 null로 설정하십시오.
+- **출력 토큰 제한 방지:** 각 항목의 \`reason\`은 반드시 핵심만 2~3문장 이내로 간결하게 작성하고, \`top_picks\`는 최대 2개까지만 선정하십시오.
 
 반드시 아래의 구조를 가진 순수 JSON 객체(Object)만 출력하시오. (Markdown 백틱 금지)
 
@@ -301,7 +302,7 @@ ${issueListForPrompt}
     {
       "type": "THEME 혹은 SECTOR",
       "name": "항목 이름",
-      "reason": "[헤드라인 한 줄 요약]\\n\\n이슈에 대한 심층적 분석, 파급 효과, 파생될 하위 테마, 대장주의 구체적 흐름 등 최소 3~4문장 이상의 상세한 설명 작성",
+      "reason": "[헤드라인 한 줄 요약]\\n\\n이슈에 대한 분석, 파급 효과, 대장주 흐름 등 2~3문장 이내로 핵심만 요약 작성",
       "linked_issue_id": "위 이슈 목록의 ID 중 하나 또는 신규 이슈 ID 또는 null",
       "linked_issue_path": "이슈→테마 연결 논리 경로 또는 null",
       "momentum_status": "UPTREND, PEAKOUT, REBOUND, FADING 중 택 1",
@@ -309,7 +310,7 @@ ${issueListForPrompt}
         {
           "stock_name": "종목명",
           "stock_code": "종목코드",
-          "reason": "10일내 +20% 상승 달성 확률이 높은 추천 사유"
+          "reason": "10일내 +20% 상승 달성 확률이 높은 추천 사유 (간결하게)"
         }
       ]
     }
@@ -321,7 +322,7 @@ ${issueListForPrompt}
             const rawResponse = await AiExecutionQueue.getInstance().enqueue({
                 agentId: 'THEME_INTELLIGENCE',
                 agentName: '테마 수명 분석기',
-                triggerType: 'MANUAL', // 일단 메뉴얼/테스트
+                triggerType: 'MANUAL', 
                 prompt: userPrompt,
                 systemInstruction: systemInstruction,
             });
@@ -464,6 +465,41 @@ ${issueListForPrompt}
             }
             if (edgeCount > 0) {
                 console.log(`[ThemeIntelligence] 🔗 Knowledge Graph: ${edgeCount}개 ISSUE→THEME/SECTOR 엣지 기록 완료`);
+            }
+
+            // 8. 모의매매 추천 종목 텔레그램 브리핑 발송
+            try {
+                const { TelegramService } = await import('../TelegramService');
+                const tgSvc = TelegramService.getInstance();
+                const briefingPicks = [];
+                for (const item of parsedArray) {
+                    if (item.top_picks && Array.isArray(item.top_picks)) {
+                        for (const pick of item.top_picks) {
+                            briefingPicks.push({
+                                stock_name: pick.stock_name,
+                                theme_name: item.name,
+                                reason: item.reason || ''
+                            });
+                        }
+                    }
+                }
+                
+                if (briefingPicks.length > 0) {
+                    const top5Picks = briefingPicks.slice(0, 5);
+                    
+                    let tgMsg = `🎯 *[테마 AI 모의매매 선정 브리핑]* (${dateStr})\n\n오늘 시장 주도 테마에서 AI가 아래 ${top5Picks.length}개 종목을 모의매매로 신규 선정(편입)했습니다.\n\n`;
+                    
+                    top5Picks.forEach((p, idx) => {
+                        const cleanReason = p.reason.replace(/[*_`]/g, '');
+                        tgMsg += `*${idx + 1}. ${p.stock_name}* (테마: ${p.theme_name})\n- 선정 사유: ${cleanReason}\n\n`;
+                    });
+                    
+                    tgMsg += `💡 장중 시세는 대시보드 [테마 모의매매] 탭에서 확인하실 수 있습니다.`;
+                    await tgSvc.sendMessage(tgMsg);
+                    console.log(`[ThemeIntelligence] 텔레그램 모의매매 브리핑 발송 완료 (${top5Picks.length}건)`);
+                }
+            } catch (tgErr: any) {
+                console.error(`[ThemeIntelligence] 텔레그램 모의매매 브리핑 발송 실패:`, tgErr.message);
             }
 
             return mapDataForDb;

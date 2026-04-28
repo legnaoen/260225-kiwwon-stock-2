@@ -34,6 +34,26 @@ export const ThemeMockTradingTab: React.FC = () => {
         loadData();
     }, []);
 
+    const handleUpdateLivePrices = async () => {
+        setIsLoading(true);
+        try {
+            const api = window.electronAPI as any;
+            if (api.updateThemeMockLivePrices) {
+                const res = await api.updateThemeMockLivePrices();
+                if (res.success) {
+                    const reloadRes = await api.getThemeMockTradingPicks();
+                    if (reloadRes.success) setMockData(reloadRes.data || []);
+                } else {
+                    alert(`주가 갱신 실패: ${res.error}`);
+                }
+            }
+        } catch (e) {
+            console.error('주가 갱신 중 에러:', e);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const getMomentumBadge = (status: string) => {
         switch (status) {
             case 'UPTREND': return <span className="flex items-center gap-1 px-1.5 py-0.5 bg-red-500/10 text-red-500 rounded text-[10px] font-bold border border-red-500/20"><TrendingUp size={10} /> 추가상승</span>;
@@ -70,6 +90,22 @@ export const ThemeMockTradingTab: React.FC = () => {
 
     return (
         <div className="w-full h-full bg-background text-foreground p-5 font-sans overflow-y-auto">
+
+            {/* 헤더 영역 */}
+            <div className="flex items-center justify-between mb-5">
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                    <Target size={20} className="text-primary" />
+                    테마 모의매매 현황
+                </h2>
+                <button
+                    onClick={handleUpdateLivePrices}
+                    disabled={isLoading}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-md text-sm font-semibold transition-colors disabled:opacity-50"
+                >
+                    <TrendingUp size={16} className={isLoading ? 'animate-pulse' : ''} />
+                    {isLoading ? '갱신 중...' : '장중 주가 업데이트'}
+                </button>
+            </div>
 
             {/* KPI 영역 */}
             <div className="grid grid-cols-4 gap-4 mb-5">

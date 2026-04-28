@@ -10,25 +10,13 @@ const AI_AGENTS = [
         schedules: [
             { time: '08:50', label: 'Cycle A — 장전 분석', description: '글로벌 매크로, 뉴스, 수급 종합 판단' },
             { time: '09:30', label: '베이지안 검증 (Pivot)', description: '개장 30분 실시간 수급 검증 및 장전 포지션 비상 궤도 수정' },
-            { time: '13:00', label: 'Intraday 하이브리드 #2', description: '오후장 추세 반전 감지 결론 도출' },
-            { time: '15:10', label: 'Cycle B — 장마감', description: '종가 기준 최종 판단 및 기록' },
         ],
     },
     {
         id: 'SWARM', name: '장중 스웜 AI', fullName: 'Intraday Swarm Agent',
         description: '로컬 AI 4인방(모멘텀, 역발상, 퀀트, 딜러)이 장중 다수결 평가를 진행합니다.',
         gemini: false, trigger: 'CRON' as const,
-        schedules: [
-            { time: '09:10', label: '스웜 A/B 테스트 (1회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '09:25', label: '스웜 A/B 테스트 (2회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '09:40', label: '스웜 A/B 테스트 (3회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '09:55', label: '스웜 A/B 테스트 (4회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '10:10', label: '스웜 A/B 테스트 (5회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '10:25', label: '스웜 A/B 테스트 (6회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '10:40', label: '스웜 A/B 테스트 (7회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '10:55', label: '스웜 A/B 테스트 (8회차)', description: '로컬 군집 4인 개별투표 및 합의' },
-            { time: '11:10', label: '스웜 A/B 테스트 (최종)', description: '마지막 로컬 예측 스나이핑' },
-        ],
+        schedules: [],
     },
     {
         id: 'IMA', name: '이슈 AI (편집장)', fullName: 'Issue Management Agent',
@@ -53,8 +41,6 @@ const AI_AGENTS = [
         description: '메인 예측 결과를 로컬 스웜이 매일 피드백(평가)하며, 메인 AI가 주/월 단위로 시스템 룰을 생성합니다.',
         gemini: true, trigger: 'CRON' as const,
         schedules: [
-            { time: '15:00', label: '단기 피드백 (Pre-Close)', description: '아침 시황 비판 (Local Swarm)' },
-            { time: '15:40', label: '일간 회고 (Post-Market)', description: '오늘 모든 예측의 결산 로그 (Local Swarm)' },
             { time: '16:00', label: '주간 회고 (금요일)', description: '반복되는 실패 감지 및 룰 추출 (Master)' },
             { time: '16:30', label: '월간 회고 (말일)', description: '4주간 매매내역 거시 분석 체화 (Master)' },
         ],
@@ -72,7 +58,7 @@ const AI_AGENTS = [
         description: '장중/장마감 주도 테마와 섹터를 수집(NaverFlow)하고 모멘텀의 수명(Lifespan)을 예측합니다.',
         gemini: true, trigger: 'CRON' as const,
         schedules: [
-            { time: '09:41', label: '오전 주도테마 요약', description: '09:41 정규 수집 시 연계 분석' },
+            { time: '09:40', label: '오전 주도테마 요약', description: '09:40 정규 수집 시 연계 분석' },
             { time: '15:45', label: '장마감 메가트렌드 요약', description: '15:45 최종 수집 시 연계 분석' },
         ],
     },
@@ -107,7 +93,6 @@ const AI_AGENTS = [
         schedules: [
             { time: '09:45', label: '1차 평가 (루키 오디션)', description: '서브 AI + 인큐베이터 추천 새 후보 필터링' },
             { time: '09:48', label: '2차 평가 (아침 리밸런싱)', description: '전체 포트폴리오 재평가 및 한도 내 매수 확정' },
-            { time: '14:05', label: '장중 미니 리뷰 (오후장 점검)', description: '현재 활성된 보유/관심 종목을 대상으로 솎아내기 (손절 방어 및 승급)' },
         ],
     },
     {

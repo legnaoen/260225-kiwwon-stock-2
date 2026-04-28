@@ -15,6 +15,21 @@ export class ThemeMockTradingJudgeAgent {
         return ThemeMockTradingJudgeAgent.instance;
     }
 
+    private getBusinessDaysDiff(startDateStr: string, endDateStr: string): number {
+        const start = new Date(startDateStr);
+        const end = new Date(endDateStr);
+        let count = 0;
+        const cur = new Date(start);
+        while (cur < end) {
+            cur.setDate(cur.getDate() + 1);
+            const day = cur.getDay();
+            if (day !== 0 && day !== 6) { // 일(0), 토(6) 아님
+                count++;
+            }
+        }
+        return count;
+    }
+
     /**
      * 모의매매 명부에 있는 최근 15일 이내의 추천 종목들을 추적하고
      * 상태(진입가, 현재가, 수익률, D-DAY, HIT 여부 등)를 업데이트합니다.
@@ -73,6 +88,9 @@ export class ThemeMockTradingJudgeAgent {
                     }
 
                     const ohlcvList = stmtGetOhlcv.all(pick.stock_code, row.date) as any[];
+                    const todayStr = this.db.getKstDate();
+                    const bizDays = this.getBusinessDaysDiff(row.date, todayStr);
+                    
                     let entryPrice = 0;
                     let currentPrice = 0;
                     let maxHigh = 0;
@@ -91,7 +109,7 @@ export class ThemeMockTradingJudgeAgent {
                             entryPrice = estPrice;
                             currentPrice = estPrice;
                             maxHigh = estPrice;
-                            elapsedDays = 0;
+                            elapsedDays = bizDays;
                         } else {
                             continue; // OHLCV 히스토리가 아예 없으면 스킵 (신규상장 등)
                         }
@@ -108,8 +126,8 @@ export class ThemeMockTradingJudgeAgent {
                             if (candle.high > maxHigh) maxHigh = candle.high;
                         }
                         
-                        // 영업일 경과 수
-                        elapsedDays = ohlcvList.length - 1; // 추천 당일은 0일
+                        // 영업일 경과 수 (OHLCV가 없어도 시간이 지났으면 반영)
+                        elapsedDays = Math.max(bizDays, ohlcvList.length - 1);
                     }
                     
                     const returnVal = ((currentPrice - entryPrice) / entryPrice) * 100;

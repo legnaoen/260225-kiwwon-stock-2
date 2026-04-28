@@ -129,6 +129,9 @@ export class PortfolioRetrospectiveAgent {
                 raw_ai_step3: step3Result,
             });
 
+            // ── Phase D: SKILL.md 자가 진화 (Auto-Update) ──
+            await this.runStep4_SkillUpdate(step3Result);
+
             console.log(`[PortfolioRetrospectiveAgent] 분석 완료. 리포트 ID: ${reportId}`);
             return { success: true, reportId, totalTrades: stats.total_trades };
         } catch (e: any) {
@@ -140,11 +143,39 @@ export class PortfolioRetrospectiveAgent {
 
     private async buildTradeCaseCards(): Promise<TradeCaseCard[]> {
         // 매도 완료된 종목(성적표) 조회 — was_held=1인 DROPPED/HIT만 대상
-        const historyRows = this.db.getPortfolioHistory() as any[];
+        const historyRowsRaw = this.db.getPortfolioHistory() as any[];
+
+        // 1. 최신순 정렬 및 최근 100건 1차 컷 (오래된 장세 노이즈 제거)
+        const recentRows = historyRowsRaw
+            .sort((a, b) => {
+                const dateA = a.exit_date || a.updated_at || '';
+                const dateB = b.exit_date || b.updated_at || '';
+                return dateB.localeCompare(dateA); // 내림차순 (최신 먼저)
+            })
+            .slice(0, 100);
+
+        // 2. 가중치 샘플링: 상위 수익 5건(성공) + 하위 수익 15건(손실) 추출
+        const getReturn = (row: any) => {
+            const entry = Number(row.entry_price) || 0;
+            const exit = Number(row.exit_price) || Number(row.current_price) || entry;
+            if (entry > 0) return ((exit - entry) / entry) * 100;
+            return Number(row.profit_rate) || 0;
+        };
+
+        const sortedByReturn = [...recentRows].sort((a, b) => getReturn(b) - getReturn(a)); // 수익률 높은 순
+
+        const topWins = sortedByReturn.filter(r => getReturn(r) > 0).slice(0, 5); // 성공한 종목 최대 5개
+        const bottomLosses = sortedByReturn.filter(r => getReturn(r) < 0).reverse().slice(0, 15); // 크게 실패한 종목 최대 15개
+
+        // 두 배열 합치기 및 고유값 추출 (만약의 경우 대비)
+        const selectedSet = new Set([...topWins, ...bottomLosses]);
+        
+        // 전체 건수가 너무 적으면 그냥 최신 데이터 전부 사용
+        const targetRows = recentRows.length <= 20 ? recentRows : Array.from(selectedSet);
 
         const cards: TradeCaseCard[] = [];
 
-        for (const row of historyRows) {
+        for (const row of targetRows) {
             try {
                 const entryDate = row.entry_date || row.created_at?.substring(0, 10) || '';
                 const exitDate = row.updated_at?.substring(0, 10) || '';
@@ -482,6 +513,78 @@ ${step2Result.substring(0, 3000)}
         });
 
         return result || '{}';
+    }
+
+    private async runStep4_SkillUpdate(step3Result: string): Promise<boolean> {
+        console.log('[PortfolioRetrospectiveAgent] Step 4: PM2 마스터 가이드 자동 업데이트 시작...');
+        const fs = require('fs');
+        const path = require('path');
+        const guidePath = path.join(process.cwd(), '.agents/skills/pm2_master_guideline/PM2_MASTER_GUIDELINE.md');
+        let currentGuide = '';
+        try {
+            currentGuide = fs.readFileSync(guidePath, 'utf-8');
+        } catch(e) {
+            console.error('[PortfolioRetrospectiveAgent] PM2_MASTER_GUIDELINE.md 파일을 읽을 수 없어 업데이트를 중단합니다.');
+            return false;
+        }
+
+        const prompt = `
+너는 AI 포트폴리오 시스템의 진화를 담당하는 최고 시스템 아키텍트이다.
+최근 매매 성적표 분석을 통해 도출된 [상세 개선안]을 바탕으로, 기존의 [PM2_MASTER_GUIDELINE.md] 문서를 업데이트해라.
+
+[가장 중요한 원칙]
+1. 모호한 요약("추격 매수를 자제하라" 등)은 절대 금지한다.
+2. 성적표 상세 개선안에 등장한 **구체적인 수치와 제한 조건(예: "RSI 70 이상 매수 금지", "이격도 115% 하드리미트", "목표수익 3% 달성 시 트레일링 스탑" 등)을 날것 그대로** 가져와서 적용하라.
+3. 기존 마스터 문서의 상단부인 '# 🏛️ [기본 헌법]' 영역은 절대 삭제하거나 변경하지 마라.
+4. 오직 하단의 '# 🚨 [AI 전술 오답노트]' 영역에만 최신 교훈을 강하게 덧붙이고, 낡은 오답은 하나로 압축해라. 날짜를 오늘 자로 기록하라.
+
+[최근 성적표 상세 개선안 (Step3 Result)]
+${step3Result.substring(0, 3000)}
+
+[기존 PM2_MASTER_GUIDELINE.md 내용]
+${currentGuide}
+
+아래 형식으로 응답하라. (응답한 내용 전체가 파일에 그대로 덮어써진다. 기존 마크다운 구조와 YAML frontmatter를 반드시 유지하라.)
+\`\`\`markdown
+---
+name: PM2 마스터 트레이딩 가이드
+description: 포트폴리오 매니저의 매수 타점, 차트 리스크 평가, 그리고 AI 자가 진화 오답노트가 기록되는 단일 지침서입니다.
+---
+
+# 🏛️ [기본 헌법] 차트 리스크 분석 및 대장주 가이드
+(이하 기존 내용 유지...)
+
+---
+
+# 🚨 [AI 전술 오답노트] 최근 성과 회고에 따른 추가 제약사항 (가변 영역)
+(여기에 기존 오답노트를 최적화하고 이번 개선안의 구체적 수치/조건을 매우 명확하게 추가/수정하여 작성)
+\`\`\`
+`;
+        try {
+            const result = await AiExecutionQueue.getInstance().enqueue({
+                agentId: 'PORTFOLIO_RETRO_STEP4',
+                agentName: 'PM2 마스터 가이드 업데이트',
+                triggerType: 'MANUAL',
+                prompt,
+            });
+
+            if (result) {
+                let newGuide = result;
+                const match = result.match(/```markdown\n([\s\S]*?)```/) || result.match(/```\n([\s\S]*?)```/);
+                if (match) newGuide = match[1];
+
+                if (newGuide.length > 500) {
+                    fs.writeFileSync(guidePath, newGuide.trim(), 'utf-8');
+                    console.log('[PortfolioRetrospectiveAgent] ✅ PM2_MASTER_GUIDELINE.md 자동 업데이트 성공!');
+                    return true;
+                } else {
+                    console.error('[PortfolioRetrospectiveAgent] 업데이트된 내용이 너무 짧아(파싱 오류 의심) 덮어쓰기를 취소합니다.');
+                }
+            }
+        } catch(e: any) {
+            console.error(`[PortfolioRetrospectiveAgent] PM2_MASTER_GUIDELINE.md 업데이트 실패: ${e.message}`);
+        }
+        return false;
     }
 
     // ─── 유틸리티 ─────────────────────────────────────────────────────────────────

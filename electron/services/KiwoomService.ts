@@ -814,7 +814,7 @@ export class KiwoomService {
     /**
      * 국내주식 정정 주문
      */
-    public async modifyOrder(accountNo: string, orig_ord_no: string, stk_cd: string, mdfy_qty: number, mdfy_uv: number): Promise<any> {
+    public async modifyOrder(accountNo: string, orig_ord_no: string, stk_cd: string, mdfy_qty: number, mdfy_uv: number, trde_tp: string = '00'): Promise<any> {
         return this.makeApiRequestWithRetry(async (token) => {
             const url = `${BASE_URL}/api/dostk/ordr`
             const headers = {
@@ -829,7 +829,7 @@ export class KiwoomService {
                 orig_ord_no: orig_ord_no,
                 mdfy_qty: String(mdfy_qty),
                 mdfy_uv: String(mdfy_uv),
-                trde_tp: '00', // 지정가 (보통)
+                trde_tp: trde_tp, // 지정가 '00', 시장가 '03' 등
                 cond_uv: ''
             }
             const response = await this.kiwoomAxios.post(url, body, { headers })
@@ -908,6 +908,64 @@ export class KiwoomService {
                 return { oso: orderList };
             } catch (error: any) {
                 console.error(`[KiwoomService] 미체결 조회 에러:`, error.response?.data || error.message);
+                throw error;
+            }
+        });
+    }
+
+    /**
+     * 계좌별주문체결내역상세요청 (kt00007) - 매도/매수 등 정밀 미체결 조회
+     */
+    public async getUnexecutedOrdersKt00007(
+        accountNo: string,
+        options: {
+            sell_tp?: string; // '0': 전체, '1': 매도, '2': 매수
+            stk_cd?: string;
+        } = {}
+    ): Promise<any> {
+        const {
+            sell_tp = '1', // 기본값: 매도 미체결만 조회
+            stk_cd = '',
+        } = options;
+
+        return this.makeApiRequestWithRetry(async (token) => {
+            try {
+                const url = `/api/dostk/acnt`;
+                const headers = {
+                    'Content-Type': 'application/json;charset=UTF-8',
+                    'authorization': `Bearer ${token}`,
+                    'api-id': 'kt00007',
+                    'cont-yn': 'N',
+                    'next-key': ''
+                };
+                const body = {
+                    account_no: accountNo,
+                    ord_dt: '', // 오늘
+                    qry_tp: '3', // 3: 미체결 내역
+                    stk_bond_tp: '1', // 1: 주식
+                    sell_tp: sell_tp,
+                    stk_cd: stk_cd,
+                    fr_ord_no: '',
+                    dmst_stex_tp: '%'
+                };
+                const response = await this.kiwoomAxios.post(url, body, { headers });
+                
+                let orderList = [];
+                if (response.data && response.data.acnt_ord_cntr_prps_dtl) {
+                    orderList = Array.isArray(response.data.acnt_ord_cntr_prps_dtl) 
+                        ? response.data.acnt_ord_cntr_prps_dtl 
+                        : [response.data.acnt_ord_cntr_prps_dtl];
+                } else if (response.data && response.data.Body) {
+                    orderList = Array.isArray(response.data.Body) ? response.data.Body : [response.data.Body];
+                } else if (response.data && response.data.list) {
+                    orderList = response.data.list;
+                }
+                
+                if (orderList.length > 0) console.log(`[KiwoomService] 미체결(매도) 조회 (kt00007): ${orderList.length}건`);
+                
+                return { oso: orderList };
+            } catch (error: any) {
+                console.error(`[KiwoomService] 미체결(kt00007) 조회 에러:`, error.response?.data || error.message);
                 throw error;
             }
         });

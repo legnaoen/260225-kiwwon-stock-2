@@ -256,6 +256,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => ipcRenderer.invoke('v2-pipeline:run', { pipelineId, options }),
     getThemeTrackerData: (type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => ipcRenderer.invoke('naverflow:get-tracker-data', type, date, limitDays, topN),
     getThemeMockTradingPicks: () => ipcRenderer.invoke('naverflow:get-mock-trading-picks'),
+    updateThemeMockLivePrices: () => ipcRenderer.invoke('naverflow:update-mock-live-prices'),
     analyzeThemes: (date: string) => ipcRenderer.invoke('naverflow:analyze-themes', date),
     resetThemeLedger: () => ipcRenderer.invoke('naverflow:reset-themes'),
     verifyThemeIntelligence: (params: any) => ipcRenderer.invoke('naverflow:verify-theme', params),
@@ -382,6 +383,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // PM 성적표 AI 분석 (포트폴리오 매니저 성적 분석 & 개선안)
     runPortfolioRetrospective: () => ipcRenderer.invoke('portfolio:run-retrospective'),
     getLatestPortfolioRetrospective: () => ipcRenderer.invoke('portfolio:get-latest-retrospective'),
+    getPm2MasterGuideContent: () => ipcRenderer.invoke('ai-analyst:get-pm2-master-guide'),
+    savePm2MasterGuideContent: (content: string) => ipcRenderer.invoke('ai-analyst:save-pm2-master-guide', content),
+    getSubAiSkills: () => ipcRenderer.invoke('ai-analyst:get-sub-ai-skills'),
 
     // AI 수동실행 로그
     saveAiRunLog: (message: string) => ipcRenderer.invoke('ai-run-logs:save', message),
@@ -467,6 +471,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Kill-Switch (긴급 중단)
     getLiveTradeKillSwitch: () => ipcRenderer.invoke('livetrade:get-kill-switch'),
     setLiveTradeKillSwitch: (active: boolean) => ipcRenderer.invoke('livetrade:set-kill-switch', active),
+    testLiveTradeBuyOrder: (stockCode: string, qty: number, accountNo?: string) => ipcRenderer.invoke('livetrade:test-buy-order', stockCode, qty, accountNo),
+    getLiveTradeDailyLogs: () => ipcRenderer.invoke('livetrade:get-daily-logs'),
     // Live Trade Error Log
     onLiveTradeError: (callback: (error: any) => void) => {
         const listener = (_event: any, data: any) => callback(data)

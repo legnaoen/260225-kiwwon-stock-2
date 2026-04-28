@@ -468,15 +468,15 @@ export class PortfolioManagerAgent {
                 sysConditionMsg = "\n[🚨시스템 상태: 실시간 시세 및 차트 서버 연결 장애 발동 중]\n현재 증권사 API 장애로 인해 최신 호가와 차트 데이터를 받아올 수 없습니다. 따라서 무리하게 공격적인 IMMEDIATE_BUY 신호를 내리는 것을 지양하고, 관망(WATCHLIST) 또는 HOLD 위주로 보수적인(Defensive) 판정을 내리십시오.\n";
             }
 
-            // --- AI Skill Injection: 대장주 추천 가이드 (구 SKILL.md) ---
-            let chartRiskSkill = '';
+            // --- AI Master Guideline Injection ---
+            let pm2MasterGuideline = '';
             try {
                 const fs = require('fs');
                 const path = require('path');
-                chartRiskSkill = fs.readFileSync(path.join(process.cwd(), '.agents/skills/leader_stock_guide/대장주_추천_가이드.md'), 'utf-8');
+                pm2MasterGuideline = fs.readFileSync(path.join(process.cwd(), '.agents/skills/pm2_master_guideline/PM2_MASTER_GUIDELINE.md'), 'utf-8');
             } catch (e) {
-                console.warn('[PortfolioManager] ⚠️ 대장주 추천 가이드(대장주_추천_가이드.md)를 읽을 수 없습니다. 기본 룰 적용.');
-                chartRiskSkill = "대장주 위주의 초강세 모멘텀 매매를 지향하라.";
+                console.warn('[PortfolioManager] ⚠️ PM2 마스터 가이드라인(PM2_MASTER_GUIDELINE.md)을 읽을 수 없습니다.');
+                pm2MasterGuideline = "대장주 위주의 초강세 모멘텀 매매를 지향하라.";
             }
 
             // 5. 시장 맥락 데이터 수집 (Alpha + 이슈 브리핑)
@@ -538,9 +538,6 @@ export class PortfolioManagerAgent {
 오늘 1) 당일 신규 추천주, 2) 기존 관심종목, 3) 보유종목(매수포지션)이 하나로 통합된 거대한 풀을 심사한다.
 ${sysConditionMsg}
 
-[차트 리스크 분석 교본 (필수 준수 지침)]
-${chartRiskSkill}
-
 [🌐 시장 맥락 활용 원칙 — 반드시 준수]
 프롬프트 최상단에 오늘의 시장 맥락(Alpha 랭킹 + 이슈 수혜/피해 섹터 + 시황 브리핑)이 제공된다.
 1. **Alpha Top 15 교차 확인**: 애널리스트 추천 종목이 Alpha Top 15 안에 있으면 conviction_score 상향.
@@ -565,6 +562,13 @@ ${chartRiskSkill}
   → analysts_json에 ALPHA_TOP이 포함된 종목은 conviction_score를 5점 추가로 부여하라 (100점 초과 불가)
 
 ※ strategy 필드는 더 이상 사용하지 않는다. 응답 JSON에 strategy를 포함하지 마라.
+
+================================================================================================
+
+[🧠 PM2 마스터 매매 가이드라인 및 최신 오답노트 (최우선 준수 영역)]
+${pm2MasterGuideline}
+
+================================================================================================
 
 [응답 가이드]
 결과는 반드시 JSON 형식이어야 하며, 풀에 있는 이번 파트의 모든 종목을 누락 없이 반환하여야 한다.

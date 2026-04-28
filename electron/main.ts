@@ -777,6 +777,85 @@ ipcMain.handle('ai-analyst:run-retrospective', async () => {
     }
 });
 
+ipcMain.handle('ai-analyst:get-pm2-master-guide', async () => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const guidePath = path.join(process.cwd(), '.agents/skills/pm2_master_guideline/PM2_MASTER_GUIDELINE.md');
+        if (fs.existsSync(guidePath)) {
+            const content = fs.readFileSync(guidePath, 'utf-8');
+            const stat = fs.statSync(guidePath);
+            return { success: true, content, mtime: stat.mtime.getTime() };
+        } else {
+            return { success: false, error: 'PM2_MASTER_GUIDELINE.md 파일이 없습니다.' };
+        }
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('ai-analyst:save-pm2-master-guide', async (_event, content: string) => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const guidePath = path.join(process.cwd(), '.agents/skills/pm2_master_guideline/PM2_MASTER_GUIDELINE.md');
+        
+        // Ensure directory exists
+        const dir = path.dirname(guidePath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        
+        fs.writeFileSync(guidePath, content, 'utf-8');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('ai-analyst:get-sub-ai-skills', async () => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const skillsDir = path.join(process.cwd(), '.agents/skills');
+        const results = [];
+
+        if (fs.existsSync(skillsDir)) {
+            const folders = fs.readdirSync(skillsDir);
+            
+            // 트레이딩 서브 AI용 화이트리스트
+            const allowedSubAis = [
+                'momentum_guidelines', 
+                'pullback_guidelines', 
+                'theme_guidelines', 
+                'report_guidelines', 
+                'fundamental_guidelines'
+            ];
+
+            for (const folder of folders) {
+                if (!allowedSubAis.includes(folder)) continue;
+
+                const skillPath = path.join(skillsDir, folder, 'SKILL.md');
+                if (fs.existsSync(skillPath)) {
+                    const content = fs.readFileSync(skillPath, 'utf-8');
+                    // 폴더명에서 _guidelines 제거하여 이쁜 이름 도출
+                    let name = folder.replace('_guidelines', '').replace(/_/g, ' ').toUpperCase();
+                    if(name.includes('AI')) {
+                        name = name.replace('AI', 'AI');
+                    } else {
+                        name = name + ' AI';
+                    }
+                    results.push({ id: folder, name, content });
+                }
+            }
+        }
+        return { success: true, data: results };
+    } catch (e: any) {
+        console.error('[Main] get-sub-ai-skills 오류:', e);
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('maiis:run-pipeline-manual', async (_event, pipelineId: string) => {
     try {
         console.log(`[Main] Manual pipeline trigger: ${pipelineId}`)
@@ -864,6 +943,45 @@ ipcMain.handle('v2:get-sim-trade-picks', async () => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService');
         const db = DatabaseService.getInstance().getDb();
+        
+        // --- 1. 누락된 진입가(PENDING) 자동 보정 로직 (Retroactive Fix) ---
+        // 어제 OHLCV 누락으로 진입을 못 한 항목 중, 오늘 OHLCV가 업데이트된 경우 해당일 종가로 자동 진입 처리
+        try {
+            const tables = [
+                'track_a_buy_picks',
+                'track_b_buy_picks',
+                'track_c_buy_picks',
+                'track_d_buy_picks',
+                'track_e_buy_picks'
+            ];
+            for (const table of tables) {
+                const pendingPicks = db.prepare(`SELECT id, stock_code, pick_date FROM ${table} WHERE status = 'PENDING' OR entry_price IS NULL OR entry_price <= 0`).all();
+                for (const pick of (pendingPicks as any[])) {
+                    // 진입가 확인 (pick_date 와 같거나 그 이후의 첫 거래일 종가)
+                    const entryData = db.prepare(`SELECT date, close FROM market_ohlcv_history WHERE stock_code = ? AND date >= ? ORDER BY date ASC LIMIT 1`).get(pick.stock_code, pick.pick_date) as any;
+                    if (entryData && entryData.close > 0) {
+                        // 현재가 갱신을 위해 최신 종가 조회
+                        const currentData = db.prepare(`SELECT close FROM market_ohlcv_history WHERE stock_code = ? ORDER BY date DESC LIMIT 1`).get(pick.stock_code) as any;
+                        const currentPrice = currentData ? currentData.close : entryData.close;
+                        
+                        db.prepare(`
+                            UPDATE ${table} 
+                            SET entry_price = ?, 
+                                current_price = ?, 
+                                status = 'ACTIVE', 
+                                entry_date = ? 
+                            WHERE id = ?
+                        `).run(entryData.close, currentPrice, entryData.date, pick.id);
+                        
+                        console.log(`[SimTrade Fix] ${pick.stock_code} (${table}) PENDING 보정 완료 - 진입일: ${entryData.date}, 진입가: ${entryData.close}`);
+                    }
+                }
+            }
+        } catch (fixErr) {
+            console.error('[SimTrade Fix] PENDING 보정 중 에러:', fixErr);
+        }
+
+        // --- 2. 통합 조회 ---
         // ROW_NUMBER() 윈도우 함수로 (stock_code, pick_date) 파티션 내 1위 레코드만 선택
         // 동일 종목이 여러 Track 테이블에 중복 저장되어도 DB 레벨에서 완전 dedup
         const picks = db.prepare(`
@@ -1533,6 +1651,82 @@ ipcMain.handle('naverflow:get-mock-trading-picks', async () => {
         return { success: false, error: err.message }
     }
 })
+
+ipcMain.handle('naverflow:update-mock-live-prices', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const { KiwoomService } = await import('./services/KiwoomService');
+        const { ThemeMockTradingJudgeAgent } = await import('./services/v2_agents/ThemeMockTradingJudgeAgent');
+        
+        const db = DatabaseService.getInstance();
+        const rawDb = (db as any).db;
+        const kiwoom = KiwoomService.getInstance();
+        const todayStr = db.getKstDate();
+
+        const records = db.getThemeMockTradingPicks(10);
+        const activeStockCodes = new Set<string>();
+
+        records.forEach(group => {
+            group.items.forEach((item: any) => {
+                const statusStr = item.status || '';
+                if (!statusStr.includes('청산') && !statusStr.includes('만료') && !statusStr.includes('HIT')) {
+                    const code = item.stock_code || item.code;
+                    if (code) activeStockCodes.add(code);
+                }
+            });
+        });
+
+        const codes = Array.from(activeStockCodes);
+        if (codes.length === 0) {
+            return { success: true, updated: 0, message: "업데이트할 활성 종목이 없습니다." };
+        }
+
+        console.log(`[IPC] update-mock-live-prices: ${codes.length}종목 키움 API 갱신 시작...`);
+
+        let fetchCount = 0;
+        const stmtInsertOhlcv = rawDb.prepare(`
+            INSERT OR REPLACE INTO market_ohlcv_history (stock_code, date, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        const insertTx = rawDb.transaction((rows: any[]) => {
+            for (const r of rows) {
+                stmtInsertOhlcv.run(r.code, todayStr, r.price, r.high, r.price, r.price, 0);
+            }
+        });
+
+        const priceRows: any[] = [];
+        for (const code of codes) {
+            try {
+                const pData = await kiwoom.getCurrentPrice(code);
+                const curPriceStr = pData?.cur_prc || pData?.stck_prpr || pData?.Body?.cur_prc || 0;
+                const highPriceStr = pData?.hgpr || pData?.stck_hgpr || pData?.Body?.hgpr || curPriceStr;
+                
+                const currentPrice = Math.abs(Number(curPriceStr));
+                const highPrice = Math.abs(Number(highPriceStr));
+                
+                if (currentPrice > 0) {
+                    priceRows.push({ code, price: currentPrice, high: highPrice });
+                    fetchCount++;
+                }
+            } catch (err: any) {
+                console.warn(`[IPC] ${code} 가격 갱신 실패:`, err.message);
+            }
+        }
+
+        if (priceRows.length > 0) {
+            insertTx(priceRows);
+        }
+
+        console.log(`[IPC] update-mock-live-prices: 키움 시세 갱신 완료 (${fetchCount}건). 판독기 실행.`);
+        await ThemeMockTradingJudgeAgent.getInstance().evaluatePicks();
+
+        return { success: true, updated: fetchCount };
+    } catch (err: any) {
+        console.error(`[IPC] update-mock-live-prices Error:`, err);
+        return { success: false, error: err.message };
+    }
+});
 
 ipcMain.handle('naverflow:analyze-themes', async (_event, date: string) => {
     try {
@@ -2886,6 +3080,31 @@ ipcMain.handle('livetrade:set-kill-switch', async (_event, active: boolean) => {
         TelegramService.getInstance().sendMessage(msg);
     } catch {}
     return { success: true, active };
+});
+
+ipcMain.handle('livetrade:test-buy-order', async (_event, stockCode: string, qty: number, accountNo?: string) => {
+    try {
+        const { LiveTradeExecutionService } = await import('./services/LiveTradeExecutionService');
+        const logs = await LiveTradeExecutionService.getInstance().executeTestBuy(stockCode, qty, accountNo);
+        return { success: true, logs };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('livetrade:get-daily-logs', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        const logs = db.prepare(`
+            SELECT * FROM live_trade_logs 
+            WHERE timestamp >= date('now', 'localtime')
+            ORDER BY timestamp DESC
+        `).all();
+        return { success: true, logs };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
 });
 
 ipcMain.handle('youtube:collect-now', async (_event, channelId?: string) => {

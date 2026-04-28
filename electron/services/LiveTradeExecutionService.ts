@@ -25,11 +25,15 @@ export class LiveTradeExecutionService {
     private sellingInProgress = new Set<string>();
 
     // ─── 익절 모니터 실행 Lock (크론 중복 방지) ─────────────────────────────────
+    // ─── 익절 모니터 실행 Lock (크론 중복 방지) ─────────────────────────────────
     private isTakeProfitRunning = false;
+
+    // ─── 미체결 매도 추적 타이머 ───────────────────────────────────────────────
+    private unexecutedChasingTimer: NodeJS.Timeout | null = null;
+    private isChasingRunning = false;
 
     private constructor() {}
 
-    // ─── 에러 이벤트 emit 헬퍼 ────────────────────────────────────────────────
     private emitError(source: string, message: string, detail?: string) {
         eventBus.emit(SystemEvent.LIVE_TRADE_ERROR, {
             time: new Date().toLocaleString('ko-KR', { hour12: false }),
@@ -37,6 +41,20 @@ export class LiveTradeExecutionService {
             message,
             detail: detail || ''
         });
+        this.logEvent('ERROR', '', `[${source}] ${message} ${detail || ''}`);
+    }
+
+    // ─── DB 로깅 헬퍼 ────────────────────────────────────────────────
+    public logEvent(type: 'BUY' | 'SELL' | 'ERROR' | 'INFO', stockCode: string, message: string) {
+        try {
+            const rawDb = (DatabaseService.getInstance() as any).db;
+            rawDb.prepare(`
+                INSERT INTO live_trade_logs (timestamp, type, stock_code, message)
+                VALUES (datetime('now', 'localtime'), ?, ?, ?)
+            `).run(type, stockCode || '', message);
+        } catch (e: any) {
+            console.error('[LiveTrade] DB Log Insert Error:', e.message);
+        }
     }
 
     public static getInstance(): LiveTradeExecutionService {
@@ -56,6 +74,11 @@ export class LiveTradeExecutionService {
             const settings = store.get('settings') as any;
             if (settings && settings.selectedAccount) {
                 this.accountNo = settings.selectedAccount;
+                return this.accountNo;
+            }
+            const autoSettings = store.get('autotrade_settings') as any;
+            if (autoSettings && autoSettings.selectedAccount) {
+                this.accountNo = autoSettings.selectedAccount;
                 return this.accountNo;
             }
         } catch (e) {
@@ -105,6 +128,7 @@ export class LiveTradeExecutionService {
         // [Guard 1] Kill-Switch
         if (this.isKillSwitchActive()) {
             console.warn(`[LiveTrade] Kill-Switch 활성화 상태. 매수 차단: ${stockName}`);
+            this.logEvent('INFO', stockCode, `Kill-Switch 활성. 매수 차단: ${stockName}`);
             this.telegram.sendMessage(`🚫 **[Kill-Switch 활성]** 긴급 중단 상태로 매수가 차단되었습니다.\n- 종목: ${stockName}`);
             return;
         }
@@ -112,6 +136,7 @@ export class LiveTradeExecutionService {
         // [Guard 2] 이중 매수 방지 — 동일 종목이 이미 매수 진행 중이면 Skip
         if (this.buyingInProgress.has(stockCode)) {
             console.warn(`[LiveTrade] 이중 매수 방지: ${stockName}(${stockCode}) 이미 매수 처리 중`);
+            this.logEvent('INFO', stockCode, `이중 매수 방지 (Lock): ${stockName} 이미 처리 중`);
             return;
         }
 
@@ -126,6 +151,7 @@ export class LiveTradeExecutionService {
 
         if (existingTicket) {
             console.warn(`[LiveTrade] 이중 매수 방지(DB): ${stockName}(${stockCode}) 오늘 이미 발급된 티켓 존재`);
+            this.logEvent('INFO', stockCode, `이중 매수 방지 (DB): 오늘 발급된 티켓 존재`);
             return;
         }
 
@@ -153,6 +179,7 @@ export class LiveTradeExecutionService {
 
         if (quantity <= 0) {
             console.warn(`[LiveTrade] Calculated quantity is 0 for ${stockName}. Skip buy.`);
+            this.logEvent('ERROR', stockCode, `수량 계산 0. 매수금액(${strategy.buy_amount_per_trade.toLocaleString()}) < 주가(${currentPrice.toLocaleString()})`);
             this.ledger.createTicket({
                 stock_code: stockCode,
                 entry_date: getKstDate(),
@@ -190,6 +217,7 @@ export class LiveTradeExecutionService {
                 status: 'ACTIVE'
             });
 
+            this.logEvent('BUY', stockCode, `조건부 지정가 매수 주문 전송 완료 (${quantity}주 @ ${orderPrice})`);
             this.telegram.sendMessage(`📈 **[실전 자동매수 발동]**\n- 종목: ${stockName}\n- 가격: ${orderPrice.toLocaleString()}원 (+1틱)\n- 수량: ${quantity}주\n- 전략: ${strategyCategory}\n- 매도목표일: ${targetExitDate}`);
         } catch (error: any) {
             console.error(`[LiveTrade] Failed to execute buy for ${stockName}:`, error);
@@ -229,6 +257,7 @@ export class LiveTradeExecutionService {
         // [Guard 1] Kill-Switch
         if (this.isKillSwitchActive()) {
             console.warn(`[LiveTrade] Kill-Switch 활성화 상태. 매도 차단: ${ticket.stock_code}`);
+            this.logEvent('INFO', ticket.stock_code, `Kill-Switch 활성. 매도 차단: ${sellReason}`);
             this.telegram.sendMessage(`🚫 **[Kill-Switch 활성]** 긴급 중단 상태로 매도가 차단되었습니다.\n- 종목: ${ticket.stock_code}`);
             return;
         }
@@ -236,6 +265,7 @@ export class LiveTradeExecutionService {
         // [Guard 2] 이중 매도 방지 — ticket_id가 이미 Lock된 경우 Skip
         if (this.sellingInProgress.has(ticket.ticket_id)) {
             console.warn(`[LiveTrade] 이중 매도 방지: ${ticket.stock_code} (ticket: ${ticket.ticket_id}) 이미 매도 처리 중`);
+            this.logEvent('INFO', ticket.stock_code, `이중 매도 방지 (Lock): 이미 처리 중 (${ticket.ticket_id})`);
             return;
         }
         this.sellingInProgress.add(ticket.ticket_id);
@@ -263,11 +293,13 @@ export class LiveTradeExecutionService {
             if (htsQty === 0) {
                 // 이미 수동으로 전량 매도되어 잔고가 없음
                 this.ledger.closeTicket(ticket.ticket_id);
+                this.logEvent('INFO', ticket.stock_code, `매도 취소: 잔고 없음 (수동 매도 추정). 티켓 CLOSED 처리.`);
                 this.telegram.sendMessage(`⚠️ **[매도 취소 - 잔고 없음]**\n- 종목: ${ticket.stock_code}\n- 사유: ${sellReason}\n- HTS 잔고 0주 확인. 이미 수동 매도된 것으로 보여 티켓을 CLOSED 처리합니다.`);
                 return;
             } else if (htsQty < ticket.quantity) {
                 // 잔고가 티켓보다 부족 (일부 수동 매도 발생)
                 sellQty = htsQty;
+                this.logEvent('INFO', ticket.stock_code, `매도 수량 조정: 잔고(${htsQty}) < 티켓(${ticket.quantity})`);
                 this.telegram.sendMessage(`⚠️ **[매도 수량 조정]**\n- 종목: ${ticket.stock_code}\n- 티켓 수량: ${ticket.quantity}주 → 실제 가용: ${htsQty}주\n- 사유: 실제 잔고 부족 (수동 매도로 추정). 가용 잔고 전량 매도합니다.`);
             }
 
@@ -290,6 +322,7 @@ export class LiveTradeExecutionService {
             );
 
             const typeLabel = trdeType === '05' ? '기간청산(조건부 지정가)' : '익절(지정가)';
+            this.logEvent('SELL', ticket.stock_code, `매도 발동 - ${typeLabel} (${sellQty}주 @ ${currentPrice}) 사유: ${sellReason}`);
             this.telegram.sendMessage(`💰 **[실전 매도 발동 - ${typeLabel}]**\n- 종목: ${ticket.stock_code}\n- 가격: ${currentPrice.toLocaleString()}원\n- 수량: ${sellQty}주\n- 상태: SELLING (장 마감 정산 시 최종 확정)\n- 사유: ${sellReason}`);
 
         } catch (error: any) {
@@ -399,48 +432,189 @@ export class LiveTradeExecutionService {
     }
 
     /**
-     * 미체결 주문 정정 루프 (1분 단위 호출)
-     * 장중 지정가 매도 미체결 시 현재가로 정정 주문
+     * 프론트엔드 모달에서 실행하는 "테스트 매수"
+     * 대상 종목의 현재가/하한가를 조회하여 지정가 매수 주문을 내고 로그 배열을 반환한다.
      */
-    public async monitorUnexecutedOrders(): Promise<void> {
-        if (this.isKillSwitchActive()) return;
+    public async executeTestBuy(stockCode: string, qty: number, accountNo?: string): Promise<string[]> {
+        const logs: string[] = [];
+        const log = (msg: string) => {
+            const time = new Date().toLocaleTimeString('ko-KR');
+            const line = `[${time}] ${msg}`;
+            console.log(`[TestBuy] ${msg}`);
+            logs.push(line);
+        };
+
+        log(`🧪 테스트 매수 시작 - 종목코드: ${stockCode}, 수량: ${qty}주`);
+
+        if (this.isKillSwitchActive()) {
+            log(`❌ Kill-Switch 활성화 상태로 매수 차단됨`);
+            return logs;
+        }
+
+        const account = accountNo || this.getAccountNo();
+        if (!account) {
+            log(`❌ 설정된 계좌 정보가 없습니다.`);
+            return logs;
+        }
+        log(`✅ 키움 계좌번호 로드 완료: ${account.substring(0, account.length - 3)}***`);
+
+        try {
+            log(`🔍 종목(${stockCode}) 현재가 및 하한가 조회 중...`);
+            const priceInfo = await this.kiwoom.getStockBasicInfo(stockCode);
+            const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
+            
+            const rawCur = String(body.stk_prc || body.cur_prc || body.stck_prpr || body.currentPrice || 0).replace(/[^0-9-]/g, '');
+            const currentPrice = Math.abs(parseInt(rawCur, 10)) || 0;
+            
+            // 키움 API 구조에 따라 하한가(lwl) 추출
+            let rawLwl = String(body.lwl || 0).replace(/[^0-9-]/g, '');
+            let limitLow = Math.abs(parseInt(rawLwl, 10)) || 0;
+            
+            if (currentPrice === 0) {
+                log(`❌ 현재가 조회 실패. 종목코드를 확인하세요. 응답: ${JSON.stringify(body).substring(0, 50)}`);
+                return logs;
+            }
+            if (limitLow === 0) {
+                log(`⚠️ 하한가 필드(lwl) 조회 안됨. 자체 계산 수행 (-30%)`);
+                limitLow = calculateOrderPrice(currentPrice * 0.70, 1);
+            }
+
+            log(`✅ 현재가: ${currentPrice.toLocaleString()}원 / 하한가: ${limitLow.toLocaleString()}원`);
+            log(`🚀 하한가(${limitLow.toLocaleString()}원)로 지정가(00) 매수 주문 발송 시도...`);
+
+            const result = await this.kiwoom.sendBuyOrder(
+                account,
+                stockCode,
+                qty,
+                limitLow,
+                '00' 
+            );
+
+            log(`✅ 주문 발송 성공!`);
+            log(`- API 응답: ${JSON.stringify(result)}`);
+        } catch (e: any) {
+            log(`❌ 주문 발송 중 API 에러 발생: ${e.message}`);
+            if (e.response && e.response.data) {
+                log(`- 에러 상세: ${JSON.stringify(e.response.data)}`);
+            }
+        }
+
+        log(`🧪 테스트 매수 프로세스 종료`);
+        return logs;
+    }
+
+    /**
+     * 15:00 ~ 15:20 미체결 타임스탑 매도 추적 정정 시작 (10초 주기)
+     */
+    public startUnexecutedSellChasing(): void {
+        if (this.unexecutedChasingTimer) {
+            clearInterval(this.unexecutedChasingTimer);
+        }
+        this.logEvent('INFO', '', '[LiveTrade] 미체결 매도 추적기 시작 (10초 주기)');
+        console.log('[LiveTrade] 미체결 매도 추적기 시작 (15:00 ~ 15:20 구간)');
+
+        this.unexecutedChasingTimer = setInterval(async () => {
+            if (this.isChasingRunning) return;
+            this.isChasingRunning = true;
+            try {
+                await this.processUnexecutedSellChasing();
+            } catch (err: any) {
+                console.error(`[LiveTrade] 미체결 매도 추적 에러:`, err.message);
+            } finally {
+                this.isChasingRunning = false;
+            }
+        }, 10 * 1000); // 10초 주기
+    }
+
+    /**
+     * 미체결 매도 추적 종료
+     */
+    public stopUnexecutedSellChasing(): void {
+        if (this.unexecutedChasingTimer) {
+            clearInterval(this.unexecutedChasingTimer);
+            this.unexecutedChasingTimer = null;
+            this.logEvent('INFO', '', '[LiveTrade] 미체결 매도 추적기 종료 (15:20 동시호가 돌입)');
+            console.log('[LiveTrade] 미체결 매도 추적기 종료');
+        }
+    }
+
+    /**
+     * 미체결 매도 추적 및 Market Sweep (15:18 일괄 시장가 청산) 로직 수행
+     */
+    private async processUnexecutedSellChasing(): Promise<void> {
+        if (this.isKillSwitchActive()) {
+            this.stopUnexecutedSellChasing();
+            return;
+        }
+
         const account = this.getAccountNo();
         if (!account) return;
 
+        // 현재 시간 확인
+        const now = getKstDate();
+        const hhmm = parseInt(now.toISOString().substring(11, 16).replace(':', ''), 10);
+
+        // 15:20 동시호가 시작되면 타이머 종료 (이후는 거래소가 알아서 시장가 체결시킴)
+        if (hhmm >= 1520) {
+            this.stopUnexecutedSellChasing();
+            return;
+        }
+
+        // 15:18이 되면 Market Sweep (일괄 시장가 '03' 정정)
+        const isMarketSweepTime = hhmm >= 1518;
+
         try {
-            const unexecRes = await this.kiwoom.getUnexecutedOrders(account);
-            const unexecList = unexecRes?.oso || unexecRes?.output || [];
+            // kt00007 매도 미체결만 조회
+            const unexecRes = await this.kiwoom.getUnexecutedOrdersKt00007(account, { sell_tp: '1' });
+            const unexecList = unexecRes?.oso || [];
 
             if (unexecList.length === 0) return;
 
-            // ACTIVE + SELLING 모두 포함해서 우리 시스템이 관리 중인 종목 확인
+            // 우리 시스템이 관리 중인 종목만 필터
             const managedTickets = this.ledger.getActiveAndSellingTickets();
             const managedCodes = new Set(managedTickets.map(t => t.stock_code));
 
+            let processedCount = 0;
             for (const order of unexecList) {
+                // kt00007 규격에 따른 필드 매핑
                 const stkCd = (order.pdno || order.stk_cd || order.iscd || '').trim().replace(/^A/, '');
                 const origOrdNo = order.odno || order.ord_no || order.orig_ord_no || '';
-                const mdfyQty = parseInt(order.ord_qty || order.rmn_qty || order.qty || '0', 10);
+                const mdfyQty = parseInt(order.ord_rmnd_qty || order.rmn_qty || order.ord_qty || '0', 10); // 잔량
 
                 if (!stkCd || !origOrdNo || mdfyQty <= 0) continue;
-
-                // 우리 시스템이 관리 중인 종목의 주문만 정정
                 if (!managedCodes.has(stkCd)) continue;
 
-                const priceInfo = await this.kiwoom.getStockBasicInfo(stkCd);
-                const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
-                const rawCur = String(body.stk_prc || body.cur_prc || body.stck_prpr || body.currentPrice || 0).replace(/[^0-9-]/g, '');
-                const currentPrice = Math.abs(parseInt(rawCur, 10)) || 0;
+                if (isMarketSweepTime) {
+                    // [Step 3] Market Sweep (시장가 일괄 청산)
+                    console.log(`[LiveTrade] 15:18 시장가 일괄 정정 발송: ${stkCd} (${mdfyQty}주)`);
+                    await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, 0, '03'); // 시장가는 단가 0, trde_tp 03
+                    this.logEvent('SELL', stkCd, `[추적청산] 15:18 Market Sweep. 남은 ${mdfyQty}주 시장가 일괄 정정`);
+                    this.telegram.sendMessage(`🧹 **[Market Sweep: 시장가 일괄 청산]**\n- 종목: ${stkCd}\n- 미체결 잔량: ${mdfyQty}주\n- 시장가(03) 정정 발송됨.`);
+                } else {
+                    // [Step 2] 일반 지정가 추적 (현재가 - 1틱)
+                    const priceInfo = await this.kiwoom.getStockBasicInfo(stkCd);
+                    const body = priceInfo?.Body || priceInfo?.acnt_ord_cntr_prps_dtl || priceInfo || {};
+                    const rawCur = String(body.stk_prc || body.cur_prc || body.stck_prpr || body.currentPrice || 0).replace(/[^0-9-]/g, '');
+                    const currentPrice = Math.abs(parseInt(rawCur, 10)) || 0;
 
-                if (currentPrice > 0) {
-                    console.log(`[LiveTrade] 정정 주문 발송: ${stkCd} (${mdfyQty}주) -> ${currentPrice}원`);
-                    await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, currentPrice);
-                    this.telegram.sendMessage(`🔄 **[실전 미체결 정정]**\n- 종목: ${stkCd}\n- 주문번호: ${origOrdNo}\n- 정정가: ${currentPrice.toLocaleString()}원 (현재가)`);
+                    if (currentPrice > 0) {
+                        const chasePrice = calculateOrderPrice(currentPrice, -1);
+                        console.log(`[LiveTrade] 추적 지정가 정정 발송: ${stkCd} (${mdfyQty}주) -> 현재가 ${currentPrice}원, 정정가 ${chasePrice}원`);
+                        await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, chasePrice, '00');
+                        this.logEvent('SELL', stkCd, `[추적청산] 미체결 ${mdfyQty}주 -> 지정가 ${chasePrice}원 (현재가-1틱) 정정 발송`);
+                    }
                 }
+                processedCount++;
             }
+
+            if (processedCount === 0 && isMarketSweepTime) {
+                // 더 이상 우리 시스템 소관의 미체결 잔량이 없으면 타이머 일찍 종료 가능
+                this.stopUnexecutedSellChasing();
+            }
+
         } catch (err: any) {
-            console.error(`[LiveTrade] 미체결 모니터링 중 에러:`, err.message);
-            this.emitError('미체결 정정', '미체결 주문 정정 중 에러 발생', err.message);
+            console.error(`[LiveTrade] 미체결 매도 추적 중 에러:`, err.message);
+            this.emitError('미체결 추적', '미체결 매도 추적/정정 중 에러 발생', err.message);
         }
     }
 }

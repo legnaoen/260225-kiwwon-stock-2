@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Brain, X, ChevronRight, Settings, Activity, Clock, Trash2, AlertTriangle, FlaskConical, Zap, Check, Copy, ExternalLink, Sparkles } from 'lucide-react'
+import { Brain, X, ChevronRight, Settings, Activity, Clock, Trash2, AlertTriangle, FlaskConical, Zap, Check, Copy, ExternalLink, Sparkles, Save, RefreshCw, AlertCircle, BrainCircuit } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -312,12 +312,23 @@ export const PortfolioManagerTab: React.FC = () => {
     const [showSkillModal, setShowSkillModal] = useState(false)
     const [skillContent, setSkillContent] = useState('')
     const [incubatorScanRunning, setIncubatorScanRunning] = useState(false)
+    
+    // AI 자가학습 지침서 (SKILL.md) 관련 상태
+    const [isEvolvingSkillModalOpen, setIsEvolvingSkillModalOpen] = useState(false)
+    const [evolvingSkillContent, setEvolvingSkillContent] = useState('')
+    const [evolvingSkillMtime, setEvolvingSkillMtime] = useState<number | null>(null)
+    const [isSavingEvolvingSkill, setIsSavingEvolvingSkill] = useState(false)
     // 성적표 AI 분석
     const [retroRunning, setRetroRunning] = useState(false)
     const [retroReport, setRetroReport] = useState<any | null>(null)
     const [retroError, setRetroError] = useState<string | null>(null)
     const [showRetroModal, setShowRetroModal] = useState(false)
     const [retroModalTab, setRetroModalTab] = useState<'summary' | 'pm1' | 'pm2' | 'patterns'>('summary')
+
+    // 서브 AI 스킬 뷰어 상태
+    const [showSubAiSkillModal, setShowSubAiSkillModal] = useState(false)
+    const [subAiSkills, setSubAiSkills] = useState<{id: string, name: string, content: string}[]>([])
+    const [activeSubAiSkillId, setActiveSubAiSkillId] = useState<string>('')
 
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>(() => {
         const saved = localStorage.getItem('portfolio_sortConfig');
@@ -352,20 +363,20 @@ export const PortfolioManagerTab: React.FC = () => {
         );
     }
 
-    const handleShowSkill = async () => {
-        setShowSkillModal(true);
-        setSkillContent('문서를 불러오는 중입니다...');
+    const handleOpenSubAiSkillModal = async () => {
         try {
-            const allSkills = await window.electronAPI.skillsGetAll();
-            const skillList = allSkills?.data || allSkills; // Handle both direct array or wrapped data depending on API
-            const skill = Array.isArray(skillList) ? skillList.find((s: any) => s.name?.includes('Chart Risk') || s.name?.includes('차트 리스크') || (s.path && s.path.includes('chart_risk_analysis'))) : null;
-            if (skill && skill.content) {
-                setSkillContent(skill.content);
+            const res = await (window.electronAPI as any).getSubAiSkills();
+            if (res.success && res.data) {
+                setSubAiSkills(res.data);
+                if (res.data.length > 0) {
+                    setActiveSubAiSkillId(res.data[0].id);
+                }
+                setShowSubAiSkillModal(true);
             } else {
-                setSkillContent('스킬 문서를 찾을 수 없습니다.');
+                appendLog(`❌ 서브 AI 지침서 조회 실패: ${res.error}`);
             }
-        } catch (e: any) {
-            setSkillContent(`가져오기 실패:\n${e.message}`);
+        } catch(e: any) {
+            appendLog(`❌ 서브 AI 지침서 조회 오류: ${e.message}`);
         }
     }
 
@@ -473,6 +484,38 @@ export const PortfolioManagerTab: React.FC = () => {
             appendLog(`❌ 오류: ${e.message}`)
         } finally {
             setRunningAction(null)
+        }
+    }
+
+    const handleOpenEvolvingSkillModal = async () => {
+        try {
+            const res = await (window.electronAPI as any).getPm2MasterGuideContent();
+            if (res.success) {
+                setEvolvingSkillContent(res.content);
+                setEvolvingSkillMtime(res.mtime);
+                setIsEvolvingSkillModalOpen(true);
+            } else {
+                alert('PM2_MASTER_GUIDELINE.md 파일을 불러오지 못했습니다: ' + res.error);
+            }
+        } catch (e: any) {
+            alert('오류 발생: ' + e.message);
+        }
+    }
+
+    const handleSaveEvolvingSkill = async () => {
+        setIsSavingEvolvingSkill(true);
+        try {
+            const res = await (window.electronAPI as any).savePm2MasterGuideContent(evolvingSkillContent);
+            if (res.success) {
+                alert('PM2_MASTER_GUIDELINE.md 문서가 성공적으로 업데이트 되었습니다.');
+                setIsEvolvingSkillModalOpen(false);
+            } else {
+                alert('저장 실패: ' + res.error);
+            }
+        } catch (e: any) {
+            alert('오류 발생: ' + e.message);
+        } finally {
+            setIsSavingEvolvingSkill(false);
         }
     }
 
@@ -1397,7 +1440,6 @@ export const PortfolioManagerTab: React.FC = () => {
                         <table className="w-full text-sm text-left whitespace-nowrap">
                             <thead className="sticky top-0 z-10 bg-background">
                                 <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
-                                    <th className="py-2 pr-3 font-bold w-16 text-center">결과</th>
                                     <th className="py-2 pr-4 font-bold w-36 min-w-[144px]">종목</th>
                                     <th className="py-2 pr-4 font-bold text-center w-[60px]">분류</th>
                                     <th className="py-2 pr-4 font-bold text-right w-[90px]">진입가</th>
@@ -1415,7 +1457,11 @@ export const PortfolioManagerTab: React.FC = () => {
                                             종료된 포트폴리오(성적) 내역이 없습니다.
                                         </td>
                                     </tr>
-                                ) : history.map(p => {
+                                ) : history.slice().sort((a, b) => {
+                                    const dateA = a.exit_date || a.updated_at || '';
+                                    const dateB = b.exit_date || b.updated_at || '';
+                                    return dateB.localeCompare(dateA);
+                                }).map(p => {
                                     const prof = Number(p.profit_rate);
                                     let rateColor = 'text-muted-foreground';
                                     if (p.status === 'HIT') rateColor = 'text-emerald-500 font-bold';
@@ -1442,11 +1488,6 @@ export const PortfolioManagerTab: React.FC = () => {
                                             onClick={() => setSelected(p)}
                                             className="border-b border-border/20 hover:bg-accent/30 cursor-pointer transition-colors group"
                                         >
-                                            <td className="py-2.5 pr-3 text-center">
-                                                <span className={cn('text-[10px] px-2 py-0.5 rounded font-bold border', p.status === 'HIT' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'bg-rose-500/10 text-rose-500 border-rose-500/30')}>
-                                                    {p.status === 'HIT' ? 'HIT ✅' : 'DROP ❌'}
-                                                </span>
-                                            </td>
                                             {/* 종목 */}
                                             <td className="py-2 pr-4 w-36 min-w-[144px]">
                                                 <div className="font-semibold text-[13px] truncate max-w-[128px]" title={p.stock_name}>{p.stock_name}</div>
@@ -1920,22 +1961,50 @@ export const PortfolioManagerTab: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* ── AI 룰 및 매매 정책 (Skills) ── */}
-                        <div>
-                            <div className="text-xs font-bold text-muted-foreground uppercase mb-3 flex items-center gap-1.5">
-                                <Brain className="w-3.5 h-3.5 text-indigo-400" /> 차트 분석 룰 (Skill) <span className="text-indigo-400 normal-case font-normal">(AI에 즉시 반영됨)</span>
+                        {/* ── 👑 PM2 최고 책임자 시스템 관리 ── */}
+                        <div className="mb-6">
+                            <div className="text-xs font-bold text-indigo-400 uppercase mb-3 flex items-center gap-1.5 border-b border-indigo-500/20 pb-2">
+                                <BrainCircuit className="w-4 h-4" /> [섹션 1] PM2 최고 책임자 파트
                             </div>
                             <div className="flex flex-col gap-2">
                                 <button
-                                    onClick={handleShowSkill}
-                                    className="w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all bg-indigo-500/5 border-indigo-500/20 hover:bg-indigo-500/10 hover:border-indigo-500/40"
+                                    onClick={() => setShowRetroModal(true)}
+                                    disabled={!!runningAction || history.length < 5}
+                                    className={cn(
+                                        "w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all",
+                                        "bg-indigo-500/5 border-indigo-500/20 hover:bg-indigo-500/10 hover:border-indigo-500/40",
+                                        (!!runningAction || history.length < 5) && "opacity-40"
+                                    )}
+                                >
+                                    <span className="text-xl leading-none">🧠</span>
+                                    <div>
+                                        <div className="text-sm font-bold text-indigo-400">PM2 성적표 총괄 분석 및 오답노트 작성 (수동)</div>
+                                        <div className="text-xs text-muted-foreground mt-0.5">PM2의 최근 매매 성적(최대 20건)을 입체적으로 분석하여 마스터 가이드를 업데이트합니다.</div>
+                                    </div>
+                                </button>
+                                <button
+                                    onClick={handleOpenEvolvingSkillModal}
+                                    disabled={!!runningAction}
+                                    className={cn(
+                                        "w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all bg-indigo-500/10 border-indigo-500/30 hover:bg-indigo-500/20 hover:border-indigo-500/50",
+                                        !!runningAction && "opacity-40"
+                                    )}
                                 >
                                     <span className="text-xl leading-none">📖</span>
                                     <div>
-                                        <div className="text-sm font-bold text-indigo-400">차트 분석 리스크 평가 가이드북</div>
-                                        <div className="text-xs text-muted-foreground mt-0.5">MA 이격도, 단기 모멘텀에 따른 과열 리스크 회피 지침 문서 열람</div>
+                                        <div className="text-sm font-bold text-indigo-400">PM2 마스터 트레이딩 가이드 관리</div>
+                                        <div className="text-xs text-muted-foreground mt-0.5">PM2가 매매 시 참고하는 기본 헌법과 AI 총괄 오답노트(가변 전술)가 통합된 지침서를 관리합니다.</div>
                                     </div>
                                 </button>
+                            </div>
+                        </div>
+
+                        {/* ── 👥 서브 AI 부서 시스템 관리 ── */}
+                        <div className="mb-4">
+                            <div className="text-xs font-bold text-amber-500 uppercase mb-3 flex items-center gap-1.5 border-b border-amber-500/20 pb-2">
+                                <Brain className="w-4 h-4" /> [섹션 2] 서브 AI 종목발굴 부서 파트
+                            </div>
+                            <div className="flex flex-col gap-2">
                                 <button
                                     onClick={handleRunRetrospectiveManual}
                                     disabled={!!runningAction}
@@ -1947,8 +2016,22 @@ export const PortfolioManagerTab: React.FC = () => {
                                 >
                                     <span className="text-xl leading-none">{runningAction === 'JUDGE' ? '⚙' : '🤖'}</span>
                                     <div>
-                                        <div className="text-sm font-bold text-amber-500">애널리스트 성과 회고 및 오답노트 작성 (수동)</div>
-                                        <div className="text-xs text-muted-foreground mt-0.5">만기가 도래한 종목의 성적을 평가하고 각 서브 AI 스킬에 교훈을 보강합니다.</div>
+                                        <div className="text-sm font-bold text-amber-500">부서별 애널리스트 성과 회고 및 오답노트 작성 (수동)</div>
+                                        <div className="text-xs text-muted-foreground mt-0.5">만기가 도래한 추천 종목의 성적을 평가하고 각 서브 AI 스킬에 교훈을 보강합니다.</div>
+                                    </div>
+                                </button>
+                                <button
+                                    onClick={handleOpenSubAiSkillModal}
+                                    disabled={!!runningAction}
+                                    className={cn(
+                                        "w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all bg-amber-500/5 border-amber-500/20 hover:bg-amber-500/10 hover:border-amber-500/40",
+                                        !!runningAction && "opacity-40"
+                                    )}
+                                >
+                                    <span className="text-xl leading-none">📚</span>
+                                    <div>
+                                        <div className="text-sm font-bold text-amber-500">서브 AI 부서별 매매 지침서(SKILL) 열람</div>
+                                        <div className="text-xs text-muted-foreground mt-0.5">수급, 리포트 등 서브 AI들이 종목 추천 시 참고하는 개별 매매 지침 및 오답노트를 열람합니다.</div>
                                     </div>
                                 </button>
                             </div>
@@ -2111,24 +2194,131 @@ export const PortfolioManagerTab: React.FC = () => {
                 </div>
             )}
 
-            {/* ── Skill Document Modal ── */}
-            {showSkillModal && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 md:p-12 animate-in fade-in duration-200 bg-background/80 backdrop-blur-sm">
-                    <div className="absolute inset-0" onClick={() => setShowSkillModal(false)} />
-                    <div className="relative flex flex-col w-full max-w-4xl h-full max-h-[85vh] bg-card border shadow-2xl rounded-2xl overflow-hidden shadow-glow">
-                        <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/20 shrink-0">
-                            <div className="flex items-center gap-2">
-                                <Brain className="w-5 h-5 text-indigo-400" />
-                                <h2 className="text-lg font-bold text-foreground">AI 차트 리스크 분석 지침 (Skill)</h2>
+            {/* old showSkillModal removed */}
+            {/* ── Evolving Skill (SKILL.md) Document Modal ── */}
+            {isEvolvingSkillModalOpen && (
+                <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-background border border-border/50 rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col h-[85vh] animate-in zoom-in-95 duration-200">
+                        {/* Header */}
+                        <div className="p-6 border-b border-border/40 flex items-start justify-between bg-muted/20 rounded-t-2xl shrink-0">
+                            <div>
+                                <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                                    <BrainCircuit className="text-indigo-500" size={20} /> PM2 마스터 트레이딩 가이드
+                                </h2>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                    기본 매매 원칙(헌법) 및 성적 회고에 의해 지속 추가되는 오답노트(가변 전술)입니다.
+                                </p>
                             </div>
-                            <button onClick={() => setShowSkillModal(false)} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors">
+                            <div className="text-right flex flex-col items-end gap-2 shrink-0">
+                                {evolvingSkillMtime && (
+                                    <div className="bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
+                                        <Clock size={12} />
+                                        마지막 업데이트: {new Date(evolvingSkillMtime).toLocaleString()}
+                                    </div>
+                                )}
+                                <button onClick={() => setIsEvolvingSkillModalOpen(false)} className="p-2 -mr-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Body (Textarea) */}
+                        <div className="flex-1 p-6 flex flex-col overflow-hidden bg-background">
+                            <textarea
+                                value={evolvingSkillContent}
+                                onChange={(e) => setEvolvingSkillContent(e.target.value)}
+                                className="w-full h-full flex-1 p-4 bg-muted/10 border border-border/40 rounded-xl text-sm font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none leading-relaxed text-foreground"
+                                placeholder="지침서 내용이 비어있습니다."
+                                spellCheck={false}
+                            />
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-4 border-t border-border/40 flex items-center justify-between bg-muted/20 rounded-b-2xl shrink-0">
+                            <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                                <AlertCircle size={12} /> 인간 개입(직접 수정)도 가능하며, 다음 회고 시 AI가 이 내용을 바탕으로 덧붙입니다.
+                            </p>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsEvolvingSkillModalOpen(false)} className="px-4 py-2 text-sm font-medium border border-border rounded-lg hover:bg-muted/30 transition-colors">취소</button>
+                                <button 
+                                    onClick={handleSaveEvolvingSkill} 
+                                    disabled={isSavingEvolvingSkill}
+                                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                                >
+                                    {isSavingEvolvingSkill ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} 
+                                    {isSavingEvolvingSkill ? '' : '저장하기'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* ── Sub AI Skill Document Modal ── */}
+            {showSubAiSkillModal && (
+                <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-background border border-border/50 rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col h-[85vh] animate-in zoom-in-95 duration-200 overflow-hidden">
+                        {/* Header */}
+                        <div className="p-5 border-b border-border/40 flex items-center justify-between bg-amber-500/10 shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-amber-500/20 rounded-lg">
+                                    <Brain className="text-amber-500" size={20} />
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-bold text-foreground">서브 AI 부서별 매매 지침서 열람</h2>
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                        종목 발굴 부서(서브 AI)들이 자체 학습한 오답노트와 규칙들을 확인할 수 있습니다.
+                                    </p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowSubAiSkillModal(false)} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors">
                                 <X size={20} />
                             </button>
                         </div>
-                        <div className="flex-1 overflow-auto p-6 bg-background">
-                            <pre className="text-sm text-foreground/90 font-mono whitespace-pre-wrap leading-relaxed">
-                                {skillContent}
-                            </pre>
+
+                        <div className="flex flex-1 overflow-hidden">
+                            {/* Left Sidebar (Tabs) */}
+                            <div className="w-56 border-r border-border/50 bg-muted/5 flex flex-col">
+                                <div className="p-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider border-b border-border/50">
+                                    AI 부서 목록
+                                </div>
+                                <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
+                                    {subAiSkills.map(skill => (
+                                        <button
+                                            key={skill.id}
+                                            onClick={() => setActiveSubAiSkillId(skill.id)}
+                                            className={cn(
+                                                "w-full px-4 py-3 text-sm text-left transition-colors flex items-center gap-2",
+                                                activeSubAiSkillId === skill.id 
+                                                    ? "bg-amber-500/10 text-amber-500 font-bold border-r-2 border-amber-500" 
+                                                    : "text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                                            )}
+                                        >
+                                            {activeSubAiSkillId === skill.id ? '🤖' : '📁'} {skill.name}
+                                        </button>
+                                    ))}
+                                    {subAiSkills.length === 0 && (
+                                        <div className="p-4 text-xs text-muted-foreground text-center">
+                                            저장된 지침서가 없습니다.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Right Content */}
+                            <div className="flex-1 flex flex-col bg-background relative">
+                                {activeSubAiSkillId && subAiSkills.find(s => s.id === activeSubAiSkillId) ? (
+                                    <textarea
+                                        readOnly
+                                        value={subAiSkills.find(s => s.id === activeSubAiSkillId)?.content || ''}
+                                        className="w-full h-full p-6 text-sm font-mono focus:outline-none resize-none leading-relaxed text-foreground bg-transparent custom-scrollbar"
+                                        spellCheck={false}
+                                    />
+                                ) : (
+                                    <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+                                        부서를 선택해주세요.
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

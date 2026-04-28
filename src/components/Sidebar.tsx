@@ -13,8 +13,8 @@ export const menuItems = [
     { id: 'market-leaders', name: '주도주 AI', icon: TrendingUp },
     { id: 'portfolio-manager', name: '종목 AI', icon: Wallet },
     { id: 'moonshot', name: '텐베거 AI', icon: Rocket },
-    { id: 'issue-agent', name: '이슈 AI', icon: Brain },
     { id: 'theme-tracker', name: '테마 AI', icon: Activity },
+    { id: 'issue-agent', name: '이슈 AI', icon: Brain },
     { id: 'pipeline-monitor', name: '데이터 관제', icon: Server },
     { id: 'settings', name: '설정', icon: Settings },
     

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { FileText, ShieldCheck, BarChart2, TrendingUp, AlertCircle, Loader2, Tag, Plus, X, Trash2 } from 'lucide-react'
+import { FileText, ShieldCheck, BarChart2, TrendingUp, AlertCircle, Loader2, Tag, Plus, X, Trash2, Clipboard, ClipboardCheck, ChevronDown, ChevronUp, Bot } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '../utils'
@@ -11,9 +11,161 @@ interface StockAiReportProps {
     refreshTrigger?: number
     hideTitle?: boolean
     pmEvents?: any[] // Added PM events
+    gemmaReports?: any[] // Added Gemma Reports
 }
 
-export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvents }: StockAiReportProps) {
+interface GemmaReport {
+    id: number;
+    date: string;
+    stock_code: string;
+    stock_name: string;
+    agent_source: string;
+    market_theme_link: string | null;
+    theme_durability: string | null;
+    catalyst_summary: string | null;
+    risk_factors: string | null;
+    upside_probability: string | null;
+    buy_score: number;
+    preliminary_decision: string | null;
+    reasoning: string | null;
+    injected_context_json: string | null;
+    system_prompt: string | null;
+    raw_ai_response: string | null;
+    created_at: string;
+}
+
+// 로데이터 복사 버튼 컴포넌트
+function CopyRawDataButton({ report }: { report: GemmaReport }) {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = React.useCallback(async () => {
+        const text = [
+            `=== TRACK_B_GEMMA 분석 로데이터 ===`,
+            `날짜: ${report.date} | 종목: ${report.stock_name} (${report.stock_code}) | 저장: ${report.created_at}`,
+            ``,
+            `[파싱된 결과]`,
+            `buy_score: ${report.buy_score} / preliminary_decision: ${report.preliminary_decision}`,
+            `market_theme_link: ${report.market_theme_link ?? '없음'}`,
+            `theme_durability: ${report.theme_durability ?? '없음'}`,
+            `catalyst_summary: ${report.catalyst_summary ?? '없음'}`,
+            `risk_factors: ${report.risk_factors ?? '없음'}`,
+            `upside_probability: ${report.upside_probability ?? '없음'}`,
+            `reasoning: ${report.reasoning ?? '없음'}`,
+            ``,
+            `[주입된 컨텍스트 원문]`,
+            report.injected_context_json ?? '(없음)',
+            ``,
+            `[사용된 시스템 프롬프트]`,
+            report.system_prompt ?? '(없음)',
+            ``,
+            `[AI 응답 원문 (파싱 전)]`,
+            report.raw_ai_response ?? '(없음)',
+        ].join('\n');
+
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2500);
+        } catch {
+            // fallback
+        }
+    }, [report]);
+
+    return (
+        <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-md border transition-all duration-200
+                       text-violet-400 border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/15 hover:border-violet-500/50"
+            title="이 분석에 사용된 컨텍스트, 프롬프트, AI 응답 원문을 클립보드에 복사합니다"
+        >
+            {copied ? <ClipboardCheck size={12} className="text-green-400" /> : <Clipboard size={12} />}
+            {copied ? '복사됨!' : '로데이터 복사'}
+        </button>
+    );
+}
+
+// Gemma 분석 카드 컴포넌트
+function GemmaReportCard({ report }: { report: GemmaReport }) {
+    const [expanded, setExpanded] = useState(false);
+
+    const decisionColor = report.preliminary_decision === 'BUY'
+        ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+        : 'text-amber-400 bg-amber-500/10 border-amber-500/30';
+
+    const probColor = report.upside_probability === 'HIGH'
+        ? 'text-emerald-400'
+        : report.upside_probability === 'MEDIUM'
+        ? 'text-yellow-400'
+        : 'text-red-400';
+
+    return (
+        <div className="border border-violet-500/20 bg-violet-500/5 rounded-lg overflow-hidden mt-1 mb-2">
+            {/* 카드 헤더 */}
+            <div className="flex items-center justify-between px-3 py-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-mono text-muted-foreground">{report.date}</span>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${decisionColor}`}>
+                        {report.preliminary_decision ?? 'N/A'}
+                    </span>
+                    <span className="text-[11px] font-bold text-muted-foreground">
+                        점수: <span className="text-violet-300">{report.buy_score}</span>
+                    </span>
+                    <span className={`text-[11px] font-bold ${probColor}`}>
+                        {report.upside_probability ?? 'N/A'}
+                    </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                    <CopyRawDataButton report={report} />
+                    <button
+                        onClick={() => setExpanded(e => !e)}
+                        className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                        {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                </div>
+            </div>
+
+            {/* 축약 요약 항상 표시 */}
+            {report.catalyst_summary && (
+                <div className="px-3 pb-2 text-[12px] text-muted-foreground">
+                    💡 {report.catalyst_summary.slice(0, 120)}{report.catalyst_summary.length > 120 ? '...' : ''}
+                </div>
+            )}
+
+            {/* 펼치면 상세 표시 */}
+            {expanded && (
+                <div className="border-t border-violet-500/10 px-3 py-3 space-y-2 bg-background/30">
+                    {report.market_theme_link && (
+                        <div>
+                            <div className="text-[10px] font-bold text-violet-400 uppercase tracking-wider mb-0.5">시장 테마 연관</div>
+                            <div className="text-[12px] text-foreground">{report.market_theme_link}</div>
+                        </div>
+                    )}
+                    {report.theme_durability && (
+                        <div>
+                            <div className="text-[10px] font-bold text-violet-400 uppercase tracking-wider mb-0.5">테마 지속성</div>
+                            <div className="text-[12px] text-foreground">{report.theme_durability}</div>
+                        </div>
+                    )}
+                    {report.risk_factors && (
+                        <div>
+                            <div className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-0.5">리스크</div>
+                            <div className="text-[12px] text-foreground/80">{report.risk_factors}</div>
+                        </div>
+                    )}
+                    {report.reasoning && (
+                        <div>
+                            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">종합 근거</div>
+                            <div className="text-[12px] text-foreground/80 italic">{report.reasoning}</div>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvents, gemmaReports = [] }: StockAiReportProps) {
     const [reports, setReports] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
 
@@ -41,7 +193,7 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
 
 
 
-    const [filterType, setFilterType] = useState<'ALL'|'AI_REPORT'|'PM_EVENT'>('ALL')
+    const [filterType, setFilterType] = useState<'ALL'|'AI_REPORT'|'PM_EVENT'|'GEMMA_REPORT'>('ALL')
 
     const unifiedTimeline = useMemo(() => {
         let combined: any[] = [];
@@ -62,9 +214,19 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
             combined = [...combined, ...evts];
         }
 
+        if (gemmaReports && gemmaReports.length > 0) {
+            const gemmas = gemmaReports.map(g => ({
+                _type: 'GEMMA_REPORT',
+                _sortDate: new Date(g.created_at || g.date).getTime() || 0,
+                ...g
+            }));
+            combined = [...combined, ...gemmas];
+        }
+
         let filtered = combined;
         if (filterType === 'AI_REPORT') filtered = combined.filter(x => x._type === 'AI_REPORT');
         if (filterType === 'PM_EVENT') filtered = combined.filter(x => x._type === 'PM_EVENT');
+        if (filterType === 'GEMMA_REPORT') filtered = combined.filter(x => x._type === 'GEMMA_REPORT');
 
         return filtered.sort((a, b) => b._sortDate - a._sortDate);
     }, [reports, pmEvents, filterType]);
@@ -116,13 +278,29 @@ export function StockAiReport({ symbol, name, refreshTrigger, hideTitle, pmEvent
                 >
                     AI 리포트만 보기
                 </button>
+                <button 
+                    onClick={() => setFilterType('GEMMA_REPORT')}
+                    className={cn("px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border", filterType === 'GEMMA_REPORT' ? "bg-violet-500/10 text-violet-500 border-violet-500/30" : "bg-transparent text-muted-foreground border-transparent hover:bg-muted/50")}
+                >
+                    Gemma 리서치
+                </button>
             </div>
 
             {/* 리포트/이벤트 통합 타임라인 목록 */}
             <div className="space-y-10 pl-2">
                 {unifiedTimeline.length > 0 ? unifiedTimeline.map((item, idx) => {
                     const isPM = item._type === 'PM_EVENT';
+                    const isGemma = item._type === 'GEMMA_REPORT';
                     
+                    if (isGemma) {
+                        return (
+                            <div key={`gemma-${idx}`} className="group relative pl-8 border-l-2 border-border/40 hover:border-violet-500/30 transition-colors pb-4">
+                                <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-background shadow-sm bg-violet-400" />
+                                <GemmaReportCard report={item} />
+                            </div>
+                        )
+                    }
+
                     if (isPM) {
                         const log = item;
                         return (

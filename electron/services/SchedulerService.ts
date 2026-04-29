@@ -217,8 +217,7 @@ export class SchedulerService {
                             }
                         }
                         
-                        // [추가] 기간청산 주문 후 미체결 추적 정정기 가동 (15:00 ~ 15:20)
-                        execSvc.startUnexecutedSellChasing();
+                        // (미체결 추적은 09:00부터 상시 가동 중이며 알아서 10초 모드로 변속됨)
                     }
                 } catch (e: any) {
                     console.error('[Scheduler] 실전매매 기간청산 오류:', e.message)
@@ -322,6 +321,10 @@ export class SchedulerService {
                     await PortfolioManagerAgent.getInstance().runDailyReview()
                 } catch (e: any) {
                     console.error('[Scheduler] PM 통합 리뷰 오류:', e.message)
+                    try {
+                        const { TelegramService } = await import('./TelegramService');
+                        TelegramService.getInstance().sendMessage(`❌ [09:45] PM 통합 리뷰 전체 실패\n오류: ${e.message}`);
+                    } catch (_) { }
                 }
             }), { timezone: 'Asia/Seoul' })
 
@@ -655,6 +658,15 @@ export class SchedulerService {
                     // Ignore background errors or log them silently
                 }
             }, { timezone: 'Asia/Seoul' });
+            
+            // 09:00 동적 미체결 추적 타이머 가동 (Idle/Chase 자동 변속)
+            const liveTradeChasingStartJob = cron.schedule('00 09 * * 1-5', async () => {
+                try {
+                    const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService');
+                    LiveTradeExecutionService.getInstance().startUnexecutedSellChasing();
+                } catch (e: any) {}
+            }, { timezone: 'Asia/Seoul' });
+
             const liveTradeMonitorJob15 = cron.schedule('0-30 15 * * 1-5', async () => {
                 try {
                     const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService');
@@ -663,7 +675,7 @@ export class SchedulerService {
                     // Ignore background errors
                 }
             }, { timezone: 'Asia/Seoul' });
-            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, liveTradeMonitorJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
+            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, liveTradeMonitorJob, liveTradeChasingStartJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)

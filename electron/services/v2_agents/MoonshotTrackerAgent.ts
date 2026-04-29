@@ -300,13 +300,48 @@ ${factsText}
                         const latestClose = latestOhlcv?.close || stock.current_price || 0;
 
                         if (result.verdict === 'drop') {
-                            // 방출: is_invalidated = 1 처리, 최신 현재가 반영
+                            // 데일리 복기 로그 저장 (아카이브에서 볼 수 있게 먼저 저장)
                             db.prepare(`
-                                UPDATE moonshot_active_tracking
-                                SET is_invalidated = 1, current_price = ?, updated_at = ?
-                                WHERE stock_code = ?
-                            `).run(latestClose, now, stock.stock_code);
-                            this.sendProgress(win, `🚨 [${stock.stock_name}] DROP 판정 → 방출 처리 완료${result.dropReason ? ': ' + result.dropReason : ''}`, 'warning');
+                                INSERT INTO moonshot_daily_review
+                                (stock_code, stock_name, tag, verdict, alpha_score, daily_narrative, hypothesis_intact, drop_reason, reviewed_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            `).run(
+                                stock.stock_code, stock.stock_name, stock.tag,
+                                result.verdict, result.alphaScore,
+                                result.dailyNarrative, result.hypothesisIntact ? 1 : 0,
+                                result.dropReason || null, now
+                            );
+
+                            // 방출: 아카이브(히스토리)로 이동 및 매도 처리
+                            const sellPrice = latestClose;
+                            const returnRate = stock.entry_price > 0 ? ((sellPrice / stock.entry_price) - 1) * 100 : 0;
+                            const success = returnRate > 0 ? 1 : 0;
+                            
+                            try { db.exec('ALTER TABLE moonshot_archive ADD COLUMN is_hidden INTEGER DEFAULT 0'); } catch (_) { }
+
+                            db.prepare(`
+                                INSERT INTO moonshot_archive 
+                                (stock_code, stock_name, tag, original_thesis, bull_case, bear_case, entry_price, sell_price, return_rate, buy_date, sell_date, success, final_narrative, is_hidden)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?)
+                            `).run(
+                                stock.stock_code,
+                                stock.stock_name,
+                                stock.tag,
+                                stock.narrative,
+                                stock.bull_case,
+                                stock.bear_case,
+                                stock.entry_price,
+                                sellPrice,
+                                returnRate,
+                                stock.entry_date,
+                                success,
+                                result.dailyNarrative,
+                                0 // AI 자동 폐기이므로 is_hidden = 0
+                            );
+
+                            db.prepare('DELETE FROM moonshot_active_tracking WHERE stock_code = ?').run(stock.stock_code);
+
+                            this.sendProgress(win, `🚨 [${stock.stock_name}] DROP 판정 → 매도 및 히스토리 보관 완료${result.dropReason ? ': ' + result.dropReason : ''}`, 'warning');
                         } else {
                             // 유지: Alpha Score + 현재가 동시 갱신
                             db.prepare(`
@@ -315,22 +350,21 @@ ${factsText}
                                 WHERE stock_code = ?
                             `).run(result.alphaScore, latestClose, now, stock.stock_code);
                             
+                            // 데일리 복기 로그 저장
+                            db.prepare(`
+                                INSERT INTO moonshot_daily_review
+                                (stock_code, stock_name, tag, verdict, alpha_score, daily_narrative, hypothesis_intact, drop_reason, reviewed_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            `).run(
+                                stock.stock_code, stock.stock_name, stock.tag,
+                                result.verdict, result.alphaScore,
+                                result.dailyNarrative, result.hypothesisIntact ? 1 : 0,
+                                result.dropReason || null, now
+                            );
+
                             const verdictEmoji = result.verdict === 'hold' ? '✅' : '⚠️';
                             this.sendProgress(win, `${verdictEmoji} [${stock.stock_name}] ${result.verdict.toUpperCase()} (Alpha ${result.alphaScore}점 | 현재가 ${latestClose.toLocaleString()}원)`, result.verdict === 'hold' ? 'success' : 'warning');
                         }
-
-
-                        // 데일리 복기 로그 저장
-                        db.prepare(`
-                            INSERT INTO moonshot_daily_review
-                            (stock_code, stock_name, tag, verdict, alpha_score, daily_narrative, hypothesis_intact, drop_reason, reviewed_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        `).run(
-                            stock.stock_code, stock.stock_name, stock.tag,
-                            result.verdict, result.alphaScore,
-                            result.dailyNarrative, result.hypothesisIntact ? 1 : 0,
-                            result.dropReason || null, now
-                        );
                     } catch (dbErr: any) {
                         console.error('[MoonshotTracker] DB update error:', dbErr.message);
                     }

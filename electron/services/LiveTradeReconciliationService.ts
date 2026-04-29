@@ -55,7 +55,32 @@ export class LiveTradeReconciliationService {
                 throw new Error('계좌 정보를 가져올 수 없습니다. (settings.selectedAccount 미설정)');
             }
 
-            // 2. 키움 계좌 잔고 가져오기 (C-2 수정: 올바른 파싱 적용)
+            // 2. [신규] 당일 매수 체결내역 조회 (kt00007, qry_tp='4')
+            //    ord_no 기준으로 티켓과 매칭하여 실제 체결가(cntr_uv) 반영
+            let buyExecutionMap: Record<string, { cntr_qty: number; cntr_uv: number; stk_cd: string }> = {};
+            try {
+                const executions = await this.kiwoom.getDailyBuyExecutions(accountNo);
+                for (const ex of executions) {
+                    if (ex.ord_no) {
+                        // 같은 주문번호에 여러 건 체결(분할체결)이 있을 수 있으므로 누적
+                        if (buyExecutionMap[ex.ord_no]) {
+                            buyExecutionMap[ex.ord_no].cntr_qty += ex.cntr_qty;
+                            // 체결단가는 마지막 값 사용 (실제로는 평균이 필요하나 분할체결 빈도 낮음)
+                        } else {
+                            buyExecutionMap[ex.ord_no] = {
+                                cntr_qty: ex.cntr_qty,
+                                cntr_uv:  ex.cntr_uv,
+                                stk_cd:   ex.stk_cd
+                            };
+                        }
+                    }
+                }
+                console.log(`[LiveTradeReconciliation] 당일 매수 체결내역 ${executions.length}건 조회 완료 (ord_no 매핑: ${Object.keys(buyExecutionMap).length}건)`);
+            } catch (execErr: any) {
+                console.warn('[LiveTradeReconciliation] 체결내역 조회 실패 (잔고 대조는 계속 진행):', execErr.message);
+            }
+
+            // 3. 키움 계좌 잔고 가져오기 (C-2 수정: 올바른 파싱 적용)
             const holdingsRes = await this.kiwoom.getHoldings(accountNo);
             const rawHoldings = this.parseHoldingsList(holdingsRes);
 
@@ -71,7 +96,7 @@ export class LiveTradeReconciliationService {
                 }
             }
 
-            // 3. DB의 ACTIVE + SELLING 티켓 가져오기
+            // 4. DB의 ACTIVE + SELLING 티켓 가져오기
             const allTickets = this.ledger.getActiveAndSellingTickets();
             const ticketsByStock: Record<string, typeof allTickets> = {};
 
@@ -82,7 +107,23 @@ export class LiveTradeReconciliationService {
                 ticketsByStock[ticket.stock_code].push(ticket);
             }
 
+            // [신규] 오늘 생성된 ACTIVE 티켓에 대해 체결가 업데이트
             const today = new Date().toISOString().split('T')[0];
+            for (const ticket of allTickets) {
+                if (ticket.status !== 'ACTIVE') continue;
+                if (!ticket.entry_date?.startsWith(today)) continue;
+                if (!ticket.order_no) continue;
+
+                const execution = buyExecutionMap[ticket.order_no];
+                if (execution && execution.cntr_qty > 0 && execution.cntr_uv > 0) {
+                    // 실제 체결가가 주문가와 다른 경우에만 업데이트
+                    if (Math.abs(execution.cntr_uv - ticket.entry_price) > 0) {
+                        this.ledger.updateEntryPrice(ticket.ticket_id, execution.cntr_uv);
+                        console.log(`[LiveTradeReconciliation] ${ticket.stock_code} 진입가 업데이트: ${ticket.entry_price} → ${execution.cntr_uv} (체결가)`);
+                    }
+                }
+            }
+
             let changesCount = 0;
 
             // 4. 종목별 대조 및 조정 (Reconciliation)

@@ -213,6 +213,44 @@ export class MarketDataCollectorService {
                 currentBatch = [];
             };
 
+            const processRawData = (stockCode: string, rawData: any[]) => {
+                for (const row of rawData.slice(0, days)) {
+                    // 날짜 파싱
+                    const dateStr = String(row.dt || row.stnd_dt || row.stck_bsop_date || row.date || '').replace(/[-]/g, '');
+                    if (dateStr.length !== 8) continue;
+                    const formattedDate = `${dateStr.substring(0,4)}-${dateStr.substring(4,6)}-${dateStr.substring(6,8)}`;
+
+                    const v = Object.keys(row).reduce((acc: any, k) => { acc[k] = row[k]; return acc; }, {});
+                    const getVal = (keys: string[]) => {
+                        for(const k of keys) {
+                            if (v[k] !== undefined && String(v[k]).trim() !== '') return String(v[k]).replace(/[,]/g, '').replace(/[-]/g, '');
+                        }
+                        return '0';
+                    };
+
+                    const open = parseInt(getVal(["open", "open_pric", "opn_prc", "stck_oprc", "oprc"]));
+                    const high = parseInt(getVal(["high", "high_pric", "hg_prc", "stck_hgpr", "hgpr"]));
+                    const low = parseInt(getVal(["low", "low_pric", "lw_prc", "stck_lwpr", "lwpr"]));
+                    const close = parseInt(getVal(["close", "cur_prc", "stck_clpr", "clprc", "prpr"]));
+                    const volume = parseInt(getVal(["volume", "trde_qty", "vol", "acml_vol"]));
+                    
+                    // 거래대금 파싱 (없으면 close * volume 평균치로 대체)
+                    let tradingValue = parseInt(getVal(["trading_value", "trde_daeg", "acml_tr_pbmn"]));
+                    if (tradingValue === 0 && volume > 0) {
+                        tradingValue = Math.floor((open + close) / 2 * volume); // 보정
+                    }
+
+                    currentBatch.push({
+                        stockCode,
+                        date: formattedDate,
+                        open, high, low, close, volume, tradingValue
+                    });
+                }
+            };
+
+            let failedStocksList: any[] = [];
+            let isCircuitBroken = false;
+
             for (let i = 0; i < pendingStocks.length; i++) {
                 const stock = pendingStocks[i];
 
@@ -221,41 +259,11 @@ export class MarketDataCollectorService {
                     const rawData = await this.kiwoomService.getDailyChartData(stock.stock_code, days + 5);
 
                     if (Array.isArray(rawData) && rawData.length > 0) {
-                        for (const row of rawData.slice(0, days)) {
-                            // 날짜 파싱
-                            const dateStr = String(row.dt || row.stnd_dt || row.stck_bsop_date || row.date || '').replace(/[-]/g, '');
-                            if (dateStr.length !== 8) continue;
-                            const formattedDate = `${dateStr.substring(0,4)}-${dateStr.substring(4,6)}-${dateStr.substring(6,8)}`;
-
-                            const v = Object.keys(row).reduce((acc: any, k) => { acc[k] = row[k]; return acc; }, {});
-                            const getVal = (keys: string[]) => {
-                                for(const k of keys) {
-                                    if (v[k] !== undefined && String(v[k]).trim() !== '') return String(v[k]).replace(/[,]/g, '').replace(/[-]/g, '');
-                                }
-                                return '0';
-                            };
-
-                            const open = parseInt(getVal(["open", "open_pric", "opn_prc", "stck_oprc", "oprc"]));
-                            const high = parseInt(getVal(["high", "high_pric", "hg_prc", "stck_hgpr", "hgpr"]));
-                            const low = parseInt(getVal(["low", "low_pric", "lw_prc", "stck_lwpr", "lwpr"]));
-                            const close = parseInt(getVal(["close", "cur_prc", "stck_clpr", "clprc", "prpr"]));
-                            const volume = parseInt(getVal(["volume", "trde_qty", "vol", "acml_vol"]));
-                            
-                            // 거래대금 파싱 (없으면 close * volume 평균치로 대체)
-                            let tradingValue = parseInt(getVal(["trading_value", "trde_daeg", "acml_tr_pbmn"]));
-                            if (tradingValue === 0 && volume > 0) {
-                                tradingValue = Math.floor((open + close) / 2 * volume); // 보정
-                            }
-
-                            currentBatch.push({
-                                stockCode: stock.stock_code,
-                                date: formattedDate,
-                                open, high, low, close, volume, tradingValue
-                            });
-                        }
+                        processRawData(stock.stock_code, rawData);
                         successCount++;
                     } else {
                         failCount++;
+                        failedStocksList.push(stock);
                     }
 
                     // Flush batch
@@ -271,9 +279,11 @@ export class MarketDataCollectorService {
                 } catch (err: any) {
                     console.error(`[MarketDataCollector] 종목 수집 실패 (${stock.stock_code}):`, err.message);
                     failCount++;
+                    failedStocksList.push(stock);
                     
                     if (err.message && err.message.toLowerCase().includes('circuit')) {
                         console.error('[MarketDataCollector] 수집량을 초과하여 수집을 중단합니다.');
+                        isCircuitBroken = true;
                         break;
                     }
                 }
@@ -282,7 +292,45 @@ export class MarketDataCollectorService {
             // 남은 데이터 저장
             flushBatch();
 
-            const finishMsg = `[Data Pump] 수집 완료. 징수 종목: ${successCount}개 / 실패: ${failCount}개.`;
+            // ─── 1회 한정 Micro-Retry (부분 재시도) 로직 ───
+            let retryRecovered = 0;
+            if (failedStocksList.length > 0 && !isCircuitBroken) {
+                console.log(`[MarketDataCollector] ⚠️ 1차 수집 실패 종목 ${failedStocksList.length}개 감지. 10초 대기 후 1회 한정 재수집(Micro-Retry)을 시작합니다.`);
+                eventBus.emit(SystemEvent.LOG_INFO, `[Data Pump] 1차 실패 종목 ${failedStocksList.length}개 대상 1회 재시도 (10초 쿨다운)`);
+                
+                // TPS/과부하 해소를 위해 10초 대기
+                await new Promise(r => setTimeout(r, 10000));
+                
+                for (let i = 0; i < failedStocksList.length; i++) {
+                    const stock = failedStocksList[i];
+                    try {
+                        const rawData = await this.kiwoomService.getDailyChartData(stock.stock_code, days + 5);
+                        if (Array.isArray(rawData) && rawData.length > 0) {
+                            processRawData(stock.stock_code, rawData);
+                            successCount++;
+                            failCount--; // 기존 1차 실패 차감
+                            retryRecovered++;
+                        } else {
+                            console.warn(`[MarketDataCollector] 🚫 재시도 최종 실패 (${stock.stock_code}): 데이터 없음 (불량 종목 간주)`);
+                        }
+                        
+                        if (currentBatch.length >= batchSize) flushBatch();
+                        
+                    } catch (err: any) {
+                        console.error(`[MarketDataCollector] 🚫 재시도 최종 실패 (${stock.stock_code}):`, err.message);
+                        if (err.message && err.message.toLowerCase().includes('circuit')) {
+                            break;
+                        }
+                    }
+                }
+                
+                flushBatch();
+            }
+
+            const finishMsg = retryRecovered > 0 
+                ? `[Data Pump] 수집 완료. 징수 종목: ${successCount}개 (재시도 복구 ${retryRecovered}개 포함) / 최종 실패: ${failCount}개.`
+                : `[Data Pump] 수집 완료. 징수 종목: ${successCount}개 / 최종 실패: ${failCount}개.`;
+            
             console.log(finishMsg);
             eventBus.emit(SystemEvent.LOG_SUCCESS, finishMsg);
 

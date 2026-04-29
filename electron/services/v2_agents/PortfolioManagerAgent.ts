@@ -1075,7 +1075,7 @@ ${pm2MasterGuideline}
                 console.error(`[PortfolioManager] JSON 파싱 에러:`, jsonErr.message);
             }
 
-            console.warn(`[PortfolioManager] 구조 파싱 실패 또는 결과 없음:`, response);
+            console.warn(`[PortfolioManager] 구조 파싱 실패 또는 결과 없음: 빈 배열 반환됨`);
             return null;
 
         } catch (e: any) {
@@ -1110,6 +1110,11 @@ ${pm2MasterGuideline}
                 } catch (schedErr) {
                     console.error('[PortfolioManager] 재시도 스케줄링 실패:', schedErr);
                 }
+            } else {
+                try {
+                    const { TelegramService } = await import('../TelegramService');
+                    TelegramService.getInstance().sendMessage(`❌ [PM2] 종목 리뷰 중 오류 발생: ${e.message}`);
+                } catch (_) { }
             }
             throw e;
         }

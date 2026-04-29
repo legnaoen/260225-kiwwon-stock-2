@@ -339,6 +339,34 @@ ${issueListForPrompt}
             const parsedObj = JSON.parse(jsonMatch[0]);
             const parsedArray = parsedObj.theme_evaluations || [];
 
+            // 5.5. (추가) 선정된 종목의 실시간 현재가를 Kiwoom API로 조회하여 entryPrice로 기록
+            try {
+                const { KiwoomService } = await import('../KiwoomService');
+                const kiwoom = KiwoomService.getInstance();
+                console.log(`[ThemeIntelligence] 💰 추천 종목 실시간 진입가 조회 시작...`);
+                
+                for (const item of parsedArray) {
+                    if (!item.top_picks || !Array.isArray(item.top_picks)) continue;
+                    
+                    for (const pick of item.top_picks) {
+                        try {
+                            const stockCode = pick.stock_code.replace(/^A/, '');
+                            const priceInfo = await kiwoom.getCurrentPrice(stockCode);
+                            if (priceInfo && priceInfo.current_price) {
+                                pick.entryPrice = priceInfo.current_price;
+                                console.log(`[ThemeIntelligence] 진입가 확보: ${pick.stock_name} -> ${pick.entryPrice}원`);
+                            }
+                        } catch (pErr: any) {
+                            console.warn(`[ThemeIntelligence] 실시간 가격 조회 실패 (${pick.stock_name}):`, pErr.message);
+                        }
+                        // API Rate Limit 방지를 위해 짧은 대기 시간 추가
+                        await new Promise(resolve => setTimeout(resolve, 250));
+                    }
+                }
+            } catch (err: any) {
+                console.error(`[ThemeIntelligence] 💰 추천 종목 실시간 가격 연동 중 오류:`, err.message);
+            }
+
             // 6. DB에 기록 (Upsert Themes)
             const mapDataForDb = parsedArray.map((item: any) => {
                 let normalizedType = 'THEME';

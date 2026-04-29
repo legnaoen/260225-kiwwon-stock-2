@@ -835,6 +835,16 @@ export class DatabaseService {
         } catch (e) {
             // Ignore if column already exists
         }
+        try {
+            this.db.exec(`ALTER TABLE live_trade_tickets ADD COLUMN order_no TEXT DEFAULT '';`);
+        } catch (e) {
+            // Ignore if column already exists
+        }
+        try {
+            this.db.exec(`ALTER TABLE live_trade_tickets ADD COLUMN stock_name TEXT DEFAULT '';`);
+        } catch (e) {
+            // Ignore if column already exists
+        }
         
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS live_trade_strategies (
@@ -854,9 +864,15 @@ export class DatabaseService {
                 timestamp TEXT NOT NULL,
                 type TEXT NOT NULL,
                 stock_code TEXT,
-                message TEXT NOT NULL
+                message TEXT NOT NULL,
+                order_no TEXT DEFAULT '',
+                rsp_cd TEXT DEFAULT '',
+                api_response TEXT DEFAULT ''
             );
         `);
+        try { this.db.exec(`ALTER TABLE live_trade_logs ADD COLUMN order_no TEXT DEFAULT '';`); } catch (e) { }
+        try { this.db.exec(`ALTER TABLE live_trade_logs ADD COLUMN rsp_cd TEXT DEFAULT '';`); } catch (e) { }
+        try { this.db.exec(`ALTER TABLE live_trade_logs ADD COLUMN api_response TEXT DEFAULT '';`); } catch (e) { }
         // ──────────────────────────────────────────────────────────────────
 
         // ═══ V2 Agent Swarm: Market Condition Agent ═══
@@ -3755,6 +3771,20 @@ export class DatabaseService {
             }
         });
         transaction(items);
+    }
+
+    public deleteThemeMockTradingPicks(date: string) {
+        try {
+            this.db.prepare(`
+                UPDATE theme_intelligence 
+                SET top_picks_json = '[]'
+                WHERE date = ?
+            `).run(date);
+            return { success: true };
+        } catch (error: any) {
+            console.error('[DB] deleteThemeMockTradingPicks error:', error.message);
+            return { success: false, error: error.message };
+        }
     }
 
     public getThemeMockTradingPicks(limitDays: number = 10) {

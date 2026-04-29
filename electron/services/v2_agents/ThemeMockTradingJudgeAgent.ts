@@ -91,7 +91,7 @@ export class ThemeMockTradingJudgeAgent {
                     const todayStr = this.db.getKstDate();
                     const bizDays = this.getBusinessDaysDiff(row.date, todayStr);
                     
-                    let entryPrice = 0;
+                    let entryPrice = pick.entryPrice || 0; // JSON에 기록된 실시간 진입가가 있다면 우선 사용
                     let currentPrice = 0;
                     let maxHigh = 0;
                     let elapsedDays = 0;
@@ -106,16 +106,19 @@ export class ThemeMockTradingJudgeAgent {
                             if (fallbackRate && fallbackRate.change_rate != null) {
                                 estPrice = Math.round(fallbackOhlcv.close * (1 + fallbackRate.change_rate / 100));
                             }
-                            entryPrice = estPrice;
-                            currentPrice = estPrice;
-                            maxHigh = estPrice;
+                            if (!entryPrice) entryPrice = estPrice; // 값이 없을 때만 추정
+                            currentPrice = entryPrice;
+                            maxHigh = entryPrice;
                             elapsedDays = bizDays;
                         } else {
-                            continue; // OHLCV 히스토리가 아예 없으면 스킵 (신규상장 등)
+                            if (!entryPrice) continue; // OHLCV 히스토리가 아예 없고 entryPrice도 없으면 스킵 (신규상장 등)
+                            currentPrice = entryPrice;
+                            maxHigh = entryPrice;
+                            elapsedDays = bizDays;
                         }
                     } else {
-                        // 진입가: 추천일(D-0)의 종가 기준
-                        entryPrice = ohlcvList[0].close;
+                        // 진입가: 추천일(D-0)의 종가 기준 (단, 사전에 기록된 실시간 진입가가 없다면 덮어쓰기)
+                        if (!entryPrice) entryPrice = ohlcvList[0].close;
                         
                         // 현재가: 배열의 가장 마지막(최신) 종가
                         currentPrice = ohlcvList[ohlcvList.length - 1].close;

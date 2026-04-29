@@ -338,6 +338,21 @@ export const LiveTradeTab: React.FC = () => {
         });
     }, [testLogs]);
 
+    const handleDeleteTicket = useCallback(async (ticketId: string, stockName: string) => {
+        const confirmed = window.confirm(`⚠️ "${stockName}" FAILED 티켓을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`);
+        if (!confirmed) return;
+        try {
+            const res = await (window.electronAPI as any)?.deleteFailedTicket?.(ticketId);
+            if (res?.deleted) {
+                setTickets(prev => prev.filter(t => t.ticket_id !== ticketId && t.id !== ticketId));
+            } else {
+                alert('삭제 실패: ' + (res?.reason || '알 수 없는 오류'));
+            }
+        } catch (e: any) {
+            alert('삭제 중 오류: ' + e.message);
+        }
+    }, []);
+
     const handleSaveStrategy = async () => {
         if (!window.electronAPI) return;
         try {
@@ -581,7 +596,18 @@ export const LiveTradeTab: React.FC = () => {
                                                 <ReturnCell value={isReceivingLive ? livePnlPct : pick.pnlPct} />
                                             </td>
                                             <td className="py-2.5 px-3 text-center">
-                                                <StatusBadge status={pick.status} isUp={livePnlPct > 0} failReason={pick.fail_reason} />
+                                                <div className="flex items-center justify-center gap-1.5">
+                                                    <StatusBadge status={pick.status} isUp={livePnlPct > 0} failReason={pick.fail_reason} />
+                                                    {pick.status === 'FAILED' && (
+                                                        <button
+                                                            onClick={() => handleDeleteTicket(pick.ticket_id || pick.id, pick.stock_name || pick.stock_code)}
+                                                            title="FAILED 티켓 삭제"
+                                                            className="p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                                                        >
+                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     )
@@ -987,27 +1013,63 @@ export const LiveTradeTab: React.FC = () => {
                             ) : (
                                 <div className="divide-y divide-border/30">
                                     {dailyLogs.map((log) => {
-                                        const typeColors: any = {
-                                            'BUY': 'bg-rose-500/10 text-rose-500 border-rose-500/20',
-                                            'SELL': 'bg-blue-500/10 text-blue-500 border-blue-500/20',
+                                        const typeColors: Record<string, string> = {
+                                            'BUY_SEND': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
+                                            'BUY_ACK':  'bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-bold',
+                                            'BUY_REJECT': 'bg-red-500/10 text-red-500 border-red-500/20 font-bold',
+                                            'BUY':   'bg-rose-500/10 text-rose-500 border-rose-500/20',
+                                            'SELL':  'bg-blue-500/10 text-blue-500 border-blue-500/20',
+                                            'RECON': 'bg-purple-500/10 text-purple-500 border-purple-500/20',
                                             'ERROR': 'bg-red-500/10 text-red-500 border-red-500/20 font-bold',
-                                            'INFO': 'bg-muted text-muted-foreground border-border/50'
+                                            'INFO':  'bg-muted text-muted-foreground border-border/50'
                                         };
+                                        const isAck    = log.type === 'BUY_ACK';
+                                        const isReject = log.type === 'BUY_REJECT';
+                                        const hasApiDetail = (isAck || isReject) && (log.order_no || log.rsp_cd || log.api_response);
                                         return (
-                                            <div key={log.id} className="px-5 py-3 hover:bg-accent/30 transition-colors flex gap-4 text-[13px]">
+                                            <div key={log.id} className={cn(
+                                                "px-5 py-3 transition-colors flex gap-4 text-[13px]",
+                                                isAck    ? "hover:bg-emerald-500/5 bg-emerald-500/[0.02]" :
+                                                isReject ? "hover:bg-red-500/5 bg-red-500/[0.02]" :
+                                                "hover:bg-accent/30"
+                                            )}>
                                                 <div className="w-[140px] shrink-0 text-muted-foreground font-mono">
                                                     {new Date(log.timestamp).toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit' })}
                                                 </div>
-                                                <div className="w-[70px] shrink-0">
+                                                <div className="w-[90px] shrink-0">
                                                     <span className={cn("px-2 py-0.5 rounded text-[10px] border whitespace-nowrap font-bold", typeColors[log.type] || typeColors['INFO'])}>
                                                         {log.type}
                                                     </span>
                                                 </div>
-                                                <div className="w-[80px] shrink-0 font-bold text-foreground">
+                                                <div className="w-[80px] shrink-0 font-bold text-foreground font-mono">
                                                     {log.stock_code || '-'}
                                                 </div>
-                                                <div className="flex-1 text-muted-foreground/90 break-keep">
-                                                    {log.message}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-muted-foreground/90 break-keep">{log.message}</div>
+                                                    {hasApiDetail && (
+                                                        <div className="mt-1.5 flex flex-wrap gap-2 text-[11px] font-mono">
+                                                            {log.order_no && (
+                                                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                                                                    주문번호: {log.order_no}
+                                                                </span>
+                                                            )}
+                                                            {log.rsp_cd && (
+                                                                <span className={cn(
+                                                                    "px-1.5 py-0.5 rounded border",
+                                                                    (log.rsp_cd === '00000' || log.rsp_cd === '0' || log.rsp_cd === '')
+                                                                        ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                                                        : "bg-red-500/10 text-red-500 border-red-500/20"
+                                                                )}>
+                                                                    rsp_cd: {log.rsp_cd}
+                                                                </span>
+                                                            )}
+                                                            {log.api_response && log.api_response !== '{}' && (
+                                                                <span className="px-1.5 py-0.5 rounded bg-muted/50 text-muted-foreground border border-border/40 max-w-[400px] truncate" title={log.api_response}>
+                                                                    응답: {log.api_response}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         );

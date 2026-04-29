@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 export interface LiveTradeTicket {
     ticket_id: string;
     stock_code: string;
+    stock_name?: string;      // 종목명 (표시용)
     entry_date: string;
     entry_price: number;
     quantity: number;
@@ -11,6 +12,7 @@ export interface LiveTradeTicket {
     target_exit_date: string;
     status: 'ACTIVE' | 'CLOSED' | 'FAILED' | 'SELLING';
     fail_reason?: string;
+    order_no?: string;        // 키움 주문번호 (BUY_ACK 후 저장)
     created_at: string;
     updated_at: string;
 }
@@ -90,9 +92,9 @@ export class LiveTradeLedgerService {
     public createTicket(ticket: Omit<LiveTradeTicket, 'ticket_id' | 'created_at' | 'updated_at'>): string {
         const sql = `
             INSERT INTO live_trade_tickets (
-                ticket_id, stock_code, entry_date, entry_price, quantity, strategy_category, target_exit_date, status, fail_reason, created_at, updated_at
+                ticket_id, stock_code, stock_name, entry_date, entry_price, quantity, strategy_category, target_exit_date, status, fail_reason, order_no, created_at, updated_at
             ) VALUES (
-                $id, $stockCode, $entryDate, $entryPrice, $quantity, $category, $targetExitDate, $status, $failReason, $now, $now
+                $id, $stockCode, $stockName, $entryDate, $entryPrice, $quantity, $category, $targetExitDate, $status, $failReason, $orderNo, $now, $now
             )
         `;
 
@@ -102,6 +104,7 @@ export class LiveTradeLedgerService {
         (this.db as any).db.prepare(sql).run({
             id: ticketId,
             stockCode: ticket.stock_code,
+            stockName: ticket.stock_name || '',
             entryDate: ticket.entry_date,
             entryPrice: ticket.entry_price,
             quantity: ticket.quantity,
@@ -109,6 +112,7 @@ export class LiveTradeLedgerService {
             targetExitDate: ticket.target_exit_date,
             status: ticket.status || 'ACTIVE',
             failReason: ticket.fail_reason || null,
+            orderNo: ticket.order_no || '',
             now: now
         });
 
@@ -163,5 +167,44 @@ export class LiveTradeLedgerService {
         const sql = `UPDATE live_trade_tickets SET status = 'FAILED', fail_reason = ?, updated_at = ? WHERE ticket_id = ?`;
         const now = this.db.getKstTimestamp();
         (this.db as any).db.prepare(sql).run(reason, now, ticketId);
+    }
+
+    /**
+     * 키움 주문번호를 티켓에 연결 — 매수 주문 ACK 직후 호출
+     */
+    public updateOrderNo(ticketId: string, orderNo: string): void {
+        const sql = `UPDATE live_trade_tickets SET order_no = ?, updated_at = ? WHERE ticket_id = ?`;
+        const now = this.db.getKstTimestamp();
+        (this.db as any).db.prepare(sql).run(orderNo, now, ticketId);
+    }
+
+    /**
+     * 실제 체결가로 entry_price 업데이트 — 장 마감 정산(Reconciliation) 시 호출
+     * cntr_uv: kt00007 응답의 체결단가 필드
+     */
+    public updateEntryPrice(ticketId: string, actualPrice: number): void {
+        const sql = `UPDATE live_trade_tickets SET entry_price = ?, updated_at = ? WHERE ticket_id = ?`;
+        const now = this.db.getKstTimestamp();
+        (this.db as any).db.prepare(sql).run(actualPrice, now, ticketId);
+    }
+
+    /**
+     * FAILED 티켓 삭제 — UI에서 사용자가 수동으로 제거할 때 호출
+     * 안전을 위해 FAILED 상태인 티켓만 삭제 허용
+     */
+    public deleteTicket(ticketId: string): { deleted: boolean; reason?: string } {
+        const ticket = (this.db as any).db.prepare(
+            `SELECT ticket_id, status FROM live_trade_tickets WHERE ticket_id = ?`
+        ).get(ticketId) as { ticket_id: string; status: string } | undefined;
+
+        if (!ticket) {
+            return { deleted: false, reason: '티켓을 찾을 수 없습니다.' };
+        }
+        if (ticket.status !== 'FAILED') {
+            return { deleted: false, reason: `FAILED 상태인 티켓만 삭제 가능합니다. (현재: ${ticket.status})` };
+        }
+
+        (this.db as any).db.prepare(`DELETE FROM live_trade_tickets WHERE ticket_id = ?`).run(ticketId);
+        return { deleted: true };
     }
 }

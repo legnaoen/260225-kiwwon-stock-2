@@ -256,6 +256,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runV2Pipeline: (pipelineId: string, options?: { forceFetch?: boolean }) => ipcRenderer.invoke('v2-pipeline:run', { pipelineId, options }),
     getThemeTrackerData: (type: 'SECTOR' | 'THEME', date: string, limitDays?: number, topN?: number) => ipcRenderer.invoke('naverflow:get-tracker-data', type, date, limitDays, topN),
     getThemeMockTradingPicks: () => ipcRenderer.invoke('naverflow:get-mock-trading-picks'),
+    deleteThemeMockTradingPicksByDate: (date: string) => ipcRenderer.invoke('naverflow:delete-mock-trading-picks', date),
     updateThemeMockLivePrices: () => ipcRenderer.invoke('naverflow:update-mock-live-prices'),
     analyzeThemes: (date: string) => ipcRenderer.invoke('naverflow:analyze-themes', date),
     resetThemeLedger: () => ipcRenderer.invoke('naverflow:reset-themes'),
@@ -473,6 +474,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setLiveTradeKillSwitch: (active: boolean) => ipcRenderer.invoke('livetrade:set-kill-switch', active),
     testLiveTradeBuyOrder: (stockCode: string, qty: number, accountNo?: string) => ipcRenderer.invoke('livetrade:test-buy-order', stockCode, qty, accountNo),
     getLiveTradeDailyLogs: () => ipcRenderer.invoke('livetrade:get-daily-logs'),
+    deleteFailedTicket: (ticketId: string) => ipcRenderer.invoke('livetrade:delete-ticket', ticketId),
     // Live Trade Error Log
     onLiveTradeError: (callback: (error: any) => void) => {
         const listener = (_event: any, data: any) => callback(data)

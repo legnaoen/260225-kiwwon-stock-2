@@ -1399,12 +1399,16 @@ ipcMain.handle('moonshot:delete-active-tracking', async (_event, stock_code: str
             const sellPrice = stockInfo.current_price || 0;
             const returnRate = stockInfo.entry_price > 0 ? ((sellPrice / stockInfo.entry_price) - 1) * 100 : 0;
             const success = returnRate > 0 ? 1 : 0;
+            const isUserDeleted = !stockInfo.daily_narrative; // 데일리 리뷰가 없으면 사용자 수동 폐기
             const finalNarrative = stockInfo.daily_narrative || '사용자에 의한 등재 취소 및 수동 폐기';
+
+            // is_hidden 컬럼이 없으면 자동 추가 (마이그레이션)
+            try { db.exec('ALTER TABLE moonshot_archive ADD COLUMN is_hidden INTEGER DEFAULT 0'); } catch (_) { }
 
             db.prepare(`
                 INSERT INTO moonshot_archive 
-                (stock_code, stock_name, tag, original_thesis, bull_case, bear_case, entry_price, sell_price, return_rate, buy_date, sell_date, success, final_narrative)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?)
+                (stock_code, stock_name, tag, original_thesis, bull_case, bear_case, entry_price, sell_price, return_rate, buy_date, sell_date, success, final_narrative, is_hidden)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?)
             `).run(
                 stockInfo.stock_code,
                 stockInfo.stock_name,
@@ -1417,7 +1421,8 @@ ipcMain.handle('moonshot:delete-active-tracking', async (_event, stock_code: str
                 returnRate,
                 stockInfo.entry_date,
                 success,
-                finalNarrative
+                finalNarrative,
+                isUserDeleted ? 1 : 0  // 사용자 수동 삭제는 히스토리에서 숨김
             );
         }
 
@@ -1437,10 +1442,30 @@ ipcMain.handle('moonshot:get-archive', async () => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService');
         const db = DatabaseService.getInstance().getDb();
-        return db.prepare('SELECT * FROM moonshot_archive ORDER BY sell_date DESC').all();
+        // is_hidden=1 인 행(사용자 삭제 or AI 자동 삭제)은 표시하지 않음
+        return db.prepare('SELECT * FROM moonshot_archive WHERE (is_hidden IS NULL OR is_hidden != 1) ORDER BY sell_date DESC').all();
     } catch (error: any) {
         console.error('[Moonshot] get-archive error:', error);
         return [];
+    }
+});
+
+// 아카이브 개별 삭제 (soft-delete: is_hidden=1)
+ipcMain.handle('moonshot:delete-archive', async (_event, id: number) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance().getDb();
+        // is_hidden 컬럼이 없으면 자동으로 추가
+        try { db.exec('ALTER TABLE moonshot_archive ADD COLUMN is_hidden INTEGER DEFAULT 0'); } catch (_) { }
+        const info = db.prepare('UPDATE moonshot_archive SET is_hidden = 1 WHERE id = ?').run(id);
+        if (info.changes > 0) {
+            console.log(`[Moonshot] Archive soft-deleted: id=${id}`);
+            return { success: true };
+        }
+        return { success: false, error: '삭제할 대상이 없습니다.' };
+    } catch (error: any) {
+        console.error('[Moonshot] delete-archive error:', error);
+        return { success: false, error: error.message };
     }
 });
 
@@ -1651,6 +1676,18 @@ ipcMain.handle('naverflow:get-mock-trading-picks', async () => {
         return { success: false, error: err.message }
     }
 })
+
+ipcMain.handle('naverflow:delete-mock-trading-picks', async (_event, date: string) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance();
+        return db.deleteThemeMockTradingPicks(date);
+    } catch (err: any) {
+        console.error(`[IPC] deleteThemeMockTradingPicks Error:`, err);
+        return { success: false, error: err.message };
+    }
+})
+
 
 ipcMain.handle('naverflow:update-mock-live-prices', async () => {
     try {
@@ -3062,6 +3099,16 @@ ipcMain.handle('livetrade:get-tickets', async () => {
         return await LiveTradeLedgerService.getInstance().getAllTickets();
     } catch (err: any) {
         return [];
+    }
+});
+
+ipcMain.handle('livetrade:delete-ticket', async (_event, ticketId: string) => {
+    try {
+        const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');
+        const result = LiveTradeLedgerService.getInstance().deleteTicket(ticketId);
+        return result;
+    } catch (err: any) {
+        return { deleted: false, reason: err.message };
     }
 });
 

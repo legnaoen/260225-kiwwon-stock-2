@@ -109,8 +109,8 @@ export default function MoonshotTab() {
     const selectedStock = activeStocks.find(s => s.id === selectedStockId) || activeStocks[0] || null
 
     const [archiveStocks, setArchiveStocks] = useState<any[]>([])
-    const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null)
-    const selectedArchive = archiveStocks.find(s => s.stock_code === selectedArchiveId) || archiveStocks[0] || null
+    const [selectedArchiveId, setSelectedArchiveId] = useState<string | number | null>(null)
+    const selectedArchive = archiveStocks.find(s => s.id === selectedArchiveId) || archiveStocks[0] || null
 
     useEffect(() => {
         if (viewMode === 'archive') {
@@ -229,6 +229,27 @@ export default function MoonshotTab() {
             alert('IPC 에러: ' + e.message);
         }
     };
+
+    const handleDeleteArchive = async (arc: any, e: React.MouseEvent) => {
+        e.stopPropagation(); // 행 선택 이벤트 차단
+        if (!confirm(`[${arc.stock_name}] 항목을 히스토리에서 삭제하시겠습니까?\nAI가 자동으로 정리한 내용만 남기려면 확인하세요.`)) return;
+
+        const { electronAPI } = window as any;
+        if (!electronAPI || !electronAPI.invoke) return;
+
+        try {
+            const res = await electronAPI.invoke('moonshot:delete-archive', arc.id);
+            if (res.success) {
+                setArchiveStocks(prev => prev.filter(s => s.id !== arc.id));
+                if (selectedArchive?.id === arc.id) setSelectedArchiveId(null);
+            } else {
+                alert('삭제 실패: ' + res.error);
+            }
+        } catch(e: any) {
+            alert('IPC 에러: ' + e.message);
+        }
+    };
+
 
     // Scanner States
     const [selectedConditionA, setSelectedConditionA] = useState(() => localStorage.getItem('moonshot_condA') || '101')
@@ -724,6 +745,62 @@ export default function MoonshotTab() {
         return r.status === reportFilter
     })
 
+    // Moonshot 통계 계산 (viewMode 기반 동적 렌더링)
+    let displayTotalCount = 0;
+    let displayWinRate = "0.0";
+    let displaySumReturn = 0;
+    let displayAvgReturn = "0.0";
+    let displayAvgDays = "0.0";
+
+    if (viewMode === 'archive') {
+        displayTotalCount = archiveStocks.length;
+        const wCount = archiveStocks.filter(a => a.success).length;
+        displayWinRate = displayTotalCount > 0 ? ((wCount / displayTotalCount) * 100).toFixed(1) : "0.0";
+        
+        let sumR = 0;
+        let sumDays = 0;
+        let validDays = 0;
+        archiveStocks.forEach(arc => {
+            sumR += Number(arc.return_rate) || 0;
+            if (arc.buy_date && arc.sell_date) {
+                try {
+                    const b = new Date(arc.buy_date.replace(/[./]/g, '-').split(' ')[0]);
+                    const s = new Date(arc.sell_date.replace(/[./]/g, '-').split(' ')[0]);
+                    if (!isNaN(b.getTime()) && !isNaN(s.getTime())) {
+                        sumDays += Math.max(0, Math.floor((s.getTime() - b.getTime()) / (1000 * 3600 * 24)));
+                        validDays++;
+                    }
+                } catch(e) {}
+            }
+        });
+        displaySumReturn = sumR;
+        displayAvgReturn = displayTotalCount > 0 ? (sumR / displayTotalCount).toFixed(1) : "0.0";
+        displayAvgDays = validDays > 0 ? (sumDays / validDays).toFixed(1) : "0.0";
+    } else if (viewMode === 'active') {
+        displayTotalCount = activeStocks.length;
+        const wCount = activeStocks.filter(a => a.returnRate > 0).length;
+        displayWinRate = displayTotalCount > 0 ? ((wCount / displayTotalCount) * 100).toFixed(1) : "0.0";
+        
+        let sumR = 0;
+        let sumDays = 0;
+        let validDays = 0;
+        const now = new Date();
+        activeStocks.forEach(arc => {
+            sumR += Number(arc.returnRate) || 0;
+            if (arc.entryDate) {
+                try {
+                    const b = new Date(arc.entryDate.replace(/[./]/g, '-').split(' ')[0]);
+                    if (!isNaN(b.getTime())) {
+                        sumDays += Math.max(0, Math.floor((now.getTime() - b.getTime()) / (1000 * 3600 * 24)));
+                        validDays++;
+                    }
+                } catch(e) {}
+            }
+        });
+        displaySumReturn = sumR;
+        displayAvgReturn = displayTotalCount > 0 ? (sumR / displayTotalCount).toFixed(1) : "0.0";
+        displayAvgDays = validDays > 0 ? (sumDays / validDays).toFixed(1) : "0.0";
+    }
 
     const handleCopyAll = () => {
         if (!selectedDetail) return
@@ -753,13 +830,46 @@ ${selectedDetail.rawResult}
             {/* Top Navigation & Status Bar */}
             <div className="flex items-center justify-between pb-2">
                 <div className="flex items-center gap-6">
-                    <div>
-                        <h1 className="text-2xl font-bold flex items-center gap-2">
-                            <Rocket className="text-primary" /> 
-                            Project Moonshot 
-                        </h1>
-                        <p className="text-muted-foreground mt-1 text-sm">텐베거(10-Bagger) 시스템 : 패러다임과 실적 폭발성에만 집중합니다.</p>
-                    </div>
+                    {viewMode === 'scanner' ? (
+                        <div>
+                            <h1 className="text-2xl font-bold flex items-center gap-2">
+                                <Rocket className="text-primary" /> 
+                                Project Moonshot 
+                            </h1>
+                            <p className="text-muted-foreground mt-1 text-sm">텐베거(10-Bagger) 시스템 : 패러다임과 실적 폭발성에만 집중합니다.</p>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-4 bg-muted/20 border px-4 py-2.5 rounded-xl">
+                            <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-muted-foreground font-bold">보유</span>
+                                <span className="text-sm font-black font-mono">{displayTotalCount}</span>
+                            </div>
+                            <div className="w-px h-3 bg-border"></div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-muted-foreground font-bold">총수익률</span>
+                                <span className={cn("text-sm font-black font-mono", displaySumReturn > 0 ? "text-red-500" : displaySumReturn < 0 ? "text-blue-500" : "")}>
+                                    {displaySumReturn > 0 ? '+' : ''}{displaySumReturn.toFixed(1)}%
+                                </span>
+                            </div>
+                            <div className="w-px h-3 bg-border"></div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-muted-foreground font-bold">평균수익률</span>
+                                <span className={cn("text-sm font-black font-mono", Number(displayAvgReturn) > 0 ? "text-red-500" : Number(displayAvgReturn) < 0 ? "text-blue-500" : "")}>
+                                    {Number(displayAvgReturn) > 0 ? '+' : ''}{displayAvgReturn}%
+                                </span>
+                            </div>
+                            <div className="w-px h-3 bg-border"></div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-muted-foreground font-bold">승률</span>
+                                <span className="text-sm font-black font-mono text-primary">{displayWinRate}%</span>
+                            </div>
+                            <div className="w-px h-3 bg-border"></div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-muted-foreground font-bold">보유기간</span>
+                                <span className="text-sm font-black font-mono">{displayAvgDays}일</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -1213,7 +1323,7 @@ ${selectedDetail.rawResult}
                                                     <div className="text-sm font-bold">{(stock.currentPrice || 0).toLocaleString()}원</div>
                                                     <div className={cn(
                                                         "text-xs font-bold mt-1",
-                                                        stock.returnRate > 0 ? "text-green-500" : stock.returnRate < 0 ? "text-red-500" : "text-muted-foreground"
+                                                        stock.returnRate > 0 ? "text-red-500" : stock.returnRate < 0 ? "text-blue-500" : "text-muted-foreground"
                                                     )}>
                                                         {stock.returnRate > 0 ? '+' : ''}{stock.returnRate}%
                                                     </div>
@@ -1426,19 +1536,21 @@ ${selectedDetail.rawResult}
                                             <th className="px-4 py-3 font-semibold text-left">종목명 / 태그</th>
                                             <th className="px-4 py-3 font-semibold text-right">편입 정보</th>
                                             <th className="px-4 py-3 font-semibold text-right">매도 정보</th>
-                                            <th className="px-4 py-3 font-semibold text-center">최종 결과</th>
+                                            <th className="px-4 py-3 font-semibold text-center">최종 수익률</th>
+                                            <th className="px-4 py-3 font-semibold text-center">마감 사유</th>
+                                            <th className="px-4 py-3 font-semibold text-center w-10"></th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {archiveStocks.length === 0 ? (
-                                            <tr><td colSpan={4} className="py-10 text-center text-muted-foreground">보관된 히스토리가 없습니다.</td></tr>
+                                            <tr><td colSpan={6} className="py-10 text-center text-muted-foreground">보관된 히스토리가 없습니다.</td></tr>
                                         ) : archiveStocks.map((arc) => (
                                             <tr 
                                                 key={arc.id} 
-                                                onClick={() => setSelectedArchiveId(arc.stock_code)}
+                                                onClick={() => setSelectedArchiveId(arc.id)}
                                                 className={cn(
-                                                    "border-b last:border-b-0 cursor-pointer transition-colors",
-                                                    selectedArchive?.stock_code === arc.stock_code ? "bg-primary/5 border-l-2 border-l-primary" : "hover:bg-muted/30 border-l-2 border-l-transparent"
+                                                    "border-b last:border-b-0 cursor-pointer transition-colors group",
+                                                    selectedArchive?.id === arc.id ? "bg-primary/5 border-l-2 border-l-primary" : "hover:bg-muted/30 border-l-2 border-l-transparent"
                                                 )}
                                             >
                                                 <td className="px-4 py-4 text-left">
@@ -1462,13 +1574,28 @@ ${selectedDetail.rawResult}
                                                 </td>
                                                 <td className="px-4 py-4">
                                                     <div className="flex items-center justify-center flex-col gap-1">
-                                                        <span className={cn("text-lg font-bold font-mono tracking-tighter", arc.success ? "text-green-500" : "text-red-500")}>
+                                                        <span className={cn("text-lg font-bold font-mono tracking-tighter", arc.return_rate > 0 ? "text-red-500" : arc.return_rate < 0 ? "text-blue-500" : "text-muted-foreground")}>
                                                             {arc.return_rate > 0 ? '+' : ''}{Number(arc.return_rate).toFixed(1)}%
                                                         </span>
-                                                        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-sm", arc.success ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-600")}>
-                                                            {arc.success ? "표적 익절" : "가설 훼손컷"}
+                                                        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-sm", arc.success ? "bg-red-500/10 text-red-600" : "bg-blue-500/10 text-blue-600")}>
+                                                            {arc.success ? "수익 마감" : "손실 마감"}
                                                         </span>
                                                     </div>
+                                                </td>
+                                                <td className="px-4 py-4 text-center">
+                                                    <span className="text-[11px] font-bold text-muted-foreground px-2.5 py-1 bg-muted/50 border rounded-md whitespace-nowrap">
+                                                        {arc.final_narrative?.includes('수동 폐기') ? '사용자 수동 삭제' : '가설 훼손 (DROP)'}
+                                                    </span>
+                                                </td>
+                                                {/* 개별 삭제 버튼 */}
+                                                <td className="px-2 py-4 text-center">
+                                                    <button
+                                                        onClick={(e) => handleDeleteArchive(arc, e)}
+                                                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500"
+                                                        title="이 항목 히스토리에서 삭제"
+                                                    >
+                                                        <Trash2 size={13} />
+                                                    </button>
                                                 </td>
                                             </tr>
                                         ))}
@@ -1490,8 +1617,11 @@ ${selectedDetail.rawResult}
                                         <h2 className="text-3xl font-bold">{selectedArchive.stock_name}</h2>
                                         <div className="flex items-center gap-2 mt-2">
                                             <span className="bg-primary-foreground/20 px-2 py-1 rounded text-xs font-mono">{selectedArchive.stock_code}</span>
-                                            <span className={cn("px-2 py-1 rounded text-xs font-bold", selectedArchive.success ? "text-green-100" : "text-gray-200")}>
+                                            <span className={cn("px-2 py-1 rounded text-xs font-bold", selectedArchive.success ? "text-red-100 bg-red-500/20" : "text-blue-100 bg-blue-500/20")}>
                                                 최종 수익률 {selectedArchive.return_rate > 0 ? '+' : ''}{Number(selectedArchive.return_rate).toFixed(1)}%
+                                            </span>
+                                            <span className="px-2 py-1 rounded text-xs font-bold bg-black/20 text-white/90">
+                                                {selectedArchive.final_narrative?.includes('수동 폐기') ? '사용자 직접 삭제' : 'AI 가설 훼손 (DROP)'}
                                             </span>
                                         </div>
                                     </div>

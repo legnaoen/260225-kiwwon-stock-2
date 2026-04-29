@@ -31,8 +31,11 @@ export class LiveTradeExecutionService {
     // ─── 미체결 매도 추적 타이머 ───────────────────────────────────────────────
     private unexecutedChasingTimer: NodeJS.Timeout | null = null;
     private isChasingRunning = false;
+    private chaseIntervalMs: number = 5 * 60 * 1000; // 기본 5분
 
-    private constructor() {}
+    private constructor() {
+        eventBus.on(SystemEvent.PRICE_UPDATE, this.onPriceUpdate.bind(this));
+    }
 
     private emitError(source: string, message: string, detail?: string) {
         eventBus.emit(SystemEvent.LIVE_TRADE_ERROR, {
@@ -45,13 +48,25 @@ export class LiveTradeExecutionService {
     }
 
     // ─── DB 로깅 헬퍼 ────────────────────────────────────────────────
-    public logEvent(type: 'BUY' | 'SELL' | 'ERROR' | 'INFO', stockCode: string, message: string) {
+    public logEvent(
+        type: 'BUY' | 'BUY_SEND' | 'BUY_ACK' | 'BUY_REJECT' | 'SELL' | 'RECON' | 'ERROR' | 'INFO',
+        stockCode: string,
+        message: string,
+        opts: { order_no?: string; rsp_cd?: string; api_response?: string } = {}
+    ) {
         try {
             const rawDb = (DatabaseService.getInstance() as any).db;
             rawDb.prepare(`
-                INSERT INTO live_trade_logs (timestamp, type, stock_code, message)
-                VALUES (datetime('now', 'localtime'), ?, ?, ?)
-            `).run(type, stockCode || '', message);
+                INSERT INTO live_trade_logs (timestamp, type, stock_code, message, order_no, rsp_cd, api_response)
+                VALUES (datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?)
+            `).run(
+                type,
+                stockCode || '',
+                message,
+                opts.order_no  || '',
+                opts.rsp_cd    || '',
+                opts.api_response ? opts.api_response.substring(0, 512) : '' // 512자 제한
+            );
         } catch (e: any) {
             console.error('[LiveTrade] DB Log Insert Error:', e.message);
         }
@@ -141,7 +156,6 @@ export class LiveTradeExecutionService {
         }
 
         // [Guard 2.5] DB 티켓 중복 검사 — 오늘 이미 매수 시도/성공한 티켓이 있는지 확인
-        // buyingInProgress.add() 전에 체크해야 안전 (add 전 차단)
         const todayKst = getKstDate();
         const rawDb = (DatabaseService.getInstance() as any).db;
         const existingTicket = rawDb.prepare(`
@@ -173,8 +187,38 @@ export class LiveTradeExecutionService {
             return;
         }
 
-        // 1. 수량 계산
-        const orderPrice = calculateOrderPrice(currentPrice, 1);
+        // ─── 1. 주문 시점 기반 동적 주문 유형 결정 (Option B) ───────────────────
+        // KST 현재 시각을 HHMM 정수로 비교 (예: 15:21 → 1521)
+        const nowKst = new Date();
+        // getKstDate() 는 날짜만 반환 → 시/분은 직접 계산 (KST = UTC+9)
+        const kstHour   = (nowKst.getUTCHours() + 9) % 24;
+        const kstMinute = nowKst.getUTCMinutes();
+        const kstHHMM   = kstHour * 100 + kstMinute;
+
+        const isAfterSimultaneousAuction = kstHHMM >= 1520; // 15:20 동시호가 돌입 기준
+
+        let trdeType: string;
+        let orderPrice: number;
+        let orderTypeLabel: string;
+
+        if (isAfterSimultaneousAuction) {
+            // 15:20 이후: 지정가(00), 현재가 × 1.03 (상한가 방향, 호가 단위 올림)
+            trdeType = '00';
+            const rawPrice = Math.round(currentPrice * 1.03);
+            // 호가 단위 올림: calculateOrderPrice의 내부 tick 로직 활용
+            // rawPrice를 tick 단위로 정렬: rawPrice - (rawPrice % tickSize) + tickSize
+            const { getTickSize: getTick } = await import('../utils/tickSize');
+            const tick = getTick(rawPrice);
+            orderPrice = rawPrice % tick === 0 ? rawPrice : rawPrice + (tick - (rawPrice % tick));
+            orderTypeLabel = `지정가(동시호가 +3%) ${orderPrice.toLocaleString()}원`;
+        } else {
+            // 15:20 이전: 조건부 지정가(05), 현재가 + 1틱
+            trdeType = '05';
+            orderPrice = calculateOrderPrice(currentPrice, 1);
+            orderTypeLabel = `조건부 지정가 ${orderPrice.toLocaleString()}원 (+1틱)`;
+        }
+
+        // 2. 수량 계산
         const quantity = Math.floor(strategy.buy_amount_per_trade / orderPrice);
 
         if (quantity <= 0) {
@@ -182,6 +226,7 @@ export class LiveTradeExecutionService {
             this.logEvent('ERROR', stockCode, `수량 계산 0. 매수금액(${strategy.buy_amount_per_trade.toLocaleString()}) < 주가(${currentPrice.toLocaleString()})`);
             this.ledger.createTicket({
                 stock_code: stockCode,
+                stock_name: stockName,
                 entry_date: getKstDate(),
                 entry_price: orderPrice,
                 quantity: 0,
@@ -195,35 +240,100 @@ export class LiveTradeExecutionService {
             return;
         }
 
+        // 3. 주문 전송 직전 로그 (BUY_SEND)
+        this.logEvent(
+            'BUY_SEND',
+            stockCode,
+            `매수 주문 전송 시작 | ${orderTypeLabel} × ${quantity}주 | 전략: ${strategyCategory} | 시각: ${kstHour.toString().padStart(2,'0')}:${kstMinute.toString().padStart(2,'0')}`
+        );
+        console.log(`[LiveTrade] Sending BUY order for ${stockName} (${stockCode}): ${quantity} shares @ ${orderPrice} trde_tp=${trdeType}`);
+
         try {
-            // 2. 키움 API 매수 주문 전송 (trde_tp: '05' 조건부 지정가)
-            console.log(`[LiveTrade] Sending BUY order for ${stockName} (${stockCode}): ${quantity} shares @ ${orderPrice} (Condition Limit)`);
-            await this.kiwoom.sendBuyOrder(
+            // 4. 키움 API 매수 주문 전송
+            const apiResult = await this.kiwoom.sendBuyOrder(
                 account,
                 stockCode,
                 quantity,
                 orderPrice,
-                '05' // 조건부 지정가
+                trdeType
             );
 
-            // 3. 주문 전송 즉시 티켓 생성 (ACTIVE) — entry_date는 KST 기준
-            this.ledger.createTicket({
-                stock_code: stockCode,
-                entry_date: getKstDate(),
-                entry_price: orderPrice,
-                quantity: quantity,
-                strategy_category: strategyCategory,
-                target_exit_date: targetExitDate,
-                status: 'ACTIVE'
-            });
+            // 5. API 응답 파싱
+            const ordNo   = String(apiResult?.ord_no  || apiResult?.odno     || apiResult?.order_no || '');
+            const rspCd   = String(apiResult?.rsp_cd  || apiResult?.rsp_msg1 || '');
+            const rspMsg  = String(apiResult?.rsp_msg || apiResult?.msg       || apiResult?.msg1     || '');
+            const isSuccess = rspCd === '' || rspCd === '00000' || rspCd === '0';
+            const apiResponseStr = JSON.stringify(apiResult || {}).substring(0, 512);
 
-            this.logEvent('BUY', stockCode, `조건부 지정가 매수 주문 전송 완료 (${quantity}주 @ ${orderPrice})`);
-            this.telegram.sendMessage(`📈 **[실전 자동매수 발동]**\n- 종목: ${stockName}\n- 가격: ${orderPrice.toLocaleString()}원 (+1틱)\n- 수량: ${quantity}주\n- 전략: ${strategyCategory}\n- 매도목표일: ${targetExitDate}`);
+            if (isSuccess) {
+                // 6. 접수 성공: 티켓 생성 → order_no 연결
+                const ticketId = this.ledger.createTicket({
+                    stock_code: stockCode,
+                    stock_name: stockName,
+                    entry_date: getKstDate(),
+                    entry_price: orderPrice,
+                    quantity: quantity,
+                    strategy_category: strategyCategory,
+                    target_exit_date: targetExitDate,
+                    status: 'ACTIVE',
+                    order_no: ordNo
+                });
+
+                // 티켓에 order_no 별도 업데이트 (createTicket 반환 ticketId 활용)
+                if (ordNo) {
+                    this.ledger.updateOrderNo(ticketId, ordNo);
+                }
+
+                this.logEvent(
+                    'BUY_ACK',
+                    stockCode,
+                    `키움 접수 성공 | ord_no: ${ordNo || '(없음)'} | rsp_cd: ${rspCd} | msg: ${rspMsg || '정상처리'}`,
+                    { order_no: ordNo, rsp_cd: rspCd, api_response: apiResponseStr }
+                );
+                this.telegram.sendMessage(
+                    `📈 **[실전 자동매수 발동]**\n` +
+                    `- 종목: ${stockName}\n` +
+                    `- 주문유형: ${isAfterSimultaneousAuction ? '지정가(동시호가 +3%)' : '조건부 지정가(+1틱)'}\n` +
+                    `- 가격: ${orderPrice.toLocaleString()}원\n` +
+                    `- 수량: ${quantity}주\n` +
+                    `- 전략: ${strategyCategory}\n` +
+                    `- 주문번호: ${ordNo || '(미수신)'}\n` +
+                    `- 매도목표일: ${targetExitDate}`
+                );
+            } else {
+                // 7. 접수 거부: FAILED 티켓 생성
+                this.ledger.createTicket({
+                    stock_code: stockCode,
+                    stock_name: stockName,
+                    entry_date: getKstDate(),
+                    entry_price: orderPrice,
+                    quantity: quantity,
+                    strategy_category: strategyCategory,
+                    target_exit_date: targetExitDate,
+                    status: 'FAILED',
+                    fail_reason: `키움 접수 거부: rsp_cd=${rspCd}, msg=${rspMsg}`
+                });
+                this.logEvent(
+                    'BUY_REJECT',
+                    stockCode,
+                    `키움 접수 거부 | rsp_cd: ${rspCd} | msg: ${rspMsg}`,
+                    { order_no: '', rsp_cd: rspCd, api_response: apiResponseStr }
+                );
+                this.emitError('매수 주문', `${stockName}(${stockCode}) 매수 접수 거부`, `rsp_cd=${rspCd}, msg=${rspMsg}`);
+                this.telegram.sendMessage(
+                    `🚨 **[실전 자동매수 거부]**\n` +
+                    `- 종목: ${stockName}\n` +
+                    `- 오류코드: ${rspCd}\n` +
+                    `- 메시지: ${rspMsg}`
+                );
+            }
         } catch (error: any) {
             console.error(`[LiveTrade] Failed to execute buy for ${stockName}:`, error);
-            this.emitError('매수 주문', `${stockName}(${stockCode}) 매수 주문 실패`, error?.response?.data ? JSON.stringify(error.response.data) : error.message);
+            const errDetail = error?.response?.data ? JSON.stringify(error.response.data) : error.message;
+            this.emitError('매수 주문', `${stockName}(${stockCode}) 매수 주문 실패`, errDetail);
             this.ledger.createTicket({
                 stock_code: stockCode,
+                stock_name: stockName,
                 entry_date: getKstDate(),
                 entry_price: orderPrice,
                 quantity: quantity,
@@ -232,6 +342,12 @@ export class LiveTradeExecutionService {
                 status: 'FAILED',
                 fail_reason: `주문 전송 오류: ${error.message}`
             });
+            this.logEvent(
+                'ERROR',
+                stockCode,
+                `매수 주문 HTTP 예외: ${error.message}`,
+                { api_response: errDetail.substring(0, 512) }
+            );
             this.telegram.sendMessage(`🚨 **[실전 자동매수 실패]**\n- 종목: ${stockName}\n- 에러: ${error.message}`);
         } finally {
             // Lock 해제 — 성공/실패 모두 해제
@@ -355,13 +471,55 @@ export class LiveTradeExecutionService {
         await this._executeSell(ticket, '05', '최대 보유일 도달 (기간 청산)', account);
     }
 
+    /**
+     * 추적 모드 주기 변경 (10초 / 5분) 및 타이머 재시작
+     */
+    private setChaseInterval(ms: number) {
+        if (this.chaseIntervalMs === ms && this.unexecutedChasingTimer !== null) return;
+        this.chaseIntervalMs = ms;
+        this.startUnexecutedSellChasing();
+    }
+
+    /**
+     * [Event-Driven] 웹소켓 실시간 가격 수신 시 목표가 도달 즉각 매도 검사
+     */
+    private async onPriceUpdate(data: { code: string; price: number }) {
+        if (this.isKillSwitchActive()) return;
+
+        const activeTickets = this.ledger.getActiveTickets();
+        const tickets = activeTickets.filter(t => t.stock_code === data.code);
+        if (tickets.length === 0) return;
+
+        const { StrategyProfileService } = await import('./StrategyProfileService');
+        const profileSvc = StrategyProfileService.getInstance();
+
+        for (const ticket of tickets) {
+            if (this.sellingInProgress.has(ticket.ticket_id)) continue;
+            if (ticket.entry_price <= 0) continue;
+
+            const returnPct = ((data.price - ticket.entry_price) / ticket.entry_price) * 100;
+
+            const strategyConfig = this.ledger.getActiveStrategies().find(s => s.strategy_category === ticket.strategy_category);
+            const targetProfit = strategyConfig?.target_profit_rate > 0
+                ? strategyConfig.target_profit_rate
+                : profileSvc.getProfile(ticket.strategy_category).hardTakeProfit;
+
+            if (targetProfit > 0 && returnPct >= targetProfit) {
+                console.log(`[LiveTrade] 실시간 익절 도달 (WS): ${ticket.stock_code} (${returnPct.toFixed(2)}% >= ${targetProfit}%)`);
+                await this.executeTakeProfitSell(ticket);
+                // 매도 주문 직후 추적 모드 10초로 전환
+                this.setChaseInterval(10 * 1000);
+            }
+        }
+    }
+
     // ───────────────────────────────────────────────────────────────────────────
     //  장중 모니터링 루프
     // ───────────────────────────────────────────────────────────────────────────
 
     /**
-     * 익절 매도(Type A) 모니터링 루프 (1분 단위 크론 호출)
-     * isTakeProfitRunning Lock으로 크론 중복 실행 방지
+     * 익절 매도(Type A) 모니터링 폴백 로직 (크론 호출)
+     * 웹소켓 누락 대비용 당일 OHLCV 고가 체크
      */
     public async monitorTakeProfit(): Promise<void> {
         // [Guard] 이전 실행이 아직 완료되지 않으면 건너뜀
@@ -379,12 +537,6 @@ export class LiveTradeExecutionService {
         }
 
         try {
-            // 1. HTS 잔고 조회 (현재가 포함)
-            const holdingsRes = await this.kiwoom.getHoldings(account);
-            const rawHoldings = this.parseHoldingsList(holdingsRes);
-
-            if (rawHoldings.length === 0) return;
-
             // 2. ACTIVE 상태 티켓만 조회 (SELLING은 이미 매도 중이므로 제외)
             const activeTickets = this.ledger.getActiveTickets();
             if (activeTickets.length === 0) return;
@@ -395,31 +547,28 @@ export class LiveTradeExecutionService {
             for (const ticket of activeTickets) {
                 // 이미 매도 Lock이 걸린 티켓이면 건너뜀
                 if (this.sellingInProgress.has(ticket.ticket_id)) continue;
+                if (ticket.entry_price <= 0) continue;
 
-                const holding = rawHoldings.find((h: any) => {
-                    const sc = (h.stk_cd || h.pdno || h.iscd || '').trim().replace(/^A/, '');
-                    return sc === ticket.stock_code;
-                });
+                // 틱 수신 장애 대비 당일 최고가(High) 조회 
+                const candles = await this.kiwoom.getOhlcvDaily(ticket.stock_code, 1);
+                if (candles.length === 0) continue;
+                
+                const todayCandle = candles[candles.length - 1];
+                const highPrice = todayCandle.high;
+                if (highPrice <= 0) continue;
 
-                if (!holding) continue;
-
-                // 잔고 응답에서 현재가 추출
-                const currentPrice = parseInt(holding.prpr || holding.cur_prc || holding.stck_prpr || '0', 10);
-                if (currentPrice <= 0 || ticket.entry_price <= 0) continue;
-
-                const returnPct = ((currentPrice - ticket.entry_price) / ticket.entry_price) * 100;
+                const returnPct = ((highPrice - ticket.entry_price) / ticket.entry_price) * 100;
 
                 // 전략 프로파일에서 목표 수익률 확인
-                // M-1: live_trade_strategies.target_profit_rate 우선, 없으면 StrategyProfile 폴백
                 const strategyConfig = this.ledger.getActiveStrategies().find(s => s.strategy_category === ticket.strategy_category);
                 const targetProfit = strategyConfig?.target_profit_rate > 0
                     ? strategyConfig.target_profit_rate
                     : profileSvc.getProfile(ticket.strategy_category).hardTakeProfit;
 
                 if (targetProfit > 0 && returnPct >= targetProfit) {
-                    console.log(`[LiveTrade] 익절 조건 도달: ${ticket.stock_code} (${returnPct.toFixed(2)}% >= ${targetProfit}%)`);
-                    // executeTakeProfitSell 내부에서 Lock + SELLING 상태 즉시 반영
+                    console.log(`[LiveTrade] Fail-Safe 익절 도달 (OHLCV 당일 고점): ${ticket.stock_code} (고가 ${highPrice}원, ${returnPct.toFixed(2)}% >= ${targetProfit}%)`);
                     await this.executeTakeProfitSell(ticket);
+                    this.setChaseInterval(10 * 1000);
                     await new Promise(r => setTimeout(r, 500)); // 연속 주문 간 짧은 딜레이
                 }
             }
@@ -504,14 +653,15 @@ export class LiveTradeExecutionService {
     }
 
     /**
-     * 15:00 ~ 15:20 미체결 타임스탑 매도 추적 정정 시작 (10초 주기)
+     * 동적 미체결 타임스탑 매도 추적 정정 시작 (기본 5분 / 추적 시 10초)
      */
     public startUnexecutedSellChasing(): void {
         if (this.unexecutedChasingTimer) {
             clearInterval(this.unexecutedChasingTimer);
         }
-        this.logEvent('INFO', '', '[LiveTrade] 미체결 매도 추적기 시작 (10초 주기)');
-        console.log('[LiveTrade] 미체결 매도 추적기 시작 (15:00 ~ 15:20 구간)');
+        
+        const mode = this.chaseIntervalMs === 10 * 1000 ? 'Chase Mode (10초)' : 'Idle Mode (5분)';
+        console.log(`[LiveTrade] 미체결 매도 추적기 시작 - ${mode}`);
 
         this.unexecutedChasingTimer = setInterval(async () => {
             if (this.isChasingRunning) return;
@@ -523,7 +673,7 @@ export class LiveTradeExecutionService {
             } finally {
                 this.isChasingRunning = false;
             }
-        }, 10 * 1000); // 10초 주기
+        }, this.chaseIntervalMs);
     }
 
     /**
@@ -568,7 +718,22 @@ export class LiveTradeExecutionService {
             const unexecRes = await this.kiwoom.getUnexecutedOrdersKt00007(account, { sell_tp: '1' });
             const unexecList = unexecRes?.oso || [];
 
-            if (unexecList.length === 0) return;
+            if (unexecList.length === 0) {
+                // 미체결 잔량이 없고 현재 10초 모드라면, 5분(Idle) 모드로 다운그레이드
+                if (this.chaseIntervalMs === 10 * 1000) {
+                    console.log('[LiveTrade] 미체결 잔량 0건 확인. 추적 주기를 5분(Idle Mode)으로 하향 조정.');
+                    this.setChaseInterval(5 * 60 * 1000);
+                }
+                return;
+            }
+
+            // 미체결 잔량이 발견되었는데 5분(Idle) 모드라면 10초(Chase) 모드로 업그레이드
+            if (this.chaseIntervalMs !== 10 * 1000) {
+                console.log('[LiveTrade] 미체결 잔량 발견. 추적 주기를 10초(Chase Mode)로 상향 조정.');
+                this.setChaseInterval(10 * 1000);
+                // 모드 상향 조정만 하고 이번 턴은 즉시 반환 (다음 10초 후부터 본격 처리)
+                return;
+            }
 
             // 우리 시스템이 관리 중인 종목만 필터
             const managedTickets = this.ledger.getActiveAndSellingTickets();

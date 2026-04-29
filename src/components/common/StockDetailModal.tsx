@@ -14,167 +14,11 @@ interface StockDetailModalProps {
     onClose: () => void;
 }
 
-interface GemmaReport {
-    id: number;
-    date: string;
-    stock_code: string;
-    stock_name: string;
-    agent_source: string;
-    market_theme_link: string | null;
-    theme_durability: string | null;
-    catalyst_summary: string | null;
-    risk_factors: string | null;
-    upside_probability: string | null;
-    buy_score: number;
-    preliminary_decision: string | null;
-    reasoning: string | null;
-    injected_context_json: string | null;
-    system_prompt: string | null;
-    raw_ai_response: string | null;
-    created_at: string;
-}
-
-interface StockThemeTag {
-    tag_name: string;
-    tag_type: string;
-    added_date: string;
-    change_rate: number;
-}
-
-// 로데이터 복사 버튼 컴포넌트
-function CopyRawDataButton({ report }: { report: GemmaReport }) {
-    const [copied, setCopied] = useState(false);
-
-    const handleCopy = useCallback(async () => {
-        const text = [
-            `=== TRACK_B_GEMMA 분석 로데이터 ===`,
-            `날짜: ${report.date} | 종목: ${report.stock_name} (${report.stock_code}) | 저장: ${report.created_at}`,
-            ``,
-            `[파싱된 결과]`,
-            `buy_score: ${report.buy_score} / preliminary_decision: ${report.preliminary_decision}`,
-            `market_theme_link: ${report.market_theme_link ?? '없음'}`,
-            `theme_durability: ${report.theme_durability ?? '없음'}`,
-            `catalyst_summary: ${report.catalyst_summary ?? '없음'}`,
-            `risk_factors: ${report.risk_factors ?? '없음'}`,
-            `upside_probability: ${report.upside_probability ?? '없음'}`,
-            `reasoning: ${report.reasoning ?? '없음'}`,
-            ``,
-            `[주입된 컨텍스트 원문]`,
-            report.injected_context_json ?? '(없음)',
-            ``,
-            `[사용된 시스템 프롬프트]`,
-            report.system_prompt ?? '(없음)',
-            ``,
-            `[AI 응답 원문 (파싱 전)]`,
-            report.raw_ai_response ?? '(없음)',
-        ].join('\n');
-
-        try {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2500);
-        } catch {
-            // fallback
-        }
-    }, [report]);
-
-    return (
-        <button
-            onClick={handleCopy}
-            className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-md border transition-all duration-200
-                       text-violet-400 border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/15 hover:border-violet-500/50"
-            title="이 분석에 사용된 컨텍스트, 프롬프트, AI 응답 원문을 클립보드에 복사합니다"
-        >
-            {copied ? <ClipboardCheck size={12} className="text-green-400" /> : <Clipboard size={12} />}
-            {copied ? '복사됨!' : '로데이터 복사'}
-        </button>
-    );
-}
-
-// Gemma 분석 카드 컴포넌트
-function GemmaReportCard({ report }: { report: GemmaReport }) {
-    const [expanded, setExpanded] = useState(false);
-
-    const decisionColor = report.preliminary_decision === 'BUY'
-        ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
-        : 'text-amber-400 bg-amber-500/10 border-amber-500/30';
-
-    const probColor = report.upside_probability === 'HIGH'
-        ? 'text-emerald-400'
-        : report.upside_probability === 'MEDIUM'
-        ? 'text-yellow-400'
-        : 'text-red-400';
-
-    return (
-        <div className="border border-violet-500/20 bg-violet-500/5 rounded-lg overflow-hidden">
-            {/* 카드 헤더 */}
-            <div className="flex items-center justify-between px-3 py-2.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[11px] font-mono text-muted-foreground">{report.date}</span>
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${decisionColor}`}>
-                        {report.preliminary_decision ?? 'N/A'}
-                    </span>
-                    <span className="text-[11px] font-bold text-muted-foreground">
-                        점수: <span className="text-violet-300">{report.buy_score}</span>
-                    </span>
-                    <span className={`text-[11px] font-bold ${probColor}`}>
-                        {report.upside_probability ?? 'N/A'}
-                    </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                    <CopyRawDataButton report={report} />
-                    <button
-                        onClick={() => setExpanded(e => !e)}
-                        className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                        {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
-                </div>
-            </div>
-
-            {/* 축약 요약 항상 표시 */}
-            {report.catalyst_summary && (
-                <div className="px-3 pb-2 text-[12px] text-muted-foreground">
-                    💡 {report.catalyst_summary.slice(0, 120)}{report.catalyst_summary.length > 120 ? '...' : ''}
-                </div>
-            )}
-
-            {/* 펼치면 상세 표시 */}
-            {expanded && (
-                <div className="border-t border-violet-500/10 px-3 py-3 space-y-2 bg-background/30">
-                    {report.market_theme_link && (
-                        <div>
-                            <div className="text-[10px] font-bold text-violet-400 uppercase tracking-wider mb-0.5">시장 테마 연관</div>
-                            <div className="text-[12px] text-foreground">{report.market_theme_link}</div>
-                        </div>
-                    )}
-                    {report.theme_durability && (
-                        <div>
-                            <div className="text-[10px] font-bold text-violet-400 uppercase tracking-wider mb-0.5">테마 지속성</div>
-                            <div className="text-[12px] text-foreground">{report.theme_durability}</div>
-                        </div>
-                    )}
-                    {report.risk_factors && (
-                        <div>
-                            <div className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-0.5">리스크</div>
-                            <div className="text-[12px] text-foreground/80">{report.risk_factors}</div>
-                        </div>
-                    )}
-                    {report.reasoning && (
-                        <div>
-                            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">종합 근거</div>
-                            <div className="text-[12px] text-foreground/80 italic">{report.reasoning}</div>
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
-}
+// (Moved Gemma UI components to StockAiReport.tsx)
 
 export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIssues, aiReason, aiRisk, onClose }: StockDetailModalProps) {
-    const [gemmaReports, setGemmaReports] = useState<GemmaReport[]>([]);
-    const [stockTags, setStockTags] = useState<StockThemeTag[]>([]);
+    const [gemmaReports, setGemmaReports] = useState<any[]>([]);
+    const [stockTags, setStockTags] = useState<any[]>([]);
     const [stockNarrative, setStockNarrative] = useState<{ narrative: string, updated_at: string } | null>(null);
     const [showAllIssues, setShowAllIssues] = useState(false);
 
@@ -438,25 +282,8 @@ export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIs
                                 </div>
                             </div>
 
-                            {/* Gemma 4 리서치 분석 이력 (영구 타임라인) */}
-                            {gemmaReports.length > 0 && (
-                                <div className="space-y-3 mt-6">
-                                    <h4 className="text-[11px] font-bold text-violet-400 flex items-center gap-1.5 uppercase tracking-wider">
-                                        <Bot size={13} /> Gemma 4 리서치 분석 이력
-                                        <span className="ml-auto text-[10px] font-normal text-muted-foreground normal-case">
-                                            총 {gemmaReports.length}건 — 각 카드 우측 [로데이터 복사]로 검증 가능
-                                        </span>
-                                    </h4>
-                                    <div className="space-y-2">
-                                        {gemmaReports.map(report => (
-                                            <GemmaReportCard key={report.id} report={report} />
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* AI Report (기존 종목 AI 리포트) */}
-                            <StockAiReport symbol={stockCode} name={stockName} hideTitle={true} />
+                            {/* AI Report (기존 종목 AI 리포트 및 통합 타임라인) */}
+                            <StockAiReport symbol={stockCode} name={stockName} hideTitle={true} gemmaReports={gemmaReports} />
                         </div>
                     </div>
                 </div>

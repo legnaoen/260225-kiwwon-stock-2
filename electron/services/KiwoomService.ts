@@ -972,6 +972,78 @@ export class KiwoomService {
     }
 
     /**
+     * 당일 매수 체결내역 조회 (kt00007, qry_tp='4')
+     * - Reconciliation 시 실제 체결가(cntr_uv)와 체결수량(cntr_qty) 확인용
+     * - sell_tp='2'(매수), qry_tp='4'(체결내역만)
+     */
+    public async getDailyBuyExecutions(
+        accountNo: string,
+        options: { stk_cd?: string } = {}
+    ): Promise<Array<{
+        ord_no: string;     // 주문번호
+        stk_cd: string;     // 종목코드
+        stk_nm: string;     // 종목명
+        cntr_qty: number;   // 체결수량
+        cntr_uv: number;    // 체결단가
+        ord_qty: number;    // 주문수량
+        ord_uv: number;     // 주문단가
+        sell_tp: string;    // 매도수구분 ('1':매도, '2':매수)
+    }>> {
+        return this.makeApiRequestWithRetry(async (token) => {
+            try {
+                const url = `/api/dostk/acnt`;
+                const headers = {
+                    'Content-Type': 'application/json;charset=UTF-8',
+                    'authorization': `Bearer ${token}`,
+                    'api-id': 'kt00007',
+                    'cont-yn': 'N',
+                    'next-key': ''
+                };
+                const body = {
+                    account_no: accountNo,
+                    ord_dt: '',          // 오늘 (공백)
+                    qry_tp: '4',         // 4: 체결내역만
+                    stk_bond_tp: '1',    // 1: 주식
+                    sell_tp: '2',        // 2: 매수만
+                    stk_cd: options.stk_cd || '',
+                    fr_ord_no: '',
+                    dmst_stex_tp: '%'
+                };
+
+                const response = await this.kiwoomAxios.post(url, body, { headers });
+
+                let rawList: any[] = [];
+                if (response.data?.acnt_ord_cntr_prps_dtl) {
+                    rawList = Array.isArray(response.data.acnt_ord_cntr_prps_dtl)
+                        ? response.data.acnt_ord_cntr_prps_dtl
+                        : [response.data.acnt_ord_cntr_prps_dtl];
+                } else if (response.data?.Body) {
+                    rawList = Array.isArray(response.data.Body) ? response.data.Body : [response.data.Body];
+                } else if (response.data?.list) {
+                    rawList = response.data.list;
+                }
+
+                const executions = rawList.map((item: any) => ({
+                    ord_no:   String(item.ord_no   || item.order_no   || ''),
+                    stk_cd:   String(item.stk_cd   || item.pdno       || '').replace(/^A/, ''),
+                    stk_nm:   String(item.stk_nm   || item.prdt_name  || ''),
+                    cntr_qty: parseInt(item.cntr_qty || item.tot_ccld_qty || '0', 10),
+                    cntr_uv:  parseInt(item.cntr_uv  || item.avg_prvs  || '0', 10),
+                    ord_qty:  parseInt(item.ord_qty  || '0', 10),
+                    ord_uv:   parseInt(item.ord_uv   || '0', 10),
+                    sell_tp:  String(item.sell_tp  || '2'),
+                }));
+
+                console.log(`[KiwoomService] 당일 매수 체결내역 (kt00007, qry_tp=4): ${executions.length}건`);
+                return executions;
+            } catch (error: any) {
+                console.error(`[KiwoomService] 당일 매수 체결내역 조회 에러:`, error.response?.data || error.message);
+                throw error;
+            }
+        });
+    }
+
+    /**
      * 예상체결등락률상위 조회 (ka10029) - 장전 갭상승 종목 포착용
      */
     public async getGapUpStocks() {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Target, TrendingUp, AlertTriangle, Clock, Info, CheckCircle2, BarChart2 } from 'lucide-react';
+import { Target, TrendingUp, AlertTriangle, Clock, Info, CheckCircle2, BarChart2, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { StockDetailModal } from '../common/StockDetailModal';
 import { twMerge } from 'tailwind-merge';
@@ -49,6 +49,27 @@ export const ThemeMockTradingTab: React.FC = () => {
             }
         } catch (e) {
             console.error('주가 갱신 중 에러:', e);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleDeleteGroup = async (date: string) => {
+        if (!confirm(`해당 날짜(${date})의 모의매매 추천 종목을 모두 삭제하시겠습니까?`)) return;
+        setIsLoading(true);
+        try {
+            const api = window.electronAPI as any;
+            if (api.deleteThemeMockTradingPicksByDate) {
+                const res = await api.deleteThemeMockTradingPicksByDate(date);
+                if (res.success) {
+                    const reloadRes = await api.getThemeMockTradingPicks();
+                    if (reloadRes.success) setMockData(reloadRes.data || []);
+                } else {
+                    alert(`삭제 실패: ${res.error}`);
+                }
+            }
+        } catch (e: any) {
+            alert(`오류 발생: ${e.message}`);
         } finally {
             setIsLoading(false);
         }
@@ -151,9 +172,16 @@ export const ThemeMockTradingTab: React.FC = () => {
                 <div className="flex flex-col">
                     {mockData.map((group, idx) => (
                         <div key={idx} className="flex flex-col">
-                            {/* Group Header (Only Date) */}
-                            <div className="px-4 py-2 bg-muted/40 border-b border-border/40 flex items-center gap-2 sticky top-0 z-10">
+                            {/* Group Header (Only Date + Delete Button) */}
+                            <div className="px-4 py-2 bg-muted/40 border-b border-border/40 flex items-center justify-between sticky top-0 z-10">
                                 <span className="text-xs font-bold text-blue-500 flex items-center gap-1.5"><Clock size={13} /> {group.date}</span>
+                                <button 
+                                    onClick={() => handleDeleteGroup(group.date)}
+                                    className="text-muted-foreground hover:text-red-500 p-1 rounded-md hover:bg-red-500/10 transition-colors"
+                                    title={`${group.date} 모의매매 기록 일괄 삭제`}
+                                >
+                                    <Trash2 size={14} />
+                                </button>
                             </div>
 
                             {/* Group Items */}

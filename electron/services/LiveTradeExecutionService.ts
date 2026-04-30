@@ -33,6 +33,10 @@ export class LiveTradeExecutionService {
     private isChasingRunning = false;
     private chaseIntervalMs: number = 5 * 60 * 1000; // 기본 5분
 
+    // ─── 인메모리 캐시 ────────────────────────────────────────────────────────
+    private cachedActiveTickets: LiveTradeTicket[] = [];
+    private lastCacheTime: number = 0;
+
     private constructor() {
         eventBus.on(SystemEvent.PRICE_UPDATE, this.onPriceUpdate.bind(this));
     }
@@ -481,12 +485,25 @@ export class LiveTradeExecutionService {
     }
 
     /**
+     * 캐시된 ACTIVE 티켓 목록 반환 (웹소켓 틱마다 DB 쿼리 방지)
+     * 5초에 한 번만 DB와 동기화
+     */
+    private getCachedActiveTickets(): LiveTradeTicket[] {
+        const now = Date.now();
+        if (now - this.lastCacheTime > 5000) {
+            this.cachedActiveTickets = this.ledger.getActiveTickets();
+            this.lastCacheTime = now;
+        }
+        return this.cachedActiveTickets;
+    }
+
+    /**
      * [Event-Driven] 웹소켓 실시간 가격 수신 시 목표가 도달 즉각 매도 검사
      */
     private async onPriceUpdate(data: { code: string; price: number }) {
         if (this.isKillSwitchActive()) return;
 
-        const activeTickets = this.ledger.getActiveTickets();
+        const activeTickets = this.getCachedActiveTickets();
         const tickets = activeTickets.filter(t => t.stock_code === data.code);
         if (tickets.length === 0) return;
 
@@ -540,6 +557,10 @@ export class LiveTradeExecutionService {
             // 2. ACTIVE 상태 티켓만 조회 (SELLING은 이미 매도 중이므로 제외)
             const activeTickets = this.ledger.getActiveTickets();
             if (activeTickets.length === 0) return;
+
+            // [백그라운드 필수 구독] 실전 매매 진행 중인 종목은 UI 무관하게 웹소켓 상시 구독 보장
+            const activeSymbols = activeTickets.map(t => t.stock_code);
+            this.kiwoom.wsRegister(activeSymbols);
 
             const { StrategyProfileService } = await import('./StrategyProfileService');
             const profileSvc = StrategyProfileService.getInstance();

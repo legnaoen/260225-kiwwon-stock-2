@@ -904,6 +904,15 @@ ${pm2MasterGuideline}
                                         // 도전자를 HELD로 승급
                                         this.db.upsertPortfolioWatchlist({ ...winner, status: 'HELD' }, true);
                                         this.db.logPortfolioEvent(winner.stock_code, winner.stock_name, 'BUY_UPGRADED', 'WATCHING', 'HELD', `PM3 재심사 교체 승급: ${pm3Result.reason}`, winner.current_price || 0);
+                                        // ✅ [PM3] 교체 승급 시 trade_history OPEN 레코드 생성
+                                        this.db.openTradeRecord({
+                                            stock_code: winner.stock_code,
+                                            stock_name: winner.stock_name,
+                                            entry_price: winner.current_price || winner.entry_price || 0,
+                                            entry_reason: `PM3 교체 승급: ${pm3Result.reason}`,
+                                            strategy: winner.strategy || 'MOMENTUM',
+                                            analysts_json: winner.analysts_json || []
+                                        });
                                         console.log(`[PM3] ✅ REPLACE 확정: [${candidate.stock_name}] → [${winner.stock_name}] 교체 완료`);
                                     }
                                     try {

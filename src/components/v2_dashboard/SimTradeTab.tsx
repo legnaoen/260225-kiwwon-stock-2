@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { TrendingUp, RefreshCw, Target, BarChart2, Award, Clock, ArrowUpRight, ArrowDownRight, Minus, Trash2, Settings, X, Save, MoreHorizontal, Database } from 'lucide-react'
+import { TrendingUp, RefreshCw, Target, BarChart2, Award, Clock, ArrowUpRight, ArrowDownRight, Minus, Trash2, Settings, X, Save, MoreHorizontal, Database, Play, Zap } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import { StockDetailModal } from '../common/StockDetailModal'
@@ -504,6 +504,43 @@ export const SimTradeTab: React.FC = () => {
                                         >
                                             <Database className="w-3.5 h-3.5" />
                                             OHLCV 전체 수동 수집
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                setIsMoreMenuOpen(false);
+                                                if (!confirm('정말 장 마감 후속 파이프라인(진입가 확정, 채점, 인큐베이터 등)을 지금 실행하시겠습니까?')) return;
+                                                setLoading(true);
+                                                try {
+                                                    const res = await (window as any).electronAPI.resumePostMarketPipeline();
+                                                    if (res.success) alert('수동 복구 파이프라인이 완료되었습니다.');
+                                                    else alert('오류: ' + res.error);
+                                                    await fetchPicks();
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-muted transition-colors flex items-center gap-2 text-rose-400 border-b border-border/30"
+                                        >
+                                            <Play className="w-3.5 h-3.5" />
+                                            ▶ 장 마감 후속 파이프라인 일괄 실행
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                setIsMoreMenuOpen(false);
+                                                if (!confirm('⚠️ 실전 매매입니다! 오늘 추천된 종목들을 지금 즉시 매수 실행하시겠습니까? (미체결 방지를 위해 시장가 또는 호가 조작이 필요할 수 있습니다)')) return;
+                                                setLoading(true);
+                                                try {
+                                                    const res = await (window as any).electronAPI.executeLiveTradesManual();
+                                                    if (res.success) alert(`매수 연동 완료: ${res.count}건\n상세 로그: ${res.log}`);
+                                                    else alert('매수 연동 실패: ' + res.error);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-muted transition-colors flex items-center gap-2 text-emerald-400 border-b border-border/30"
+                                        >
+                                            <Zap className="w-3.5 h-3.5" />
+                                            ⚡ 오늘 추천 종목 실전 매수 수동 발동
                                         </button>
                                         <button
                                             onClick={async () => {

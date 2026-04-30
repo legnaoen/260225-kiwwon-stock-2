@@ -513,6 +513,9 @@ export default function MarketAgentTab({ onNavigate }: { onNavigate?: (tabId: st
             unsubComplete()
             unsubPerf()
             if (unsubRt) unsubRt();
+            if (window.electronAPI?.wsUnregister) {
+                window.electronAPI.wsUnregister(['069500', '114800']).catch(e => console.error('WS Unregister:', e));
+            }
         }
     }, [decisionTab])
 

@@ -33,8 +33,6 @@ export function useGlobalSignalMonitor() {
 
                 const allSymbols = Array.from(new Set([...holdingSymbols]))
                 if (allSymbols.length > 0) {
-                    // Register for Real-time WS if not already
-                    window.electronAPI.wsRegister(allSymbols)
                     // Enqueue for 20-day MA calculation
                     enqueueSymbols(allSymbols)
                 }

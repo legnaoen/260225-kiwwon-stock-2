@@ -140,10 +140,9 @@ export default function Holdings() {
 
                 // Removed raw holdings[0] auto-selection to defer it to the sorted list useEffect
 
-                // Register for real-time and background signal check
+                // Enqueue for background signal check
                 const symbols = holdings.map((h: any) => h.code).filter((c: any) => !!c)
                 if (symbols.length > 0) {
-                    window.electronAPI.wsRegister(symbols)
                     enqueueSymbols(symbols)
                 }
 
@@ -161,14 +160,27 @@ export default function Holdings() {
         }
     }
 
-    // Real-time listener
+    // WebSocket subscription management (Depends on symbol list string, NOT full array)
+    useEffect(() => {
+        const symbols = data.holdings.map((h: any) => h.code).filter((c: any) => !!c)
+        if (symbols.length > 0 && window.electronAPI?.wsRegister) {
+            window.electronAPI.wsRegister(symbols)
+        }
+
+        return () => {
+            if (symbols.length > 0 && window.electronAPI?.wsUnregister) {
+                window.electronAPI.wsUnregister(symbols)
+            }
+        }
+    }, [data.holdings.map((h: any) => h.code).join(',')])
+
+    // Real-time listener (Depends on nothing, runs once)
     useEffect(() => {
         const cleanup = window.electronAPI.onRealTimeData((wsData: any) => {
             if (wsData.stk_cd) {
                 setData(prev => {
                     let hasChanged = false
                     const newHoldings = prev.holdings.map(item => {
-                        // Compare numeric codes to avoid issues with 'A' prefixes
                         const itemNumericCode = item.code.replace(/[^0-9]/g, '')
                         const wsNumericCode = wsData.stk_cd.replace(/[^0-9]/g, '')
 
@@ -176,8 +188,6 @@ export default function Holdings() {
                             const newPrice = wsData.cur_prc ? Math.abs(Number(wsData.cur_prc)) : item.price
                             if (newPrice !== item.price) {
                                 hasChanged = true
-                                // 수동 계산 폐기: 평가금액(value)과 수익률(profit)은 
-                                // 10초마다 도는 kt00018 백그라운드 API가 훨씬 더 정확하게 채워주므로 건드리지 않음.
                                 return { ...item, price: newPrice }
                             }
                         }
@@ -185,7 +195,6 @@ export default function Holdings() {
                     })
 
                     if (!hasChanged) return prev
-
                     return { ...prev, holdings: newHoldings }
                 })
             }

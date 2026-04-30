@@ -40,6 +40,11 @@ export class SchedulerService {
         return this.ohlcvCollectionStatus === 'SUCCESS';
     }
 
+    public setOhlcvCollectionStatus(status: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'FAILED') {
+        this.ohlcvCollectionStatus = status;
+        console.log(`[SchedulerService] OHLCV Collection Status updated to: ${status}`);
+    }
+
     private constructor() {
         this.initSchedules()
     }

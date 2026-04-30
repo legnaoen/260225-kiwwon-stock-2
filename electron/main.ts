@@ -1128,11 +1128,161 @@ ipcMain.handle('v2:force-refresh-sim-trade-prices', async () => {
 ipcMain.handle('v2:run-ohlcv-collection', async () => {
     try {
         const { MarketDataCollectorService } = await import('./services/v2_pipeline/MarketDataCollectorService');
+        const { SchedulerService } = await import('./services/SchedulerService');
+        SchedulerService.getInstance().setOhlcvCollectionStatus('RUNNING');
         const result = await MarketDataCollectorService.getInstance().runDailyCollection();
+        if (result.success) {
+            SchedulerService.getInstance().setOhlcvCollectionStatus('SUCCESS');
+        } else {
+            SchedulerService.getInstance().setOhlcvCollectionStatus('FAILED');
+        }
         return { success: true, result };
     } catch (error: any) {
         console.error('[MarketDataCollector] runDailyCollection error:', error);
+        const { SchedulerService } = await import('./services/SchedulerService');
+        SchedulerService.getInstance().setOhlcvCollectionStatus('FAILED');
         return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('v2:resume-post-market-pipeline', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const { TelegramService } = await import('./services/TelegramService');
+        const telegram = TelegramService.getInstance();
+        
+        telegram.sendMessage(`🚀 [수동 복구] 장 마감 후속 파이프라인 일괄 강제 실행 시작...`);
+        
+        // 1. 15:32 Entry price fix
+        console.log('[Manual Resume] 1. 진입가 최종 확정 (15:32)');
+        const rawDb = DatabaseService.getInstance().getDb();
+        const targetCodes = new Set<string>();
+        const pickTables = ['track_a_buy_picks', 'track_b_buy_picks', 'track_c_buy_picks', 'track_d_buy_picks', 'track_e_buy_picks'];
+        for (const table of pickTables) {
+            try {
+                const rows = rawDb.prepare(`SELECT stock_code FROM ${table} WHERE status IN ('PENDING', 'ACTIVE')`).all() as any[];
+                rows.forEach(r => targetCodes.add(r.stock_code));
+            } catch (_) {}
+        }
+        const codeList = Array.from(targetCodes);
+        if (codeList.length > 0) {
+            const { MarketDataCollectorService } = await import('./services/v2_pipeline/MarketDataCollectorService');
+            await MarketDataCollectorService.getInstance().refreshStocksClose(codeList);
+        }
+        const { TrackEBuyAgent } = await import('./services/v2_agents/TrackEBuyAgent');
+        const { TrackDBuyAgent } = await import('./services/v2_agents/TrackDBuyAgent');
+        const { TrackCBuyAgent } = await import('./services/v2_agents/TrackCBuyAgent');
+        const { TrackBBuyAgent } = await import('./services/v2_agents/TrackBBuyAgent');
+        const { TrackABuyAgent } = await import('./services/v2_agents/TrackABuyAgent');
+        TrackEBuyAgent.getInstance().updateEntryPrices();
+        TrackDBuyAgent.getInstance().updateEntryPrices();
+        TrackCBuyAgent.getInstance().updateEntryPrices();
+        TrackBBuyAgent.getInstance().updateEntryPrices();
+        TrackABuyAgent.getInstance().updateEntryPrices();
+
+        // 2. 15:35 Moonshot Tracker
+        console.log('[Manual Resume] 2. Moonshot Tracker (15:35)');
+        const { MoonshotTrackerAgent } = await import('./services/v2_agents/MoonshotTrackerAgent');
+        await MoonshotTrackerAgent.getInstance().runDailyReview();
+
+        // 3. 15:41 Portfolio Judge
+        console.log('[Manual Resume] 3. Portfolio Judge (15:41)');
+        const { PortfolioJudgeScheduler } = await import('./services/v2_pipeline/PortfolioJudgeScheduler');
+        await PortfolioJudgeScheduler.getInstance().runDailyJudgement();
+        TrackEBuyAgent.getInstance().scoreDailyPerformance();
+        TrackDBuyAgent.getInstance().scoreDailyPerformance();
+        TrackCBuyAgent.getInstance().scoreDailyPerformance();
+        TrackBBuyAgent.getInstance().scoreDailyPerformance();
+        TrackABuyAgent.getInstance().scoreDailyPerformance();
+
+        // 4. 15:43 Incubator Scan
+        console.log('[Manual Resume] 4. Incubator Scan (15:43)');
+        const { IncubatorScanEngine } = await import('./services/v2_agents/IncubatorScanEngine');
+        await IncubatorScanEngine.getInstance().runDailyScan();
+
+        telegram.sendMessage(`✅ [수동 복구] 장 마감 후속 파이프라인 일괄 강제 실행 완료`);
+        return { success: true };
+    } catch (e: any) {
+        console.error('[Manual Resume] Pipeline error:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('v2:execute-live-trades-manual', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');
+        const { LiveTradeExecutionService } = await import('./services/LiveTradeExecutionService');
+        const { TelegramService } = await import('./services/TelegramService');
+        const { getKstDate } = await import('./utils/DateUtils');
+
+        const db = DatabaseService.getInstance().getDb();
+        const strategies = LiveTradeLedgerService.getInstance().getStrategies();
+        const activeLiveStrategy = strategies.find((s: any) => s.is_active === 1);
+
+        if (!activeLiveStrategy) {
+            return { success: false, error: '활성화된 실전 매매 전략이 없습니다. (투자 내역 탭 확인)' };
+        }
+
+        const activeCategory = activeLiveStrategy.strategy_category;
+        const maxHoldDays = activeLiveStrategy.max_hold_days;
+
+        const CATEGORY_TO_PICK_TABLE: Record<string, string> = {
+            'TRUE_LEADER':             'track_a_buy_picks',
+            'EMERGING_STAR':           'track_b_buy_picks',
+            'PULLBACK_REBOUND':        'track_c_buy_picks',
+            'PULLBACK_DIP':            'track_c_buy_picks',
+            'INTRADAY_SURGE':          'track_d_buy_picks',
+            'SHORT_TERM_CONSOLIDATION':'track_e_buy_picks',
+        };
+
+        const pickTable = CATEGORY_TO_PICK_TABLE[activeCategory];
+        if (!pickTable) return { success: false, error: '알 수 없는 전략 카테고리입니다.' };
+
+        const today = getKstDate();
+        const todayPicks = db.prepare(`SELECT stock_code, stock_name, current_price, entry_price FROM ${pickTable} WHERE pick_date = ? AND category = ?`).all(today, activeCategory) as any[];
+
+        if (todayPicks.length === 0) {
+            return { success: false, error: '오늘 해당 카테고리(전략)에 추천된 종목이 없습니다.' };
+        }
+
+        const calcTargetExitDate = (fromDate: string, businessDays: number): string => {
+            const d = new Date(fromDate);
+            let added = 0;
+            while (added < businessDays) {
+                d.setDate(d.getDate() + 1);
+                const dow = d.getDay();
+                if (dow !== 0 && dow !== 6) added++;
+            }
+            return d.toISOString().split('T')[0];
+        };
+        const targetExitDate = calcTargetExitDate(today, maxHoldDays);
+
+        let liveTradeLog = `\n\n⚡ [실전 매매 수동 연동] 전략: ${activeCategory} | 목표일: ${targetExitDate}`;
+        let executedCount = 0;
+        
+        for (const pick of todayPicks) {
+            const ohlcvRow = db.prepare(`SELECT close FROM market_ohlcv_history WHERE stock_code = ? AND date = ?`).get(pick.stock_code, today) as any;
+            const currentPrice = ohlcvRow?.close ?? 0;
+
+            if (currentPrice <= 0) {
+                liveTradeLog += `\n  ⚠️ ${pick.stock_name}: OHLCV 현재가 없음 → 매수 스킵`;
+                continue;
+            }
+
+            try {
+                await LiveTradeExecutionService.getInstance().executeBuy(pick.stock_code, pick.stock_name, activeCategory, currentPrice, targetExitDate);
+                liveTradeLog += `\n  ✅ ${pick.stock_name}: ${currentPrice.toLocaleString()}원 매수 발동`;
+                executedCount++;
+            } catch (err: any) {
+                liveTradeLog += `\n  🚨 ${pick.stock_name} 매수 실패: ${err.message}`;
+            }
+        }
+
+        TelegramService.getInstance().sendMessage(liveTradeLog);
+        return { success: true, count: executedCount, log: liveTradeLog };
+    } catch (e: any) {
+        return { success: false, error: e.message };
     }
 });
 

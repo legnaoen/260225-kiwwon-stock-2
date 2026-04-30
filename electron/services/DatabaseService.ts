@@ -3361,8 +3361,10 @@ export class DatabaseService {
     }
 
     /**
-     * 매도(DROPPED/HIT/SELL) 시 호출 — 가장 최근 OPEN 거래를 CLOSED로 닫기
-     * @returns 닫힌 trade_id (-1 = 해당 OPEN 거래 없음)
+     * 매도(DROPPED/HIT/SELL) 시 호출 — 가장 최근 OPEN 거래를 CLOSED로 닫기.
+     * OPEN 레코드가 없는 경우, maiis_portfolio에서 entry 정보를 복구하여 자동 생성 후 닫는다.
+     * (PM3 교체 경로나 구버전 PM2에서 openTradeRecord 누락 시 성적표 누락 방지)
+     * @returns 닫힌 trade_id (-1 = 복구 불가)
      */
     public closeTradeRecord(params: {
         stock_code: string;
@@ -3372,13 +3374,47 @@ export class DatabaseService {
     }): number {
         try {
             // 해당 종목의 가장 최근 OPEN 거래를 조회
-            const openTrade = this.db.prepare(
+            let openTrade = this.db.prepare(
                 "SELECT trade_id, entry_price, entry_date FROM maiis_trade_history WHERE stock_code = ? AND status = 'OPEN' ORDER BY trade_id DESC LIMIT 1"
             ).get(params.stock_code) as any;
 
             if (!openTrade) {
-                console.warn(`[DB] closeTradeRecord: ${params.stock_code} 에 OPEN 거래 없음. 스킵.`);
-                return -1;
+                // ── [방어 로직] OPEN 레코드 자동 복구 ─────────────────────────────────
+                // openTradeRecord()가 누락된 경우(PM3 교체 경로 등), maiis_portfolio에서
+                // entry_price와 entry_date를 조회하여 OPEN 레코드를 소급 생성 후 즉시 닫는다.
+                const pfRecord = this.db.prepare(
+                    "SELECT stock_name, entry_price, entry_date, strategy, analysts_json FROM maiis_portfolio WHERE stock_code = ? AND entry_price > 0 LIMIT 1"
+                ).get(params.stock_code) as any;
+
+                if (!pfRecord || !pfRecord.entry_price) {
+                    console.warn(`[DB] closeTradeRecord: ${params.stock_code} OPEN 레코드 없고 포트폴리오 entry_price도 없음. 성적표 기록 불가.`);
+                    return -1;
+                }
+
+                console.warn(`[DB] ⚠️ closeTradeRecord: ${params.stock_code} OPEN 레코드 누락 → maiis_portfolio에서 자동 복구 후 CLOSED 처리`);
+                const recoveryNow = this.getKstTimestamp();
+                const result = this.db.prepare(`
+                    INSERT INTO maiis_trade_history
+                        (stock_code, stock_name, entry_date, entry_price, entry_reason,
+                         entry_at, strategy, analysts_json, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?)
+                `).run(
+                    params.stock_code,
+                    pfRecord.stock_name || params.stock_code,
+                    pfRecord.entry_date || this.getKstDate(),
+                    pfRecord.entry_price,
+                    '[자동복구] openTradeRecord 누락으로 closeTradeRecord 시점에 소급 생성',
+                    recoveryNow,
+                    pfRecord.strategy || 'MOMENTUM',
+                    pfRecord.analysts_json || '[]',
+                    recoveryNow, recoveryNow
+                );
+                openTrade = {
+                    trade_id: result.lastInsertRowid as number,
+                    entry_price: pfRecord.entry_price,
+                    entry_date: pfRecord.entry_date || this.getKstDate()
+                };
+                // ──────────────────────────────────────────────────────────────────────
             }
 
             const now = this.getKstTimestamp();

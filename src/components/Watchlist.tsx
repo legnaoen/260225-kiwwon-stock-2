@@ -157,7 +157,6 @@ export default function Watchlist() {
                 if (mapped.length > 0 && !selectedStock) {
                     setSelectedStock({ code: mapped[0].code, name: mapped[0].name })
                 }
-                window.electronAPI.wsRegister(targetSymbols)
                 enqueueSymbols(targetSymbols)
             } else {
                 setError(result.error?.message || result.error || '관심종목 데이터를 가져오지 못했습니다.');
@@ -174,6 +173,30 @@ export default function Watchlist() {
         fetchMaster()
         fetchData()
 
+        const handleRefresh = () => fetchData()
+        window.addEventListener('kiwoom:refresh-data', handleRefresh)
+
+        return () => {
+            window.removeEventListener('kiwoom:refresh-data', handleRefresh)
+        }
+    }, [])
+
+    // WebSocket subscription management (Depends on symbol list string)
+    useEffect(() => {
+        const symbols = watchlist.map(s => s.code).filter(Boolean)
+        if (symbols.length > 0 && window.electronAPI?.wsRegister) {
+            window.electronAPI.wsRegister(symbols)
+        }
+
+        return () => {
+            if (symbols.length > 0 && window.electronAPI?.wsUnregister) {
+                window.electronAPI.wsUnregister(symbols)
+            }
+        }
+    }, [watchlist.map(s => s.code).join(',')])
+
+    // Real-time listener (Depends on nothing, runs once)
+    useEffect(() => {
         const cleanup = window.electronAPI.onRealTimeData((wsData: any) => {
             if (wsData.stk_cd) {
                 setWatchlist(prev => prev.map(item => {
@@ -194,12 +217,8 @@ export default function Watchlist() {
             }
         })
 
-        const handleRefresh = () => fetchData()
-        window.addEventListener('kiwoom:refresh-data', handleRefresh)
-
         return () => {
             cleanup()
-            window.removeEventListener('kiwoom:refresh-data', handleRefresh)
         }
     }, [])
 

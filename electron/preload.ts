@@ -270,6 +270,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPerformanceStats: (picks: any[], targetReturn: number) => ipcRenderer.invoke('v2:get-performance-stats', { picks, targetReturn }),
     forceRefreshSimTradePrices: () => ipcRenderer.invoke('v2:force-refresh-sim-trade-prices'),
     runOhlcvCollection: () => ipcRenderer.invoke('v2:run-ohlcv-collection'),
+    resumePostMarketPipeline: () => ipcRenderer.invoke('v2:resume-post-market-pipeline'),
+    executeLiveTradesManual: () => ipcRenderer.invoke('v2:execute-live-trades-manual'),
     runTrackABuyAgent: (date?: string) => ipcRenderer.invoke('track-a:run-buy-agent', date),
     runTrackBBuyAgent: (date?: string) => ipcRenderer.invoke('track-b:run-buy-agent', date),
     runTrackCBuyAgent: (date?: string) => ipcRenderer.invoke('track-c:run-buy-agent', date),

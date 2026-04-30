@@ -25,6 +25,7 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
     const [userOpinion, setUserOpinion] = useState<string>('');
     const [isVerifying, setIsVerifying] = useState(false);
     const [copilotFeedback, setCopilotFeedback] = useState<string>('');
+    const [mockRefreshTrigger, setMockRefreshTrigger] = useState<number>(0);
 
     // Follower stocks toggle
     const [showAllStocks, setShowAllStocks] = useState(false);
@@ -168,10 +169,13 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
         setIsAnalyzing(true);
         try {
             const api = window.electronAPI as any;
+
+            // AI 분석 실행 (백엔드가 자동으로 네이버 파이프라인 최신화 → AI 분석 순서로 실행)
             if (api.analyzeThemes) {
                 const res = await api.analyzeThemes(targetDate);
                 if (res.success) {
                     await loadData(); // Reload UI with new AI data
+                    setMockRefreshTrigger(prev => prev + 1); // 모의매매 탭 갱신 트리거
                 } else {
                     console.error('AI 분석 실패:', res.error);
                 }
@@ -196,6 +200,7 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                 const res = await api.analyzeThemes(targetDate);
                 if (res.success) {
                     await loadData(); // Reload UI with new AI data
+                    setMockRefreshTrigger(prev => prev + 1); // 모의매매 탭 갱신 트리거
                 } else {
                     console.error('AI 분석 실패:', res.error);
                 }
@@ -1181,7 +1186,7 @@ export const ThemeTrackerTab: React.FC<{ onNavigate?: (tabId: string, entityId?:
                 {/* ─── 탭 3: 모의매매 (신규 목업) ─────────────────── */}
                 {activeTab === 'mock' && (
                     <div className="flex-1 overflow-hidden">
-                        <ThemeMockTradingTab />
+                        <ThemeMockTradingTab refreshTrigger={mockRefreshTrigger} />
                     </div>
                 )}
 

@@ -8,7 +8,7 @@ function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-export const ThemeMockTradingTab: React.FC = () => {
+export const ThemeMockTradingTab: React.FC<{ refreshTrigger?: number }> = ({ refreshTrigger = 0 }) => {
     const [mockData, setMockData] = useState<any[]>([]);
     const [selectedStock, setSelectedStock] = useState<{ stockCode: string; stockName: string; aiReason?: string } | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -32,7 +32,7 @@ export const ThemeMockTradingTab: React.FC = () => {
             }
         };
         loadData();
-    }, []);
+    }, [refreshTrigger]);
 
     const handleUpdateLivePrices = async () => {
         setIsLoading(true);

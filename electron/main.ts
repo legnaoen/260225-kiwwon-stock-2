@@ -1735,16 +1735,21 @@ ipcMain.handle('naverflow:update-mock-live-prices', async () => {
         const priceRows: any[] = [];
         for (const code of codes) {
             try {
-                const pData = await kiwoom.getCurrentPrice(code);
-                const curPriceStr = pData?.cur_prc || pData?.stck_prpr || pData?.Body?.cur_prc || 0;
-                const highPriceStr = pData?.hgpr || pData?.stck_hgpr || pData?.Body?.hgpr || curPriceStr;
-                
-                const currentPrice = Math.abs(Number(curPriceStr));
-                const highPrice = Math.abs(Number(highPriceStr));
-                
-                if (currentPrice > 0) {
-                    priceRows.push({ code, price: currentPrice, high: highPrice });
-                    fetchCount++;
+                // ka10004(getCurrentPrice) 대신 안정성이 검증된 ka10002(getOhlcvDaily)를 사용하여 당일(최신) 가격을 추출합니다.
+                const candles = await kiwoom.getOhlcvDaily(code, 2); // 최소 2개 정도 가져와서 마지막(최신) 캔들을 씁니다.
+                if (candles && candles.length > 0) {
+                    const latest = candles[candles.length - 1]; // Sort ascending이므로 마지막이 최신
+                    const currentPrice = latest.close;
+                    const highPrice = latest.high;
+
+                    if (currentPrice > 0) {
+                        priceRows.push({ code, price: currentPrice, high: highPrice });
+                        fetchCount++;
+                    } else {
+                        console.warn(`[IPC] ${code} 현재가 파싱 실패. candles 덤프: ${JSON.stringify(candles).substring(0, 100)}`);
+                    }
+                } else {
+                    console.warn(`[IPC] ${code} 캔들 데이터를 불러오지 못했습니다.`);
                 }
             } catch (err: any) {
                 console.warn(`[IPC] ${code} 가격 갱신 실패:`, err.message);
@@ -1767,14 +1772,29 @@ ipcMain.handle('naverflow:update-mock-live-prices', async () => {
 
 ipcMain.handle('naverflow:analyze-themes', async (_event, date: string) => {
     try {
+        // ★ Phase 1: 분석 전 네이버 테마 데이터 강제 최신화
+        // stock_theme_tags.change_rate가 아침 크론(~09:40)의 스테일 값일 수 있으므로,
+        // 분석 시점의 실시간 등락률로 반드시 갱신 후 AI에게 전달합니다.
+        try {
+            const { V2PipelineManager } = await import('./services/v2_pipeline/V2PipelineManager')
+            console.log('[IPC] analyze-themes: ① 네이버 테마 실시간 데이터 최신화 시작...')
+            await V2PipelineManager.getInstance().runPipeline('PL-NaverFlow', { forceFetch: true })
+            console.log('[IPC] analyze-themes: ① 네이버 테마 실시간 데이터 최신화 완료 → stock_theme_tags.change_rate 갱신됨')
+        } catch (pipeErr: any) {
+            // 파이프라인 실패 시에도 AI 분석은 계속 진행 (최선)
+            console.error('[IPC] analyze-themes: 네이버 파이프라인 최신화 실패 (이전 데이터로 진행):', pipeErr.message)
+        }
+
+        // ★ Phase 2: 최신화된 데이터 기반으로 AI 분석 실행
         const { ThemeIntelligenceAgent } = await import('./services/v2_agents/ThemeIntelligenceAgent')
         const { ThemeMockTradingJudgeAgent } = await import('./services/v2_agents/ThemeMockTradingJudgeAgent')
-        
+
+        console.log('[IPC] analyze-themes: ② AI 테마 분석 시작...')
         const data = await ThemeIntelligenceAgent.getInstance().runBatchAnalysis(date)
-        
-        // 종목 추출 후 바로 판독/업데이트 실행
+
+        // ★ Phase 3: 선정된 종목 판독/수익률 업데이트 실행
         await ThemeMockTradingJudgeAgent.getInstance().evaluatePicks()
-        
+
         return { success: true, data }
     } catch (err: any) {
         return { success: false, error: err.message }

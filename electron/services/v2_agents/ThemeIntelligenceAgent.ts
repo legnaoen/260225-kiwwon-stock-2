@@ -339,6 +339,30 @@ ${issueListForPrompt}
             const parsedObj = JSON.parse(jsonMatch[0]);
             const parsedArray = parsedObj.theme_evaluations || [];
 
+            // 5.1. (추가) 전체 추출된 종목 중 상위 5개만 모의매매 대상(top_picks)으로 확정 (텔레그램 로직과 UI 동기화)
+            let pickCount = 0;
+            const top5PicksList: any[] = [];
+            
+            for (const item of parsedArray) {
+                if (!item.top_picks || !Array.isArray(item.top_picks)) continue;
+                const filteredPicks = [];
+                for (const pick of item.top_picks) {
+                    if (pickCount < 5) {
+                        filteredPicks.push(pick);
+                        top5PicksList.push(pick); // 나중에 텔레그램 보낼 때 사용
+                        pickCount++;
+                    }
+                }
+                item.top_picks = filteredPicks; // 상위 5개 안에 못 들면 빈 배열이 되거나 일부만 남음
+            }
+
+            // 5.2. (추가) 수동 분석 시 이전 과거 데이터 쓰레기가 UI 앞쪽에 나오는 현상을 방지하기 위해 오늘자 모의매매 DB 완전 초기화
+            try {
+                this.db.deleteThemeMockTradingPicks(dateStr);
+            } catch (e: any) {
+                console.warn('[ThemeIntelligence] 기존 추천 종목 초기화 중 에러 (무시가능):', e.message);
+            }
+
             // 5.5. (추가) 선정된 종목의 실시간 현재가를 Kiwoom API로 조회하여 entryPrice로 기록
             try {
                 const { KiwoomService } = await import('../KiwoomService');
@@ -346,21 +370,24 @@ ${issueListForPrompt}
                 console.log(`[ThemeIntelligence] 💰 추천 종목 실시간 진입가 조회 시작...`);
                 
                 for (const item of parsedArray) {
-                    if (!item.top_picks || !Array.isArray(item.top_picks)) continue;
+                    if (!item.top_picks || !Array.isArray(item.top_picks) || item.top_picks.length === 0) continue;
                     
                     for (const pick of item.top_picks) {
                         try {
                             const stockCode = pick.stock_code.replace(/^A/, '');
-                            const priceInfo = await kiwoom.getCurrentPrice(stockCode);
-                            if (priceInfo && priceInfo.current_price) {
-                                pick.entryPrice = priceInfo.current_price;
+                            const candles = await kiwoom.getOhlcvDaily(stockCode, 2);
+                            if (candles && candles.length > 0) {
+                                const latest = candles[candles.length - 1];
+                                pick.entryPrice = latest.close;
                                 console.log(`[ThemeIntelligence] 진입가 확보: ${pick.stock_name} -> ${pick.entryPrice}원`);
+                            } else {
+                                console.warn(`[ThemeIntelligence] 캔들 데이터 없음: ${pick.stock_name}`);
                             }
                         } catch (pErr: any) {
                             console.warn(`[ThemeIntelligence] 실시간 가격 조회 실패 (${pick.stock_name}):`, pErr.message);
                         }
                         // API Rate Limit 방지를 위해 짧은 대기 시간 추가
-                        await new Promise(resolve => setTimeout(resolve, 250));
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     }
                 }
             } catch (err: any) {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, Settings, Wallet, Network, Globe, LineChart, Server, Sparkles, Brain, Activity, Telescope, TrendingUp, Rocket } from 'lucide-react'
+import { LayoutDashboard, Settings, Wallet, Network, Globe, LineChart, Server, Sparkles, Brain, Activity, Telescope, TrendingUp, Rocket, FileText, Briefcase } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
@@ -15,10 +15,12 @@ export const menuItems = [
     { id: 'moonshot', name: '텐베거 AI', icon: Rocket },
     { id: 'theme-tracker', name: '테마 AI', icon: Activity },
     { id: 'issue-agent', name: '이슈 AI', icon: Brain },
+    { id: 'report-ai-tracker', name: '리포트 매매', icon: Briefcase },
     { id: 'pipeline-monitor', name: '데이터 관제', icon: Server },
     { id: 'settings', name: '설정', icon: Settings },
     
     // --- 주석 처리된 레거시 항목들 ---
+    // { id: 'report-dashboard', name: '리포트', icon: FileText }, // ReportTrackerTab(리포트 매매)로 통합됨
     // { id: 'dashboard', name: '대시보드', icon: LayoutDashboard }, // 사용자 요청으로 제거
     // { id: 'maiis-command', name: '종합 관제', icon: Network }, // 사용자 요청으로 제거
     // { id: 'macro-dashboard', name: '글로벌 매크로', icon: Globe }, // 사용자 요청으로 제거

@@ -972,13 +972,13 @@ export class KiwoomService {
     }
 
     /**
-     * 당일 매수 체결내역 조회 (kt00007, qry_tp='4')
+     * 당일 체결내역 조회 (kt00007, qry_tp='4')
      * - Reconciliation 시 실제 체결가(cntr_uv)와 체결수량(cntr_qty) 확인용
-     * - sell_tp='2'(매수), qry_tp='4'(체결내역만)
+     * - sell_tp='0'(전체), '1'(매도), '2'(매수)
      */
-    public async getDailyBuyExecutions(
+    public async getDailyExecutions(
         accountNo: string,
-        options: { stk_cd?: string } = {}
+        options: { stk_cd?: string, sell_tp?: string } = {}
     ): Promise<Array<{
         ord_no: string;     // 주문번호
         stk_cd: string;     // 종목코드
@@ -1004,7 +1004,7 @@ export class KiwoomService {
                     ord_dt: '',          // 오늘 (공백)
                     qry_tp: '4',         // 4: 체결내역만
                     stk_bond_tp: '1',    // 1: 주식
-                    sell_tp: '2',        // 2: 매수만
+                    sell_tp: options.sell_tp || '0', // 기본값 전체
                     stk_cd: options.stk_cd || '',
                     fr_ord_no: '',
                     dmst_stex_tp: '%'
@@ -1031,13 +1031,13 @@ export class KiwoomService {
                     cntr_uv:  parseInt(item.cntr_uv  || item.avg_prvs  || '0', 10),
                     ord_qty:  parseInt(item.ord_qty  || '0', 10),
                     ord_uv:   parseInt(item.ord_uv   || '0', 10),
-                    sell_tp:  String(item.sell_tp  || '2'),
+                    sell_tp:  String(item.sell_tp || item.sll_buy_tp || (String(item.io_tp_nm).includes('매도') ? '1' : '2')),
                 }));
 
-                console.log(`[KiwoomService] 당일 매수 체결내역 (kt00007, qry_tp=4): ${executions.length}건`);
+                console.log(`[KiwoomService] 당일 체결내역 (kt00007, qry_tp=4): ${executions.length}건`);
                 return executions;
             } catch (error: any) {
-                console.error(`[KiwoomService] 당일 매수 체결내역 조회 에러:`, error.response?.data || error.message);
+                console.error(`[KiwoomService] 당일 체결내역 조회 에러:`, error.response?.data || error.message);
                 throw error;
             }
         });

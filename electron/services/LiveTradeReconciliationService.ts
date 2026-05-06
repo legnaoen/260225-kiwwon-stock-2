@@ -55,17 +55,15 @@ export class LiveTradeReconciliationService {
                 throw new Error('계좌 정보를 가져올 수 없습니다. (settings.selectedAccount 미설정)');
             }
 
-            // 2. [신규] 당일 매수 체결내역 조회 (kt00007, qry_tp='4')
-            //    ord_no 기준으로 티켓과 매칭하여 실제 체결가(cntr_uv) 반영
+            // 2. [신규] 당일 전체 체결내역 조회 (kt00007, qry_tp='4')
             let buyExecutionMap: Record<string, { cntr_qty: number; cntr_uv: number; stk_cd: string }> = {};
+            let sellExecutionByStock: Record<string, { total_amt: number; total_qty: number }> = {};
             try {
-                const executions = await this.kiwoom.getDailyBuyExecutions(accountNo);
+                const executions = await this.kiwoom.getDailyExecutions(accountNo, { sell_tp: '0' });
                 for (const ex of executions) {
-                    if (ex.ord_no) {
-                        // 같은 주문번호에 여러 건 체결(분할체결)이 있을 수 있으므로 누적
+                    if (ex.sell_tp === '2' && ex.ord_no) { // 매수
                         if (buyExecutionMap[ex.ord_no]) {
                             buyExecutionMap[ex.ord_no].cntr_qty += ex.cntr_qty;
-                            // 체결단가는 마지막 값 사용 (실제로는 평균이 필요하나 분할체결 빈도 낮음)
                         } else {
                             buyExecutionMap[ex.ord_no] = {
                                 cntr_qty: ex.cntr_qty,
@@ -73,9 +71,15 @@ export class LiveTradeReconciliationService {
                                 stk_cd:   ex.stk_cd
                             };
                         }
+                    } else if (ex.sell_tp === '1' && ex.stk_cd) { // 매도
+                        if (!sellExecutionByStock[ex.stk_cd]) {
+                            sellExecutionByStock[ex.stk_cd] = { total_amt: 0, total_qty: 0 };
+                        }
+                        sellExecutionByStock[ex.stk_cd].total_qty += ex.cntr_qty;
+                        sellExecutionByStock[ex.stk_cd].total_amt += (ex.cntr_qty * ex.cntr_uv);
                     }
                 }
-                console.log(`[LiveTradeReconciliation] 당일 매수 체결내역 ${executions.length}건 조회 완료 (ord_no 매핑: ${Object.keys(buyExecutionMap).length}건)`);
+                console.log(`[LiveTradeReconciliation] 당일 체결내역 조회 완료 (매수주문: ${Object.keys(buyExecutionMap).length}건, 매도종목: ${Object.keys(sellExecutionByStock).length}건)`);
             } catch (execErr: any) {
                 console.warn('[LiveTradeReconciliation] 체결내역 조회 실패 (잔고 대조는 계속 진행):', execErr.message);
             }
@@ -126,6 +130,15 @@ export class LiveTradeReconciliationService {
 
             let changesCount = 0;
 
+            // 종목별 체결 평균단가 계산 헬퍼
+            const getAverageSellPrice = (stkCode: string, fallbackPrice: number = 0) => {
+                const sellData = sellExecutionByStock[stkCode];
+                if (sellData && sellData.total_qty > 0) {
+                    return Math.round(sellData.total_amt / sellData.total_qty);
+                }
+                return fallbackPrice > 0 ? fallbackPrice : 0; 
+            };
+
             // 4. 종목별 대조 및 조정 (Reconciliation)
             for (const [stockCode, tickets] of Object.entries(ticketsByStock)) {
                 const htsTotal = htsHoldings[stockCode] || 0;
@@ -137,8 +150,11 @@ export class LiveTradeReconciliationService {
                     const sellingTickets = tickets.filter(t => t.status === 'SELLING');
                     if (htsTotal === 0 && sellingTickets.length > 0) {
                         for (const ticket of sellingTickets) {
-                            this.ledger.closeTicket(ticket.ticket_id);
-                            this.telegram.sendMessage(`✅ **[정산 - 매도 완료]**\n- 종목: ${stockCode}\n- 사유: 잔고 0주 확인 (정상 매도 완료)`);
+                            const exitPrice = getAverageSellPrice(stockCode, ticket.entry_price);
+                            const realizedPct = exitPrice > 0 ? Number((((exitPrice - ticket.entry_price) / ticket.entry_price) * 100).toFixed(2)) : 0;
+                            
+                            this.ledger.closeTicketWithExitInfo(ticket.ticket_id, exitPrice, realizedPct);
+                            this.telegram.sendMessage(`✅ **[정산 - 매도 완료]**\n- 종목: ${ticket.stock_name || stockCode}\n- 확정 수익률: ${realizedPct}%\n- 사유: 잔고 0주 확인`);
                             changesCount++;
                         }
                     }
@@ -165,16 +181,22 @@ export class LiveTradeReconciliationService {
                         if (newQuantity === 0) {
                             if (ticket.status === 'SELLING') {
                                 // 매도 주문이 전량 체결된 경우
-                                this.ledger.closeTicket(ticket.ticket_id);
-                                this.telegram.sendMessage(`✅ **[정산 - 매도 완료]**\n- 종목: ${stockCode}\n- 티켓: ${ticket.entry_date} 진입분\n- 사유: 잔고 0주 확인 (정상 매도 완료)`);
+                                const exitPrice = getAverageSellPrice(stockCode, ticket.entry_price);
+                                const realizedPct = exitPrice > 0 ? Number((((exitPrice - ticket.entry_price) / ticket.entry_price) * 100).toFixed(2)) : 0;
+                                
+                                this.ledger.closeTicketWithExitInfo(ticket.ticket_id, exitPrice, realizedPct);
+                                this.telegram.sendMessage(`✅ **[정산 - 매도 완료]**\n- 종목: ${stockCode}\n- 티켓: ${ticket.entry_date} 진입분\n- 확정 수익률: ${realizedPct}%\n- 사유: 잔고 0주 확인 (정상 매도 완료)`);
                             } else if (ticket.entry_date.startsWith(today)) {
                                 // 오늘 매수했는데 HTS에 없음 → 매수 미체결
                                 this.ledger.markTicketFailed(ticket.ticket_id, '장 마감 정산: 매수 미체결 확인 (조건부 지정가 동시호가 미체결)');
                                 this.telegram.sendMessage(`⚠️ **[정산 - 매수 실패 처리]**\n- 종목: ${stockCode}\n- 사유: HTS 체결 수량 0주 (매수 미체결)`);
                             } else {
                                 // 과거 보유 티켓인데 잔고가 없음 → 사용자 수동 매도
-                                this.ledger.closeTicket(ticket.ticket_id);
-                                this.telegram.sendMessage(`⚠️ **[정산 - 수동 매도 감지]**\n- 종목: ${stockCode}\n- 사유: 잔고 부족 (사용자가 HTS/MTS로 임의 매도한 것으로 추정)`);
+                                const exitPrice = getAverageSellPrice(stockCode, ticket.entry_price);
+                                const realizedPct = exitPrice > 0 ? Number((((exitPrice - ticket.entry_price) / ticket.entry_price) * 100).toFixed(2)) : 0;
+                                
+                                this.ledger.closeTicketWithExitInfo(ticket.ticket_id, exitPrice, realizedPct);
+                                this.telegram.sendMessage(`⚠️ **[정산 - 수동 매도 감지]**\n- 종목: ${stockCode}\n- 확정 수익률: ${realizedPct}%\n- 사유: 잔고 부족 (사용자가 HTS/MTS로 임의 매도한 것으로 추정)`);
                             }
                         } else {
                             // 부분 처리

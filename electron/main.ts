@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'node:path'
 import { spawn, ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
+
 import Store from 'electron-store'
 import { KiwoomService } from './services/KiwoomService'
 import { AutoTradeService } from './services/AutoTradeService'
@@ -458,7 +459,7 @@ ipcMain.handle('maiis:run-portfolio-review', async () => {
     }
 })
 
-// === Tags =========================================================================
+// === Tags & Reports =========================================================================
 ipcMain.handle('naverflow:get-stock-theme-tags', async (_event, stockCode: string) => {
     try {
         return DatabaseService.getInstance().getStockThemeTags(stockCode);
@@ -468,7 +469,194 @@ ipcMain.handle('naverflow:get-stock-theme-tags', async (_event, stockCode: strin
     }
 })
 
-// === DART 공시 수집 테스트 ==========================================================
+ipcMain.handle('naverflow:get-research-reports', async (_event, limit?: number) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getNaverResearchReports(limit);
+    } catch (e: any) {
+        console.error('[IPC] get-research-reports err:', e);
+        return [];
+    }
+})
+
+ipcMain.handle('naverflow:get-research-top-sectors', async (_event, limitDays?: number) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getNaverResearchTopSectors(limitDays);
+    } catch (e: any) {
+        console.error('[IPC] get-research-top-sectors err:', e);
+        return [];
+    }
+})
+
+// === Report-Driven AI Tracker IPC Handlers ====================================================
+// 포트폴리오 조회 (현재 보유 종목)
+ipcMain.handle('report-tracker:get-portfolio', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getReportPortfolio();
+    } catch (e: any) {
+        console.error('[IPC] report-tracker:get-portfolio err:', e);
+        return [];
+    }
+});
+
+// 매매 이력 조회
+ipcMain.handle('report-tracker:get-history', async (_event, limit?: number) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getReportTradeHistory(limit ?? 100);
+    } catch (e: any) {
+        console.error('[IPC] report-tracker:get-history err:', e);
+        return [];
+    }
+});
+
+// 리밸런싱 로그 조회
+ipcMain.handle('report-tracker:get-logs', async (_event, limit?: number) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getReportRebalanceLogs(limit ?? 30);
+    } catch (e: any) {
+        console.error('[IPC] report-tracker:get-logs err:', e);
+        return [];
+    }
+});
+
+// 성과 통계 조회
+ipcMain.handle('report-tracker:get-stats', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        return DatabaseService.getInstance().getReportPortfolioStats();
+    } catch (e: any) {
+        console.error('[IPC] report-tracker:get-stats err:', e);
+        return { activeCount: 0, totalTrades: 0, winRate: 0, avgReturn: 0, avgHoldDays: 0 };
+    }
+});
+
+// 수동 리밸런싱 실행 (Scout → Manager 연계)
+ipcMain.handle('report-tracker:run-rebalance', async () => {
+    try {
+        const { ReportScoutAgent } = await import('./services/v2_agents/ReportScoutAgent');
+        const { ReportManagerAgent } = await import('./services/v2_agents/ReportManagerAgent');
+
+        const scoutResult = await ReportScoutAgent.getInstance().run();
+        if (!scoutResult.success) {
+            return { success: false, error: `Scout 실패: ${scoutResult.error}` };
+        }
+        const managerResult = await ReportManagerAgent.getInstance().run(scoutResult);
+        return {
+            success: managerResult.success,
+            scoutCandidates: scoutResult.candidates.length,
+            kept: managerResult.kept.length,
+            dropped: managerResult.dropped.length,
+            added: managerResult.added.length,
+            logText: managerResult.logText,
+            error: managerResult.error,
+        };
+    } catch (e: any) {
+        console.error('[IPC] report-tracker:run-rebalance err:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+// 수동 Scout만 실행 (후보 미리보기용)
+ipcMain.handle('report-tracker:run-scout-preview', async () => {
+    try {
+        const { ReportScoutAgent } = await import('./services/v2_agents/ReportScoutAgent');
+        const scoutResult = await ReportScoutAgent.getInstance().run();
+        return {
+            success: scoutResult.success,
+            candidates: scoutResult.candidates,
+            error: scoutResult.error,
+        };
+    } catch (e: any) {
+        console.error('[IPC] report-tracker:run-scout-preview err:', e);
+        return { success: false, candidates: [], error: e.message };
+    }
+});
+
+// 종목 수동 탈락 처리
+ipcMain.handle('report-tracker:drop-item', async (_event, { stockCode, exitReason }: { stockCode: string; exitReason: string }) => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance();
+        const rawDb = (db as any).db;
+        const row = rawDb.prepare(
+            `SELECT current_price FROM report_mock_portfolio WHERE stock_code = ? AND status = 'ACTIVE'`
+        ).get(stockCode) as any;
+        const exitPrice = row?.current_price ?? 0;
+        const ok = db.dropReportPortfolioItem(stockCode, exitPrice, exitReason || '수동 탈락', 'DROPPED');
+        return { success: ok };
+    } catch (e: any) {
+        console.error('[IPC] report-tracker:drop-item err:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+// 종목 전체 초기화 (Hard Delete)
+ipcMain.handle('report-tracker:clear-portfolio', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance();
+        const ok = db.clearReportPortfolio();
+        return { success: ok };
+    } catch (e: any) {
+        console.error('[IPC] report-tracker:clear-portfolio err:', e);
+        return { success: false, error: e.message };
+    }
+});
+
+// 종목 현재가 갱신
+ipcMain.handle('report-tracker:refresh-prices', async () => {
+    try {
+        const { DatabaseService } = await import('./services/DatabaseService');
+        const db = DatabaseService.getInstance();
+        const rawDb = (db as any).db;
+
+        const heldStocks: any[] = rawDb.prepare(
+            `SELECT stock_code, stock_name, entry_price FROM report_mock_portfolio WHERE status = 'ACTIVE'`
+        ).all();
+
+        if (heldStocks.length === 0) {
+            return { success: true, updated: 0, failed: 0 };
+        }
+
+        let updated = 0;
+        let failed = 0;
+
+        for (const stock of heldStocks) {
+            try {
+                const row = rawDb.prepare(
+                    `SELECT close FROM market_ohlcv_history WHERE stock_code = ? ORDER BY date DESC LIMIT 1`
+                ).get(stock.stock_code) as any;
+                
+                const curPrice = row?.close ? Number(row.close) : 0;
+
+                if (curPrice > 0) {
+                    if (stock.entry_price > 0) {
+                        const currentReturn = ((curPrice - stock.entry_price) / stock.entry_price) * 100;
+                        db.updateReportPortfolioPrice(stock.stock_code, curPrice, currentReturn);
+                    } else {
+                        rawDb.prepare(
+                            `UPDATE report_mock_portfolio SET current_price = ?, updated_at = ? WHERE stock_code = ?`
+                        ).run(curPrice, db.getKstTimestamp(), stock.stock_code);
+                    }
+                    updated++;
+                } else {
+                    failed++;
+                }
+            } catch (e: any) {
+                failed++;
+            }
+        }
+        return { success: true, updated, failed };
+    } catch (e: any) {
+        console.error('[IPC] report-tracker:refresh-prices err:', e);
+        return { success: false, error: e.message };
+    }
+});
+
 // Phase 2.5: AI Analysts & Portfolio Manager Test Hooks
 // ======================
 ipcMain.handle('ai-analyst:run-momentum', async () => {
@@ -2096,7 +2284,8 @@ ipcMain.handle('naverflow:get-theme-news', async (_event, themeName: string, key
 })
 
 ipcMain.handle('agent:market:settings:get', async () => {
-    return { success: true, data: store.get('market_agent_settings', { telegramEnabled: true }) }
+    const current = store.get('market_agent_settings', {}) as any;
+    return { success: true, data: { telegramEnabled: true, ...current } }
 })
 
 ipcMain.handle('agent:market:settings:save', async (_event, settings) => {

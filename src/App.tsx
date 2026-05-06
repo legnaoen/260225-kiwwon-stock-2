@@ -18,6 +18,8 @@ import { PortfolioManagerTab } from './components/v2_dashboard/PortfolioManagerT
 // import { IncubatorLabTab } from './components/v2_dashboard/IncubatorLabTab'
 import { MarketLeadersTab } from './components/v2_dashboard/MarketLeadersTab'
 import MoonshotTab from './components/v2_dashboard/MoonshotTab'
+import ReportDashboardTab from './components/v2_dashboard/ReportDashboardTab'
+import ReportTrackerTab from './components/v2_dashboard/ReportTrackerTab'
 import CoPilotDrawer from './components/common/CoPilotDrawer'
 
 // ─── V2 Hooks & Stores ───────────────────────────────────────────────────────
@@ -384,9 +386,11 @@ function AppContent() {
                         {activeTab === 'portfolio-manager' && <PortfolioManagerTab />}
                         {activeTab === 'market-leaders' && <MarketLeadersTab />}
                         {activeTab === 'moonshot' && <MoonshotTab />}
+                        {activeTab === 'report-dashboard' && <ReportDashboardTab />}
+                        {activeTab === 'report-ai-tracker' && <ReportTrackerTab />}
 
                         {/* 등록된 탭이 아닌 경우 폴백 화면 */}
-                        {(['dashboard', 'holdings', 'settings', 'macro-dashboard', 'pipeline-monitor', 'market-agent', 'issue-agent', 'theme-tracker', 'portfolio-manager', 'market-leaders', 'moonshot'].indexOf(activeTab) === -1) && (
+                        {(['dashboard', 'holdings', 'settings', 'macro-dashboard', 'pipeline-monitor', 'market-agent', 'issue-agent', 'theme-tracker', 'portfolio-manager', 'market-leaders', 'moonshot', 'report-dashboard', 'report-ai-tracker'].indexOf(activeTab) === -1) && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />

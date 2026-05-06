@@ -96,6 +96,14 @@ const AI_AGENTS = [
         ],
     },
     {
+        id: 'REPORT_AI', name: '리포트 매매 AI', fullName: 'Report Tracker AI',
+        description: '장 시작 직후 당일 최신 리포트를 스캔하여 1, 2차 서바이벌 분석 후 실시간 시가로 포트폴리오를 리밸런싱합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '09:00', label: '오전 개장 동시호가 리밸런싱', description: 'Scout 1차 발굴 및 Manager 2차 심사 후 실시간 가격 편입' },
+        ],
+    },
+    {
         id: 'PORTFOLIO_JUDGE', name: '장마감 포트폴리오 심판', fullName: 'Portfolio Judge Scheduler',
         description: '장 마감 후 종가 기준으로 당일 포트폴리오의 생존 여부와 전략 수명을 엄격하게 채점합니다.',
         gemini: true, trigger: 'CRON' as const,

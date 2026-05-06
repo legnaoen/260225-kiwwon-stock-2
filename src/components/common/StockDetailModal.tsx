@@ -44,7 +44,7 @@ export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIs
         if ((window as any).electronAPI?.getStockThemeTags) {
             const normalizedCode = stockCode.replace(/[^0-9]/g, '');
             (window as any).electronAPI.getStockThemeTags(normalizedCode)
-                .then((tags: StockThemeTag[]) => {
+                .then((tags: any[]) => {
                     if (tags) setStockTags(tags);
                 })
                 .catch((e: any) => { console.error('Failed to load stock tags:', e); });
@@ -115,30 +115,7 @@ export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIs
                     <div className="flex-1 w-full h-[50vh] lg:h-full overflow-y-auto min-h-0 bg-card custom-scrollbar">
                         <div className="p-6 space-y-6 max-w-4xl mx-auto">
 
-                            {/* ── 모의매매 AI 추천 근거 (Gemini 최종 선정 결과) ── */}
-                            {(aiReason || aiRisk) && (
-                                <div className="space-y-4 bg-muted/5 border border-border/50 p-4 rounded-xl mb-6">
-                                    <div className="space-y-2 pb-4 border-b border-border/40">
-                                        <h4 className="text-[11px] font-bold text-indigo-500 flex items-center gap-1.5 uppercase tracking-wider">
-                                            <Sparkles size={13} /> 모의매매 AI 선정 사유 (Gemini 최종 판단)
-                                        </h4>
-                                        <div className="flex flex-col gap-2">
-                                            {aiReason && (
-                                                <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
-                                                    <div className="text-xs font-bold text-indigo-400 mb-1">👍 추천 근거</div>
-                                                    <div className="text-sm font-semibold">{aiReason}</div>
-                                                </div>
-                                            )}
-                                            {aiRisk && (
-                                                <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
-                                                    <div className="text-xs font-bold text-red-400 mb-1">⚠️ 리스크 인지</div>
-                                                    <div className="text-[13px] text-muted-foreground font-medium">{aiRisk}</div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
+                            {/* ── 모의매매 AI 추천 근거 카드는 삭제 (타임라인으로 통합) ── */}
 
                             {/* ── 종목 서사 (Narrative) ── */}
                             {stockNarrative && (
@@ -283,7 +260,28 @@ export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIs
                             </div>
 
                             {/* AI Report (기존 종목 AI 리포트 및 통합 타임라인) */}
-                            <StockAiReport symbol={stockCode} name={stockName} hideTitle={true} gemmaReports={gemmaReports} />
+                            <StockAiReport 
+                                symbol={stockCode} 
+                                name={stockName} 
+                                hideTitle={true} 
+                                gemmaReports={
+                                    (aiReason || aiRisk) ? [
+                                        {
+                                            id: 'virtual-ai-reason',
+                                            date: new Date().toISOString().split('T')[0],
+                                            stock_code: stockCode,
+                                            stock_name: stockName,
+                                            preliminary_decision: 'WATCH',
+                                            buy_score: 65, // 기본 표시
+                                            upside_probability: 'MEDIUM',
+                                            catalyst_summary: aiReason || aiRisk || '',
+                                            risk_factors: aiRisk || '',
+                                            created_at: new Date().toISOString()
+                                        },
+                                        ...gemmaReports
+                                    ] : gemmaReports
+                                } 
+                            />
                         </div>
                     </div>
                 </div>

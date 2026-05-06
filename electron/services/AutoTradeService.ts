@@ -1,6 +1,7 @@
 import { KiwoomService } from './KiwoomService'
 import { eventBus, SystemEvent } from '../utils/EventBus'
 import { DatabaseService } from './DatabaseService'
+import { LiveTradeReconciliationService } from './LiveTradeReconciliationService'
 
 export class AutoTradeService {
     private static instance: AutoTradeService;
@@ -101,15 +102,30 @@ export class AutoTradeService {
         const ordNo = orderInfo.order_no;
         if (!ordNo) return;
 
+        let isCompleted = false;
+
         let existing = this.activeOrders.get(ordNo);
         if (existing) {
             existing.unexec_qty = String(orderInfo.remain_qty);
             if (orderInfo.remain_qty <= 0 || orderInfo.status === '체결') {
                 this.activeOrders.delete(ordNo);
+                isCompleted = true;
             }
         } else if (orderInfo.remain_qty > 0) {
             // 우리가 모르는 신규 주문 발생. 다음 모니터링 주기 때 즉시 REST API 강제 동기화 유도
             this.lastUnexecutedSyncTime = 0;
+        } else if (orderInfo.remain_qty <= 0 || orderInfo.status === '체결') {
+            isCompleted = true;
+        }
+
+        // 잔량이 0이 되어 매도/매수가 완료된 경우 즉시 정산 로직을 비동기로 호출
+        if (isCompleted) {
+            setTimeout(() => {
+                this.broadcastLog(`주문(${ordNo}) 전량 체결 감지. 실시간 정산 동기화를 수행합니다.`, 'INFO');
+                LiveTradeReconciliationService.getInstance().reconcileDailyExecutions().catch(err => {
+                    console.error('[AutoTrade] 실시간 정산 호출 실패:', err);
+                });
+            }, 3000); // 체결 완료 후 Kiwoom 서버에 확실히 반영될 수 있도록 3초 대기 후 정산
         }
     }
 

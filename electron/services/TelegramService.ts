@@ -404,7 +404,7 @@ export class TelegramService {
 
                 // 앱 시작 시 테스트겸 확인용 메시지 자동 발송
                 if (this.chatId) {
-                    this.sendMessage('🚀 [시스템 알림] 키움 트레이더 안티그래비티 프로그램이 정상적으로 시작되었습니다.');
+                    this.sendMessage('🚀 AI Trader 시작');
                 }
 
             } catch (error) {
@@ -724,8 +724,8 @@ export class TelegramService {
 
         // [V2] Market Condition Agent 브리핑 알림
         eventBus.on('MARKET_AGENT_PREDICTION_COMPLETE' as any, (data: any) => {
-            const mcaSettings = store.get('market_agent_settings', { telegramEnabled: true }) as any;
-            if (!mcaSettings.telegramEnabled) return;
+            const mcaSettings = store.get('market_agent_settings', {}) as any;
+            if (mcaSettings.telegramEnabled === false) return;
             
             if (data.predict === 'HOLD' && data.confidence === 0) return; // 실행 실패 건 제외
             
@@ -771,8 +771,8 @@ export class TelegramService {
         // [V2] 장중 예측 알림 (MCA Gemini 09:30/13:00 + 로컬 Swarm 09:45~13:45, 총 11슬롯)
         // IntradaySwarm.runSwarm() / MCA.runIntraday() 양쪽 모두 동일 이벤트를 발행하므로 단일 리스너로 처리
         eventBus.on('INTRADAY_PREDICTION_UPDATED' as any, async (data: any) => {
-            const mcaSettings = store.get('market_agent_settings', { telegramEnabled: true }) as any;
-            if (!mcaSettings.telegramEnabled) return;
+            const mcaSettings = store.get('market_agent_settings', {}) as any;
+            if (mcaSettings.telegramEnabled === false) return;
 
             if (!data || data.confidence === 0) return; // 실패 건 (confidence=0) 제외
 

@@ -42,7 +42,7 @@ function ReturnCell({ value, placeholder }: { value: number | null | undefined; 
     )
 }
 
-function StatusBadge({ status, isUp, failReason }: { status: string; isUp: boolean; failReason?: string }) {
+function StatusBadge({ status, isUp, failReason, realizedPct }: { status: string; isUp: boolean; failReason?: string; realizedPct?: number }) {
     switch (status) {
         case 'BUYING':
             return <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-blue-500/10 text-blue-500 border border-blue-500/30">⏳ 매수중</span>
@@ -53,8 +53,12 @@ function StatusBadge({ status, isUp, failReason }: { status: string; isUp: boole
             </span>
         case 'SELLING':
             return <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">⚡ 매도중</span>
-        case 'CLOSED':
-            return <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-muted/30 text-muted-foreground border border-border/50">✅ 청산</span>
+        case 'CLOSED': {
+            if (realizedPct === undefined) return <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-muted/30 text-muted-foreground border border-border/50">✅ 청산</span>;
+            if (realizedPct > 0) return <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-rose-500/10 text-rose-500 border border-rose-500/30">🟢 익절</span>;
+            if (realizedPct < 0) return <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-blue-500/10 text-blue-500 border border-blue-500/30">🔴 손절</span>;
+            return <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-muted/30 text-muted-foreground border border-border/50">⚪ 본절</span>;
+        }
         case 'FAILED':
             return <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-red-500/10 text-red-500 border border-red-500/30 cursor-help" title={failReason || '매수 실패'}>❌ 실패</span>
         default:
@@ -363,8 +367,7 @@ export const LiveTradeTab: React.FC = () => {
                 max_hold_days: editForm.days,
                 target_profit_rate: editForm.tp
             });
-            alert('실전 매매 설정이 저장되었습니다.');
-            setIsSettingsOpen(false);
+            // 저장 시 모달을 닫지 않고 바로 상태만 갱신하여 연속 설정이 가능하도록 함.
             const fetchedStrategies = await window.electronAPI.getLiveTradeStrategies();
             setStrategies(fetchedStrategies || []);
         } catch (error: any) {
@@ -379,21 +382,26 @@ export const LiveTradeTab: React.FC = () => {
         picks: tickets.filter(t => (t.pick_date || t.entry_date)?.split('T')[0] === date)
     }));
 
-    const activeRunningStrategy = strategies.find(s => s.is_active === 1);
-    const systemStatus = activeRunningStrategy ? 'System Online' : 'System Offline';
-    const systemStatusColor = activeRunningStrategy ? 'bg-emerald-500/20 text-emerald-600 border-emerald-500/30' : 'bg-muted/20 text-muted-foreground border-border/30';
+    const activeRunningStrategies = strategies.filter(s => s.is_active === 1);
+    const systemStatus = activeRunningStrategies.length > 0 ? 'System Online' : 'System Offline';
+    const systemStatusColor = activeRunningStrategies.length > 0 ? 'bg-emerald-500/20 text-emerald-600 border-emerald-500/30' : 'bg-muted/20 text-muted-foreground border-border/30';
 
     // Stats Calculation
-    const closedTickets = tickets.filter(t => t.status === 'CLOSED');
-    const winTickets = closedTickets.filter(t => (t.pnlPct || 0) > 0);
+    const validTickets = tickets.filter(t => t.status !== 'FAILED');
+    const closedTickets = validTickets.filter(t => t.status === 'CLOSED');
+    const activeValidCount = validTickets.length - closedTickets.length;
+    const winTickets = closedTickets.filter(t => (t.realized_profit_pct ?? t.pnlPct ?? 0) > 0);
     const totalClosed = closedTickets.length;
     const winRate = totalClosed > 0 ? ((winTickets.length / totalClosed) * 100).toFixed(1) : '0.0';
     
-    const cumulativeReturn = closedTickets.reduce((sum, t) => sum + (t.pnlPct || 0), 0);
+    const cumulativeReturn = closedTickets.reduce((sum, t) => sum + (t.realized_profit_pct ?? t.pnlPct ?? 0), 0);
     const cumulativeProfit = closedTickets.reduce((sum, t) => {
-        const pnlAmt = t.pnlAmount || ((t.entry_price && t.quantity && t.pnlPct) ? (t.entry_price * t.quantity * (t.pnlPct / 100)) : 0);
+        const pct = t.realized_profit_pct ?? t.pnlPct ?? 0;
+        const pnlAmt = t.pnlAmount || ((t.entry_price && t.quantity && pct !== 0) ? (t.entry_price * t.quantity * (pct / 100)) : 0);
         return sum + pnlAmt;
     }, 0);
+
+
 
     return (
         <div className="flex flex-col h-full overflow-hidden select-none relative">
@@ -401,10 +409,10 @@ export const LiveTradeTab: React.FC = () => {
             <div className="shrink-0 px-4 py-3 border-b border-border/50 bg-emerald-500/5">
                 <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                        <Zap className={cn("w-4 h-4", activeRunningStrategy ? "text-emerald-500" : "text-muted-foreground")} />
-                        {activeRunningStrategy ? (
+                        <Zap className={cn("w-4 h-4", activeRunningStrategies.length > 0 ? "text-emerald-500" : "text-muted-foreground")} />
+                        {activeRunningStrategies.length > 0 ? (
                             <span className="font-bold text-sm text-emerald-600 dark:text-emerald-400">
-                                {CATEGORY_META[activeRunningStrategy.strategy_category]?.label || activeRunningStrategy.strategy_category} ({activeRunningStrategy.buy_amount_per_trade?.toLocaleString()}원 / 보유 {activeRunningStrategy.max_hold_days}일 / 목표 {activeRunningStrategy.target_profit_rate}%)
+                                {activeRunningStrategies.map((s: any) => CATEGORY_META[s.strategy_category]?.label?.split(' ')[1] || s.strategy_category).join(', ')} 등 {activeRunningStrategies.length}개 전략 동시 운용 중
                             </span>
                         ) : (
                             <span className="font-bold text-sm text-muted-foreground">설정된 실전 매매 전략이 없습니다</span>
@@ -474,7 +482,7 @@ export const LiveTradeTab: React.FC = () => {
                 {/* Stats Bar */}
                 <div className="grid grid-cols-4 gap-3">
                     {[
-                        { icon: <ShieldCheck className="w-4 h-4 text-indigo-400" />, label: '총 건수 (진행중)', value: `${tickets.length}건`, sub: `(진행중 ${tickets.length - totalClosed}건)` },
+                        { icon: <ShieldCheck className="w-4 h-4 text-indigo-400" />, label: '총 건수 (진행중)', value: `${validTickets.length}건`, sub: `(진행중 ${activeValidCount}건)` },
                         { icon: <TrendingUp className={cn("w-4 h-4", cumulativeReturn > 0 ? "text-rose-500" : (cumulativeReturn < 0 ? "text-blue-500" : "text-muted-foreground"))} />, label: '누적 수익률', value: `${cumulativeReturn > 0 ? '+' : ''}${cumulativeReturn.toFixed(1)}%`, color: cumulativeReturn > 0 ? 'text-rose-500' : (cumulativeReturn < 0 ? 'text-blue-500' : 'text-foreground') },
                         { icon: <Award className={cn("w-4 h-4", cumulativeProfit > 0 ? "text-rose-500" : (cumulativeProfit < 0 ? "text-blue-500" : "text-muted-foreground"))} />, label: '누적 수익금', value: `${Math.floor(cumulativeProfit).toLocaleString()}원`, color: cumulativeProfit > 0 ? 'text-rose-500' : (cumulativeProfit < 0 ? 'text-blue-500' : 'text-foreground') },
                         { icon: <Target className="w-4 h-4 text-emerald-500" />, label: '총 승률 (수익/청산)', value: `${winRate}%`, sub: `(${winTickets.length}건 / ${totalClosed}건)` },
@@ -495,6 +503,7 @@ export const LiveTradeTab: React.FC = () => {
                 </div>
             </div>
 
+
             {/* ── 메인 테이블 ── */}
             <div className="flex-1 overflow-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                 <table className="w-full text-sm text-left whitespace-nowrap">
@@ -506,7 +515,7 @@ export const LiveTradeTab: React.FC = () => {
                             <th className="py-2 px-3 font-bold text-center">AI점수</th>
                             <th className="py-2 px-3 font-bold text-right">진입가</th>
                             <th className="py-2 px-3 font-bold text-right">현재/청산가</th>
-                            <th className="py-2 px-3 font-bold text-center">D-day</th>
+                            <th className="py-2 px-3 font-bold text-center">보유일</th>
                             <th className="py-2 px-3 font-bold text-right">피크</th>
                             <th className="py-2 px-3 font-bold text-right">현재수익</th>
                             <th className="py-2 px-3 font-bold text-center">진행 상태</th>
@@ -532,30 +541,39 @@ export const LiveTradeTab: React.FC = () => {
                                     const isLive = pick.status === 'ACTIVE' || pick.status === 'SELLING';
 
                                     // 실시간 현재가 (WS 수신 시) 또는 DB 저장값 폴백
-                                    const livePrice = isLive ? (livePrices[stockCode] || pick.current_price || pick.entry_price) : (pick.current_price || pick.entry_price);
+                                    const livePrice = isLive ? (livePrices[stockCode] || pick.current_price || pick.entry_price) : (pick.exit_price || pick.current_price || pick.entry_price);
                                     const isReceivingLive = isLive && !!livePrices[stockCode];
 
                                     // 실시간으로 수익률 계산
-                                    const livePnlPct = (isReceivingLive && pick.entry_price > 0)
-                                        ? ((livePrice - pick.entry_price) / pick.entry_price) * 100
-                                        : (pick.pnlPct || 0);
+                                    const livePnlPct = isLive
+                                        ? ((isReceivingLive && pick.entry_price > 0)
+                                            ? ((livePrice - pick.entry_price) / pick.entry_price) * 100
+                                            : (pick.pnlPct || 0))
+                                        : (pick.realized_profit_pct ?? pick.pnlPct ?? 0);
 
                                     return (
-                                        <tr key={pick.id} className="border-b border-border/20 hover:bg-accent/30 transition-colors group">
+                                        <tr key={pick.id || pick.ticket_id} className={cn("border-b border-border/20 transition-colors group", pick.status === 'FAILED' ? "opacity-40 grayscale" : "hover:bg-accent/30")}>
                                             <td className="py-2.5 px-3">
                                                 <div className="font-semibold text-sm text-foreground">{pick.stock_name || pick.stock_code}</div>
                                                 <div className="text-[10px] font-mono text-muted-foreground">{pick.stock_code}</div>
                                             </td>
                                             <td className="py-2.5 px-3">
-                                                <div className="text-xs text-muted-foreground truncate max-w-[120px] sm:max-w-[160px]">
-                                                    {pick.related_themes || '분석 중'}
+                                                <div className="text-xs text-muted-foreground truncate max-w-[120px] sm:max-w-[160px]" title={pick.related_themes}>
+                                                    {(() => {
+                                                        try {
+                                                            const parsed = JSON.parse(pick.related_themes || '[]');
+                                                            return Array.isArray(parsed) && parsed.length > 0 ? parsed.join(', ') : (pick.related_themes || '분석 중');
+                                                        } catch {
+                                                            return pick.related_themes || '분석 중';
+                                                        }
+                                                    })()}
                                                 </div>
                                             </td>
                                             <td className="py-2.5 px-3 text-center">
                                                 <CategoryBadge category={pick.category || pick.strategy_category} />
                                             </td>
                                             <td className="py-2.5 px-3 text-center">
-                                                <span className="font-mono font-bold text-sm text-amber-400">{pick.buy_score || 90}</span>
+                                                <span className="font-mono font-bold text-sm text-amber-400">{pick.ai_score || pick.buy_score || '-'}</span>
                                             </td>
                                             <td className="py-2.5 px-3 text-right">
                                                 <span className="font-mono text-sm text-muted-foreground">
@@ -579,9 +597,9 @@ export const LiveTradeTab: React.FC = () => {
                                                 )}
                                             </td>
                                             <td className="py-2.5 px-3 text-center">
-                                                {pick.status === 'ACTIVE' ? (
-                                                    <span className={cn('text-xs font-bold', (pick.target_days - (pick.holding_days || 0)) <= 0 ? 'text-red-400' : 'text-foreground')}>
-                                                        {(pick.target_days - (pick.holding_days || 0)) <= 0 ? '매도예정' : `D-${(pick.target_days - (pick.holding_days || 0))}`}
+                                                {pick.status === 'ACTIVE' || pick.status === 'SELLING' ? (
+                                                    <span className={cn('text-xs font-bold', (pick.holding_days ?? 0) >= (pick.target_days ?? 1) ? 'text-red-400' : 'text-foreground')}>
+                                                        {(pick.holding_days ?? 0) >= (pick.target_days ?? 1) ? '매도예정' : `${pick.holding_days ?? 0}일 (최대 ${pick.target_days ?? 1}일)`}
                                                     </span>
                                                 ) : pick.status === 'FAILED' ? (
                                                     <span className="text-xs text-red-500/70 font-bold" title={pick.fail_reason}>실패</span>
@@ -593,11 +611,11 @@ export const LiveTradeTab: React.FC = () => {
                                                 <ReturnCell value={pick.peak_return} />
                                             </td>
                                             <td className="py-2.5 px-3 text-right">
-                                                <ReturnCell value={isReceivingLive ? livePnlPct : pick.pnlPct} />
+                                                <ReturnCell value={livePnlPct} />
                                             </td>
                                             <td className="py-2.5 px-3 text-center">
                                                 <div className="flex items-center justify-center gap-1.5">
-                                                    <StatusBadge status={pick.status} isUp={livePnlPct > 0} failReason={pick.fail_reason} />
+                                                    <StatusBadge status={pick.status} isUp={livePnlPct > 0} failReason={pick.fail_reason} realizedPct={pick.realized_profit_pct} />
                                                     {pick.status === 'FAILED' && (
                                                         <button
                                                             onClick={() => handleDeleteTicket(pick.ticket_id || pick.id, pick.stock_name || pick.stock_code)}
@@ -704,9 +722,35 @@ export const LiveTradeTab: React.FC = () => {
                             <button onClick={() => setIsSettingsOpen(false)} className="p-1 hover:bg-muted rounded transition-colors"><X className="w-5 h-5"/></button>
                         </div>
                         <div className="p-6 overflow-y-auto space-y-6">
-                            <p className="text-sm text-muted-foreground">
-                                선택된 <strong>단 하나의 단일 전략</strong>에 한해 AI가 포착한 종목을 키움증권 계좌로 <strong>자동 매수 및 청산</strong>합니다.
-                            </p>
+                            {activeRunningStrategies.length > 0 ? (
+                                <div className="space-y-1.5">
+                                    <p className="text-sm font-bold text-foreground mb-3 flex items-center gap-1.5">
+                                        <span className="relative flex h-2.5 w-2.5">
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                        </span>
+                                        현재 가동 중인 전략 요약
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {activeRunningStrategies.map((s: any) => (
+                                            <div key={s.strategy_category} className="flex flex-col bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5">
+                                                <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mb-1 flex items-center gap-1">
+                                                    {CATEGORY_META[s.strategy_category]?.label || s.strategy_category}
+                                                </div>
+                                                <div className="text-[11px] text-muted-foreground flex justify-between items-center">
+                                                    <span>보유 <span className="font-bold text-foreground">{s.max_hold_days}</span>일</span>
+                                                    <span>목표 <span className="font-bold text-rose-500">{s.target_profit_rate}%</span></span>
+                                                    <span className="font-mono text-foreground font-bold">{s.buy_amount_per_trade?.toLocaleString()}원</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-sm text-muted-foreground">
+                                    활성화된 <strong>다중 전략</strong>을 동시 운용할 수 있으며, 동일 종목 포착 시 각 전략의 설정에 따라 <strong>개별 매수 및 청산</strong>됩니다.
+                                </p>
+                            )}
                             
                             {(() => {
                                 const STRATEGIES = [
@@ -729,9 +773,14 @@ export const LiveTradeTab: React.FC = () => {
                                                 onChange={(e) => setActiveStrategy(e.target.value)}
                                                 className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm font-bold text-foreground focus:ring-2 focus:ring-indigo-500/50 outline-none transition-shadow"
                                             >
-                                                {STRATEGIES.map(s => (
-                                                    <option key={s.cat} value={s.cat}>{s.name}</option>
-                                                ))}
+                                                {STRATEGIES.map(s => {
+                                                    const isStratActive = strategies.find(dbS => dbS.strategy_category === s.cat)?.is_active === 1;
+                                                    return (
+                                                        <option key={s.cat} value={s.cat}>
+                                                            {isStratActive ? '🟢 [ON] ' : '⚪ [OFF] '} {s.name}
+                                                        </option>
+                                                    );
+                                                })}
                                             </select>
                                         </div>
 
@@ -893,13 +942,49 @@ export const LiveTradeTab: React.FC = () => {
                                                 </div>
                                             )}
                                         </div>
+                                        {/* Max Required Cash Calculator */}
+                                        {(() => {
+                                            const activeStrats = strategies.filter(s => s.is_active === 1);
+                                            let maxCash = 0;
+                                            
+                                            // 1. 이미 저장된 다른 활성 전략들의 합산
+                                            activeStrats.forEach(s => {
+                                                if (s.strategy_category !== activeStrategy) {
+                                                    maxCash += (s.buy_amount_per_trade || 0) * 5 * (s.max_hold_days || 1);
+                                                }
+                                            });
+
+                                            // 2. 현재 화면에서 편집 중인 전략의 합산 (ON일 때만)
+                                            if (editForm.isActive) {
+                                                maxCash += editForm.amt * 5 * editForm.days;
+                                            }
+
+                                            if (maxCash === 0) return null;
+
+                                            return (
+                                                <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-3">
+                                                    <span className="text-amber-500 mt-0.5">💡</span>
+                                                    <div>
+                                                        <div className="text-xs font-bold text-amber-500 mb-1">
+                                                            활성화된 전략들의 총 예상 최대 필요 예수금: {maxCash.toLocaleString()}원
+                                                        </div>
+                                                        <div className="text-[10px] text-muted-foreground">
+                                                            계산식: ∑ (각 전략 1회 매수 금액 × 하루 최대 추천 5종목 × 보유일 합산)
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                     </>
                                 )
                             })()}
                         </div>
-                        <div className="p-4 border-t border-border bg-muted/30 flex justify-end gap-2">
-                            <button onClick={() => setIsSettingsOpen(false)} className="px-4 py-2 rounded-lg text-sm font-bold text-muted-foreground hover:bg-muted-foreground/10 transition-colors">취소</button>
-                            <button onClick={handleSaveStrategy} className="px-4 py-2 rounded-lg text-sm font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-colors shadow-sm">설정 저장 및 적용</button>
+                        <div className="p-4 border-t border-border bg-muted/30 flex justify-between gap-2">
+                            <div className="text-xs text-muted-foreground self-center">다중 전략 설정 시, 하나씩 선택하여 각각 저장해주세요.</div>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsSettingsOpen(false)} className="px-4 py-2 rounded-lg text-sm font-bold text-muted-foreground hover:bg-muted-foreground/10 transition-colors">닫기</button>
+                                <button onClick={handleSaveStrategy} className="px-4 py-2 rounded-lg text-sm font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-colors shadow-sm">현재 선택 전략 저장</button>
+                            </div>
                         </div>
                     </div>
                 </div>

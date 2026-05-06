@@ -13,8 +13,15 @@ export interface LiveTradeTicket {
     status: 'ACTIVE' | 'CLOSED' | 'FAILED' | 'SELLING';
     fail_reason?: string;
     order_no?: string;        // 키움 주문번호 (BUY_ACK 후 저장)
+    ai_score?: number;        // AI 점수
+    related_themes?: string;  // 관련 테마
+    exit_price?: number;      // 매도 체결 단가
+    exit_date?: string;       // 매도 체결 일시
+    realized_profit_pct?: number; // 최종 확정 수익률
     created_at: string;
     updated_at: string;
+    target_days?: number;
+    holding_days?: number;
 }
 
 export interface LiveTradeStrategy {
@@ -56,11 +63,8 @@ export class LiveTradeLedgerService {
         const id = uuidv4();
         const now = this.db.getKstTimestamp();
         
-        // If this strategy is being set to active, deactivate all others
-        if (strategy.is_active === 1) {
-            const disableOthersSql = `UPDATE live_trade_strategies SET is_active = 0`;
-            (this.db as any).db.prepare(disableOthersSql).run();
-        }
+        // 다중 전략 운용을 위해 기존 전략의 is_active=0 강제 해제 로직 삭제
+
 
         const sql = `
             INSERT INTO live_trade_strategies (
@@ -92,9 +96,9 @@ export class LiveTradeLedgerService {
     public createTicket(ticket: Omit<LiveTradeTicket, 'ticket_id' | 'created_at' | 'updated_at'>): string {
         const sql = `
             INSERT INTO live_trade_tickets (
-                ticket_id, stock_code, stock_name, entry_date, entry_price, quantity, strategy_category, target_exit_date, status, fail_reason, order_no, created_at, updated_at
+                ticket_id, stock_code, stock_name, entry_date, entry_price, quantity, strategy_category, target_exit_date, status, fail_reason, order_no, ai_score, related_themes, created_at, updated_at
             ) VALUES (
-                $id, $stockCode, $stockName, $entryDate, $entryPrice, $quantity, $category, $targetExitDate, $status, $failReason, $orderNo, $now, $now
+                $id, $stockCode, $stockName, $entryDate, $entryPrice, $quantity, $category, $targetExitDate, $status, $failReason, $orderNo, $aiScore, $relatedThemes, $now, $now
             )
         `;
 
@@ -113,6 +117,8 @@ export class LiveTradeLedgerService {
             status: ticket.status || 'ACTIVE',
             failReason: ticket.fail_reason || null,
             orderNo: ticket.order_no || '',
+            aiScore: ticket.ai_score || 0,
+            relatedThemes: ticket.related_themes || '',
             now: now
         });
 
@@ -120,22 +126,73 @@ export class LiveTradeLedgerService {
     }
 
     public getAllTickets(): LiveTradeTicket[] {
-        const sql = `SELECT * FROM live_trade_tickets ORDER BY entry_date DESC`;
+        const sql = `
+            SELECT 
+                t.*,
+                s.max_hold_days as target_days,
+                (
+                    SELECT COUNT(DISTINCT m.date)
+                    FROM market_ohlcv_history m
+                    WHERE m.date > date(t.entry_date)
+                ) as holding_days
+            FROM live_trade_tickets t
+            LEFT JOIN live_trade_strategies s ON t.strategy_category = s.strategy_category
+            ORDER BY t.entry_date DESC
+        `;
         return (this.db as any).db.prepare(sql).all() as LiveTradeTicket[];
     }
 
     public getActiveTickets(): LiveTradeTicket[] {
-        const sql = `SELECT * FROM live_trade_tickets WHERE status = 'ACTIVE' ORDER BY entry_date DESC`;
+        const sql = `
+            SELECT 
+                t.*,
+                s.max_hold_days as target_days,
+                (
+                    SELECT COUNT(DISTINCT m.date)
+                    FROM market_ohlcv_history m
+                    WHERE m.date > date(t.entry_date)
+                ) as holding_days
+            FROM live_trade_tickets t
+            LEFT JOIN live_trade_strategies s ON t.strategy_category = s.strategy_category
+            WHERE t.status = 'ACTIVE' 
+            ORDER BY t.entry_date DESC
+        `;
         return (this.db as any).db.prepare(sql).all() as LiveTradeTicket[];
     }
 
     public getActiveAndSellingTickets(): LiveTradeTicket[] {
-        const sql = `SELECT * FROM live_trade_tickets WHERE status IN ('ACTIVE', 'SELLING') ORDER BY entry_date DESC`;
+        const sql = `
+            SELECT 
+                t.*,
+                s.max_hold_days as target_days,
+                (
+                    SELECT COUNT(DISTINCT m.date)
+                    FROM market_ohlcv_history m
+                    WHERE m.date > date(t.entry_date)
+                ) as holding_days
+            FROM live_trade_tickets t
+            LEFT JOIN live_trade_strategies s ON t.strategy_category = s.strategy_category
+            WHERE t.status IN ('ACTIVE', 'SELLING') 
+            ORDER BY t.entry_date DESC
+        `;
         return (this.db as any).db.prepare(sql).all() as LiveTradeTicket[];
     }
 
     public getActiveTicketsByStock(stockCode: string): LiveTradeTicket[] {
-        const sql = `SELECT * FROM live_trade_tickets WHERE status = 'ACTIVE' AND stock_code = ? ORDER BY entry_date ASC`;
+        const sql = `
+            SELECT 
+                t.*,
+                s.max_hold_days as target_days,
+                (
+                    SELECT COUNT(DISTINCT m.date)
+                    FROM market_ohlcv_history m
+                    WHERE m.date > date(t.entry_date)
+                ) as holding_days
+            FROM live_trade_tickets t
+            LEFT JOIN live_trade_strategies s ON t.strategy_category = s.strategy_category
+            WHERE t.status = 'ACTIVE' AND t.stock_code = ? 
+            ORDER BY t.entry_date ASC
+        `;
         return (this.db as any).db.prepare(sql).all(stockCode) as LiveTradeTicket[];
     }
 
@@ -143,6 +200,12 @@ export class LiveTradeLedgerService {
         const sql = `UPDATE live_trade_tickets SET status = 'CLOSED', updated_at = ? WHERE ticket_id = ?`;
         const now = this.db.getKstTimestamp();
         (this.db as any).db.prepare(sql).run(now, ticketId);
+    }
+
+    public closeTicketWithExitInfo(ticketId: string, exitPrice: number, realizedProfitPct: number): void {
+        const sql = `UPDATE live_trade_tickets SET status = 'CLOSED', exit_price = ?, exit_date = ?, realized_profit_pct = ?, updated_at = ? WHERE ticket_id = ?`;
+        const now = this.db.getKstTimestamp();
+        (this.db as any).db.prepare(sql).run(exitPrice, now, realizedProfitPct, now, ticketId);
     }
 
     public markTicketSelling(ticketId: string): void {

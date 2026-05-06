@@ -74,9 +74,9 @@ export default function TitleBar({ isDarkMode, onToggleTheme }: TitleBarProps) {
         <header className="titlebar flex items-center justify-between h-10 px-4 bg-muted/50 border-b border-white/5 select-none">
             <div className="flex items-center gap-2">
                 <div className="w-5 h-5 bg-primary rounded-md flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-primary-foreground">K</span>
+                    <span className="text-[10px] font-bold text-primary-foreground">AI</span>
                 </div>
-                <span className="text-xs font-semibold tracking-tight uppercase">Kiwoom Trader</span>
+                <span className="text-xs font-semibold tracking-tight uppercase">AI Trader</span>
             </div>
 
             <div className="no-drag flex items-center gap-3">

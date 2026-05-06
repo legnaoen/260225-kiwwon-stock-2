@@ -363,6 +363,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     getNaverFlowSettings: () => ipcRenderer.invoke('naverflow:get-settings'),
     saveNaverFlowSettings: (settings: any) => ipcRenderer.invoke('naverflow:save-settings', settings),
+    getNaverResearchReports: (limit?: number) => ipcRenderer.invoke('naverflow:get-research-reports', limit),
+    getNaverResearchTopSectors: (limitDays?: number) => ipcRenderer.invoke('naverflow:get-research-top-sectors', limitDays),
 
     // Phase 2.5: AI Analysts & Portfolio Manager
     runMomentumAnalyst: () => ipcRenderer.invoke('ai-analyst:run-momentum'),
@@ -485,6 +487,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     // Grid Search 최적 파라미터 캐시 조회
     getGridSearchResults: () => ipcRenderer.invoke('optimizer:get-grid-search-results'),
+
+    // === Report-Driven AI Tracker =============================================
+    getReportPortfolio: () => ipcRenderer.invoke('report-tracker:get-portfolio'),
+    getReportTradeHistory: (limit?: number) => ipcRenderer.invoke('report-tracker:get-history', limit),
+    getReportRebalanceLogs: (limit?: number) => ipcRenderer.invoke('report-tracker:get-logs', limit),
+    getReportPortfolioStats: () => ipcRenderer.invoke('report-tracker:get-stats'),
+    runReportRebalance: () => ipcRenderer.invoke('report-tracker:run-rebalance'),
+    runReportScoutPreview: () => ipcRenderer.invoke('report-tracker:run-scout-preview'),
+    dropReportItem: (stockCode: string, exitReason: string) => ipcRenderer.invoke('report-tracker:drop-item', { stockCode, exitReason }),
+    clearReportPortfolio: () => ipcRenderer.invoke('report-tracker:clear-portfolio'),
+    refreshReportPrices: () => ipcRenderer.invoke('report-tracker:refresh-prices'),
 })
 
 

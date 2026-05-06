@@ -641,6 +641,66 @@ export class DatabaseService {
         this.db.exec(createNaverVocabularyTable)
         this.db.exec(createNaverResearchFlowTable)
 
+        // ─── Report-Driven AI Tracker: 리포트 매매 포트폴리오 ──────────────────
+        // Partial index로 status='ACTIVE' 종목만 UNIQUE 보장 (재편입 허용)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS report_mock_portfolio (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                entry_price REAL DEFAULT 0,
+                current_price REAL DEFAULT 0,
+                entry_date TEXT,
+                holding_days INTEGER DEFAULT 0,
+                target_return_pct REAL DEFAULT 15.0,
+                target_days INTEGER DEFAULT 20,
+                peak_return REAL,
+                final_return REAL,
+                status TEXT DEFAULT 'ACTIVE',
+                report_source TEXT,
+                industry_name TEXT,
+                ai_entry_reason TEXT,
+                ai_score INTEGER DEFAULT 0,
+                scout_candidates_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        `);
+        this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_report_portfolio_active ON report_mock_portfolio(stock_code) WHERE status='ACTIVE';`);
+
+        // ─── Report-Driven AI Tracker: 매매 이력 ───────────────────────────────
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS report_trade_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                entry_price REAL DEFAULT 0,
+                exit_price REAL DEFAULT 0,
+                final_return REAL DEFAULT 0,
+                entry_date TEXT,
+                exit_date TEXT,
+                holding_days INTEGER DEFAULT 0,
+                report_source TEXT,
+                industry_name TEXT,
+                ai_entry_reason TEXT,
+                ai_exit_reason TEXT,
+                exit_type TEXT DEFAULT 'DROPPED',  -- 'DROPPED' | 'TARGET_HIT' | 'STOP_LOSS'
+                created_at TEXT NOT NULL
+            );
+        `);
+
+        // ─── Report-Driven AI Tracker: Scout/Manager 실행 로그 ────────────────
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS report_rebalance_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_date TEXT NOT NULL,
+                log_text TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(run_date)
+            );
+        `);
+        // ───────────────────────────────────────────────────────────────────────
+
         this.db.exec(createDartCorpTable)
         this.db.exec(createPortfolioEventLogsTable)
         this.db.exec(createSchedulesTable)
@@ -825,6 +885,8 @@ export class DatabaseService {
                 target_exit_date TEXT NOT NULL,
                 status TEXT DEFAULT 'ACTIVE', -- ACTIVE, CLOSED, FAILED
                 fail_reason TEXT,
+                ai_score INTEGER DEFAULT 0,
+                related_themes TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -844,6 +906,27 @@ export class DatabaseService {
             this.db.exec(`ALTER TABLE live_trade_tickets ADD COLUMN stock_name TEXT DEFAULT '';`);
         } catch (e) {
             // Ignore if column already exists
+        }
+        try {
+            this.db.exec(`ALTER TABLE live_trade_tickets ADD COLUMN ai_score INTEGER DEFAULT 0;`);
+        } catch (e) {
+        }
+        try {
+            this.db.exec(`ALTER TABLE live_trade_tickets ADD COLUMN related_themes TEXT;`);
+        } catch (e) {
+        }
+        
+        try {
+            this.db.exec(`ALTER TABLE live_trade_tickets ADD COLUMN exit_price REAL DEFAULT 0;`);
+        } catch (e) {
+        }
+        try {
+            this.db.exec(`ALTER TABLE live_trade_tickets ADD COLUMN exit_date TEXT;`);
+        } catch (e) {
+        }
+        try {
+            this.db.exec(`ALTER TABLE live_trade_tickets ADD COLUMN realized_profit_pct REAL;`);
+        } catch (e) {
         }
         
         this.db.exec(`
@@ -2462,6 +2545,35 @@ export class DatabaseService {
         }
     }
 
+    public getNaverResearchReports(limit: number = 1000): any[] {
+        try {
+            return this.db.prepare(`
+                SELECT * FROM naver_research_flow
+                ORDER BY date DESC, rank ASC
+                LIMIT ?
+            `).all(limit) as any[];
+        } catch (e) {
+            console.error('[DatabaseService] getNaverResearchReports Error:', e);
+            return [];
+        }
+    }
+
+    public getNaverResearchTopSectors(limitDays: number = 7): any[] {
+        try {
+            return this.db.prepare(`
+                SELECT date, rank, industry_name, COUNT(*) as report_count
+                FROM naver_research_flow
+                WHERE rank > 0
+                GROUP BY date, rank, industry_name
+                ORDER BY date DESC, rank ASC
+                LIMIT ?
+            `).all(limitDays * 3) as any[];
+        } catch (e) {
+            console.error('[DatabaseService] getNaverResearchTopSectors Error:', e);
+            return [];
+        }
+    }
+
     // === MAIIS Inventory Methods ===
     public getMaiisInventory() {
         try {
@@ -3989,7 +4101,7 @@ export class DatabaseService {
 
     public insertTelegramLog(senderType: string, message: string) {
         // Skip specific startup message
-        if (message.includes('정상적으로 시작되었습니다')) {
+        if (message.includes('AI Trader 시작')) {
             return;
         }
 
@@ -5139,6 +5251,230 @@ export class DatabaseService {
         } catch (e: any) {
             console.error('[DB] runPerformanceOptimizer error:', e);
             return { success: false, error: e.message };
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // === Report-Driven AI Tracker CRUD Methods ==============================
+    // ════════════════════════════════════════════════════════════════════════
+
+    /** 현재 보유 중인 리포트 매매 포트폴리오 조회 */
+    public getReportPortfolio(): any[] {
+        try {
+            return this.db.prepare(`
+                SELECT * FROM report_mock_portfolio
+                WHERE status = 'ACTIVE'
+                ORDER BY ai_score DESC, entry_date DESC
+            `).all() as any[];
+        } catch (e) {
+            console.error('[DB] getReportPortfolio Error:', e);
+            return [];
+        }
+    }
+
+    /** 매매 이력 조회 (탈락/매도 종목) */
+    public getReportTradeHistory(limit: number = 100): any[] {
+        try {
+            return this.db.prepare(`
+                SELECT * FROM report_trade_history
+                ORDER BY exit_date DESC, id DESC
+                LIMIT ?
+            `).all(limit) as any[];
+        } catch (e) {
+            console.error('[DB] getReportTradeHistory Error:', e);
+            return [];
+        }
+    }
+
+    /** 리밸런싱 로그 조회 (최근 N일) */
+    public getReportRebalanceLogs(limit: number = 30): any[] {
+        try {
+            return this.db.prepare(`
+                SELECT * FROM report_rebalance_logs
+                ORDER BY run_date DESC
+                LIMIT ?
+            `).all(limit) as any[];
+        } catch (e) {
+            console.error('[DB] getReportRebalanceLogs Error:', e);
+            return [];
+        }
+    }
+
+    /** Scout 후보를 포트폴리오에 편입 (ACTIVE) */
+    public insertReportPortfolioItem(item: {
+        stock_code: string;
+        stock_name: string;
+        entry_price: number;
+        current_price: number;
+        entry_date: string;
+        target_return_pct: number;
+        target_days: number;
+        report_source: string;
+        industry_name: string;
+        ai_entry_reason: string;
+        ai_score: number;
+        scout_candidates_json?: string;
+    }): boolean {
+        try {
+            const now = new Date().toISOString();
+            this.db.prepare(`
+                INSERT INTO report_mock_portfolio
+                (stock_code, stock_name, entry_price, current_price, entry_date,
+                 target_return_pct, target_days, report_source, industry_name,
+                 ai_entry_reason, ai_score, scout_candidates_json, status,
+                 holding_days, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, ?, ?)
+            `).run(
+                item.stock_code, item.stock_name, item.entry_price, item.current_price,
+                item.entry_date, item.target_return_pct, item.target_days,
+                item.report_source, item.industry_name, item.ai_entry_reason,
+                item.ai_score, item.scout_candidates_json ?? null, now, now
+            );
+            return true;
+        } catch (e: any) {
+            console.error('[DB] insertReportPortfolioItem Error:', e.message);
+            return false;
+        }
+    }
+
+    /** 보유 종목의 현재가/보유일/최고수익률 갱신 */
+    public updateReportPortfolioPrice(stockCode: string, currentPrice: number, currentReturn: number): void {
+        try {
+            const row = this.db.prepare(
+                `SELECT id, entry_price, peak_return, holding_days, entry_date FROM report_mock_portfolio WHERE stock_code = ? AND status = 'ACTIVE'`
+            ).get(stockCode) as any;
+            if (!row) return;
+
+            const newPeak = row.peak_return == null || currentReturn > row.peak_return ? currentReturn : row.peak_return;
+            
+            let newHoldingDays = 0;
+            if (row.entry_date) {
+                const countRow = this.db.prepare(
+                    `SELECT COUNT(DISTINCT date) as cnt FROM market_ohlcv_history WHERE stock_code = ? AND date > ?`
+                ).get(stockCode, row.entry_date) as any;
+                
+                if (countRow && countRow.cnt > 0) {
+                    newHoldingDays = countRow.cnt;
+                } else {
+                    // DB에 OHLCV 기록이 없으면 평일 기준으로 임시 계산
+                    const today = new Date(this.getKstDate());
+                    const entry = new Date(row.entry_date);
+                    let days = 0;
+                    const cur = new Date(entry.getTime());
+                    cur.setDate(cur.getDate() + 1); // 편입일 다음날부터 계산 (당일은 0일)
+                    while (cur <= today) {
+                        const dow = cur.getDay();
+                        if (dow !== 0 && dow !== 6) days++;
+                        cur.setDate(cur.getDate() + 1);
+                    }
+                    newHoldingDays = Math.max(0, days);
+                }
+            }
+
+            this.db.prepare(`
+                UPDATE report_mock_portfolio
+                SET current_price = ?, holding_days = ?, peak_return = ?, updated_at = ?
+                WHERE id = ?
+            `).run(currentPrice, newHoldingDays, newPeak, new Date().toISOString(), row.id);
+        } catch (e: any) {
+            console.error('[DB] updateReportPortfolioPrice Error:', e.message);
+        }
+    }
+
+    /** 종목 탈락(DROPPED) 처리 → 이력 테이블로 이관 */
+    public dropReportPortfolioItem(stockCode: string, exitPrice: number, exitReason: string, exitType: string = 'DROPPED'): boolean {
+        try {
+            const row = this.db.prepare(
+                `SELECT * FROM report_mock_portfolio WHERE stock_code = ? AND status = 'ACTIVE'`
+            ).get(stockCode) as any;
+            if (!row) return false;
+
+            const finalReturn = row.entry_price > 0
+                ? parseFloat((((exitPrice - row.entry_price) / row.entry_price) * 100).toFixed(2))
+                : 0;
+            const now = new Date().toISOString();
+
+            this.db.transaction(() => {
+                // 이력 테이블에 삽입
+                this.db.prepare(`
+                    INSERT INTO report_trade_history
+                    (stock_code, stock_name, entry_price, exit_price, final_return,
+                     entry_date, exit_date, holding_days, report_source, industry_name,
+                     ai_entry_reason, ai_exit_reason, exit_type, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `).run(
+                    row.stock_code, row.stock_name, row.entry_price, exitPrice, finalReturn,
+                    row.entry_date, now.split('T')[0], row.holding_days,
+                    row.report_source, row.industry_name,
+                    row.ai_entry_reason, exitReason, exitType, now
+                );
+                // 포트폴리오에서 DROPPED 상태로 변경
+                this.db.prepare(`
+                    UPDATE report_mock_portfolio
+                    SET status = 'DROPPED', final_return = ?, exit_price = ?, updated_at = ?
+                    WHERE stock_code = ? AND status = 'ACTIVE'
+                `).run(finalReturn, exitPrice, now, stockCode);
+            })();
+            return true;
+        } catch (e: any) {
+            console.error('[DB] dropReportPortfolioItem Error:', e.message);
+            return false;
+        }
+    }
+
+    /** 리포트 포트폴리오 (ACTIVE) 전량 하드 딜리트 (히스토리 이관 안함) */
+    public clearReportPortfolio(): boolean {
+        try {
+            this.db.prepare(`DELETE FROM report_mock_portfolio WHERE status = 'ACTIVE'`).run();
+            return true;
+        } catch (e: any) {
+            console.error('[DB] clearReportPortfolio Error:', e.message);
+            return false;
+        }
+    }
+
+
+    /** 리밸런싱 로그 저장/갱신 */
+    public upsertReportRebalanceLog(runDate: string, logText: string): void {
+        try {
+            this.db.prepare(`
+                INSERT INTO report_rebalance_logs (run_date, log_text, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(run_date) DO UPDATE SET log_text = excluded.log_text
+            `).run(runDate, logText, new Date().toISOString());
+        } catch (e: any) {
+            console.error('[DB] upsertReportRebalanceLog Error:', e.message);
+        }
+    }
+
+    /** 리포트 매매 성과 통계 */
+    public getReportPortfolioStats(): {
+        activeCount: number;
+        totalTrades: number;
+        winRate: number;
+        avgReturn: number;
+        avgHoldDays: number;
+    } {
+        try {
+            const history = this.db.prepare(
+                `SELECT final_return, holding_days FROM report_trade_history`
+            ).all() as any[];
+            const activeCount = (this.db.prepare(
+                `SELECT COUNT(*) as cnt FROM report_mock_portfolio WHERE status='ACTIVE'`
+            ).get() as any)?.cnt ?? 0;
+
+            const totalTrades = history.length;
+            const wins = history.filter(h => h.final_return > 0).length;
+            const winRate = totalTrades > 0 ? parseFloat(((wins / totalTrades) * 100).toFixed(1)) : 0;
+            const avgReturn = totalTrades > 0
+                ? parseFloat((history.reduce((s, h) => s + h.final_return, 0) / totalTrades).toFixed(2))
+                : 0;
+            const avgHoldDays = totalTrades > 0
+                ? Math.round(history.reduce((s, h) => s + h.holding_days, 0) / totalTrades)
+                : 0;
+            return { activeCount, totalTrades, winRate, avgReturn, avgHoldDays };
+        } catch (e) {
+            return { activeCount: 0, totalTrades: 0, winRate: 0, avgReturn: 0, avgHoldDays: 0 };
         }
     }
 }

@@ -199,7 +199,7 @@ export class SchedulerService {
                     const activeTickets = ledger.getActiveTickets()
                     const today = new Date().toISOString().split('T')[0]
                     
-                    const expiringTickets = activeTickets.filter(t => t.target_exit_date <= today)
+                    const expiringTickets = activeTickets.filter(t => (t.holding_days ?? 0) >= (t.target_days ?? 999))
                     
                     if (expiringTickets.length > 0) {
                         this.telegram.sendMessage(`⏳ **[장 마감 기간 청산 시작]**\n- 청산 대상: ${expiringTickets.length}건\n- 최대 보유일 도달로 인해 15:20 동시호가 시장가(조건부 지정가)로 전량 매도 실행합니다.`);
@@ -432,9 +432,9 @@ export class SchedulerService {
                     let retries = 0;
                     while (!result.success && retries < 2) {
                         retries++;
-                        this.telegram.sendMessage(`⚠️ [15:05] OHLCV 수집 실패 (수집: ${result.collected}개). 5분 후 재시도합니다... (${retries}/2)`);
-                        console.log(`[Scheduler] OHLCV 수집 실패. 5분 대기 후 재시도 (${retries}/2)...`);
-                        await new Promise(r => setTimeout(r, 5 * 60 * 1000));
+                        this.telegram.sendMessage(`⚠️ [15:05] OHLCV 수집 실패 (수집: ${result.collected}개). 30초 후 재시도합니다... (${retries}/2)`);
+                        console.log(`[Scheduler] OHLCV 수집 실패. 30초 대기 후 재시도 (${retries}/2)...`);
+                        await new Promise(r => setTimeout(r, 30 * 1000));
                         result = await collector.runDailyCollection(100);
                     }
                     
@@ -488,83 +488,84 @@ export class SchedulerService {
                         const { LiveTradeLedgerService } = await import('./LiveTradeLedgerService')
                         const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService')
                         const strategies = LiveTradeLedgerService.getInstance().getStrategies()
-                        const activeLiveStrategy = strategies.find((s: any) => s.is_active === 1)
+                        const activeLiveStrategies = strategies.filter((s: any) => s.is_active === 1)
 
-                        if (activeLiveStrategy) {
-                            const activeCategory = activeLiveStrategy.strategy_category as string
-                            const maxHoldDays = activeLiveStrategy.max_hold_days as number
+                        if (activeLiveStrategies.length > 0) {
+                            let totalLiveTradeLog = '';
+                            const today = (await import('../utils/DateUtils')).getKstDate();
+                            const rawDb = (DatabaseService.getInstance() as any).db;
+                            let hasLiveTradeAction = false;
 
-                            // 전략 카테고리 → Track 픽 테이블 매핑
-                            // UI 카테고리 키와 TrackBuyAgent BUY_CATEGORIES가 동일한 문자열을 사용
-                            const CATEGORY_TO_PICK_TABLE: Record<string, string> = {
-                                'TRUE_LEADER':             'track_a_buy_picks',
-                                'EMERGING_STAR':           'track_b_buy_picks',
-                                'PULLBACK_REBOUND':        'track_c_buy_picks',
-                                'PULLBACK_DIP':            'track_c_buy_picks',
-                                'INTRADAY_SURGE':          'track_d_buy_picks',
-                                'SHORT_TERM_CONSOLIDATION':'track_e_buy_picks',
+                            for (const activeLiveStrategy of activeLiveStrategies) {
+                                const activeCategory = activeLiveStrategy.strategy_category as string;
+                                const maxHoldDays = activeLiveStrategy.max_hold_days as number;
+
+                                const CATEGORY_TO_PICK_TABLE: Record<string, string> = {
+                                    'TRUE_LEADER':             'track_a_buy_picks',
+                                    'EMERGING_STAR':           'track_b_buy_picks',
+                                    'PULLBACK_REBOUND':        'track_c_buy_picks',
+                                    'PULLBACK_DIP':            'track_c_buy_picks',
+                                    'INTRADAY_SURGE':          'track_d_buy_picks',
+                                    'SHORT_TERM_CONSOLIDATION':'track_e_buy_picks',
+                                };
+
+                                const pickTable = CATEGORY_TO_PICK_TABLE[activeCategory];
+
+                                if (pickTable) {
+                                    const todayPicks: any[] = rawDb.prepare(`
+                                        SELECT stock_code, stock_name, current_price, entry_price, buy_score, related_themes_json
+                                        FROM ${pickTable}
+                                        WHERE pick_date = ? AND category = ?
+                                    `).all(today, activeCategory);
+
+                                    if (todayPicks.length > 0) {
+                                        hasLiveTradeAction = true;
+                                        const calcTargetExitDate = (fromDate: string, businessDays: number): string => {
+                                            const d = new Date(fromDate)
+                                            let added = 0
+                                            while (added < businessDays) {
+                                                d.setDate(d.getDate() + 1)
+                                                const dow = d.getDay()
+                                                if (dow !== 0 && dow !== 6) added++ // 주말 제외
+                                            }
+                                            return d.toISOString().split('T')[0]
+                                        }
+                                        const targetExitDate = calcTargetExitDate(today, maxHoldDays)
+
+                                        totalLiveTradeLog += `\n\n🔥 [실전 매매] 전략: ${activeCategory} | 목표일: ${targetExitDate}`
+                                        for (const pick of todayPicks) {
+                                            const ohlcvRow: any = rawDb.prepare(`
+                                                SELECT close FROM market_ohlcv_history
+                                                WHERE stock_code = ? AND date = ?
+                                            `).get(pick.stock_code, today)
+                                            const currentPrice: number = ohlcvRow?.close ?? 0
+
+                                            if (currentPrice <= 0) {
+                                                totalLiveTradeLog += `\n  ⚠️ ${pick.stock_name}: OHLCV 현재가 없음 → 매수 스킵`
+                                                continue
+                                            }
+                                            try {
+                                                await LiveTradeExecutionService.getInstance().executeBuy(
+                                                    pick.stock_code,
+                                                    pick.stock_name,
+                                                    activeCategory,
+                                                    currentPrice,
+                                                    targetExitDate,
+                                                    pick.buy_score,
+                                                    pick.related_themes_json
+                                                )
+                                                totalLiveTradeLog += `\n  ✅ ${pick.stock_name}(${pick.stock_code}): ${currentPrice.toLocaleString()}원 매수 발동`
+                                            } catch (buyErr: any) {
+                                                totalLiveTradeLog += `\n  🚨 ${pick.stock_name} 매수 실패: ${buyErr.message}`
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
-                            const pickTable = CATEGORY_TO_PICK_TABLE[activeCategory]
-
-                            if (pickTable) {
-                                const today = (await import('../utils/DateUtils')).getKstDate()
-                                const rawDb = (DatabaseService.getInstance() as any).db
-
-                                // 모의매매 상태와 무관하게 오늘 선정된 종목 조회 (완전 분리)
-                                // category 필터: 동일 테이블에 여러 카테고리가 섞여 있는 경우 방지
-                                // (예: track_c에 PULLBACK_REBOUND, PULLBACK_DIP 모두 저장됨)
-                                const todayPicks: any[] = rawDb.prepare(`
-                                    SELECT stock_code, stock_name, current_price, entry_price
-                                    FROM ${pickTable}
-                                    WHERE pick_date = ? AND category = ?
-                                `).all(today, activeCategory)
-
-                                if (todayPicks.length > 0) {
-                                    // targetExitDate: 오늘부터 maxHoldDays 영업일 후 계산
-                                    const calcTargetExitDate = (fromDate: string, businessDays: number): string => {
-                                        const d = new Date(fromDate)
-                                        let added = 0
-                                        while (added < businessDays) {
-                                            d.setDate(d.getDate() + 1)
-                                            const dow = d.getDay()
-                                            if (dow !== 0 && dow !== 6) added++ // 주말 제외
-                                        }
-                                        return d.toISOString().split('T')[0]
-                                    }
-                                    const targetExitDate = calcTargetExitDate(today, maxHoldDays)
-
-                                    let liveTradeLog = `\n\n🔥 [실전 매매 자동 매수 연동] 전략: ${activeCategory} | 목표일: ${targetExitDate}`
-                                    for (const pick of todayPicks) {
-                                        // track_X_buy_picks의 current_price/entry_price는 INSERT 시 항상 0
-                                        // → 15:05 OHLCV 수집으로 저장된 market_ohlcv_history.close를 사용
-                                        const ohlcvRow: any = rawDb.prepare(`
-                                            SELECT close FROM market_ohlcv_history
-                                            WHERE stock_code = ? AND date = ?
-                                        `).get(pick.stock_code, today)
-                                        const currentPrice: number = ohlcvRow?.close ?? 0
-
-                                        if (currentPrice <= 0) {
-                                            liveTradeLog += `\n  ⚠️ ${pick.stock_name}: OHLCV 현재가 없음 → 매수 스킵`
-                                            continue
-                                        }
-                                        try {
-                                            await LiveTradeExecutionService.getInstance().executeBuy(
-                                                pick.stock_code,
-                                                pick.stock_name,
-                                                activeCategory,
-                                                currentPrice,
-                                                targetExitDate
-                                            )
-                                            liveTradeLog += `\n  ✅ ${pick.stock_name}(${pick.stock_code}): ${currentPrice.toLocaleString()}원 매수 발동`
-                                        } catch (buyErr: any) {
-                                            liveTradeLog += `\n  🚨 ${pick.stock_name} 매수 실패: ${buyErr.message}`
-                                        }
-                                    }
-                                    trackAMsg = trackAMsg // 기존 메시지 유지
-                                    this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정${liveTradeLog}`)
-                                    return // 실전매매 연동 시 텔레그램 중복 발송 방지
-                                }
+                            if (hasLiveTradeAction) {
+                                this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정${totalLiveTradeLog}`)
+                                return; // 실전매매 연동 시 텔레그램 중복 발송 방지
                             }
                         }
                     } catch (liveTradeConnErr: any) {
@@ -680,7 +681,34 @@ export class SchedulerService {
                     // Ignore background errors
                 }
             }, { timezone: 'Asia/Seoul' });
-            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, liveTradeMonitorJob, liveTradeChasingStartJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob)
+            // [Step 7] 09:00 리포트 AI 리밸런싱 (Scout → Manager 연계 실행 및 시가 진입)
+            // 개장 직후 당일 오전 리포트 분석 및 실시간 시가(현재가) 진입가 세팅
+            const reportTrackerJob = cron.schedule('0 9 * * 1-5', this.withRetryOnTimeout('리포트AI-09:00', async () => {
+                console.log('[Scheduler] 📑 리포트 AI (Scout → Manager) 개장 동시호가 리밸런싱 시작...')
+                try {
+                    const { ReportScoutAgent } = await import('./v2_agents/ReportScoutAgent')
+                    const { ReportManagerAgent } = await import('./v2_agents/ReportManagerAgent')
+
+                    // Phase 1: Scout — 리포트 기반 신규 후보 발굴
+                    const scoutResult = await ReportScoutAgent.getInstance().run()
+                    if (!scoutResult.success) {
+                        this.telegram.sendMessage(`⚠️ [09:00] 리포트 Scout 실패\n사유: ${scoutResult.error ?? '알 수 없음'}`)
+                        return;
+                    }
+
+                    // Phase 2: Manager — 서바이벌 리밸런싱 및 실시간 가격 페치
+                    const managerResult = await ReportManagerAgent.getInstance().run(scoutResult)
+                    if (!managerResult.success) {
+                        this.telegram.sendMessage(`❌ [09:00] 리포트 Manager 실패\n오류: ${managerResult.error}`);
+                    }
+                    // 성공 시의 텔레그램 브리핑은 ReportManagerAgent.run 내부에서 발송함.
+                } catch (e: any) {
+                    console.error('[Scheduler] 리포트 AI 오류:', e.message)
+                    this.telegram.sendMessage(`❌ [09:00] 리포트 AI 실패\n오류: ${e.message}`)
+                }
+            }), { timezone: 'Asia/Seoul' })
+
+            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, liveTradeMonitorJob, liveTradeChasingStartJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob, reportTrackerJob)
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)

@@ -266,6 +266,7 @@ export const ThemeMockTradingTab: React.FC<{ refreshTrigger?: number }> = ({ ref
                 <StockDetailModal 
                     stockCode={selectedStock.stockCode} 
                     stockName={selectedStock.stockName} 
+                    aiReason={selectedStock.aiReason}
                     onClose={() => setSelectedStock(null)} 
                 />
             )}

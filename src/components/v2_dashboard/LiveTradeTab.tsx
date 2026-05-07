@@ -97,6 +97,7 @@ export const LiveTradeTab: React.FC = () => {
     const [strategies, setStrategies] = useState<any[]>([]);
     const [tickets, setTickets] = useState<any[]>([]);
     const [editForm, setEditForm] = useState({ amt: 1000000, days: 7, tp: 10, isActive: false });
+    const [portfolioConfig, setPortfolioConfig] = useState({ active: false, targetRate: 3.0 });
     const [killSwitch, setKillSwitch] = useState(false);
 
     // ─── 에러 로그 ───────────────────────────────────────────────────────
@@ -181,6 +182,11 @@ export const LiveTradeTab: React.FC = () => {
                 const running = fetchedStrategies?.find((s: any) => s.is_active === 1);
                 if (running) {
                     setActiveStrategy(running.strategy_category);
+                }
+                
+                if ((window as any).electronAPI.getLiveTradePortfolioConfig) {
+                    const pConf = await (window as any).electronAPI.getLiveTradePortfolioConfig();
+                    if (pConf) setPortfolioConfig(pConf);
                 }
             } else {
                 setTickets(MOCK_PICKS);
@@ -367,9 +373,15 @@ export const LiveTradeTab: React.FC = () => {
                 max_hold_days: editForm.days,
                 target_profit_rate: editForm.tp
             });
+            
+            if ((window as any).electronAPI.saveLiveTradePortfolioConfig) {
+                await (window as any).electronAPI.saveLiveTradePortfolioConfig(portfolioConfig);
+            }
+
             // 저장 시 모달을 닫지 않고 바로 상태만 갱신하여 연속 설정이 가능하도록 함.
             const fetchedStrategies = await window.electronAPI.getLiveTradeStrategies();
             setStrategies(fetchedStrategies || []);
+            alert('설정이 저장되었습니다.');
         } catch (error: any) {
             alert('저장 중 오류가 발생했습니다: ' + error.message);
         }
@@ -420,6 +432,12 @@ export const LiveTradeTab: React.FC = () => {
                         <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded border", systemStatusColor)}>
                             {systemStatus}
                         </span>
+                        {portfolioConfig.active && (
+                            <span className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded border bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 flex items-center gap-1 shadow-sm">
+                                <Target className="w-3 h-3" />
+                                일괄 매도: +{portfolioConfig.targetRate}%
+                            </span>
+                        )}
                     </div>
                     <div className="flex items-center gap-2">
                         {/* ─── 에러 로그 버튼 ─── */}
@@ -975,6 +993,49 @@ export const LiveTradeTab: React.FC = () => {
                                                 </div>
                                             );
                                         })()}
+
+                                        {/* Portfolio Auto Sell Settings */}
+                                        <div className="mt-4 border border-rose-500/30 bg-rose-500/5 rounded-xl p-5 space-y-4">
+                                            <div className="flex items-center justify-between border-b border-rose-500/10 pb-3">
+                                                <div className="font-bold text-sm flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                                                    <Target className="w-4 h-4" />
+                                                    포트폴리오 전체 일괄 매도 (Auto-Sell)
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-xs font-bold text-foreground">기능 활성화</span>
+                                                    <button
+                                                        onClick={() => setPortfolioConfig(prev => ({...prev, active: !prev.active}))}
+                                                        className={cn(
+                                                            "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                                                            portfolioConfig.active ? "bg-rose-500" : "bg-muted"
+                                                        )}
+                                                    >
+                                                        <span className={cn(
+                                                            "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                                                            portfolioConfig.active ? "translate-x-4" : "translate-x-0"
+                                                        )} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                                <div className="flex-1 text-xs text-muted-foreground">
+                                                    보유 중인 <strong>모든 종목의 통합 평가 수익률</strong>이 목표치에 도달하면 일괄 익절(시장가/지정가)합니다.
+                                                </div>
+                                                <div className="w-48">
+                                                    <label className="text-[10px] text-muted-foreground font-bold mb-1 block">목표 평균 수익률</label>
+                                                    <div className="flex">
+                                                        <input 
+                                                            type="number" 
+                                                            step="0.1"
+                                                            value={portfolioConfig.targetRate} 
+                                                            onChange={(e) => setPortfolioConfig(prev => ({...prev, targetRate: Number(e.target.value)}))} 
+                                                            className="w-full bg-background border border-input border-r-0 rounded-l px-2 py-1.5 text-sm font-mono text-right text-rose-500 font-bold" 
+                                                        />
+                                                        <span className="bg-muted border border-input rounded-r px-2 py-1.5 text-xs text-muted-foreground flex items-center">%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </>
                                 )
                             })()}

@@ -3460,6 +3460,26 @@ ipcMain.handle('livetrade:save-strategy', async (_event, strategy: any) => {
     }
 });
 
+ipcMain.handle('livetrade:get-portfolio-config', async () => {
+    try {
+        const active = store.get('portfolio_auto_sell_active') || false;
+        const targetRate = store.get('portfolio_target_profit_rate') || 3.0;
+        return { active, targetRate };
+    } catch (err: any) {
+        return { active: false, targetRate: 3.0 };
+    }
+});
+
+ipcMain.handle('livetrade:save-portfolio-config', async (_event, config: any) => {
+    try {
+        store.set('portfolio_auto_sell_active', config.active);
+        store.set('portfolio_target_profit_rate', config.targetRate);
+        return { success: true };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+});
+
 ipcMain.handle('livetrade:get-tickets', async () => {
     try {
         const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');

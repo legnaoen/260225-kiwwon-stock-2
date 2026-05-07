@@ -37,6 +37,14 @@ export class LiveTradeExecutionService {
     private cachedActiveTickets: LiveTradeTicket[] = [];
     private lastCacheTime: number = 0;
 
+    // 포트폴리오 일괄 매도용 캐시
+    private latestPrices: Record<string, number> = {};
+    private cachedPortfolioConfig = {
+        active: false,
+        targetRate: 3.0,
+        lastUpdated: 0
+    };
+
     private constructor() {
         eventBus.on(SystemEvent.PRICE_UPDATE, this.onPriceUpdate.bind(this));
     }
@@ -548,35 +556,95 @@ export class LiveTradeExecutionService {
         return this.cachedActiveStrategies;
     }
 
+    private getPortfolioConfig() {
+        const now = Date.now();
+        if (now - this.cachedPortfolioConfig.lastUpdated > 5000) {
+            this.cachedPortfolioConfig.active = store.get('portfolio_auto_sell_active') as boolean || false;
+            this.cachedPortfolioConfig.targetRate = store.get('portfolio_target_profit_rate') as number || 3.0;
+            this.cachedPortfolioConfig.lastUpdated = now;
+        }
+        return this.cachedPortfolioConfig;
+    }
+
     /**
      * [Event-Driven] 웹소켓 실시간 가격 수신 시 목표가 도달 즉각 매도 검사
      */
     private async onPriceUpdate(data: { code: string; price: number }) {
         if (this.isKillSwitchActive()) return;
 
+        // 1. 개별 종목 최신가 업데이트 (포트폴리오 평가용)
+        this.latestPrices[data.code] = data.price;
+
         const activeTickets = this.getCachedActiveTickets();
-        const tickets = activeTickets.filter(t => t.stock_code === data.code);
-        if (tickets.length === 0) return;
+        if (activeTickets.length === 0) return;
 
         const { StrategyProfileService } = await import('./StrategyProfileService');
         const profileSvc = StrategyProfileService.getInstance();
 
-        for (const ticket of tickets) {
-            if (this.sellingInProgress.has(ticket.ticket_id)) continue;
-            if (ticket.entry_price <= 0) continue;
+        for (const ticket of activeTickets) {
+            // 해당 종목의 가격 업데이트인지 확인하여 개별 익절 점검
+            if (ticket.stock_code === data.code) {
+                if (this.sellingInProgress.has(ticket.ticket_id)) continue;
+                if (ticket.entry_price <= 0) continue;
 
-            const returnPct = ((data.price - ticket.entry_price) / ticket.entry_price) * 100;
+                const returnPct = ((data.price - ticket.entry_price) / ticket.entry_price) * 100;
 
-            const strategyConfig = this.getCachedActiveStrategies().find(s => s.strategy_category === ticket.strategy_category);
-            const targetProfit = strategyConfig?.target_profit_rate > 0
-                ? strategyConfig.target_profit_rate
-                : profileSvc.getProfile(ticket.strategy_category).hardTakeProfit;
+                const strategyConfig = this.getCachedActiveStrategies().find(s => s.strategy_category === ticket.strategy_category);
+                const targetProfit = strategyConfig?.target_profit_rate > 0
+                    ? strategyConfig.target_profit_rate
+                    : profileSvc.getProfile(ticket.strategy_category).hardTakeProfit;
 
-            if (targetProfit > 0 && returnPct >= targetProfit) {
-                console.log(`[LiveTrade] 실시간 익절 도달 (WS): ${ticket.stock_code} (${returnPct.toFixed(2)}% >= ${targetProfit}%)`);
-                await this.executeTakeProfitSell(ticket);
-                // 매도 주문 직후 추적 모드 10초로 전환
-                this.setChaseInterval(10 * 1000);
+                if (targetProfit > 0 && returnPct >= targetProfit) {
+                    console.log(`[LiveTrade] 실시간 익절 도달 (WS): ${ticket.stock_code} (${returnPct.toFixed(2)}% >= ${targetProfit}%)`);
+                    await this.executeTakeProfitSell(ticket);
+                    // 매도 주문 직후 추적 모드 10초로 전환
+                    this.setChaseInterval(10 * 1000);
+                }
+            }
+        }
+
+        // 2. 포트폴리오 통합 익절 체크 (모든 트랙 통합 계좌 기준)
+        const pConfig = this.getPortfolioConfig();
+        if (pConfig.active && pConfig.targetRate > 0) {
+            let totalInvested = 0;
+            let totalCurrentValue = 0;
+            let missingPrice = false;
+
+            for (const ticket of activeTickets) {
+                if (ticket.entry_price <= 0) continue;
+                const p = this.latestPrices[ticket.stock_code] || ticket.current_price || ticket.entry_price;
+                if (!p || p <= 0) {
+                    missingPrice = true;
+                    break;
+                }
+                const qty = ticket.quantity || 0;
+                if (qty <= 0) continue;
+
+                totalInvested += ticket.entry_price * qty;
+                totalCurrentValue += p * qty;
+            }
+
+            if (!missingPrice && totalInvested > 0) {
+                const avgReturnPct = ((totalCurrentValue - totalInvested) / totalInvested) * 100;
+                
+                if (avgReturnPct >= pConfig.targetRate) {
+                    console.log(`[LiveTrade] 🎯 포트폴리오 목표 수익률 도달! (평균: ${avgReturnPct.toFixed(2)}% >= ${pConfig.targetRate}%) -> 전량 매도 시작`);
+                    this.logEvent('INFO', 'PORTFOLIO', `포트폴리오 평균 수익률 ${avgReturnPct.toFixed(2)}% 도달 (목표 ${pConfig.targetRate}%) -> 전량 매도 트리거`);
+                    this.telegram.sendMessage(`🎯 **[포트폴리오 목표 도달 - 전량 매도]**\n- 평균 수익률: ${avgReturnPct.toFixed(2)}%\n- 목표: ${pConfig.targetRate}%\n- 보유 종목 일괄 매도(익절)를 시작합니다.`);
+
+                    const ticketsToSell = activeTickets.filter(t => !this.sellingInProgress.has(t.ticket_id));
+                    
+                    // 비동기 백그라운드로 0.5초 딜레이 순차 매도 (Rate Limit 방지)
+                    (async () => {
+                        for (const t of ticketsToSell) {
+                            await this.executeTakeProfitSell(t);
+                            await new Promise(r => setTimeout(r, 500));
+                        }
+                        this.setChaseInterval(10 * 1000);
+                    })().catch(console.error);
+
+                    return;
+                }
             }
         }
     }
@@ -642,6 +710,44 @@ export class LiveTradeExecutionService {
                     await this.executeTakeProfitSell(ticket);
                     this.setChaseInterval(10 * 1000);
                     await new Promise(r => setTimeout(r, 500)); // 연속 주문 간 짧은 딜레이
+                }
+            }
+
+            // 3. 포트폴리오 통합 익절 체크 (OHLCV High fallback)
+            const pConfig = this.getPortfolioConfig();
+            if (pConfig.active && pConfig.targetRate > 0) {
+                let totalInvested = 0;
+                let totalCurrentValue = 0;
+                let missingPrice = false;
+
+                for (const ticket of activeTickets) {
+                    if (ticket.entry_price <= 0) continue;
+                    const p = this.latestPrices[ticket.stock_code] || ticket.current_price || ticket.entry_price;
+                    if (!p || p <= 0) {
+                        missingPrice = true;
+                        break;
+                    }
+                    const qty = ticket.quantity || 0;
+                    if (qty <= 0) continue;
+
+                    totalInvested += ticket.entry_price * qty;
+                    totalCurrentValue += p * qty;
+                }
+
+                if (!missingPrice && totalInvested > 0) {
+                    const avgReturnPct = ((totalCurrentValue - totalInvested) / totalInvested) * 100;
+                    if (avgReturnPct >= pConfig.targetRate) {
+                        console.log(`[LiveTrade] 🎯 Fail-Safe 포트폴리오 목표 수익률 도달! (평균: ${avgReturnPct.toFixed(2)}% >= ${pConfig.targetRate}%) -> 전량 매도 시작`);
+                        this.logEvent('INFO', 'PORTFOLIO', `Fail-Safe 포트폴리오 평균 수익률 ${avgReturnPct.toFixed(2)}% 도달 (목표 ${pConfig.targetRate}%) -> 전량 매도 트리거`);
+                        this.telegram.sendMessage(`🎯 **[포트폴리오 목표 도달 (Fail-Safe) - 전량 매도]**\n- 평균 수익률: ${avgReturnPct.toFixed(2)}%\n- 목표: ${pConfig.targetRate}%\n- 보유 종목 일괄 매도(익절)를 시작합니다.`);
+
+                        const ticketsToSell = activeTickets.filter(t => !this.sellingInProgress.has(t.ticket_id));
+                        for (const t of ticketsToSell) {
+                            await this.executeTakeProfitSell(t);
+                            await new Promise(r => setTimeout(r, 500));
+                        }
+                        this.setChaseInterval(10 * 1000);
+                    }
                 }
             }
         } catch (err: any) {
@@ -815,35 +921,51 @@ export class LiveTradeExecutionService {
 
             let processedCount = 0;
             for (const order of unexecList) {
-                // kt00007 규격에 따른 필드 매핑
-                const stkCd = (order.pdno || order.stk_cd || order.iscd || '').trim().replace(/^A/, '');
-                const origOrdNo = order.odno || order.ord_no || order.orig_ord_no || '';
-                const mdfyQty = parseInt(order.ord_rmnd_qty || order.rmn_qty || order.ord_qty || '0', 10); // 잔량
+                try {
+                    // kt00007 규격에 따른 필드 매핑
+                    const stkCd = (order.pdno || order.stk_cd || order.iscd || '').trim().replace(/^A/, '');
+                    const origOrdNo = order.odno || order.ord_no || order.orig_ord_no || '';
+                    const mdfyQty = parseInt(order.ord_rmnd_qty || order.rmn_qty || order.ord_qty || '0', 10); // 잔량
+                    const ordUv = parseInt(order.ord_uv || '0', 10); // 기존 주문 단가
 
-                if (!stkCd || !origOrdNo || mdfyQty <= 0) continue;
-                if (!managedCodes.has(stkCd)) continue;
+                    if (!stkCd || !origOrdNo || mdfyQty <= 0) continue;
+                    if (!managedCodes.has(stkCd)) continue;
 
-                if (isMarketSweepTime) {
-                    // [Step 3] Market Sweep (시장가 일괄 청산)
-                    console.log(`[LiveTrade] 15:18 시장가 일괄 정정 발송: ${stkCd} (${mdfyQty}주)`);
-                    await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, 0, '03'); // 시장가는 단가 0, trde_tp 03
-                    this.logEvent('SELL', stkCd, `[추적청산] 15:18 Market Sweep. 남은 ${mdfyQty}주 시장가 일괄 정정`);
-                    this.telegram.sendMessage(`🧹 **[Market Sweep: 시장가 일괄 청산]**\n- 종목: ${stkCd}\n- 미체결 잔량: ${mdfyQty}주\n- 시장가(03) 정정 발송됨.`);
-                } else {
-                    // [Step 2] 일반 지정가 추적 (현재가 - 1틱)
-                    const priceInfo = await this.kiwoom.getStockBasicInfo(stkCd);
-                    const body = priceInfo?.Body || priceInfo?.acnt_ord_cntr_prps_dtl || priceInfo || {};
-                    const rawCur = String(body.stk_prc || body.cur_prc || body.stck_prpr || body.currentPrice || 0).replace(/[^0-9-]/g, '');
-                    const currentPrice = Math.abs(parseInt(rawCur, 10)) || 0;
+                    if (isMarketSweepTime) {
+                        // [Step 3] Market Sweep (시장가 일괄 청산)
+                        console.log(`[LiveTrade] 15:18 시장가 일괄 정정 발송: ${stkCd} (${mdfyQty}주)`);
+                        await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, 0, '03'); // 시장가는 단가 0, trde_tp 03
+                        this.logEvent('SELL', stkCd, `[추적청산] 15:18 Market Sweep. 남은 ${mdfyQty}주 시장가 일괄 정정`);
+                        this.telegram.sendMessage(`🧹 **[Market Sweep: 시장가 일괄 청산]**\n- 종목: ${stkCd}\n- 미체결 잔량: ${mdfyQty}주\n- 시장가(03) 정정 발송됨.`);
+                    } else {
+                        // [Step 2] 일반 지정가 추적 (현재가 - 1틱)
+                        const priceInfo = await this.kiwoom.getStockBasicInfo(stkCd);
+                        const body = priceInfo?.Body || priceInfo?.acnt_ord_cntr_prps_dtl || priceInfo || {};
+                        const rawCur = String(body.stk_prc || body.cur_prc || body.stck_prpr || body.currentPrice || 0).replace(/[^0-9-]/g, '');
+                        const currentPrice = Math.abs(parseInt(rawCur, 10)) || 0;
 
-                    if (currentPrice > 0) {
-                        const chasePrice = calculateOrderPrice(currentPrice, -1);
-                        console.log(`[LiveTrade] 추적 지정가 정정 발송: ${stkCd} (${mdfyQty}주) -> 현재가 ${currentPrice}원, 정정가 ${chasePrice}원`);
-                        await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, chasePrice, '00');
-                        this.logEvent('SELL', stkCd, `[추적청산] 미체결 ${mdfyQty}주 -> 지정가 ${chasePrice}원 (현재가-1틱) 정정 발송`);
+                        if (currentPrice > 0) {
+                            const chasePrice = calculateOrderPrice(currentPrice, -1);
+                            
+                            // 동일 가격 정정 방지 (키움 API 에러 방어)
+                            if (chasePrice === ordUv) {
+                                console.log(`[LiveTrade] 정정 보류: ${stkCd} 현재 미체결가(${ordUv}원)와 정정가(${chasePrice}원)가 동일함.`);
+                                continue;
+                            }
+
+                            console.log(`[LiveTrade] 추적 지정가 정정 발송: ${stkCd} (${mdfyQty}주) -> 현재가 ${currentPrice}원, 정정가 ${chasePrice}원`);
+                            await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, chasePrice, '00');
+                            this.logEvent('SELL', stkCd, `[추적청산] 미체결 ${mdfyQty}주 -> 지정가 ${chasePrice}원 (현재가-1틱) 정정 발송`);
+                        }
                     }
+                    processedCount++;
+                    
+                    // Rate Limit (초당 주문 제한) 우회를 위한 500ms 딜레이
+                    await new Promise(r => setTimeout(r, 500));
+                } catch (innerErr: any) {
+                    console.error(`[LiveTrade] 개별 미체결 정정 실패 (종목코드: ${order.stk_cd || order.pdno || ''}):`, innerErr.message);
+                    // 특정 종목 정정에 실패해도 다음 종목으로 계속 진행 (전체 루프 중단 방지)
                 }
-                processedCount++;
             }
 
             if (processedCount === 0 && isMarketSweepTime) {

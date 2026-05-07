@@ -472,6 +472,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Live Trade V2
     getLiveTradeStrategies: () => ipcRenderer.invoke('livetrade:get-strategies'),
     saveLiveTradeStrategy: (strategy: any) => ipcRenderer.invoke('livetrade:save-strategy', strategy),
+    getLiveTradePortfolioConfig: () => ipcRenderer.invoke('livetrade:get-portfolio-config'),
+    saveLiveTradePortfolioConfig: (config: any) => ipcRenderer.invoke('livetrade:save-portfolio-config', config),
     getLiveTradeTickets: () => ipcRenderer.invoke('livetrade:get-tickets'),
     // Kill-Switch (긴급 중단)
     getLiveTradeKillSwitch: () => ipcRenderer.invoke('livetrade:get-kill-switch'),

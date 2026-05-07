@@ -134,7 +134,16 @@ export class LiveTradeLedgerService {
                     SELECT COUNT(DISTINCT m.date)
                     FROM market_ohlcv_history m
                     WHERE m.date > date(t.entry_date)
-                ) as holding_days
+                      AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
+                ) as holding_days,
+                (
+                    SELECT MAX(((m.high - t.entry_price) / t.entry_price) * 100)
+                    FROM market_ohlcv_history m
+                    WHERE m.stock_code = t.stock_code 
+                      AND m.date > date(t.entry_date)
+                      AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
+                      AND t.entry_price > 0
+                ) as peak_return
             FROM live_trade_tickets t
             LEFT JOIN live_trade_strategies s ON t.strategy_category = s.strategy_category
             ORDER BY t.entry_date DESC
@@ -151,7 +160,16 @@ export class LiveTradeLedgerService {
                     SELECT COUNT(DISTINCT m.date)
                     FROM market_ohlcv_history m
                     WHERE m.date > date(t.entry_date)
-                ) as holding_days
+                      AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
+                ) as holding_days,
+                (
+                    SELECT MAX(((m.high - t.entry_price) / t.entry_price) * 100)
+                    FROM market_ohlcv_history m
+                    WHERE m.stock_code = t.stock_code 
+                      AND m.date > date(t.entry_date)
+                      AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
+                      AND t.entry_price > 0
+                ) as peak_return
             FROM live_trade_tickets t
             LEFT JOIN live_trade_strategies s ON t.strategy_category = s.strategy_category
             WHERE t.status = 'ACTIVE' 
@@ -169,7 +187,16 @@ export class LiveTradeLedgerService {
                     SELECT COUNT(DISTINCT m.date)
                     FROM market_ohlcv_history m
                     WHERE m.date > date(t.entry_date)
-                ) as holding_days
+                      AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
+                ) as holding_days,
+                (
+                    SELECT MAX(((m.high - t.entry_price) / t.entry_price) * 100)
+                    FROM market_ohlcv_history m
+                    WHERE m.stock_code = t.stock_code 
+                      AND m.date > date(t.entry_date)
+                      AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
+                      AND t.entry_price > 0
+                ) as peak_return
             FROM live_trade_tickets t
             LEFT JOIN live_trade_strategies s ON t.strategy_category = s.strategy_category
             WHERE t.status IN ('ACTIVE', 'SELLING') 
@@ -187,7 +214,16 @@ export class LiveTradeLedgerService {
                     SELECT COUNT(DISTINCT m.date)
                     FROM market_ohlcv_history m
                     WHERE m.date > date(t.entry_date)
-                ) as holding_days
+                      AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
+                ) as holding_days,
+                (
+                    SELECT MAX(((m.high - t.entry_price) / t.entry_price) * 100)
+                    FROM market_ohlcv_history m
+                    WHERE m.stock_code = t.stock_code 
+                      AND m.date > date(t.entry_date)
+                      AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
+                      AND t.entry_price > 0
+                ) as peak_return
             FROM live_trade_tickets t
             LEFT JOIN live_trade_strategies s ON t.strategy_category = s.strategy_category
             WHERE t.status = 'ACTIVE' AND t.stock_code = ? 

@@ -5122,12 +5122,15 @@ export class DatabaseService {
         return d.toISOString().slice(0, 10); // YYYY-MM-DD 형식 그대로 반환
     }
 
-    public runPerformanceOptimizer(picks: any[]) {
+    public runPerformanceOptimizer(picks: any[], userHoldDays?: number) {
         try {
             const activePicks = picks.filter(p => (p.status === 'ACTIVE' || p.status === 'CLOSED') && p.entry_date && p.stock_code);
             
             const yieldTargets = [3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20];
             const holdDaysTargets = [1, 2, 3, 4, 5, 7, 10];
+            if (userHoldDays && !holdDaysTargets.includes(userHoldDays)) {
+                holdDaysTargets.push(userHoldDays);
+            }
             
             const ohlcCache: Record<string, any[]> = {};
             
@@ -5171,6 +5174,9 @@ export class DatabaseService {
 
                 let bestEfficiencyCombo: any = null;
                 let maxEfficiencyScore      = -999;
+
+                let bestUserDayCombo: any   = null;
+                let maxUserDayReturn        = -999;
 
                 for (const targetYield of yieldTargets) {
                     for (const targetDays of holdDaysTargets) {
@@ -5236,6 +5242,14 @@ export class DatabaseService {
                                 capitalPerPos,
                             };
                         }
+
+                        // ③ 사용자 지정 보유일 최적화
+                        if (userHoldDays && targetDays === userHoldDays) {
+                            if (avgReturn > maxUserDayReturn) {
+                                maxUserDayReturn = avgReturn;
+                                bestUserDayCombo = { targetYield, targetDays, avgReturn, winRate };
+                            }
+                        }
                     }
                 }
 
@@ -5244,6 +5258,8 @@ export class DatabaseService {
                     ...bestRawCombo,
                     // 신규: 효율 최적 콤보
                     bestEfficiencyCombo,
+                    // 신규: 사용자 지정 보유일 최적 콤보
+                    ...(userHoldDays && bestUserDayCombo ? { bestUserDayCombo } : {}),
                     picksPerDay,
                 };
             }

@@ -66,6 +66,12 @@ export class ThemeMockTradingJudgeAgent {
                 WHERE stock_code = ? AND tag_name = ?
             `);
 
+            const stmtGetTradingDays = rawDb.prepare(`
+                SELECT COUNT(DISTINCT date) as days
+                FROM market_ohlcv_history
+                WHERE date > ? AND date <= ?
+            `);
+
             const stmtUpdateJson = rawDb.prepare(`
                 UPDATE theme_intelligence 
                 SET top_picks_json = ? 
@@ -89,12 +95,13 @@ export class ThemeMockTradingJudgeAgent {
 
                     const ohlcvList = stmtGetOhlcv.all(pick.stock_code, row.date) as any[];
                     const todayStr = this.db.getKstDate();
-                    const bizDays = this.getBusinessDaysDiff(row.date, todayStr);
+                    const tradingDaysObj = stmtGetTradingDays.get(row.date, todayStr) as any;
+                    const actualTradingDays = tradingDaysObj ? tradingDaysObj.days : 0;
                     
                     let entryPrice = pick.entryPrice || 0; // JSON에 기록된 실시간 진입가가 있다면 우선 사용
                     let currentPrice = 0;
                     let maxHigh = 0;
-                    let elapsedDays = 0;
+                    let elapsedDays = actualTradingDays;
 
                     if (!ohlcvList || ohlcvList.length === 0) {
                         // Fallback: 오늘 OHLCV가 없다면 어제 종가 + 오늘 테마 등락률로 진입가 추정
@@ -109,12 +116,10 @@ export class ThemeMockTradingJudgeAgent {
                             if (!entryPrice) entryPrice = estPrice; // 값이 없을 때만 추정
                             currentPrice = entryPrice;
                             maxHigh = entryPrice;
-                            elapsedDays = bizDays;
                         } else {
                             if (!entryPrice) continue; // OHLCV 히스토리가 아예 없고 entryPrice도 없으면 스킵 (신규상장 등)
                             currentPrice = entryPrice;
                             maxHigh = entryPrice;
-                            elapsedDays = bizDays;
                         }
                     } else {
                         // 진입가: 추천일(D-0)의 종가 기준 (단, 사전에 기록된 실시간 진입가가 없다면 덮어쓰기)
@@ -123,14 +128,12 @@ export class ThemeMockTradingJudgeAgent {
                         // 현재가: 배열의 가장 마지막(최신) 종가
                         currentPrice = ohlcvList[ohlcvList.length - 1].close;
 
-                        // 피크: 추천일 이후(추천일 포함) 가장 높았던 고가
+                        // 피크: 추천일 다음 날부터 가장 높았던 고가 (종가 베팅이므로 당일 고가는 제외)
                         maxHigh = entryPrice;
                         for (const candle of ohlcvList) {
+                            if (candle.date <= row.date) continue; // 매수 당일 고가는 오반영되므로 스킵
                             if (candle.high > maxHigh) maxHigh = candle.high;
                         }
-                        
-                        // 영업일 경과 수 (OHLCV가 없어도 시간이 지났으면 반영)
-                        elapsedDays = Math.max(bizDays, ohlcvList.length - 1);
                     }
                     
                     const returnVal = ((currentPrice - entryPrice) / entryPrice) * 100;

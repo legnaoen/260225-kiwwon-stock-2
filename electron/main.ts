@@ -1406,14 +1406,11 @@ ipcMain.handle('v2:execute-live-trades-manual', async () => {
 
         const db = DatabaseService.getInstance().getDb();
         const strategies = LiveTradeLedgerService.getInstance().getStrategies();
-        const activeLiveStrategy = strategies.find((s: any) => s.is_active === 1);
+        const activeLiveStrategies = strategies.filter((s: any) => s.is_active === 1);
 
-        if (!activeLiveStrategy) {
+        if (activeLiveStrategies.length === 0) {
             return { success: false, error: '활성화된 실전 매매 전략이 없습니다. (투자 내역 탭 확인)' };
         }
-
-        const activeCategory = activeLiveStrategy.strategy_category;
-        const maxHoldDays = activeLiveStrategy.max_hold_days;
 
         const CATEGORY_TO_PICK_TABLE: Record<string, string> = {
             'TRUE_LEADER':             'track_a_buy_picks',
@@ -1424,15 +1421,9 @@ ipcMain.handle('v2:execute-live-trades-manual', async () => {
             'SHORT_TERM_CONSOLIDATION':'track_e_buy_picks',
         };
 
-        const pickTable = CATEGORY_TO_PICK_TABLE[activeCategory];
-        if (!pickTable) return { success: false, error: '알 수 없는 전략 카테고리입니다.' };
-
         const today = getKstDate();
-        const todayPicks = db.prepare(`SELECT stock_code, stock_name, current_price, entry_price FROM ${pickTable} WHERE pick_date = ? AND category = ?`).all(today, activeCategory) as any[];
-
-        if (todayPicks.length === 0) {
-            return { success: false, error: '오늘 해당 카테고리(전략)에 추천된 종목이 없습니다.' };
-        }
+        let totalLiveTradeLog = '';
+        let totalExecutedCount = 0;
 
         const calcTargetExitDate = (fromDate: string, businessDays: number): string => {
             const d = new Date(fromDate);
@@ -1444,31 +1435,48 @@ ipcMain.handle('v2:execute-live-trades-manual', async () => {
             }
             return d.toISOString().split('T')[0];
         };
-        const targetExitDate = calcTargetExitDate(today, maxHoldDays);
 
-        let liveTradeLog = `\n\n⚡ [실전 매매 수동 연동] 전략: ${activeCategory} | 목표일: ${targetExitDate}`;
-        let executedCount = 0;
-        
-        for (const pick of todayPicks) {
-            const ohlcvRow = db.prepare(`SELECT close FROM market_ohlcv_history WHERE stock_code = ? AND date = ?`).get(pick.stock_code, today) as any;
-            const currentPrice = ohlcvRow?.close ?? 0;
+        for (const strategy of activeLiveStrategies) {
+            const activeCategory = strategy.strategy_category;
+            const maxHoldDays = strategy.max_hold_days;
+            const pickTable = CATEGORY_TO_PICK_TABLE[activeCategory];
+            
+            if (!pickTable) continue;
 
-            if (currentPrice <= 0) {
-                liveTradeLog += `\n  ⚠️ ${pick.stock_name}: OHLCV 현재가 없음 → 매수 스킵`;
+            const todayPicks = db.prepare(`SELECT stock_code, stock_name, current_price, entry_price FROM ${pickTable} WHERE pick_date = ? AND category = ?`).all(today, activeCategory) as any[];
+
+            if (todayPicks.length === 0) {
                 continue;
             }
 
-            try {
-                await LiveTradeExecutionService.getInstance().executeBuy(pick.stock_code, pick.stock_name, activeCategory, currentPrice, targetExitDate);
-                liveTradeLog += `\n  ✅ ${pick.stock_name}: ${currentPrice.toLocaleString()}원 매수 발동`;
-                executedCount++;
-            } catch (err: any) {
-                liveTradeLog += `\n  🚨 ${pick.stock_name} 매수 실패: ${err.message}`;
+            const targetExitDate = calcTargetExitDate(today, maxHoldDays);
+            totalLiveTradeLog += `\n\n⚡ [실전 매매 수동 연동] 전략: ${activeCategory} | 목표일: ${targetExitDate}`;
+            
+            for (const pick of todayPicks) {
+                const ohlcvRow = db.prepare(`SELECT close FROM market_ohlcv_history WHERE stock_code = ? AND date = ?`).get(pick.stock_code, today) as any;
+                const currentPrice = ohlcvRow?.close ?? 0;
+
+                if (currentPrice <= 0) {
+                    totalLiveTradeLog += `\n  ⚠️ ${pick.stock_name}: OHLCV 현재가 없음 → 매수 스킵`;
+                    continue;
+                }
+
+                try {
+                    await LiveTradeExecutionService.getInstance().executeBuy(pick.stock_code, pick.stock_name, activeCategory, currentPrice, targetExitDate);
+                    totalLiveTradeLog += `\n  ✅ ${pick.stock_name}: ${currentPrice.toLocaleString()}원 매수 발동`;
+                    totalExecutedCount++;
+                } catch (err: any) {
+                    totalLiveTradeLog += `\n  🚨 ${pick.stock_name} 매수 실패: ${err.message}`;
+                }
             }
         }
 
-        TelegramService.getInstance().sendMessage(liveTradeLog);
-        return { success: true, count: executedCount, log: liveTradeLog };
+        if (totalLiveTradeLog === '') {
+            return { success: false, error: '오늘 활성화된 전략들에 추천된 종목이 없습니다.' };
+        }
+
+        TelegramService.getInstance().sendMessage(totalLiveTradeLog);
+        return { success: true, count: totalExecutedCount, log: totalLiveTradeLog };
     } catch (e: any) {
         return { success: false, error: e.message };
     }
@@ -3863,10 +3871,10 @@ ipcMain.handle('ai-analyst:delete-trade-history-item', async (_event, id: number
     }
 })
 
-ipcMain.handle('ai-analyst:run-performance-optimizer', async (_event, picks: any[]) => {
+ipcMain.handle('ai-analyst:run-performance-optimizer', async (_event, picks: any[], userHoldDays?: number) => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService')
-        const result = DatabaseService.getInstance().runPerformanceOptimizer(picks)
+        const result = DatabaseService.getInstance().runPerformanceOptimizer(picks, userHoldDays)
         // Grid Search 결과를 electron-store에 캐싱 (실전 전략 설정 모달에서 활용)
         if (result?.success && result?.optimized) {
             store.set('grid_search_results', {

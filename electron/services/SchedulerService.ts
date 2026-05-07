@@ -655,6 +655,23 @@ export class SchedulerService {
             }, { timezone: 'Asia/Seoul' })
             */
 
+            // [Step 6.5] 14:55 테마 AI (ThemeIntelligence) 종가 베팅을 위한 전용 크론
+            // 장 마감 직전(14:55) 당일 테마/섹터 랭킹을 수집하고 AI 추천 종목을 발굴
+            const themeAiJob = cron.schedule('55 14 * * 1-5', async () => {
+                console.log(`[SchedulerService] 🤖 14:55 테마주 AI (종가 베팅용) 일괄 분석 시작`)
+                try {
+                    // 테마 AI 실행 전, 최신 테마/섹터 순위를 확보하기 위해 NaverFlow 수집 파이프라인 1회 강제 실행
+                    const { V2PipelineManager } = await import('./v2_pipeline/V2PipelineManager')
+                    await V2PipelineManager.getInstance().runPipeline('PL-NaverFlow', { forceFetch: true })
+                    
+                    // 수집된 데이터를 바탕으로 테마 AI 분석 실행
+                    const { ThemeIntelligenceAgent } = await import('./v2_agents/ThemeIntelligenceAgent')
+                    await ThemeIntelligenceAgent.getInstance().runBatchAnalysis()
+                } catch (e: any) {
+                    console.error(`[SchedulerService] 테마 AI 전용 파이프라인 실패:`, e.message)
+                }
+            }, { timezone: 'Asia/Seoul' })
+
             // [실전 매매] 1분 단위 미체결 주문 모니터링 및 익절 매도 모니터링 (09:00 ~ 15:30 장중)
             const liveTradeMonitorJob = cron.schedule('* 09-14 * * 1-5', async () => {
                 try {
@@ -708,7 +725,7 @@ export class SchedulerService {
                 }
             }), { timezone: 'Asia/Seoul' })
 
-            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, liveTradeMonitorJob, liveTradeChasingStartJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob, reportTrackerJob)
+            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, themeAiJob, liveTradeMonitorJob, liveTradeChasingStartJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob, reportTrackerJob)
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)
@@ -742,14 +759,10 @@ export class SchedulerService {
                         const { V2PipelineManager } = await import('./v2_pipeline/V2PipelineManager')
                         await V2PipelineManager.getInstance().runPipeline('PL-NaverFlow', { forceFetch: true })
 
-                        // 시간대 분기: 오전엔 AI 종목 추천, 오후엔 성과 판독(가격 최신화)만
+                        // 성과 판독(ThemeMockTradingJudgeAgent) 가동
                         try {
-                            if (hr < 13) {
-                                console.log(`[SchedulerService] 🤖 오전 스케줄 감지: ThemeIntelligence AI 일괄 분석 연계 시작`)
-                                const { ThemeIntelligenceAgent } = await import('./v2_agents/ThemeIntelligenceAgent')
-                                await ThemeIntelligenceAgent.getInstance().runBatchAnalysis()
-                            } else {
-                                console.log(`[SchedulerService] ⚖️ 오후 스케줄 감지: AI 분석 스킵 및 Theme 판독기(종가 업데이트) 가동`)
+                            if (hr >= 15 && min >= 30) {
+                                console.log(`[SchedulerService] ⚖️ 장 마감 후 스케줄 감지(${hr}:${min}): Theme 판독기(종가 업데이트) 가동`)
                                 const { ThemeMockTradingJudgeAgent } = await import('./v2_agents/ThemeMockTradingJudgeAgent')
                                 await ThemeMockTradingJudgeAgent.getInstance().evaluatePicks()
                             }

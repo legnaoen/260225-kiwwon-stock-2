@@ -56,6 +56,7 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
 
     const [isOptimizing, setIsOptimizing] = useState(false);
     const [optimizedResults, setOptimizedResults] = useState<Record<string, any> | null>(null);
+    const [userHoldDays, setUserHoldDays] = useState<number | ''>('');
 
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -105,7 +106,8 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
         setIsOptimizing(true);
         try {
             const validPicks = filteredPicks.filter(p => p.entry_date && p.stock_code);
-            const res = await (window as any).electronAPI.runPerformanceOptimizer(validPicks);
+            const userDaysArg = typeof userHoldDays === 'number' && userHoldDays > 0 ? userHoldDays : undefined;
+            const res = await (window as any).electronAPI.runPerformanceOptimizer(validPicks, userDaysArg);
             if (res && res.success) {
                 setOptimizedResults(res.optimized);
             } else {
@@ -241,25 +243,39 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
                     </div>
 
                     {/* 카테고리별 테이블 */}
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-3 gap-2">
                         <h3 className="text-sm font-semibold">📋 전술(Track)별 성과 비교 보드</h3>
-                        <button
-                            onClick={handleOptimize}
-                            disabled={isOptimizing}
-                            className="text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
-                        >
-                            {isOptimizing ? (
-                                <>
-                                    <span className="animate-spin w-3 h-3 border-2 border-white/30 border-t-white rounded-full" />
-                                    <span>시나리오 연산 중...</span>
-                                </>
-                            ) : (
-                                <>
-                                    <span>🪄</span>
-                                    <span>AI 최적 파라미터 검색 (Grid Search)</span>
-                                </>
-                            )}
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 bg-muted/20 border border-border/50 rounded-lg px-2 py-1">
+                                <span className="text-xs text-muted-foreground whitespace-nowrap">보유일 지정(선택)</span>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="30"
+                                    value={userHoldDays}
+                                    onChange={(e) => setUserHoldDays(e.target.value ? Number(e.target.value) : '')}
+                                    className="w-12 bg-background border border-input rounded px-1.5 py-0.5 text-xs text-center"
+                                    placeholder="N일"
+                                />
+                            </div>
+                            <button
+                                onClick={handleOptimize}
+                                disabled={isOptimizing}
+                                className="text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                                {isOptimizing ? (
+                                    <>
+                                        <span className="animate-spin w-3 h-3 border-2 border-white/30 border-t-white rounded-full" />
+                                        <span>시나리오 연산 중...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span>🪄</span>
+                                        <span>AI 최적 파라미터 검색 (Grid Search)</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <div className="overflow-x-auto border border-border rounded-lg">
@@ -334,9 +350,6 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
                                                         {/* ⚡ 자본효율 극대 추천 행 */}
                                                         {optResult.bestEfficiencyCombo && (() => {
                                                             const eff = optResult.bestEfficiencyCombo;
-                                                            // 수익극대와 동일한 파라미터면 한 줄만 표시
-                                                            const isSame = eff.targetYield === optResult.targetYield && eff.targetDays === optResult.targetDays;
-                                                            if (isSame) return null;
                                                             return (
                                                                 <tr className="bg-amber-500/5 border-b border-border/50">
                                                                     <td colSpan={7} className="px-4 py-2">
@@ -359,6 +372,32 @@ export function PerformanceModal({ isOpen, onClose, picks }: PerformanceModalPro
                                                                                 </span>
                                                                                 <span className="text-muted-foreground">
                                                                                     종목당 <span className="font-bold text-foreground">{eff.capitalPerPos.toFixed(0)}%</span> 배분
+                                                                                </span>
+                                                                            </span>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })()}
+                                                        
+                                                        {/* 🎯 지정 보유일 최적 추천 행 */}
+                                                        {optResult.bestUserDayCombo && (() => {
+                                                            const uCombo = optResult.bestUserDayCombo;
+                                                            return (
+                                                                <tr className="bg-emerald-500/5 border-b border-border/50">
+                                                                    <td colSpan={7} className="px-4 py-2">
+                                                                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                                                                            <span className="font-bold text-emerald-500 whitespace-nowrap">🎯 지정일({uCombo.targetDays}일) 최적</span>
+                                                                            <span className="text-muted-foreground">
+                                                                                지정한 <span className="font-bold text-foreground">{uCombo.targetDays}일</span> 보유 조건 하에서,{' '}
+                                                                                목표가를 <span className="font-bold text-foreground">{uCombo.targetYield}%</span> 로 설정 시 수익 최대
+                                                                            </span>
+                                                                            <span className="ml-auto flex items-center gap-3">
+                                                                                <span className="text-muted-foreground border-r border-border/50 pr-2">
+                                                                                    평균수익: <span className="font-bold text-red-500">+{uCombo.avgReturn.toFixed(2)}%</span>
+                                                                                </span>
+                                                                                <span className="text-muted-foreground">
+                                                                                    승률: <span className="font-bold text-emerald-500">{uCombo.winRate.toFixed(1)}%</span>
                                                                                 </span>
                                                                             </span>
                                                                         </div>

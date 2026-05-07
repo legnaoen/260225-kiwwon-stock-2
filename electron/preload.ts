@@ -415,7 +415,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteTradeHistoryItem: (id: number) => ipcRenderer.invoke('ai-analyst:delete-trade-history-item', id),
     deleteAnalystPick: (id: number) => ipcRenderer.invoke('ai-analyst:delete-pick', id),
     deleteEventLog: (id: number) => ipcRenderer.invoke('ai-analyst:delete-event-log', id),
-    runPerformanceOptimizer: (picks: any[]) => ipcRenderer.invoke('ai-analyst:run-performance-optimizer', picks),
+    runPerformanceOptimizer: (picks: any[], userHoldDays?: number) => ipcRenderer.invoke('ai-analyst:run-performance-optimizer', picks, userHoldDays),
     syncEntryPrice: (stockCode: string, price: number, entryDate: string) => ipcRenderer.invoke('ai-analyst:sync-entry-price', stockCode, price, entryDate),
 
     // ── Mega Theme Ledger ──

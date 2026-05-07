@@ -350,7 +350,7 @@ export default function Holdings() {
                                 data.holdings.forEach(stock => {
                                     const cleanCode = stock.code.replace(/^A/i, '').trim();
                                     let date = history[cleanCode] || '알 수 없음'
-                                    
+
                                     // 상장폐지/정지 종목 분리
                                     if (stock.name.includes('(폐)')) {
                                         date = '상장폐지 / 거래정지'

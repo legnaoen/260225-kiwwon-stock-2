@@ -1010,7 +1010,7 @@ ${pm2MasterGuideline}
 
                             for (const b of newBuys) {
                                 tgMsg += `\n- ${b.stock_name} (${b.strategy} | ${b.conviction_score}점)`;
-                                const reasonMatch = parsed.decisions.find((d: any) => d.stock_code === b.stock_code);
+                                const reasonMatch = parsedDecisions.find((d: any) => d.stock_code === b.stock_code || d.finalCode === b.stock_code);
                                 const reason = reasonMatch ? (reasonMatch.last_signal_reason || reasonMatch.reason) : 'PM 매수 승급 확정';
                                 this.db.logPortfolioEvent(b.stock_code, b.stock_name, 'BUY_UPGRADED', 'WATCHLIST', 'IMMEDIATE_BUY', reason || 'PM 매수 승급 확정', b.current_price || 0);
                                 // ✅ [거래 단위] 매수 진입 시 trade_history OPEN 레코드 생성

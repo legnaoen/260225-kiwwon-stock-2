@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Target, TrendingUp, AlertTriangle, Clock, Info, CheckCircle2, BarChart2, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { StockDetailModal } from '../common/StockDetailModal';
+import { ThemePerformanceModal } from './ThemePerformanceModal';
 import { twMerge } from 'tailwind-merge';
 
 function cn(...inputs: ClassValue[]) {
@@ -105,9 +106,11 @@ export const ThemeMockTradingTab: React.FC<{ refreshTrigger?: number }> = ({ ref
     // 평균 수익률 및 피크 계산
     const validReturnItems = allItems.filter((item: any) => item.return !== undefined && item.return !== null);
     const avgReturn = validReturnItems.length > 0 ? (validReturnItems.reduce((acc: number, curr: any) => acc + curr.return, 0) / validReturnItems.length).toFixed(1) : '0.0';
-    
+
     const validPeakItems = allItems.filter((item: any) => item.peak !== undefined && item.peak !== null);
     const avgPeak = validPeakItems.length > 0 ? (validPeakItems.reduce((acc: number, curr: any) => acc + curr.peak, 0) / validPeakItems.length).toFixed(1) : '0.0';
+    
+    const [isPerformanceModalOpen, setIsPerformanceModalOpen] = useState(false);
 
     return (
         <div className="w-full h-full bg-background text-foreground p-5 font-sans overflow-y-auto">
@@ -118,14 +121,23 @@ export const ThemeMockTradingTab: React.FC<{ refreshTrigger?: number }> = ({ ref
                     <Target size={20} className="text-primary" />
                     테마 모의매매 현황
                 </h2>
-                <button
-                    onClick={handleUpdateLivePrices}
-                    disabled={isLoading}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-md text-sm font-semibold transition-colors disabled:opacity-50"
-                >
-                    <TrendingUp size={16} className={isLoading ? 'animate-pulse' : ''} />
-                    {isLoading ? '갱신 중...' : '장중 주가 업데이트'}
-                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setIsPerformanceModalOpen(true)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500/20 rounded-md text-sm font-semibold transition-colors"
+                    >
+                        <BarChart2 size={16} />
+                        실전 매매 검증 시뮬레이션
+                    </button>
+                    <button
+                        onClick={handleUpdateLivePrices}
+                        disabled={isLoading}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-md text-sm font-semibold transition-colors disabled:opacity-50"
+                    >
+                        <TrendingUp size={16} className={isLoading ? 'animate-pulse' : ''} />
+                        {isLoading ? '갱신 중...' : '장중 주가 업데이트'}
+                    </button>
+                </div>
             </div>
 
             {/* KPI 영역 */}
@@ -262,14 +274,23 @@ export const ThemeMockTradingTab: React.FC<{ refreshTrigger?: number }> = ({ ref
                 </div>
             </div>
 
+            {/* 종목 상세 모달 */}
             {selectedStock && (
-                <StockDetailModal 
-                    stockCode={selectedStock.stockCode} 
-                    stockName={selectedStock.stockName} 
+                <StockDetailModal
+                    isOpen={!!selectedStock}
+                    onClose={() => setSelectedStock(null)}
+                    stockCode={selectedStock.stockCode}
+                    stockName={selectedStock.stockName}
                     aiReason={selectedStock.aiReason}
-                    onClose={() => setSelectedStock(null)} 
                 />
             )}
+
+            {/* 실전 매매 검증 시뮬레이션 모달 */}
+            <ThemePerformanceModal 
+                isOpen={isPerformanceModalOpen}
+                onClose={() => setIsPerformanceModalOpen(false)}
+                mockData={mockData}
+            />
         </div>
     );
-}
+};

@@ -7,7 +7,7 @@ import Store from 'electron-store'
 import { IngestionManager } from './IngestionManager'
 import { DatabaseService } from './DatabaseService'
 import { DEFAULT_NEWS_HUB_SETTINGS, NewsHubSettings } from '../types/NewsHubSettings'
-
+import { isETFOrSPAC } from '../utils/StockFilters'
 
 const store = new Store()
 
@@ -26,6 +26,7 @@ export class SchedulerService {
     // 타임아웃으로 실패한 크론 작업을 전부 보관 → 재연결 후 순서대로 재실행
     private retryQueue: Array<{ name: string; fn: () => Promise<void> }> = [];
     private isRecovering: boolean = false;
+    private isReportRebalanceRunning: boolean = false;
     // ──────────────────────────────────────────────────────────────
 
     private async waitForOhlcv(timeoutMinutes: number = 40): Promise<boolean> {
@@ -428,12 +429,12 @@ export class SchedulerService {
                     
                     let result = await collector.runDailyCollection(100);
                     
-                    // 재시도 로직 (최대 2회)
+                    // 재시도 로직 (최대 5회)
                     let retries = 0;
-                    while (!result.success && retries < 2) {
+                    while (!result.success && retries < 5) {
                         retries++;
-                        this.telegram.sendMessage(`⚠️ [15:05] OHLCV 수집 실패 (수집: ${result.collected}개). 30초 후 재시도합니다... (${retries}/2)`);
-                        console.log(`[Scheduler] OHLCV 수집 실패. 30초 대기 후 재시도 (${retries}/2)...`);
+                        this.telegram.sendMessage(`⚠️ [15:05] OHLCV 수집 실패 (수집: ${result.collected}개). 30초 후 재시도합니다... (${retries}/5)`);
+                        console.log(`[Scheduler] OHLCV 수집 실패. 30초 대기 후 재시도 (${retries}/5)...`);
                         await new Promise(r => setTimeout(r, 30 * 1000));
                         result = await collector.runDailyCollection(100);
                     }
@@ -677,6 +678,44 @@ export class SchedulerService {
                 try {
                     const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService');
                     await LiveTradeExecutionService.getInstance().monitorTakeProfit();
+
+                    // --- 지연 캐치업 로직 (09:00 ~ 09:15 사이) ---
+                    const now = new Date();
+                    const kstH = (now.getUTCHours() + 9) % 24;
+                    const kstM = now.getUTCMinutes();
+                    
+                    if (kstH === 9 && kstM >= 0 && kstM <= 15) {
+                        if (!this.isReportRebalanceRunning) {
+                            const { DatabaseService } = await import('./DatabaseService');
+                            const db = DatabaseService.getInstance() as any;
+                            const todayStr = (await import('../utils/DateUtils')).getKstDate();
+                            
+                            try {
+                                const todayLog = db.db.prepare("SELECT id FROM report_rebalance_logs WHERE run_date = ?").get(todayStr);
+                                if (!todayLog) {
+                                    this.isReportRebalanceRunning = true;
+                                    console.log('[Scheduler] ⏰ 지연 캐치업: 09:00 리포트 AI가 누락되어 보충 실행합니다.');
+                                    
+                                    const { ReportScoutAgent } = await import('./v2_agents/ReportScoutAgent');
+                                    const { ReportManagerAgent } = await import('./v2_agents/ReportManagerAgent');
+
+                                    const scoutResult = await ReportScoutAgent.getInstance().run();
+                                    if (!scoutResult.success) {
+                                        this.telegram.sendMessage(`⚠️ [09:00 캐치업] 리포트 Scout 실패\n사유: ${scoutResult.error ?? '알 수 없음'}`);
+                                    } else {
+                                        const managerResult = await ReportManagerAgent.getInstance().run(scoutResult);
+                                        if (!managerResult.success) {
+                                            this.telegram.sendMessage(`❌ [09:00 캐치업] 리포트 Manager 실패\n오류: ${managerResult.error}`);
+                                        }
+                                    }
+                                }
+                            } catch (e: any) {
+                                console.error('[Scheduler] 캐치업 검사/실행 오류:', e.message);
+                            } finally {
+                                this.isReportRebalanceRunning = false;
+                            }
+                        }
+                    }
                 } catch (e: any) {
                     // Ignore background errors or log them silently
                 }
@@ -1004,12 +1043,10 @@ export class SchedulerService {
             // 1. 데이터 수집 (KiwoomService의 캐시가 자동 적용됨)
             const rawCombinedList = await this.kiwoom.getCombinedTopStocks(50, 50)
 
-            const etfKeywords = ['ETF', 'ETN', 'KODEX', 'TIGER', 'ACE', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'KOSEF', 'KINDEX', 'KB스타', '스팩', 'SPAC']
-            
             // 2. 기본 필터링 (ETF, 우선주 등 제거)
             const filteredBase = rawCombinedList.filter(s => {
                 const name = s.name.toUpperCase().replace(/\s+/g, '')
-                if (etfKeywords.some(kw => name.includes(kw.toUpperCase()))) return false
+                if (isETFOrSPAC(name)) return false
                 if (name.endsWith('우') || name.endsWith('우B') || name.includes('우(')) return false
                 if (s.changeRate <= 0) return false // 상승 종목만 대상
                 return true

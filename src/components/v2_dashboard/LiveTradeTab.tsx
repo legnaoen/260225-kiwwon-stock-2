@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Target, Settings, BarChart2, Award, TrendingUp, ArrowUpRight, Clock, Trash2, ShieldCheck, Zap, X, ShieldOff, ShieldAlert, AlertTriangle, Copy, CheckCheck, ClipboardList, RefreshCw } from 'lucide-react';
+import { Target, Settings, BarChart2, Award, TrendingUp, ArrowUpRight, Clock, Trash2, ShieldCheck, Zap, X, ShieldOff, ShieldAlert, AlertTriangle, Copy, CheckCheck, ClipboardList, RefreshCw, Activity } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useAccountStore } from '../../store/useAccountStore';
+import { TimingAnalysisModal } from './TimingAnalysisModal';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
 
@@ -99,6 +100,15 @@ export const LiveTradeTab: React.FC = () => {
     const [editForm, setEditForm] = useState({ amt: 1000000, days: 7, tp: 10, isActive: false });
     const [portfolioConfig, setPortfolioConfig] = useState({ active: false, targetRate: 3.0 });
     const [killSwitch, setKillSwitch] = useState(false);
+    const [cohortPeaks, setCohortPeaks] = useState<any[]>([]);
+    const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
+    
+    // 모달창 덮어쓰기 방지용 Refs
+    const isSettingsOpenRef = React.useRef(isSettingsOpen);
+    useEffect(() => {
+        isSettingsOpenRef.current = isSettingsOpen;
+    }, [isSettingsOpen]);
+    const lastLoadedStrategyRef = React.useRef(activeStrategy);
 
     // ─── 에러 로그 ───────────────────────────────────────────────────────
     const [errorLogs, setErrorLogs] = useState<Array<{ time: string; source: string; message: string; detail: string }>>([]);
@@ -180,7 +190,8 @@ export const LiveTradeTab: React.FC = () => {
                 
                 // Initialize activeStrategy dropdown to the currently running strategy if exists
                 const running = fetchedStrategies?.find((s: any) => s.is_active === 1);
-                if (running) {
+                // 모달이 열려있을 때는 사용자가 다른 전략을 보고 있을 수 있으므로 방해하지 않음
+                if (running && !isSettingsOpenRef.current) {
                     setActiveStrategy(running.strategy_category);
                 }
                 
@@ -188,21 +199,36 @@ export const LiveTradeTab: React.FC = () => {
                     const pConf = await (window as any).electronAPI.getLiveTradePortfolioConfig();
                     if (pConf) setPortfolioConfig(pConf);
                 }
+
+                if ((window as any).electronAPI.getLiveTradeCohortPeaks) {
+                    const peaks = await (window as any).electronAPI.getLiveTradeCohortPeaks();
+                    setCohortPeaks(peaks || []);
+                }
             } else {
                 setTickets(MOCK_PICKS);
             }
         };
         loadData();
+        
+        // Polling for live updates
+        const interval = setInterval(loadData, 5000);
+        return () => clearInterval(interval);
     }, []);
 
     useEffect(() => {
+        // 백그라운드 갱신 시, 모달창이 열려있다면(그리고 다른 탭을 새로 누른게 아니라면) 사용자가 폼 입력 중이므로 덮어쓰기 방지
+        if (isSettingsOpen && activeStrategy === lastLoadedStrategyRef.current) {
+            return;
+        }
+
         const strat = strategies.find(s => s.strategy_category === activeStrategy);
         if (strat) {
             setEditForm({ amt: strat.buy_amount_per_trade, days: strat.max_hold_days, tp: strat.target_profit_rate, isActive: strat.is_active === 1 });
         } else {
             setEditForm({ amt: 1000000, days: 7, tp: 10, isActive: false });
         }
-    }, [activeStrategy, strategies]);
+        lastLoadedStrategyRef.current = activeStrategy;
+    }, [activeStrategy, strategies, isSettingsOpen]);
 
     // ─── Grid Search 결과 로드 (모달 열릴 때마다) ──────────────────────────────
     useEffect(() => {
@@ -399,21 +425,29 @@ export const LiveTradeTab: React.FC = () => {
     const systemStatusColor = activeRunningStrategies.length > 0 ? 'bg-emerald-500/20 text-emerald-600 border-emerald-500/30' : 'bg-muted/20 text-muted-foreground border-border/30';
 
     // Stats Calculation
+    const SLIPPAGE_FEE_PCT = 0.4;
+
     const validTickets = tickets.filter(t => t.status !== 'FAILED');
     const closedTickets = validTickets.filter(t => t.status === 'CLOSED');
     const activeValidCount = validTickets.length - closedTickets.length;
-    const winTickets = closedTickets.filter(t => (t.realized_profit_pct ?? t.pnlPct ?? 0) > 0);
+    
+    const winTickets = closedTickets.filter(t => ((t.realized_profit_pct ?? t.pnlPct ?? 0) - SLIPPAGE_FEE_PCT) > 0);
     const totalClosed = closedTickets.length;
     const winRate = totalClosed > 0 ? ((winTickets.length / totalClosed) * 100).toFixed(1) : '0.0';
     
-    const cumulativeReturn = closedTickets.reduce((sum, t) => sum + (t.realized_profit_pct ?? t.pnlPct ?? 0), 0);
+    const cumulativeReturn = closedTickets.reduce((sum, t) => sum + ((t.realized_profit_pct ?? t.pnlPct ?? 0) - SLIPPAGE_FEE_PCT), 0);
     const cumulativeProfit = closedTickets.reduce((sum, t) => {
-        const pct = t.realized_profit_pct ?? t.pnlPct ?? 0;
-        const pnlAmt = t.pnlAmount || ((t.entry_price && t.quantity && pct !== 0) ? (t.entry_price * t.quantity * (pct / 100)) : 0);
+        const rawPct = t.realized_profit_pct ?? t.pnlPct ?? 0;
+        const adjustedPct = rawPct - SLIPPAGE_FEE_PCT;
+        
+        // pnlAmount가 있더라도 슬리피지가 반영 안 된 원본일 수 있으므로 수식으로 재계산
+        const pnlAmt = (t.entry_price && t.quantity) 
+            ? (t.entry_price * t.quantity * (adjustedPct / 100)) 
+            : (t.pnlAmount ? t.pnlAmount * (adjustedPct / rawPct) : 0); // fallback if no quantity
+            
         return sum + pnlAmt;
     }, 0);
-
-
+    const averageReturn = totalClosed > 0 ? (cumulativeReturn / totalClosed) : 0;
 
     return (
         <div className="flex flex-col h-full overflow-hidden select-none relative">
@@ -455,6 +489,14 @@ export const LiveTradeTab: React.FC = () => {
                                 </span>
                             </button>
                         )}
+                        {/* 타이밍 분석 버튼 */}
+                        <button
+                            onClick={() => setIsAnalysisOpen(true)}
+                            className="text-xs font-bold px-3 py-1.5 rounded transition-all flex items-center gap-1.5 border bg-blue-600 hover:bg-blue-500 text-white border-blue-500 shadow-sm"
+                        >
+                            <BarChart2 className="w-3.5 h-3.5" />
+                            타이밍 분석 리포트 📊
+                        </button>
                         {/* 당일 매매 로그 버튼 */}
                         <button
                             onClick={() => { setIsDailyLogsOpen(true); loadDailyLogs(); }}
@@ -463,14 +505,6 @@ export const LiveTradeTab: React.FC = () => {
                         >
                             <ClipboardList className="w-3.5 h-3.5" />
                             당일 매매로그
-                        </button>
-                        {/* 테스트 매수 버튼 */}
-                        <button
-                            onClick={() => { setIsTestModalOpen(true); setTestLogs([]); }}
-                            className="text-xs font-bold px-3 py-1.5 rounded transition-all flex items-center gap-1.5 border bg-background hover:bg-emerald-500/10 text-emerald-500 border-emerald-500/40 hover:border-emerald-500"
-                        >
-                            <ShieldCheck className="w-3.5 h-3.5" />
-                            테스트 매수
                         </button>
                         {/* Kill-Switch 버튼 */}
                         <button
@@ -498,10 +532,11 @@ export const LiveTradeTab: React.FC = () => {
                 </div>
 
                 {/* Stats Bar */}
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-5 gap-3">
                     {[
                         { icon: <ShieldCheck className="w-4 h-4 text-indigo-400" />, label: '총 건수 (진행중)', value: `${validTickets.length}건`, sub: `(진행중 ${activeValidCount}건)` },
                         { icon: <TrendingUp className={cn("w-4 h-4", cumulativeReturn > 0 ? "text-rose-500" : (cumulativeReturn < 0 ? "text-blue-500" : "text-muted-foreground"))} />, label: '누적 수익률', value: `${cumulativeReturn > 0 ? '+' : ''}${cumulativeReturn.toFixed(1)}%`, color: cumulativeReturn > 0 ? 'text-rose-500' : (cumulativeReturn < 0 ? 'text-blue-500' : 'text-foreground') },
+                        { icon: <Activity className={cn("w-4 h-4", averageReturn > 0 ? "text-rose-500" : (averageReturn < 0 ? "text-blue-500" : "text-muted-foreground"))} />, label: '평균 수익률', value: `${averageReturn > 0 ? '+' : ''}${averageReturn.toFixed(2)}%`, color: averageReturn > 0 ? 'text-rose-500' : (averageReturn < 0 ? 'text-blue-500' : 'text-foreground') },
                         { icon: <Award className={cn("w-4 h-4", cumulativeProfit > 0 ? "text-rose-500" : (cumulativeProfit < 0 ? "text-blue-500" : "text-muted-foreground"))} />, label: '누적 수익금', value: `${Math.floor(cumulativeProfit).toLocaleString()}원`, color: cumulativeProfit > 0 ? 'text-rose-500' : (cumulativeProfit < 0 ? 'text-blue-500' : 'text-foreground') },
                         { icon: <Target className="w-4 h-4 text-emerald-500" />, label: '총 승률 (수익/청산)', value: `${winRate}%`, sub: `(${winTickets.length}건 / ${totalClosed}건)` },
                     ].map(({ icon, label, value, sub, color }) => (
@@ -540,17 +575,28 @@ export const LiveTradeTab: React.FC = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {groupedByDate.map(({ date, picks: datePicks }) => (
+                        {groupedByDate.map(({ date, picks: datePicks }) => {
+                            const peakData = cohortPeaks.find(p => p.entry_date === date);
+                            return (
                             <React.Fragment key={date}>
                                 <tr className="bg-muted/30 border-y border-border/40">
                                     <td colSpan={10} className="py-2 px-3">
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-black text-xs text-foreground">
-                                                📅 {date} 진입분
-                                            </span>
-                                            <span className="text-[10px] text-muted-foreground font-mono">
-                                                해당일 진입 {datePicks.length}건
-                                            </span>
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <span className="font-black text-xs text-foreground">
+                                                    📅 {date} 진입분
+                                                </span>
+                                                <span className="text-[10px] text-muted-foreground font-mono">
+                                                    해당일 진입 {datePicks.length}건
+                                                </span>
+                                            </div>
+                                            {peakData && (
+                                                <div className="text-[10px] text-muted-foreground font-medium bg-background border border-border/50 px-2 py-0.5 rounded shadow-sm">
+                                                    포트 당일 고점: <span className={cn("font-bold font-mono", peakData.peak_return_pct > 0 ? "text-rose-500" : "text-blue-500")}>
+                                                        {peakData.peak_return_pct > 0 ? '+' : ''}{peakData.peak_return_pct.toFixed(2)}%
+                                                    </span> <span className="text-muted-foreground/70">({peakData.peak_time})</span>
+                                                </div>
+                                            )}
                                         </div>
                                     </td>
                                 </tr>
@@ -563,11 +609,14 @@ export const LiveTradeTab: React.FC = () => {
                                     const isReceivingLive = isLive && !!livePrices[stockCode];
 
                                     // 실시간으로 수익률 계산
-                                    const livePnlPct = isLive
+                                    const rawPnlPct = isLive
                                         ? ((isReceivingLive && pick.entry_price > 0)
                                             ? ((livePrice - pick.entry_price) / pick.entry_price) * 100
                                             : (pick.pnlPct || 0))
                                         : (pick.realized_profit_pct ?? pick.pnlPct ?? 0);
+                                        
+                                    // 매수 즉시 세금/수수료 및 호가 스프레드를 반영 (-0.4%)
+                                    const livePnlPct = rawPnlPct - SLIPPAGE_FEE_PCT;
 
                                     return (
                                         <tr key={pick.id || pick.ticket_id} className={cn("border-b border-border/20 transition-colors group", pick.status === 'FAILED' ? "opacity-40 grayscale" : "hover:bg-accent/30")}>
@@ -650,7 +699,8 @@ export const LiveTradeTab: React.FC = () => {
                                 })}
 
                             </React.Fragment>
-                        ))}
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -1226,6 +1276,11 @@ export const LiveTradeTab: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            <TimingAnalysisModal 
+                isOpen={isAnalysisOpen} 
+                onClose={() => setIsAnalysisOpen(false)} 
+            />
         </div>
     );
 };

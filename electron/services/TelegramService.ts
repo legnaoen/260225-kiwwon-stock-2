@@ -11,6 +11,7 @@ import { DatabaseService } from './DatabaseService';
 import { CompanyAnalysisService } from './CompanyAnalysisService';
 import { DartApiService } from './DartApiService';
 import { StockMasterService } from './StockMasterService';
+import { isETFOrSPAC } from '../utils/StockFilters';
 
 const store = new Store();
 
@@ -619,13 +620,13 @@ export class TelegramService {
             }
 
             // 필터링 및 상위 10개
-            const etfKeywords = ['ETF', 'ETN', 'KODEX', 'TIGER', 'ACE', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'KOSEF', 'VINA', 'KINDEX', 'KB스타'];
             const top10 = rawList
                 .filter((s: any) => {
                     const name = (s.stck_nm || s.stk_nm || s.name || '').replace(/\s+/g, '');
-                    const isEtf = etfKeywords.some(keyword => name.toUpperCase().includes(keyword.toUpperCase()));
+                    const isEtf = isETFOrSPAC(name);
                     return name && !isEtf;
                 })
+
                 .slice(0, 10);
 
             if (top10.length === 0) throw new Error('ETF/ETN을 제외한 당일 급등 종목이 없습니다.');
@@ -671,13 +672,13 @@ export class TelegramService {
             }
 
             // 기간 등락률(jmp_rt) 기준 정렬 및 필터링
-            const etfKeywords = ['ETF', 'ETN', 'KODEX', 'TIGER', 'ACE', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'KOSEF', 'VINA', 'KINDEX', 'KB스타'];
             const top10 = rawList
                 .filter((s: any) => {
                     const name = (s.stck_nm || s.stk_nm || s.name || '').replace(/\s+/g, '');
-                    const isEtf = etfKeywords.some(keyword => name.toUpperCase().includes(keyword.toUpperCase()));
+                    const isEtf = isETFOrSPAC(name);
                     return name && !isEtf;
                 })
+
                 .map((s: any) => {
                     // flu_rt, jmp_rt 등 기간 수익률 관련 키 지원
                     const rateStr = String(s.flu_rt || s.jmp_rt || s.prdy_ctrt || '0').replace(/[^0-9.-]/g, '');

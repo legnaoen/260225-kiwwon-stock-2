@@ -2,6 +2,7 @@ import { AiExecutionQueue } from '../AiExecutionQueue';
 import { DatabaseService } from '../DatabaseService';
 import { KiwoomService } from '../KiwoomService';
 import { NaverNewsService } from '../NaverNewsService';
+import { isETFOrSPAC } from '../../utils/StockFilters';
 
 export class MomentumAnalystAgent {
     private static instance: MomentumAnalystAgent;
@@ -48,10 +49,9 @@ export class MomentumAnalystAgent {
             }
             
             // 필터링: ETF 등 노이즈 종목 제외
-            const etfKeywords = ['ETF', 'ETN', 'KODEX', 'TIGER', 'ACE', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'KOSEF', 'KINDEX', '스팩', 'SPAC'];
             let initialStocks = rawCombinedList.filter(s => {
                 const name = s.name.toUpperCase().replace(/\s+/g, '');
-                if (etfKeywords.some(kw => name.includes(kw.toUpperCase()))) return false;
+                if (isETFOrSPAC(name)) return false;
                 if (name.endsWith('우') || name.endsWith('우B') || name.includes('우(')) return false;
                 if (s.changeRate <= 0) return false;
                 return true;

@@ -779,27 +779,35 @@ ${pm2MasterGuideline}
 
                         pricesMap[dec.finalCode] = curPrice;
 
+                        const previousInfo = activePortfolio.find(p => p.stock_code === dec.finalCode);
+                        
+                        // ✅ 매수 포지션(HELD) 이탈 감지 및 강제 청산 (DROPPED이든 WATCHING이든 모두 해당)
+                        const wasHeld = previousInfo && (previousInfo.status === 'HELD' || previousInfo.status === 'IMMEDIATE_BUY');
+                        const isNoLongerHeld = dec.finalStatus !== 'HELD' && dec.finalStatus !== 'IMMEDIATE_BUY';
+
+                        if (wasHeld && isNoLongerHeld) {
+                            const reason = dec.korean_summary || dec.last_signal_reason || `매수 포지션 이탈 (상태: ${dec.finalStatus})`;
+                            const eventType = dec.finalStatus === 'DROPPED' ? 'DROPPED' : 'DOWNGRADED';
+                            const newStatusLog = dec.finalStatus === 'DROPPED' ? 'CLEARED' : dec.finalStatus;
+                            
+                            this.db.logPortfolioEvent(dec.finalCode, dec.stock_name, eventType, previousInfo.status, newStatusLog, reason, curPrice);
+                            
+                            const droppedPf = this.db.getDb().prepare("SELECT profit_rate FROM maiis_portfolio WHERE stock_code = ?").get(dec.finalCode) as any;
+                            this.db.closeTradeRecord({
+                                stock_code: dec.finalCode,
+                                exit_price: curPrice,
+                                exit_reason: reason,
+                                profit_rate: droppedPf?.profit_rate || 0
+                            });
+                        }
+
                         // AI가 직접 DROP한 것도 처리 (컷오프 서바이벌로 밀려난 종목들도 포함)
                         if (dec.finalStatus === 'DROPPED') {
-                            const previousInfo = activePortfolio.find(p => p.stock_code === dec.finalCode);
                             if (previousInfo) {
                                 // 기존에 포트폴리오에 있었던 종목이 밀려난 거라면 DB 상태 변경
                                 const reason = dec.korean_summary || dec.last_signal_reason || `관심종목 서바이벌 컷오프 탈락`;
                                 this.db.updatePortfolioStatus(dec.finalCode, 'DROPPED', reason);
                                 
-                                // ✅ HELD 포지션이 명시적 탈락/컷오프된 경우에만 이벤트 기록 및 Trade Record 닫기
-                                // (DB에서 Cap 초과로 잘린 경우는 enforcePortfolioCaps 내부에서 이미 처리됨)
-                                if (previousInfo.status === 'HELD' || previousInfo.status === 'IMMEDIATE_BUY') {
-                                    this.db.logPortfolioEvent(dec.finalCode, dec.stock_name, 'DROPPED', previousInfo.status, 'CLEARED', reason, curPrice);
-                                    const droppedPf = this.db.getDb().prepare("SELECT profit_rate FROM maiis_portfolio WHERE stock_code = ?").get(dec.finalCode) as any;
-                                    this.db.closeTradeRecord({
-                                        stock_code: dec.finalCode,
-                                        exit_price: curPrice,
-                                        exit_reason: reason,
-                                        profit_rate: droppedPf?.profit_rate || 0
-                                    });
-                                }
-
                                 // 인큐베이터 강등 (WATCHING/HELD 모두 대상)
                                 this.db.demoteToIncubator({
                                     stock_code: dec.finalCode,
@@ -811,8 +819,6 @@ ${pm2MasterGuideline}
                             }
                             continue; // 그 외 신규 픽이었다가 탈락한 건 DB에 넣을 필요 없으므로 생략
                         }
-
-                        const previousInfo = activePortfolio.find(p => p.stock_code === dec.finalCode);
                         if (isImmediateBuy && previousInfo?.status !== 'HELD' && upperLimitPrice > 0 && curPrice > 0 && curPrice >= upperLimitPrice) {
                             console.log(`[PortfolioManager] ⛔ ${dec.stock_name}(${dec.finalCode}) 상한가 도달(${curPrice}원). 매수불가 승급 제외`);
                             // 매수불가면 아까운대로 관심종목 T/O에 밀어넣거나 그냥 스킵 

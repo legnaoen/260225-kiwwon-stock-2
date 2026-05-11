@@ -956,6 +956,28 @@ export class DatabaseService {
         try { this.db.exec(`ALTER TABLE live_trade_logs ADD COLUMN order_no TEXT DEFAULT '';`); } catch (e) { }
         try { this.db.exec(`ALTER TABLE live_trade_logs ADD COLUMN rsp_cd TEXT DEFAULT '';`); } catch (e) { }
         try { this.db.exec(`ALTER TABLE live_trade_logs ADD COLUMN api_response TEXT DEFAULT '';`); } catch (e) { }
+        
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS live_trade_portfolio_peaks (
+                entry_date TEXT PRIMARY KEY,
+                peak_return_pct REAL NOT NULL,
+                peak_time TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        `);
+
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS live_trade_portfolio_timeseries (
+                entry_date TEXT NOT NULL,
+                trading_date TEXT NOT NULL,
+                time_slot TEXT NOT NULL,
+                high_pct REAL NOT NULL,
+                low_pct REAL NOT NULL,
+                close_pct REAL NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (entry_date, trading_date, time_slot)
+            );
+        `);
         // ──────────────────────────────────────────────────────────────────
 
         // ═══ V2 Agent Swarm: Market Condition Agent ═══
@@ -2201,8 +2223,8 @@ export class DatabaseService {
     }
 
     public syncHoldingHistory(currentCodes: string[]) {
-        if (!currentCodes || currentCodes.length === 0) {
-            console.log('[DatabaseService] syncHoldingHistory: Empty codes list, skipping sync to avoid accidental deletion');
+        if (!currentCodes) {
+            console.log('[DatabaseService] syncHoldingHistory: Null codes list, skipping sync');
             return;
         }
 
@@ -2694,11 +2716,11 @@ export class DatabaseService {
             INSERT INTO maiis_portfolio (
                 stock_code, stock_name, status, strategy, conviction_score, theme, 
                 entry_date, last_signal, last_signal_reason, analysts_json, lifespan_days,
-                last_reviewed_at, created_at, updated_at, raw_context, current_price, entry_price, entry_price_at, was_held
+                last_reviewed_at, created_at, updated_at, raw_context, current_price, entry_price, entry_price_at, was_held, high_price
             ) VALUES (
                 @stock_code, @stock_name, @status, @strategy, @conviction_score, @theme,
                 @entry_date, @last_signal, @last_signal_reason, @analysts_json, @lifespan_days,
-                @last_reviewed_at, @created_at, @updated_at, @raw_context, @current_price, @entry_price, @entry_price_at, @was_held
+                @last_reviewed_at, @created_at, @updated_at, @raw_context, @current_price, @entry_price, @entry_price_at, @was_held, @current_price
             )
             ON CONFLICT(stock_code) DO UPDATE SET
                 status = excluded.status,
@@ -2711,6 +2733,11 @@ export class DatabaseService {
                 updated_at = excluded.updated_at,
                 raw_context = excluded.raw_context,
                 current_price = excluded.current_price,
+                high_price = CASE
+                    WHEN excluded.status != 'HELD' AND maiis_portfolio.status = 'HELD' THEN 0
+                    WHEN excluded.current_price > maiis_portfolio.high_price THEN excluded.current_price
+                    ELSE maiis_portfolio.high_price
+                END,
                 lifespan_days = CASE
                     WHEN excluded.status = 'HELD'
                     THEN excluded.lifespan_days
@@ -2726,16 +2753,22 @@ export class DatabaseService {
                 entry_price = CASE
                     WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
                     THEN excluded.entry_price
+                    WHEN excluded.status != 'HELD' AND maiis_portfolio.status = 'HELD'
+                    THEN 0
                     ELSE maiis_portfolio.entry_price  -- WATCHING 등 비매수 상태에서는 절대 덮어쓰지 않음
                 END,
                 profit_rate = CASE
                     WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
+                    THEN 0
+                    WHEN excluded.status != 'HELD' AND maiis_portfolio.status = 'HELD'
                     THEN 0
                     ELSE maiis_portfolio.profit_rate
                 END,
                 entry_date = CASE
                     WHEN excluded.status = 'HELD' AND maiis_portfolio.status != 'HELD'
                     THEN excluded.entry_date
+                    WHEN excluded.status != 'HELD' AND maiis_portfolio.status = 'HELD'
+                    THEN NULL
                     WHEN maiis_portfolio.status = 'DROPPED' AND excluded.status != 'DROPPED'
                     THEN excluded.entry_date
                     ELSE maiis_portfolio.entry_date
@@ -2743,6 +2776,8 @@ export class DatabaseService {
                 entry_price_at = CASE
                     WHEN excluded.entry_price > 0 AND maiis_portfolio.entry_price = 0
                     THEN excluded.entry_price_at
+                    WHEN excluded.status != 'HELD' AND maiis_portfolio.status = 'HELD'
+                    THEN NULL
                     ELSE maiis_portfolio.entry_price_at
                 END,
                 was_held = CASE

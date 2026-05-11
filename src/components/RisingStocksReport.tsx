@@ -11,6 +11,7 @@ import { StockAiReport } from './StockAiReport'
 
 import { useLayoutStore } from '../store/useLayoutStore'
 import { useTagStore } from '../store/useTagStore'
+import { isETFOrSPAC } from '../../electron/utils/StockFilters'
 import { useRef } from 'react'
 
 // 랭킹 컬러 유틸리티 (1위~5위: 빨주노초파, 그 외: 그레이 닷)
@@ -247,12 +248,11 @@ export default function RisingStocksReport() {
             // 캐시에서 가져왔는지 여부 (KiwoomService에서 fromCache 플래그를 보냄)
             const isCached = (result as any).fromCache
 
-            const etfKeywords = ['ETF', 'ETN', 'KODEX', 'TIGER', 'ACE', 'KBSTAR', 'ARIRANG', 'HANARO', 'SOL', 'KOSEF', 'KINDEX', 'KB스타', '스팩', 'SPAC']
             const mapped: RisingStock[] = rawList
                 .filter((s: any) => {
                     const name = (s.name || '').replace(/\s+/g, '')
                     if (!name) return false
-                    if (etfKeywords.some(kw => name.toUpperCase().includes(kw.toUpperCase()))) return false
+                    if (isETFOrSPAC(name)) return false
                     if (name.endsWith('우') || name.endsWith('우B') || name.includes('우(')) return false
                     if ((s.changeRate || 0) <= 0) return false // 상승 종목만 표시
                     return true

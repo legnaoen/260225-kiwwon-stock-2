@@ -257,12 +257,43 @@ export class PortfolioReviewEngine {
     public updateHighPrices(): void {
         const active = this.db.getActivePortfolio()
         for (const item of active) {
-            const currentPrice = item.current_price || 0
-            const highPrice = item.high_price || 0
-            if (currentPrice > highPrice) {
-                this.db.getDb().prepare(
-                    'UPDATE maiis_portfolio SET high_price = ? WHERE stock_code = ?'
-                ).run(currentPrice, item.stock_code)
+            if (item.status !== 'HELD') continue;
+
+            let newHigh = item.high_price || 0;
+            const currentPrice = item.current_price || 0;
+            
+            // 1. 당일 실시간 현재가가 더 높다면 우선 반영 (장중 윗꼬리 보정)
+            if (currentPrice > newHigh) {
+                newHigh = currentPrice;
+            }
+
+            // 2. OHLCV 데이터 기반 진성 고점 탐색 (매수일 이후)
+            if (item.entry_date) {
+                try {
+                    const row = this.db.getDb().prepare(`
+                        SELECT MAX(high) as max_high 
+                        FROM market_ohlcv_history 
+                        WHERE stock_code = ? AND date >= ?
+                    `).get(item.stock_code, item.entry_date) as any;
+                    
+                    if (row && row.max_high && row.max_high > newHigh) {
+                        newHigh = row.max_high;
+                    }
+                } catch (e) {
+                    console.warn(`[ReviewEngine] OHLCV 고점 탐색 실패 (${item.stock_name}):`, e);
+                }
+            }
+
+            // 3. 기존 대비 고점이 갱신되었다면 DB 업데이트
+            if (newHigh > (item.high_price || 0)) {
+                try {
+                    this.db.getDb().prepare(
+                        'UPDATE maiis_portfolio SET high_price = ? WHERE stock_code = ?'
+                    ).run(newHigh, item.stock_code)
+                    console.log(`[ReviewEngine] 📈 ${item.stock_name} 진성 고점 갱신: ${item.high_price || 0} -> ${newHigh}`)
+                } catch (e) {
+                    console.error(`[ReviewEngine] 고점 갱신 쿼리 에러:`, e);
+                }
             }
         }
     }

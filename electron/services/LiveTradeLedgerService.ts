@@ -306,4 +306,89 @@ export class LiveTradeLedgerService {
         (this.db as any).db.prepare(`DELETE FROM live_trade_tickets WHERE ticket_id = ?`).run(ticketId);
         return { deleted: true };
     }
+
+    // ─── Portfolio Cohort Peaks ───────────────────────────────────────────────────
+
+    public upsertCohortPeak(entryDate: string, peakReturnPct: number, peakTime: string): void {
+        const sql = `
+            INSERT INTO live_trade_portfolio_peaks (entry_date, peak_return_pct, peak_time, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(entry_date) DO UPDATE SET
+                peak_return_pct = excluded.peak_return_pct,
+                peak_time = excluded.peak_time,
+                updated_at = excluded.updated_at
+        `;
+        const now = this.db.getKstTimestamp();
+        (this.db as any).db.prepare(sql).run(entryDate, peakReturnPct, peakTime, now);
+    }
+
+    public getAllCohortPeaks(): { entry_date: string; peak_return_pct: number; peak_time: string; updated_at: string }[] {
+        const sql = `SELECT * FROM live_trade_portfolio_peaks ORDER BY entry_date DESC`;
+        return (this.db as any).db.prepare(sql).all() as any[];
+    }
+
+    public upsertPortfolioTimeseries(entryDate: string, tradingDate: string, timeSlot: string, highPct: number, lowPct: number, closePct: number): void {
+        const sql = `
+            INSERT INTO live_trade_portfolio_timeseries (entry_date, trading_date, time_slot, high_pct, low_pct, close_pct, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(entry_date, trading_date, time_slot) DO UPDATE SET
+                high_pct = excluded.high_pct,
+                low_pct = excluded.low_pct,
+                close_pct = excluded.close_pct,
+                updated_at = excluded.updated_at
+        `;
+        const now = this.db.getKstTimestamp();
+        (this.db as any).db.prepare(sql).run(entryDate, tradingDate, timeSlot, highPct, lowPct, closePct, now);
+    }
+
+    public getTimingAnalysisData(): { 
+        peakDistribution: { yield: string; count: number }[],
+        timeTrajectory: { time: string; return: number }[],
+        sampleCount: number
+    } {
+        const peaks = this.getAllCohortPeaks();
+        const sampleCount = peaks.length;
+        
+        const distribution = [
+            { yield: '-1.0% 이하', count: 0 },
+            { yield: '-0.5%', count: 0 },
+            { yield: '0.0%', count: 0 },
+            { yield: '+1.0%', count: 0 },
+            { yield: '+2.0%', count: 0 },
+            { yield: '+3.0%', count: 0 },
+            { yield: '+4.0%', count: 0 },
+            { yield: '+5.0% 이상', count: 0 },
+        ];
+        
+        for (const peak of peaks) {
+            const val = peak.peak_return_pct;
+            if (val <= -1.0) distribution[0].count++;
+            else if (val <= -0.5) distribution[1].count++;
+            else if (val <= 0.0) distribution[2].count++;
+            else if (val <= 1.0) distribution[3].count++;
+            else if (val <= 2.0) distribution[4].count++;
+            else if (val <= 3.0) distribution[5].count++;
+            else if (val <= 4.0) distribution[6].count++;
+            else distribution[7].count++;
+        }
+
+        const sql = `
+            SELECT time_slot as time, AVG(close_pct) as avg_return
+            FROM live_trade_portfolio_timeseries
+            WHERE trading_date > entry_date
+            GROUP BY time_slot
+            ORDER BY time_slot ASC
+        `;
+        const rows = (this.db as any).db.prepare(sql).all() as { time: string; avg_return: number }[];
+        const timeTrajectory = rows.map(r => ({
+            time: r.time,
+            return: Number((r.avg_return || 0).toFixed(2))
+        }));
+
+        return {
+            peakDistribution: distribution,
+            timeTrajectory,
+            sampleCount
+        };
+    }
 }

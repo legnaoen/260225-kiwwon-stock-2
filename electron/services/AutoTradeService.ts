@@ -229,9 +229,10 @@ export class AutoTradeService {
             }
 
             // 2. D+3 자동 매도 스케줄 (장 시작 감지 기반 동적 실행)
-            if (this.lastD3SellDate !== todayStr && currentHour >= 9) {
-                this.checkMarketOpenAndScheduleD3Sell(todayStr);
-            }
+            // [사용자 요청] D+3 자동 매도 기능 중지
+            // if (this.lastD3SellDate !== todayStr && currentHour >= 9) {
+            //     this.checkMarketOpenAndScheduleD3Sell(todayStr);
+            // }
         }, 1000); // 1초마다 확인
     }
 

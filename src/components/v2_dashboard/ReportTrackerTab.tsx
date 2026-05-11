@@ -233,11 +233,12 @@ export default function ReportTrackerTab() {
                         <button
                             onClick={handleRebalance}
                             disabled={runningRebalance}
-                            className={"flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-semibold text-white transition-colors " + 
+                            className={"flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-semibold text-white transition-colors shadow-sm " + 
                                 (runningRebalance ? "bg-slate-400" : "bg-blue-600 hover:bg-blue-700")}
+                            title="스케줄러가 누락되었을 때 강제로 당일 리포트 AI 분석 및 리밸런싱을 실행합니다."
                         >
                             <Play size={14} className={runningRebalance ? "animate-pulse" : ""} />
-                            <span>수동 리밸런싱</span>
+                            <span>오늘의 리포트 매매 수동 트리거</span>
                         </button>
                         <button
                             onClick={handleScoutPreview}

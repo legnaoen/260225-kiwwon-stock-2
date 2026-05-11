@@ -1,0 +1,32 @@
+[
+  {
+    "id": 133,
+    "timestamp": "2026-05-11 15:22:25",
+    "type": "BUY_SEND",
+    "stock_code": "469750",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 1,453원 × 688주 | 전략: EMERGING_STAR | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 134,
+    "timestamp": "2026-05-11 15:22:25",
+    "type": "BUY_ACK",
+    "stock_code": "469750",
+    "message": "키움 접수 성공 | ord_no: 0091872 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091872",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091872\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 155,
+    "timestamp": "2026-05-11 15:23:02",
+    "type": "INFO",
+    "stock_code": "469750",
+    "message": "매도 취소: 잔고 없음 (수동 매도 추정). 티켓 CLOSED 처리.",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  }
+]

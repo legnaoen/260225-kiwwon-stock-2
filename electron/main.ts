@@ -469,6 +469,26 @@ ipcMain.handle('naverflow:get-stock-theme-tags', async (_event, stockCode: strin
     }
 })
 
+ipcMain.handle('naverflow:get-performance-stats', async (_event, picks: any[], targetReturn: number) => {
+    try {
+        const { ThemeMockTradingJudgeAgent } = await import('./services/v2_agents/ThemeMockTradingJudgeAgent');
+        return ThemeMockTradingJudgeAgent.getInstance().computeThemePerformanceStats(picks, targetReturn);
+    } catch (e: any) {
+        console.error('[IPC] naverflow:get-performance-stats err:', e);
+        return { totalPicks: 0, winRate: 0, avgPeak: 0, avgClose: 0, avgPeakDays: 0, avgTargetHitDays: 0, targetHitRate: 0, alpha: 0 };
+    }
+});
+
+ipcMain.handle('naverflow:run-performance-optimizer', async (_event, picks: any[], userHoldDays?: number) => {
+    try {
+        const { ThemeMockTradingJudgeAgent } = await import('./services/v2_agents/ThemeMockTradingJudgeAgent');
+        return ThemeMockTradingJudgeAgent.getInstance().runThemePerformanceOptimizer(picks, userHoldDays);
+    } catch (e: any) {
+        console.error('[IPC] naverflow:run-performance-optimizer err:', e);
+        return { success: false, error: e.message };
+    }
+});
+
 ipcMain.handle('naverflow:get-research-reports', async (_event, limit?: number) => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService');
@@ -520,6 +540,17 @@ ipcMain.handle('report-tracker:get-logs', async (_event, limit?: number) => {
     } catch (e: any) {
         console.error('[IPC] report-tracker:get-logs err:', e);
         return [];
+    }
+});
+
+// 타이밍 분석 데이터 조회
+ipcMain.handle('livetrade:get-timing-analysis', async () => {
+    try {
+        const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');
+        return LiveTradeLedgerService.getInstance().getTimingAnalysisData();
+    } catch (e: any) {
+        console.error('[IPC] livetrade:get-timing-analysis err:', e);
+        return { peakDistribution: [], timeTrajectory: [], sampleCount: 0 };
     }
 });
 
@@ -2074,7 +2105,7 @@ ipcMain.handle('naverflow:update-mock-live-prices', async () => {
 
         const insertTx = rawDb.transaction((rows: any[]) => {
             for (const r of rows) {
-                stmtInsertOhlcv.run(r.code, todayStr, r.price, r.high, r.price, r.price, 0);
+                stmtInsertOhlcv.run(r.code, r.date, r.price, r.high, r.price, r.price, 0);
             }
         });
 
@@ -2087,9 +2118,12 @@ ipcMain.handle('naverflow:update-mock-live-prices', async () => {
                     const latest = candles[candles.length - 1]; // Sort ascending이므로 마지막이 최신
                     const currentPrice = latest.close;
                     const highPrice = latest.high;
+                    
+                    // actual date of the candle (latest.time is epoch sec based on UTC)
+                    const candleDate = new Date(latest.time * 1000).toISOString().split('T')[0];
 
                     if (currentPrice > 0) {
-                        priceRows.push({ code, price: currentPrice, high: highPrice });
+                        priceRows.push({ code, price: currentPrice, high: highPrice, date: candleDate });
                         fetchCount++;
                     } else {
                         console.warn(`[IPC] ${code} 현재가 파싱 실패. candles 덤프: ${JSON.stringify(candles).substring(0, 100)}`);
@@ -2756,12 +2790,10 @@ ipcMain.handle('kiwoom:get-holdings', async (_event, { accountNo, nextKey = "" }
             const listData = hBody?.acnt_evlt_remn_indv_tot || hBody?.output1 || hBody?.list || hBody?.grid || [];
             const list = Array.isArray(listData) ? listData : [listData].filter(Boolean);
 
-            if (list.length > 0) {
-                const currentCodes = list.map((item: any) =>
-                    String(item.stk_cd || item.pdno || item.code || '').replace(/^A/i, '').trim()
-                ).filter(Boolean);
-                DatabaseService.getInstance().syncHoldingHistory(currentCodes);
-            }
+            const currentCodes = list.map((item: any) =>
+                String(item.stk_cd || item.pdno || item.code || '').replace(/^A/i, '').trim()
+            ).filter(Boolean);
+            DatabaseService.getInstance().syncHoldingHistory(currentCodes);
         } catch (syncErr) {
             console.error('[Main] Failed to sync holding history:', syncErr);
         }
@@ -3484,6 +3516,15 @@ ipcMain.handle('livetrade:get-tickets', async () => {
     try {
         const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');
         return await LiveTradeLedgerService.getInstance().getAllTickets();
+    } catch (err: any) {
+        return [];
+    }
+});
+
+ipcMain.handle('livetrade:get-cohort-peaks', async () => {
+    try {
+        const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');
+        return await LiveTradeLedgerService.getInstance().getAllCohortPeaks();
     } catch (err: any) {
         return [];
     }

@@ -263,6 +263,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verifyThemeIntelligence: (params: any) => ipcRenderer.invoke('naverflow:verify-theme', params),
     getThemeRelatedNews: (themeName: string, keywords: string[]) => ipcRenderer.invoke('naverflow:get-theme-news', themeName, keywords),
     getStockThemeTags: (stockCode: string) => ipcRenderer.invoke('naverflow:get-stock-theme-tags', stockCode),
+    getThemePerformanceStats: (picks: any[], targetReturn: number) => ipcRenderer.invoke('naverflow:get-performance-stats', picks, targetReturn),
+    runThemePerformanceOptimizer: (picks: any[], userHoldDays?: number) => ipcRenderer.invoke('naverflow:run-performance-optimizer', picks, userHoldDays),
     searchLiveNews: (keyword: string) => ipcRenderer.invoke('naverflow:search-live-news', keyword),
     getMarketLeaders: (days: number, topN: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN, peakoutSettings }),
     getCrossPeriodProfile: (topN?: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-cross-period-profile', { topN, peakoutSettings }),
@@ -475,6 +477,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getLiveTradePortfolioConfig: () => ipcRenderer.invoke('livetrade:get-portfolio-config'),
     saveLiveTradePortfolioConfig: (config: any) => ipcRenderer.invoke('livetrade:save-portfolio-config', config),
     getLiveTradeTickets: () => ipcRenderer.invoke('livetrade:get-tickets'),
+    getLiveTradeCohortPeaks: () => ipcRenderer.invoke('livetrade:get-cohort-peaks'),
     // Kill-Switch (긴급 중단)
     getLiveTradeKillSwitch: () => ipcRenderer.invoke('livetrade:get-kill-switch'),
     setLiveTradeKillSwitch: (active: boolean) => ipcRenderer.invoke('livetrade:set-kill-switch', active),

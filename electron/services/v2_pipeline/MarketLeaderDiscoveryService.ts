@@ -1,5 +1,6 @@
 import { DatabaseService } from '../DatabaseService';
 import { getPastDateKst } from '../../utils/DateUtils';
+import { isETFOrSPAC } from '../../utils/StockFilters';
 
 export interface MarketLeaderItem {
     stockCode: string;
@@ -309,8 +310,6 @@ export class MarketLeaderDiscoveryService {
             // --- 엄격한 스팩/파생/부동산/우선주 필터링 (DB 찌꺼기 방어벽) ---
             const upperName = stockName.toUpperCase();
             if (
-                upperName.includes('스팩') || upperName.includes('SPAC') ||
-                upperName.includes('ETN') || upperName.includes('ETF') ||
                 upperName.includes('레버리지') || upperName.includes('인버스') || upperName.includes('선물') ||
                 upperName.includes('리츠') || upperName.includes('맥쿼리인프라') || upperName.includes('맵스') ||
                 /우[A-Z]?$|우\(기\)$|우\(전환\)$/i.test(upperName)
@@ -318,10 +317,8 @@ export class MarketLeaderDiscoveryService {
                 continue;
             }
             
-            // 기존 전통 ETF 브랜드 추가 방어
-            const etfBrands = ['KODEX', 'TIGER', 'KBSTAR', 'KINDEX', 'ARIRANG', 'KOSEF', 'HANARO', 'ACE', 'SOL', 'TIMEFOLIO', '히어로즈', '마이티', 'TREX', 'FOCUS', 'HK', '파워', 'PLUS', 'RISE'];
-            const isEtfBrand = etfBrands.some(brand => upperName.startsWith(brand));
-            if (isEtfBrand) continue;
+            // 중앙화된 ETF/SPAC 필터 적용
+            if (isETFOrSPAC(stockName)) continue;
             
             // 누적 변동률 = (현재가 - 최초기준가) / 최초기준가 * 100
             const totalChangeRate = ((data.lastClose - data.firstClose) / data.firstClose) * 100;

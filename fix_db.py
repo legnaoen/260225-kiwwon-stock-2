@@ -1,21 +1,11 @@
 import sqlite3
-import os
-
-db_path = os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'kiwoom-trader', 'db', 'kiwoom.db')
-print("DB path:", db_path)
-
-conn = sqlite3.connect(db_path)
-c = conn.cursor()
-
-c.execute("UPDATE intraday_predictions SET position = 'KODEX 200' WHERE position LIKE '%HOLD(KODEX 200 기준)%' AND time_slot IN ('09:45', '10:15')")
-c.execute("UPDATE intraday_predictions SET position = 'HOLD' WHERE position LIKE '%HOLD(KODEX 200 기준)%' OR position = '- HOLD' OR position = 'HOLD(관망)'")
-
-conn.commit()
-
-c.execute("SELECT time_slot, position FROM intraday_predictions WHERE date = date('now', 'localtime')")
-print("Today's fixed positions:")
-for row in c.fetchall():
-    print(row)
-
-conn.close()
-print("Done fixing database!")
+db = r'C:/Users/legna/AppData/Roaming/kiwoom-trader/db/kiwoom.db'
+c = sqlite3.connect(db)
+cursor = c.cursor()
+cursor.execute("UPDATE live_trade_portfolio_timeseries SET time_slot = '09:00' WHERE time_slot LIKE '9%NaN%'")
+cursor.execute("UPDATE live_trade_portfolio_timeseries SET time_slot = '11:00' WHERE time_slot LIKE '11%NaN%'")
+cursor.execute("UPDATE live_trade_portfolio_timeseries SET time_slot = '12:00' WHERE time_slot LIKE '12%NaN%'")
+cursor.execute("UPDATE live_trade_portfolio_timeseries SET time_slot = '13:00' WHERE time_slot LIKE '13%NaN%'")
+cursor.execute("UPDATE live_trade_portfolio_timeseries SET time_slot = '14:00' WHERE time_slot LIKE '14%NaN%'")
+c.commit()
+print("Fixed NaN time slots")

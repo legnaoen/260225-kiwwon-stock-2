@@ -1,0 +1,282 @@
+[
+  {
+    "id": 129,
+    "timestamp": "2026-05-11 15:22:24",
+    "type": "BUY_SEND",
+    "stock_code": "460470",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 4,855원 × 205주 | 전략: EMERGING_STAR | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 130,
+    "timestamp": "2026-05-11 15:22:24",
+    "type": "BUY_ACK",
+    "stock_code": "460470",
+    "message": "키움 접수 성공 | ord_no: 0091866 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091866",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091866\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 131,
+    "timestamp": "2026-05-11 15:22:24",
+    "type": "BUY_SEND",
+    "stock_code": "054450",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 18,150원 × 55주 | 전략: EMERGING_STAR | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 132,
+    "timestamp": "2026-05-11 15:22:25",
+    "type": "BUY_ACK",
+    "stock_code": "054450",
+    "message": "키움 접수 성공 | ord_no: 0091869 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091869",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091869\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 133,
+    "timestamp": "2026-05-11 15:22:25",
+    "type": "BUY_SEND",
+    "stock_code": "469750",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 1,453원 × 688주 | 전략: EMERGING_STAR | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 134,
+    "timestamp": "2026-05-11 15:22:25",
+    "type": "BUY_ACK",
+    "stock_code": "469750",
+    "message": "키움 접수 성공 | ord_no: 0091872 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091872",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091872\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 135,
+    "timestamp": "2026-05-11 15:22:25",
+    "type": "BUY_SEND",
+    "stock_code": "031330",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 9,300원 × 107주 | 전략: EMERGING_STAR | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 136,
+    "timestamp": "2026-05-11 15:22:25",
+    "type": "BUY_ACK",
+    "stock_code": "031330",
+    "message": "키움 접수 성공 | ord_no: 0091876 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091876",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091876\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 137,
+    "timestamp": "2026-05-11 15:22:26",
+    "type": "BUY_SEND",
+    "stock_code": "0174B0",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 15,110원 × 66주 | 전략: EMERGING_STAR | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 138,
+    "timestamp": "2026-05-11 15:22:26",
+    "type": "BUY_ACK",
+    "stock_code": "0174B0",
+    "message": "키움 접수 성공 | ord_no: 0091886 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091886",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091886\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 139,
+    "timestamp": "2026-05-11 15:22:26",
+    "type": "BUY_SEND",
+    "stock_code": "073540",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 4,360원 × 229주 | 전략: PULLBACK_DIP | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 140,
+    "timestamp": "2026-05-11 15:22:26",
+    "type": "BUY_ACK",
+    "stock_code": "073540",
+    "message": "키움 접수 성공 | ord_no: 0091887 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091887",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091887\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 141,
+    "timestamp": "2026-05-11 15:22:26",
+    "type": "BUY_SEND",
+    "stock_code": "187660",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 9,430원 × 106주 | 전략: PULLBACK_DIP | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 142,
+    "timestamp": "2026-05-11 15:22:27",
+    "type": "BUY_ACK",
+    "stock_code": "187660",
+    "message": "키움 접수 성공 | ord_no: 0091889 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091889",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091889\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 143,
+    "timestamp": "2026-05-11 15:22:27",
+    "type": "BUY_SEND",
+    "stock_code": "412350",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 7,730원 × 129주 | 전략: PULLBACK_DIP | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 144,
+    "timestamp": "2026-05-11 15:22:27",
+    "type": "BUY_ACK",
+    "stock_code": "412350",
+    "message": "키움 접수 성공 | ord_no: 0091895 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091895",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091895\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 145,
+    "timestamp": "2026-05-11 15:22:27",
+    "type": "BUY_SEND",
+    "stock_code": "078890",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 10,650원 × 93주 | 전략: TRUE_LEADER | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 146,
+    "timestamp": "2026-05-11 15:22:28",
+    "type": "BUY_ACK",
+    "stock_code": "078890",
+    "message": "키움 접수 성공 | ord_no: 0091896 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091896",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091896\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 147,
+    "timestamp": "2026-05-11 15:22:28",
+    "type": "BUY_SEND",
+    "stock_code": "083450",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 67,500원 × 14주 | 전략: TRUE_LEADER | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 148,
+    "timestamp": "2026-05-11 15:22:29",
+    "type": "BUY_ACK",
+    "stock_code": "083450",
+    "message": "키움 접수 성공 | ord_no: 0091898 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091898",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091898\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 149,
+    "timestamp": "2026-05-11 15:22:29",
+    "type": "BUY_SEND",
+    "stock_code": "222040",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 7,790원 × 128주 | 전략: TRUE_LEADER | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 150,
+    "timestamp": "2026-05-11 15:22:29",
+    "type": "BUY_ACK",
+    "stock_code": "222040",
+    "message": "키움 접수 성공 | ord_no: 0091900 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091900",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091900\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 151,
+    "timestamp": "2026-05-11 15:22:29",
+    "type": "BUY_SEND",
+    "stock_code": "425040",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 24,400원 × 40주 | 전략: TRUE_LEADER | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 152,
+    "timestamp": "2026-05-11 15:22:30",
+    "type": "BUY_ACK",
+    "stock_code": "425040",
+    "message": "키움 접수 성공 | ord_no: 0091904 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091904",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091904\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 153,
+    "timestamp": "2026-05-11 15:22:30",
+    "type": "BUY_SEND",
+    "stock_code": "440110",
+    "message": "매수 주문 전송 시작 | 지정가(동시호가 +3%) 103,500원 × 9주 | 전략: TRUE_LEADER | 시각: 15:22",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 154,
+    "timestamp": "2026-05-11 15:22:30",
+    "type": "BUY_ACK",
+    "stock_code": "440110",
+    "message": "키움 접수 성공 | ord_no: 0091905 | rsp_cd:  | msg: 정상처리",
+    "order_no": "0091905",
+    "rsp_cd": "",
+    "api_response": "{\"ord_no\":\"0091905\",\"dmst_stex_tp\":\"KRX\",\"return_code\":0,\"return_msg\":\"KRX 매수주문이 완료되었습니다.\"}"
+  },
+  {
+    "id": 155,
+    "timestamp": "2026-05-11 15:23:02",
+    "type": "INFO",
+    "stock_code": "469750",
+    "message": "매도 취소: 잔고 없음 (수동 매도 추정). 티켓 CLOSED 처리.",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  },
+  {
+    "id": 156,
+    "timestamp": "2026-05-11 15:23:12",
+    "type": "INFO",
+    "stock_code": "",
+    "message": "[LiveTrade] 미체결 매도 추적기 종료 (15:20 동시호가 돌입)",
+    "order_no": "",
+    "rsp_cd": "",
+    "api_response": ""
+  }
+]

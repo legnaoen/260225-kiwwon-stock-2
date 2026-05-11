@@ -3,6 +3,7 @@ import { VirtualAccountService } from './VirtualAccountService'
 import { DataLoggingService } from './DataLoggingService'
 import { eventBus, SystemEvent } from '../utils/EventBus'
 import { DatabaseService } from './DatabaseService'
+import { isETFOrSPAC } from '../utils/StockFilters';
 import Store from 'electron-store';
 
 const store = new Store();
@@ -137,12 +138,8 @@ export class MarketScannerService {
                 const name = String(stock.stk_nm || stock.name || '');
 
                 // 쓰레기 종목 차단 (ETF/ETN/SPAC 등)
-                if (name) {
-                    const upperName = name.toUpperCase();
-                    if (upperName.includes('KODEX') || upperName.includes('TIGER') || upperName.includes('KBSTAR') ||
-                        upperName.includes('KOSEF') || upperName.includes('ARIRANG') || upperName.includes('HANARO') ||
-                        upperName.includes('RISE') || upperName.includes('ACE') || upperName.includes('SOL')) continue;
-                    if (upperName.includes('ETN') || upperName.includes('스팩') || upperName.includes('인버스') || upperName.includes('레버리지')) continue;
+                if (name && isETFOrSPAC(name)) {
+                    continue;
                 }
 
                 newThemeStocks.push(code);
@@ -228,8 +225,7 @@ export class MarketScannerService {
                     const gap = parseFloat(stock.flu_rt || stock.flrt || stock.change_rate || '0');
 
                     // 1단계 필터: 잡주 및 파생상품 차단
-                    if (name.includes('KODEX') || name.includes('TIGER') || name.includes('KBSTAR') || name.includes('KOSEF') || name.includes('ARIRANG') || name.includes('HANARO')) continue;
-                    if (name.includes('ETN') || name.includes('스팩') || name.includes('인버스') || name.includes('인버스2X')) continue;
+                    if (isETFOrSPAC(name)) continue;
                     if (currentPrice < 1000) continue; // 동전주 차단
                     if (gap < 2.0) continue; // 최소 2% 이상 상승 종목만 포착 (하락시 급등량 차단)
 

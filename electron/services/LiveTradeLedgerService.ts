@@ -122,6 +122,16 @@ export class LiveTradeLedgerService {
             now: now
         });
 
+        // [Bugfix] 당일 전량 매도(조건부 지정가) 후 당일 재매수(동시호가) 시,
+        // 잔고가 0이 되는 순간이 포착되지 않아 과거 매수일이 계속 유지되는 현상을 방지.
+        // 새로운 티켓이 생성되면 무조건 holding_history의 진입일도 최신으로 엎어칩니다.
+        const entryDateOnly = ticket.entry_date.split('T')[0];
+        (this.db as any).db.prepare(`
+            INSERT INTO holding_history (stock_code, first_seen_date) 
+            VALUES (?, ?)
+            ON CONFLICT(stock_code) DO UPDATE SET first_seen_date = excluded.first_seen_date
+        `).run(ticket.stock_code, entryDateOnly);
+
         return ticketId;
     }
 
@@ -288,6 +298,16 @@ export class LiveTradeLedgerService {
     }
 
     /**
+     * DB에서 특정 티켓의 현재 상태를 빠르게 확인합니다.
+     */
+    public getTicketStatus(ticketId: string): string | null {
+        const ticket = (this.db as any).db.prepare(
+            `SELECT status FROM live_trade_tickets WHERE ticket_id = ?`
+        ).get(ticketId) as { status: string } | undefined;
+        return ticket ? ticket.status : null;
+    }
+
+    /**
      * FAILED 티켓 삭제 — UI에서 사용자가 수동으로 제거할 때 호출
      * 안전을 위해 FAILED 상태인 티켓만 삭제 허용
      */
@@ -390,5 +410,44 @@ export class LiveTradeLedgerService {
             timeTrajectory,
             sampleCount
         };
+    }
+
+    public getTimingRawData(limit: number, offset: number): any[] {
+        // 1. Get unique (entry_date, trading_date) pairs with pagination
+        const pairsSql = `
+            SELECT DISTINCT entry_date, trading_date
+            FROM live_trade_portfolio_timeseries
+            ORDER BY trading_date DESC, entry_date DESC
+            LIMIT ? OFFSET ?
+        `;
+        const pairs = (this.db as any).db.prepare(pairsSql).all(limit, offset) as { entry_date: string; trading_date: string }[];
+        
+        if (pairs.length === 0) return [];
+
+        // 2. Fetch all timeseries rows for these pairs
+        const result: any[] = [];
+        for (const pair of pairs) {
+            const rowsSql = `
+                SELECT time_slot, close_pct
+                FROM live_trade_portfolio_timeseries
+                WHERE entry_date = ? AND trading_date = ?
+                ORDER BY time_slot ASC
+            `;
+            const rows = (this.db as any).db.prepare(rowsSql).all(pair.entry_date, pair.trading_date) as { time_slot: string; close_pct: number }[];
+            
+            // Map time_slot to close_pct
+            const timeMap: Record<string, number> = {};
+            for (const r of rows) {
+                timeMap[r.time_slot] = r.close_pct;
+            }
+            
+            result.push({
+                entry_date: pair.entry_date,
+                trading_date: pair.trading_date,
+                times: timeMap
+            });
+        }
+        
+        return result;
     }
 }

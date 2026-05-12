@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { X, TrendingUp, Clock, AlertTriangle, Lightbulb } from 'lucide-react';
+import { X, TrendingUp, Clock, AlertTriangle, Lightbulb, List } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Cell, ReferenceLine } from 'recharts';
 
 interface TimingAnalysisModalProps {
@@ -17,11 +17,32 @@ interface TimeData {
     return: number;
 }
 
+interface RawData {
+    entry_date: string;
+    trading_date: string;
+    times: Record<string, number>;
+}
+
+const TIME_SLOTS = [
+    '09:00', '09:10', '09:20', '09:30', '09:40', '09:50',
+    '10:00', '10:10', '10:20', '10:30', '10:40', '10:50',
+    '11:00', '11:10', '11:20', '11:30', '11:40', '11:50',
+    '12:00', '12:10', '12:20', '12:30', '12:40', '12:50',
+    '13:00', '13:10', '13:20', '13:30', '13:40', '13:50',
+    '14:00', '14:10', '14:20', '14:30', '14:40', '14:50',
+    '15:00', '15:10', '15:20', '15:30'
+];
+
 export function TimingAnalysisModal({ isOpen, onClose }: TimingAnalysisModalProps) {
     const [peakData, setPeakData] = useState<PeakData[]>([]);
     const [timeData, setTimeData] = useState<TimeData[]>([]);
     const [sampleCount, setSampleCount] = useState<number>(0);
     const [isLoading, setIsLoading] = useState<boolean>(true);
+
+    const [rawData, setRawData] = useState<RawData[]>([]);
+    const [rawOffset, setRawOffset] = useState<number>(0);
+    const [hasMoreRaw, setHasMoreRaw] = useState<boolean>(true);
+    const [isLoadingRaw, setIsLoadingRaw] = useState<boolean>(false);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -45,10 +66,58 @@ export function TimingAnalysisModal({ isOpen, onClose }: TimingAnalysisModalProp
             }
         };
 
-        fetchData();
+        const loadRawData = async (offsetToLoad: number) => {
+            setIsLoadingRaw(true);
+            try {
+                // @ts-ignore
+                const result = await window.electronAPI.invoke('livetrade:get-timing-raw-data', 10, offsetToLoad);
+                if (isMounted && result && result.length > 0) {
+                    if (offsetToLoad === 0) {
+                        setRawData(result);
+                    } else {
+                        setRawData(prev => [...prev, ...result]);
+                    }
+                    setRawOffset(offsetToLoad);
+                    if (result.length < 10) setHasMoreRaw(false);
+                } else if (isMounted) {
+                    setHasMoreRaw(false);
+                }
+            } catch (err) {
+                console.error('Failed to load raw data:', err);
+            } finally {
+                if (isMounted) setIsLoadingRaw(false);
+            }
+        };
+
+        fetchData().then(() => {
+            if (isMounted) loadRawData(0);
+        });
 
         return () => { isMounted = false; };
     }, [isOpen]);
+
+    const handleLoadMoreRaw = () => {
+        // @ts-ignore
+        const loadRawData = async (offsetToLoad: number) => {
+            setIsLoadingRaw(true);
+            try {
+                // @ts-ignore
+                const result = await window.electronAPI.invoke('livetrade:get-timing-raw-data', 10, offsetToLoad);
+                if (result && result.length > 0) {
+                    setRawData(prev => [...prev, ...result]);
+                    setRawOffset(offsetToLoad);
+                    if (result.length < 10) setHasMoreRaw(false);
+                } else {
+                    setHasMoreRaw(false);
+                }
+            } catch (err) {
+                console.error('Failed to load raw data:', err);
+            } finally {
+                setIsLoadingRaw(false);
+            }
+        };
+        loadRawData(rawOffset + 10);
+    };
 
     // Calculate dynamic insights
     const optimalPeak = useMemo(() => {
@@ -219,6 +288,69 @@ export function TimingAnalysisModal({ isOpen, onClose }: TimingAnalysisModalProp
                                             </LineChart>
                                         </ResponsiveContainer>
                                     </div>
+                                </div>
+                            </div>
+                            
+                            <div className="h-px bg-slate-200 w-full" />
+
+                            {/* SECTION C: Raw Data Table */}
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <List className="w-5 h-5 text-indigo-500" />
+                                    <h3 className="text-base font-bold text-slate-800">섹션 C. 날짜별 포트폴리오 수익률 로우데이터</h3>
+                                </div>
+                                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-xs text-center border-collapse">
+                                            <thead>
+                                                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold">
+                                                    <th className="p-3 sticky left-0 bg-slate-50 border-r border-slate-200 whitespace-nowrap z-10 shadow-[1px_0_0_0_#e2e8f0]">매수일(Entry)</th>
+                                                    <th className="p-3 sticky left-[105px] bg-slate-50 border-r border-slate-200 whitespace-nowrap z-10 shadow-[1px_0_0_0_#e2e8f0]">거래일(D+N)</th>
+                                                    {TIME_SLOTS.map(t => (
+                                                        <th key={t} className="p-2 min-w-[50px] border-r border-slate-100">{t}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {rawData.map((row, idx) => (
+                                                    <tr key={`${row.entry_date}-${row.trading_date}-${idx}`} className="border-b border-slate-100 hover:bg-slate-50/50">
+                                                        <td className="p-3 sticky left-0 bg-white border-r border-slate-200 whitespace-nowrap z-10 shadow-[1px_0_0_0_#e2e8f0] text-slate-600 font-medium">
+                                                            {row.entry_date}
+                                                        </td>
+                                                        <td className="p-3 sticky left-[105px] bg-white border-r border-slate-200 whitespace-nowrap z-10 shadow-[1px_0_0_0_#e2e8f0] text-indigo-600 font-bold">
+                                                            {row.trading_date}
+                                                        </td>
+                                                        {TIME_SLOTS.map(t => {
+                                                            const val = row.times[t];
+                                                            const isPos = val > 0;
+                                                            const isNeg = val < 0;
+                                                            return (
+                                                                <td key={t} className={`p-2 border-r border-slate-50 ${isPos ? 'text-rose-500 font-bold' : isNeg ? 'text-blue-500 font-bold' : 'text-slate-400'}`}>
+                                                                    {val !== undefined ? (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`) : '-'}
+                                                                </td>
+                                                            );
+                                                        })}
+                                                    </tr>
+                                                ))}
+                                                {rawData.length === 0 && !isLoadingRaw && (
+                                                    <tr>
+                                                        <td colSpan={TIME_SLOTS.length + 2} className="p-8 text-slate-400">로우데이터가 없습니다.</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {hasMoreRaw && (
+                                        <div className="p-3 border-t border-slate-100 flex justify-center bg-slate-50/50">
+                                            <button 
+                                                onClick={handleLoadMoreRaw}
+                                                disabled={isLoadingRaw}
+                                                className="px-6 py-2 bg-white border border-slate-300 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 hover:text-indigo-600 transition-colors disabled:opacity-50"
+                                            >
+                                                {isLoadingRaw ? '불러오는 중...' : '10개 더보기 (Load More)'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </>

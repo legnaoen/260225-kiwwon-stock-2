@@ -533,17 +533,46 @@ export class SchedulerService {
                                         }
                                         const targetExitDate = calcTargetExitDate(today, maxHoldDays)
 
+                                        const forceClosingAuction = store.get('portfolio_force_closing_auction') || false;
+                                        if (forceClosingAuction) {
+                                            const now = new Date();
+                                            const kstH = (now.getUTCHours() + 9) % 24;
+                                            const kstM = now.getUTCMinutes();
+                                            
+                                            // 현재 시간이 15:00 ~ 15:19 사이라면 무조건 15:20까지 대기
+                                            if (kstH === 15 && kstM < 20) {
+                                                const targetTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 20, 0);
+                                                const diffMs = targetTime.getTime() - now.getTime();
+                                                
+                                                console.log(`[Scheduler] 15:20 동시호가 대기 옵션 활성화됨. ${Math.round(diffMs/1000)}초 대기...`);
+                                                this.telegram.sendMessage(`⏳ [15:20 동시호가 대기]\nAI 모의매매 분석이 일찍 완료되었습니다.\n실전매수 '동시호가 강제 대기' 옵션에 따라 15:20 정각까지 매수 발송을 대기합니다. (${Math.round(diffMs/1000)}초)`);
+                                                await new Promise(resolve => setTimeout(resolve, diffMs));
+                                                console.log(`[Scheduler] 대기 종료. 매수 프로세스 재개`);
+                                            }
+                                        }
+
                                         totalLiveTradeLog += `\n\n🔥 [실전 매매] 전략: ${activeCategory} | 목표일: ${targetExitDate}`
                                         for (const pick of todayPicks) {
                                             const ohlcvRow: any = rawDb.prepare(`
                                                 SELECT close FROM market_ohlcv_history
                                                 WHERE stock_code = ? AND date = ?
                                             `).get(pick.stock_code, today)
-                                            const currentPrice: number = ohlcvRow?.close ?? 0
+                                            let currentPrice: number = ohlcvRow?.close ?? 0;
 
                                             if (currentPrice <= 0) {
-                                                totalLiveTradeLog += `\n  ⚠️ ${pick.stock_name}: OHLCV 현재가 없음 → 매수 스킵`
-                                                continue
+                                                try {
+                                                    const priceInfo = await this.kiwoom.getStockBasicInfo(pick.stock_code);
+                                                    const body = priceInfo?.Body || priceInfo?.out1 || priceInfo || {};
+                                                    const rawCur = String(body.cur_prc || body.stk_prc || body.stck_prpr || '0').replace(/[^0-9-]/g, '');
+                                                    currentPrice = Math.abs(parseInt(rawCur, 10)) || 0;
+                                                } catch(err) {
+                                                    console.error(`[Scheduler] ${pick.stock_code} 현재가 대체 수집 실패:`, err);
+                                                }
+                                            }
+
+                                            if (currentPrice <= 0) {
+                                                totalLiveTradeLog += `\n  ⚠️ ${pick.stock_name}: OHLCV/현재가 조회 실패 → 매수 스킵`;
+                                                continue;
                                             }
                                             try {
                                                 await LiveTradeExecutionService.getInstance().executeBuy(

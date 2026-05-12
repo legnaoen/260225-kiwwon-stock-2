@@ -416,6 +416,38 @@ export class LiveTradeExecutionService {
      * C-1: 이중 매도 방지 Lock (ticket_id 기반)
      * I-2: 실제 잔고 < 티켓 수량일 경우 가용 잔고 전체 매도
      */
+    private cachedHoldings: any[] | null = null;
+    private lastHoldingsCacheTime: number = 0;
+
+    private async getCachedHoldings(account: string) {
+        const now = Date.now();
+        if (this.cachedHoldings && now - this.lastHoldingsCacheTime < 5000) {
+            return this.cachedHoldings;
+        }
+
+        const holdingsRes = await this.kiwoom.getHoldings(account);
+        const data = holdingsRes?.data || holdingsRes;
+        
+        // 에러 코드 체크 (빈도 초과 등)
+        if (data?.rt_cd !== '0' && data?.rt_cd !== 0 && data?.msg_cd) {
+            if (data?.msg1) {
+                throw new Error(`[잔고 조회 실패] ${data.msg1}`);
+            }
+        }
+
+        const parsed = this.parseHoldingsList(holdingsRes);
+        
+        // 정상 응답인데 배열이 0개라면 (정상적인 계좌 비움일 수 있음)
+        // 하지만 에러 메시지가 동반된 경우 방어
+        if (parsed.length === 0 && data?.msg1 && data.msg1.includes('오류')) {
+             throw new Error(`[잔고 조회 오류] ${data.msg1}`);
+        }
+
+        this.cachedHoldings = parsed;
+        this.lastHoldingsCacheTime = now;
+        return this.cachedHoldings;
+    }
+
     private async _executeSell(
         ticket: LiveTradeTicket,
         trdeType: '00' | '05',
@@ -436,6 +468,14 @@ export class LiveTradeExecutionService {
             this.logEvent('INFO', ticket.stock_code, `이중 매도 방지 (Lock): 이미 처리 중 (${ticket.ticket_id})`);
             return;
         }
+
+        // [Guard 2.5] DB 상태 이중 체크 (Stale Cache로 인한 중복 호출 및 Race Condition 방지)
+        const currentStatus = this.ledger.getTicketStatus(ticket.ticket_id);
+        if (currentStatus !== 'ACTIVE') {
+            console.warn(`[LiveTrade] 매도 중단: ${ticket.stock_code} DB 상태가 ACTIVE가 아님 (현재: ${currentStatus})`);
+            return;
+        }
+
         this.sellingInProgress.add(ticket.ticket_id);
 
         // [Step 1] 매도 주문 전송 직전 — 티켓 상태를 즉시 SELLING으로 변경
@@ -445,8 +485,7 @@ export class LiveTradeExecutionService {
 
         try {
             // [Step 2] 실제 HTS 잔고 조회 → 가용 수량 결정 (I-2: 수량 불일치 안전장치)
-            const holdingsRes = await this.kiwoom.getHoldings(account);
-            const holdings = this.parseHoldingsList(holdingsRes);
+            const holdings = await this.getCachedHoldings(account);
 
             const holding = holdings.find((h: any) => {
                 const sc = (h.stk_cd || h.pdno || h.iscd || '').trim().replace(/^A/, '');
@@ -829,6 +868,13 @@ export class LiveTradeExecutionService {
                 // 이미 매도 Lock이 걸린 티켓이면 건너뜀
                 if (this.sellingInProgress.has(ticket.ticket_id)) continue;
                 if (ticket.entry_price <= 0) continue;
+
+                // [Fix] 당일 진입한 종목은 당일 OHLCV 고점 기반 Fail-Safe 매도 로직에서 제외.
+                // 당일 고가는 매수 시점 이전에 형성되었을 수 있어, 잘못된 즉시 매도를 유발할 수 있음.
+                const today = new Date().toISOString().split('T')[0];
+                if (ticket.entry_date === today) {
+                    continue;
+                }
 
                 // 틱 수신 장애 대비 당일 최고가(High) 조회 
                 const candles = await this.kiwoom.getOhlcvDaily(ticket.stock_code, 1);

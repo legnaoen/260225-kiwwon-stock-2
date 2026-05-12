@@ -554,6 +554,17 @@ ipcMain.handle('livetrade:get-timing-analysis', async () => {
     }
 });
 
+// 타이밍 로우데이터 페이징 조회
+ipcMain.handle('livetrade:get-timing-raw-data', async (_event, limit: number = 10, offset: number = 0) => {
+    try {
+        const { LiveTradeLedgerService } = await import('./services/LiveTradeLedgerService');
+        return LiveTradeLedgerService.getInstance().getTimingRawData(limit, offset);
+    } catch (e: any) {
+        console.error('[IPC] livetrade:get-timing-raw-data err:', e);
+        return [];
+    }
+});
+
 // 성과 통계 조회
 ipcMain.handle('report-tracker:get-stats', async () => {
     try {
@@ -3496,9 +3507,10 @@ ipcMain.handle('livetrade:get-portfolio-config', async () => {
     try {
         const active = store.get('portfolio_auto_sell_active') || false;
         const targetRate = store.get('portfolio_target_profit_rate') || 3.0;
-        return { active, targetRate };
+        const forceClosingAuction = store.get('portfolio_force_closing_auction') || false;
+        return { active, targetRate, forceClosingAuction };
     } catch (err: any) {
-        return { active: false, targetRate: 3.0 };
+        return { active: false, targetRate: 3.0, forceClosingAuction: false };
     }
 });
 
@@ -3506,6 +3518,7 @@ ipcMain.handle('livetrade:save-portfolio-config', async (_event, config: any) =>
     try {
         store.set('portfolio_auto_sell_active', config.active);
         store.set('portfolio_target_profit_rate', config.targetRate);
+        store.set('portfolio_force_closing_auction', config.forceClosingAuction);
         return { success: true };
     } catch (err: any) {
         return { success: false, error: err.message };

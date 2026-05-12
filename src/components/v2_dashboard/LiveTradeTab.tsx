@@ -98,7 +98,7 @@ export const LiveTradeTab: React.FC = () => {
     const [strategies, setStrategies] = useState<any[]>([]);
     const [tickets, setTickets] = useState<any[]>([]);
     const [editForm, setEditForm] = useState({ amt: 1000000, days: 7, tp: 10, isActive: false });
-    const [portfolioConfig, setPortfolioConfig] = useState({ active: false, targetRate: 3.0 });
+    const [portfolioConfig, setPortfolioConfig] = useState({ active: false, targetRate: 3.0, forceClosingAuction: false });
     const [killSwitch, setKillSwitch] = useState(false);
     const [cohortPeaks, setCohortPeaks] = useState<any[]>([]);
     const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
@@ -197,7 +197,10 @@ export const LiveTradeTab: React.FC = () => {
                 
                 if ((window as any).electronAPI.getLiveTradePortfolioConfig) {
                     const pConf = await (window as any).electronAPI.getLiveTradePortfolioConfig();
-                    if (pConf) setPortfolioConfig(pConf);
+                    // 모달 창이 열려있을 때는 사용자가 편집 중이므로 백그라운드 폴링으로 덮어쓰지 않음
+                    if (pConf && !isSettingsOpenRef.current) {
+                        setPortfolioConfig(pConf);
+                    }
                 }
 
                 if ((window as any).electronAPI.getLiveTradeCohortPeaks) {
@@ -210,9 +213,22 @@ export const LiveTradeTab: React.FC = () => {
         };
         loadData();
         
-        // Polling for live updates
-        const interval = setInterval(loadData, 5000);
-        return () => clearInterval(interval);
+        // 동적 폴링: 장중(08:50 ~ 15:40)은 5초, 장외 시간은 60초 간격으로 부하 최소화
+        let timerId: NodeJS.Timeout;
+        const scheduleNextLoad = () => {
+            const now = new Date();
+            const timeNum = now.getHours() * 100 + now.getMinutes();
+            const isMarketOpen = timeNum >= 850 && timeNum <= 1540;
+            const delay = isMarketOpen ? 5000 : 60000;
+            
+            timerId = setTimeout(async () => {
+                await loadData();
+                scheduleNextLoad();
+            }, delay);
+        };
+        scheduleNextLoad();
+        
+        return () => clearTimeout(timerId);
     }, []);
 
     useEffect(() => {
@@ -1083,6 +1099,33 @@ export const LiveTradeTab: React.FC = () => {
                                                         />
                                                         <span className="bg-muted border border-input rounded-r px-2 py-1.5 text-xs text-muted-foreground flex items-center">%</span>
                                                     </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="flex items-center justify-between border-t border-rose-500/10 pt-4 mt-4">
+                                                <div className="font-bold text-sm flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                                                    <Clock className="w-4 h-4" />
+                                                    15:20 동시호가 강제 대기 (종가 매수)
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-xs font-bold text-foreground">기능 활성화</span>
+                                                    <button
+                                                        onClick={() => setPortfolioConfig(prev => ({...prev, forceClosingAuction: !prev.forceClosingAuction}))}
+                                                        className={cn(
+                                                            "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                                                            portfolioConfig.forceClosingAuction ? "bg-rose-500" : "bg-muted"
+                                                        )}
+                                                    >
+                                                        <span className={cn(
+                                                            "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                                                            portfolioConfig.forceClosingAuction ? "translate-x-4" : "translate-x-0"
+                                                        )} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                                <div className="flex-1 text-xs text-muted-foreground">
+                                                    분석이 일찍 끝나도 <strong>15시 20분 정각까지 매수 주문을 강제로 대기</strong>시킵니다. 변동성을 피해 동시호가에 확실한 종가로 체결되도록 유도합니다. (목표가 도달 시 +3% 지정가 자동 전환됨)
                                                 </div>
                                             </div>
                                         </div>

@@ -277,14 +277,14 @@ export class MarketDataCollectorService {
                     }
 
                 } catch (err: any) {
-                    console.error(`[MarketDataCollector] 종목 수집 실패 (${stock.stock_code}):`, err.message);
                     failCount++;
                     failedStocksList.push(stock);
                     
+                    // 서킷 브레이커 발생 시 루프를 중단하지 않고 계속 진행 (오인식 대비 및 차단 해제 후 자동 복구)
                     if (err.message && err.message.toLowerCase().includes('circuit')) {
-                        console.error('[MarketDataCollector] 수집량을 초과하여 수집을 중단합니다.');
-                        isCircuitBroken = true;
-                        break;
+                        console.warn(`[MarketDataCollector] 서킷 브레이커 감지됨 (${stock.stock_code}). 중단 없이 다음 종목으로 넘어갑니다.`);
+                    } else if (!err.message.includes('ECONNABORTED')) {
+                        console.error(`[MarketDataCollector] 종목 수집 에러 (${stock.stock_code}):`, err.message);
                     }
                 }
             }
@@ -292,39 +292,47 @@ export class MarketDataCollectorService {
             // 남은 데이터 저장
             flushBatch();
 
-            // ─── 1회 한정 Micro-Retry (부분 재시도) 로직 ───
+            // ─── 다중 재시도 (End-of-Loop Retry) 로직 ───
             let retryRecovered = 0;
-            if (failedStocksList.length > 0 && !isCircuitBroken) {
-                console.log(`[MarketDataCollector] ⚠️ 1차 수집 실패 종목 ${failedStocksList.length}개 감지. 10초 대기 후 1회 한정 재수집(Micro-Retry)을 시작합니다.`);
-                eventBus.emit(SystemEvent.LOG_INFO, `[Data Pump] 1차 실패 종목 ${failedStocksList.length}개 대상 1회 재시도 (10초 쿨다운)`);
+            let retryCount = 0;
+            const maxRetries = 3;
+
+            while (failedStocksList.length > 0 && retryCount < maxRetries) {
+                retryCount++;
+                console.log(`[MarketDataCollector] ⚠️ 누락 종목 ${failedStocksList.length}개 대상 ${retryCount}차 싹쓸이 재시도 시작 (3초 대기)`);
+                eventBus.emit(SystemEvent.LOG_INFO, `[Data Pump] 누락 종목 ${failedStocksList.length}개 대상 ${retryCount}차 재시도`);
                 
-                // TPS/과부하 해소를 위해 10초 대기
-                await new Promise(r => setTimeout(r, 10000));
+                // 자연스러운 쿨다운 3초
+                await new Promise(r => setTimeout(r, 3000));
                 
-                for (let i = 0; i < failedStocksList.length; i++) {
-                    const stock = failedStocksList[i];
+                const currentRetryList = [...failedStocksList];
+                failedStocksList = []; // 다음 차수를 위해 비움
+
+                for (let i = 0; i < currentRetryList.length; i++) {
+                    const stock = currentRetryList[i];
                     try {
                         const rawData = await this.kiwoomService.getDailyChartData(stock.stock_code, days + 5);
                         if (Array.isArray(rawData) && rawData.length > 0) {
                             processRawData(stock.stock_code, rawData);
                             successCount++;
-                            failCount--; // 기존 1차 실패 차감
+                            failCount--;
                             retryRecovered++;
+                            console.log(`[MarketDataCollector] ✅ ${retryCount}차 재시도 복구 성공 (${stock.stock_code})`);
                         } else {
-                            console.warn(`[MarketDataCollector] 🚫 재시도 최종 실패 (${stock.stock_code}): 데이터 없음 (불량 종목 간주)`);
+                            failedStocksList.push(stock);
                         }
                         
                         if (currentBatch.length >= batchSize) flushBatch();
                         
                     } catch (err: any) {
-                        console.error(`[MarketDataCollector] 🚫 재시도 최종 실패 (${stock.stock_code}):`, err.message);
-                        if (err.message && err.message.toLowerCase().includes('circuit')) {
-                            break;
-                        }
+                        failedStocksList.push(stock);
                     }
                 }
-                
                 flushBatch();
+            }
+
+            if (failedStocksList.length > 0) {
+                console.warn(`[MarketDataCollector] 🚫 최대 ${maxRetries}차 재시도 후에도 ${failedStocksList.length}개 종목 최종 수집 누락.`);
             }
 
             const finishMsg = retryRecovered > 0 
@@ -342,7 +350,14 @@ export class MarketDataCollectorService {
             this.isCollecting = false;
         }
 
-        const isSuccess = successCount >= 2000;
+        // 전체 대상(pendingStocks) 중 최종 실패율이 5% 미만이면 성공으로 간주
+        const maxAllowedFails = Math.max(10, Math.floor(pendingStocks.length * 0.05));
+        const isSuccess = failCount <= maxAllowedFails;
+        
+        if (!isSuccess) {
+            console.error(`[MarketDataCollector] 최종 실패 종목 수(${failCount})가 허용치(${maxAllowedFails})를 초과하여 수집 실패로 간주합니다.`);
+        }
+
         return { success: isSuccess, collected: successCount, failed: failCount };
     }
 

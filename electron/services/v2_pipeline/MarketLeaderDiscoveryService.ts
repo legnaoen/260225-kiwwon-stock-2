@@ -150,10 +150,14 @@ export class MarketLeaderDiscoveryService {
         const stockMap = new Map<string, {
             firstClose: number; lastClose: number; totalTrdVal: number; count: number;
             history: HistoryItem[];
+            lastDate: string;
         }>();
         const uniqueDates = new Set<string>();
+        let maxDate = '';
 
         ohlcvRows.forEach(row => {
+            if (row.date > maxDate) maxDate = row.date;
+            
             const sc = row.stock_code;
             const hItem: HistoryItem = {
                 date: row.date,
@@ -167,14 +171,22 @@ export class MarketLeaderDiscoveryService {
 
             const item = stockMap.get(sc);
             if (!item) {
-                stockMap.set(sc, { firstClose: row.close, lastClose: row.close, totalTrdVal: row.trading_value || 0, count: 1, history: [hItem] });
+                stockMap.set(sc, { firstClose: row.close, lastClose: row.close, totalTrdVal: row.trading_value || 0, count: 1, history: [hItem], lastDate: row.date });
             } else {
                 item.lastClose = row.close;
                 item.totalTrdVal += (row.trading_value || 0);
                 item.count += 1;
+                item.lastDate = row.date;
                 item.history.push(hItem);
             }
         });
+
+        // [핵심 필터링] 시장의 가장 최신 거래일(maxDate) 데이터가 없는 종목(수집 누락/거래정지) 원천 차단
+        for (const [sc, item] of stockMap.entries()) {
+            if (item.lastDate < maxDate) {
+                stockMap.delete(sc);
+            }
+        }
 
         // 1.5 60일(장기) 저점 + 20일 고점 데이터 로드 (heat_60 및 drawdown20 산출용)
         const targetDate60 = this.getTradingDateCutoff(60);

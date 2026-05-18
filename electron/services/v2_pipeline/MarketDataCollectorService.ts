@@ -133,6 +133,7 @@ export class MarketDataCollectorService {
         this.isCollecting = true;
         let successCount = 0;
         let failCount = 0;
+        let pendingStocksCount = 0;
         eventBus.emit(SystemEvent.LOG_INFO, '[Data Pump] 전 종목 차트(OHLCV) 수집 엔진 가동 시작');
 
         try {
@@ -187,6 +188,7 @@ export class MarketDataCollectorService {
             }
             
             const pendingStocks = allStocks.filter(s => !existingSet.has(s.stock_code));
+            pendingStocksCount = pendingStocks.length;
             successCount = existingSet.size;
 
             console.log(`[MarketDataCollector] 수집 대상 종목 수: ${pendingStocks.length}개 (이미 수집됨: ${existingSet.size}개)`);
@@ -351,7 +353,7 @@ export class MarketDataCollectorService {
         }
 
         // 전체 대상(pendingStocks) 중 최종 실패율이 5% 미만이면 성공으로 간주
-        const maxAllowedFails = Math.max(10, Math.floor(pendingStocks.length * 0.05));
+        const maxAllowedFails = Math.max(10, Math.floor(pendingStocksCount * 0.05));
         const isSuccess = failCount <= maxAllowedFails;
         
         if (!isSuccess) {

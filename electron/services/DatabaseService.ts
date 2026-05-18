@@ -688,6 +688,16 @@ export class DatabaseService {
                 created_at TEXT NOT NULL
             );
         `);
+        try { this.db.exec('ALTER TABLE report_trade_history ADD COLUMN exit_price REAL DEFAULT 0;'); } catch {}
+        try { this.db.exec('ALTER TABLE report_trade_history ADD COLUMN final_return REAL DEFAULT 0;'); } catch {}
+        try { this.db.exec('ALTER TABLE report_trade_history ADD COLUMN exit_date TEXT;'); } catch {}
+        try { this.db.exec('ALTER TABLE report_trade_history ADD COLUMN holding_days INTEGER DEFAULT 0;'); } catch {}
+        try { this.db.exec('ALTER TABLE report_trade_history ADD COLUMN report_source TEXT;'); } catch {}
+        try { this.db.exec('ALTER TABLE report_trade_history ADD COLUMN industry_name TEXT;'); } catch {}
+        try { this.db.exec('ALTER TABLE report_trade_history ADD COLUMN ai_entry_reason TEXT;'); } catch {}
+        try { this.db.exec('ALTER TABLE report_trade_history ADD COLUMN ai_exit_reason TEXT;'); } catch {}
+        try { this.db.exec('ALTER TABLE report_trade_history ADD COLUMN exit_type TEXT DEFAULT "DROPPED";'); } catch {}
+
 
         // ─── Report-Driven AI Tracker: Scout/Manager 실행 로그 ────────────────
         this.db.exec(`

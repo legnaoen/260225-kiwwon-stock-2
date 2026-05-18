@@ -83,7 +83,7 @@ export class MoonshotTrackerAgent {
         }
 
         // ─── 현재 Active Tracking 전 종목 로드 ───
-        const activeRows: any[] = db.prepare(`
+        const activeRowsRaw: any[] = db.prepare(`
             SELECT stock_code, stock_name, tag, tbp_score, mega_trend, bull_case, bear_case,
                    milestones_json, invalidation_condition, entry_price, current_price,
                    entry_date, narrative
@@ -92,8 +92,16 @@ export class MoonshotTrackerAgent {
             ORDER BY tag, tbp_score DESC
         `).all();
 
+        const todayStr = now.split('T')[0].replace(/-/g, '.');
+        const activeRows = activeRowsRaw.filter(r => r.entry_date !== todayStr);
+        const skippedRows = activeRowsRaw.filter(r => r.entry_date === todayStr);
+
+        if (skippedRows.length > 0) {
+            this.sendProgress(win, `ℹ️ 오늘 편입된 신규 종목 ${skippedRows.length}개는 첫날 리뷰에서 제외됩니다.`, 'info');
+        }
+
         if (activeRows.length === 0) {
-            this.sendProgress(win, '⚠️ Active Tracking에 종목이 없습니다.', 'warning');
+            this.sendProgress(win, '⚠️ Active Tracking에 (리뷰 대상인) 종목이 없습니다.', 'warning');
             return [];
         }
 

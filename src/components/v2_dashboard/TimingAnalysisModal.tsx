@@ -29,8 +29,7 @@ const TIME_SLOTS = [
     '11:00', '11:10', '11:20', '11:30', '11:40', '11:50',
     '12:00', '12:10', '12:20', '12:30', '12:40', '12:50',
     '13:00', '13:10', '13:20', '13:30', '13:40', '13:50',
-    '14:00', '14:10', '14:20', '14:30', '14:40', '14:50',
-    '15:00', '15:10', '15:20', '15:30'
+    '14:00', '14:10', '14:20', '14:30', '14:40'
 ];
 
 export function TimingAnalysisModal({ isOpen, onClose }: TimingAnalysisModalProps) {
@@ -56,7 +55,7 @@ export function TimingAnalysisModal({ isOpen, onClose }: TimingAnalysisModalProp
                 const result = await window.electronAPI.invoke('livetrade:get-timing-analysis');
                 if (isMounted && result) {
                     setPeakData(result.peakDistribution || []);
-                    setTimeData(result.timeTrajectory || []);
+                    setTimeData((result.timeTrajectory || []).filter((d: any) => d.time <= '14:40'));
                     setSampleCount(result.sampleCount || 0);
                 }
             } catch (err) {

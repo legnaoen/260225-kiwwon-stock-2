@@ -368,6 +368,30 @@ export const SimTradeTab: React.FC = () => {
                                                 setIsAiMenuOpen(false);
                                                 setLoading(true);
                                                 try {
+                                                    alert('전 트랙(A~E) AI 종목 선정을 순차적으로 시작합니다. 약 1~2분 소요됩니다.');
+                                                    await (window as any).electronAPI.runTrackABuyAgent();
+                                                    await (window as any).electronAPI.runTrackBBuyAgent();
+                                                    await (window as any).electronAPI.runTrackCBuyAgent();
+                                                    await (window as any).electronAPI.runTrackDBuyAgent();
+                                                    await (window as any).electronAPI.runTrackEBuyAgent();
+                                                    alert('전 트랙 종목 선정이 완료되었습니다.');
+                                                    await fetchPicks();
+                                                } catch(e: any) {
+                                                    alert('에러 발생: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-muted transition-colors border-b border-border/30 text-indigo-400 flex items-center gap-2"
+                                        >
+                                            <Play className="w-3.5 h-3.5" />
+                                            전체 트랙 일괄 선정 (A~E)
+                                        </button>
+                                        <button 
+                                            onClick={async () => {
+                                                setIsAiMenuOpen(false);
+                                                setLoading(true);
+                                                try {
                                                     alert('대장주 전용 파이프라인 (Track A)을 시작합니다. 약 10~20초 소요됩니다.');
                                                     await (window as any).electronAPI.runTrackABuyAgent();
                                                     alert('대장주 선정이 완료되었습니다.');
@@ -482,6 +506,43 @@ export const SimTradeTab: React.FC = () => {
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setIsMoreMenuOpen(false)} />
                                     <div className="absolute right-0 top-full mt-1 w-52 bg-background border border-border/50 rounded-md shadow-xl z-50 py-1 overflow-hidden">
+                                        <button
+                                            onClick={async () => {
+                                                setIsMoreMenuOpen(false);
+                                                if (!confirm('OHLCV 전체 수집 완료 후 자동으로 종목 선정 파이프라인까지 연속 실행하시겠습니까?\n(약 15~25분 소요)')) return;
+                                                setLoading(true);
+                                                try {
+                                                    // 1. OHLCV 수집
+                                                    const ohlcvRes = await (window as any).electronAPI.runOhlcvCollection();
+                                                    if(!ohlcvRes.success) {
+                                                        alert('OHLCV 수집 중단: ' + ohlcvRes.error);
+                                                        return;
+                                                    }
+                                                    // 2. 종목 선정 파이프라인 (Track A~E)
+                                                    alert('OHLCV 수집 완료! 이제 각 트랙별 AI 종목 선정을 시작합니다.');
+                                                    await (window as any).electronAPI.runTrackEBuyAgent();
+                                                    await (window as any).electronAPI.runTrackDBuyAgent();
+                                                    await (window as any).electronAPI.runTrackCBuyAgent();
+                                                    await (window as any).electronAPI.runTrackBBuyAgent();
+                                                    await (window as any).electronAPI.runTrackABuyAgent();
+
+                                                    // 3. 후속 파이프라인 실행
+                                                    const pipelineRes = await (window as any).electronAPI.resumePostMarketPipeline();
+                                                    if (pipelineRes.success) alert('OHLCV 수집 및 파이프라인 연속 실행이 완료되었습니다.');
+                                                    else alert('OHLCV 수집은 완료되었으나, 파이프라인 실행 중 오류가 발생했습니다: ' + pipelineRes.error);
+                                                    
+                                                    await fetchPicks();
+                                                } catch(e: any) {
+                                                    alert('에러 발생: ' + e.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            }}
+                                            className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-muted transition-colors flex items-center gap-2 text-indigo-400 border-b border-border/30"
+                                        >
+                                            <Database className="w-3.5 h-3.5" />
+                                            🌟 수집 + 파이프라인 원클릭 실행
+                                        </button>
                                         <button
                                             onClick={async () => {
                                                 setIsMoreMenuOpen(false);

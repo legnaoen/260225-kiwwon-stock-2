@@ -255,7 +255,9 @@ export const ThemeMockTradingTab: React.FC<{ refreshTrigger?: number }> = ({ ref
                                         </div>
 
                                         {/* 피크 */}
-                                        <div className="text-right text-[12px] text-muted-foreground font-mono">+{peakVal.toFixed(1)}%</div>
+                                        <div className={cn("text-right text-[13px] font-bold font-mono", peakVal > 0 ? 'text-red-500' : peakVal < 0 ? 'text-blue-500' : 'text-muted-foreground')}>
+                                            {peakVal > 0 ? '+' : ''}{peakVal.toFixed(1)}%
+                                        </div>
 
                                         {/* 현재수익 */}
                                         <div className={cn("text-right text-[13px] font-bold font-mono", returnVal > 0 ? 'text-red-500' : returnVal < 0 ? 'text-blue-500' : 'text-muted-foreground')}>

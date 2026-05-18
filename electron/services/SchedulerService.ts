@@ -26,7 +26,61 @@ export class SchedulerService {
     // 타임아웃으로 실패한 크론 작업을 전부 보관 → 재연결 후 순서대로 재실행
     private retryQueue: Array<{ name: string; fn: () => Promise<void> }> = [];
     private isRecovering: boolean = false;
-    private isReportRebalanceRunning: boolean = false;
+
+    private isPmDailyReviewRunning: boolean = false;
+    // ──────────────────────────────────────────────────────────────
+
+    // ─── [장 마감 파수꾼] Post-Market Watchdog ────────────────────
+    private dailyExecutionFlags: Map<string, string> = new Map(Object.entries(store.get('watchdog_execution_flags') as Record<string, string> || {}));
+    private watchdogTasks: { name: string, triggerTime: string, dom?: string, dow?: string, fn: () => Promise<void> }[] = [];
+
+    private setWatchdogFlag(name: string, dateStr: string) {
+        this.dailyExecutionFlags.set(name, dateStr);
+        store.set('watchdog_execution_flags', Object.fromEntries(this.dailyExecutionFlags));
+    }
+
+    /**
+     * 감시자(Watchdog) 대상 크론을 생성합니다. 
+     * node-cron이 스킵되더라도 Watchdog이 누락을 감지하고 강제 실행합니다.
+     */
+    private createWatchdogCron(name: string, cronExpr: string, fn: () => Promise<void>): cron.ScheduledTask {
+        const parts = cronExpr.split(' ');
+        if (parts.length >= 5) {
+            const min = parseInt(parts[0], 10);
+            const hr = parseInt(parts[1], 10);
+            if (!isNaN(min) && !isNaN(hr)) {
+                const triggerTime = `${hr.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+                this.watchdogTasks.push({ name, triggerTime, dom: parts[2], dow: parts[4], fn });
+            }
+        }
+        return cron.schedule(cronExpr, async () => {
+            const { getKstDate } = await import('../utils/DateUtils');
+            this.setWatchdogFlag(name, getKstDate());
+            await fn();
+        }, { timezone: 'Asia/Seoul' });
+    }
+
+    private morningWatchdogTasks: { name: string, triggerTime: string, maxRecoveryTime: string, dom?: string, dow?: string, fn: () => Promise<void> }[] = [];
+
+    /**
+     * 오전 장 파수꾼(Watchdog) 대상 크론을 생성합니다.
+     */
+    private createMorningWatchdogCron(name: string, cronExpr: string, maxRecoveryTime: string, fn: () => Promise<void>): cron.ScheduledTask {
+        const parts = cronExpr.split(' ');
+        if (parts.length >= 5) {
+            const min = parseInt(parts[0], 10);
+            const hr = parseInt(parts[1], 10);
+            if (!isNaN(min) && !isNaN(hr)) {
+                const triggerTime = `${hr.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+                this.morningWatchdogTasks.push({ name, triggerTime, maxRecoveryTime, dom: parts[2], dow: parts[4], fn });
+            }
+        }
+        return cron.schedule(cronExpr, async () => {
+            const { getKstDate } = await import('../utils/DateUtils');
+            this.setWatchdogFlag(name, getKstDate());
+            await fn();
+        }, { timezone: 'Asia/Seoul' });
+    }
     // ──────────────────────────────────────────────────────────────
 
     private async waitForOhlcv(timeoutMinutes: number = 40): Promise<boolean> {
@@ -167,13 +221,13 @@ export class SchedulerService {
         const settings = store.get('ai_schedule_settings') as any || { enabled: true }
         if (settings.enabled) {
             // Cycle A: 08:50 (장전 시장 파악 - 제미나이가 트래커들의 의견을 종합)
-            const mcaJobA = cron.schedule('50 08 * * 1-5', async () => {
+            const mcaJobA = this.createMorningWatchdogCron('mcaJobA', '50 08 * * 1-5', '09:30', async () => {
                 const { MarketConditionAgent } = await import('./v2_agents/MarketConditionAgent')
                 await MarketConditionAgent.getInstance().runPrediction('A')
-            }, { timezone: 'Asia/Seoul' })
+            })
 
             // PerformanceTracker 기록용 (15:35 T+1 / T+5 / T+20)
-            const mcaTrackerJob = cron.schedule('35 15 * * 1-5', async () => {
+            const mcaTrackerJob = this.createWatchdogCron('mcaTrackerJob', '35 15 * * 1-5', async () => {
                 const isReady = await this.waitForOhlcv();
                 if (!isReady) {
                     console.log('[Scheduler] 성과 추적 취소: OHLCV 선행 작업 미완료');
@@ -189,6 +243,44 @@ export class SchedulerService {
                     this.telegram.sendMessage(`❌ [15:35] 성과 추적 실패\n오류: ${e.message}`)
                 }
             }, { timezone: 'Asia/Seoul' })
+
+            // 실전 매매 아침 보유기한 브리핑 (09:10)
+            const liveTradeMorningBriefingJob = this.createMorningWatchdogCron('liveTradeMorningBriefingJob', '10 09 * * 1-5', '09:59', async () => {
+                try {
+                    // [Bugfix] 아침 브리핑 직전에 KODEX 200(069500) 캔들을 최우선 업데이트하여 보유일(holding_days) 계산 기준을 당일로 갱신합니다.
+                    const { MarketDataCollectorService } = await import('./v2_pipeline/MarketDataCollectorService');
+                    await MarketDataCollectorService.getInstance().refreshStocksClose(['069500']);
+
+                    const { LiveTradeLedgerService } = await import('./LiveTradeLedgerService')
+                    const { StockMasterService } = await import('./StockMasterService')
+                    const ledger = LiveTradeLedgerService.getInstance()
+                    const master = StockMasterService.getInstance()
+                    
+                    const activeTickets = ledger.getActiveTickets()
+                    const todayStr = new Date().toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })
+                    
+                    const expiringTickets = activeTickets.filter(t => (t.holding_days ?? 0) >= (t.target_days ?? 999))
+                    
+                    let msg = `📅 **[오늘의 실전매매 보유기한 브리핑]**\n`
+                    msg += `- 오늘 날짜: ${todayStr}\n`
+                    msg += `- 보유기한 도달 종목: ${expiringTickets.length}건\n\n`
+                    
+                    if (expiringTickets.length > 0) {
+                        msg += `💡 아래 종목들은 장중 목표가에 도달하여 선제 익절되지 않을 경우, 오늘 오후 3시(15:00)에 장 마감 기간청산 로직을 통해 일괄 매도될 예정입니다.\n\n`
+                        expiringTickets.forEach((t, idx) => {
+                            const name = master.getStock(t.stock_code)?.stock_name || t.stock_code
+                            msg += `${idx + 1}. ${name} (목표: D+${t.target_days} / 현재: D+${t.holding_days})\n`
+                        })
+                    } else {
+                        msg += `✅ 오늘은 보유기한 만료로 인한 강제 청산 대기 종목이 없습니다.`
+                    }
+                    
+                    this.telegram.sendMessage(msg)
+                } catch (e: any) {
+                    console.error('[Scheduler] 실전매매 아침 브리핑 오류:', e.message)
+                }
+            })
+
             // 실전 매매 최대 보유일 청산 (Time-Stop) 파이프라인 (15:00)
             const liveTradeTimeStopJob = cron.schedule('00 15 * * 1-5', async () => {
                 try {
@@ -232,7 +324,7 @@ export class SchedulerService {
 
             // I-4: 장 시작 전 잔고 대조 (Daily Sync Check, 08:50)
             // 전날 정산 실패 또는 야간 수동 매매로 인한 불일치 조기 감지
-            const liveTradeSyncCheckJob = cron.schedule('50 08 * * 1-5', async () => {
+            const liveTradeSyncCheckJob = this.createMorningWatchdogCron('liveTradeSyncCheckJob', '50 08 * * 1-5', '08:59', async () => {
                 try {
                     const { LiveTradeReconciliationService } = await import('./LiveTradeReconciliationService')
                     console.log('[Scheduler] 장 시작 전 실전매매 잔고 대조 (Sync Check) 실행')
@@ -240,10 +332,10 @@ export class SchedulerService {
                 } catch (e: any) {
                     console.error('[Scheduler] 장 시작 전 Sync Check 오류:', e.message)
                 }
-            }, { timezone: 'Asia/Seoul' })
+            })
 
             // 장 마감 실전매매 정산 파이프라인 (15:35)
-            const liveTradeReconJob = cron.schedule('35 15 * * 1-5', async () => {
+            const liveTradeReconJob = this.createWatchdogCron('liveTradeReconJob', '35 15 * * 1-5', async () => {
                 try {
                     const { LiveTradeReconciliationService } = await import('./LiveTradeReconciliationService')
                     await LiveTradeReconciliationService.getInstance().reconcileDailyExecutions()
@@ -255,7 +347,7 @@ export class SchedulerService {
 
 
             // 주간 회고 AI (금요일 15:44, 3분 텀 내 편성)
-            const weeklyReviewJob = cron.schedule('44 15 * * 5', async () => {
+            const weeklyReviewJob = this.createWatchdogCron('weeklyReviewJob', '44 15 * * 5', async () => {
                 try {
                     const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
                     await MarketReviewAgent.getInstance().runWeeklyReview()
@@ -267,7 +359,7 @@ export class SchedulerService {
             }, { timezone: 'Asia/Seoul' })
 
             // 월간 회고 AI (매월 28일 15:47, 3분 텀 내 편성)
-            const monthlyReviewJob = cron.schedule('47 15 28 * *', async () => {
+            const monthlyReviewJob = this.createWatchdogCron('monthlyReviewJob', '47 15 28 * *', async () => {
                 try {
                     const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
                     await MarketReviewAgent.getInstance().runMonthlyReview()
@@ -283,7 +375,7 @@ export class SchedulerService {
 
             // ─── 종목 AI 파이프라인 (3단계, 5분 간격) ───────────────────────
             // [Step 1] 09:35 수급 AI: NaverFlow(09:26) 데이터 확보 후 급등/거래대금 교차 분석
-            const momentumJob = cron.schedule('35 09 * * 1-5', this.withRetryOnTimeout('수급AI-09:35', async () => {
+            const momentumJob = this.createMorningWatchdogCron('momentumJob', '35 09 * * 1-5', '09:59', this.withRetryOnTimeout('수급AI-09:35', async () => {
                 console.log('[Scheduler] 📈 수급 AI (MomentumAnalyst) 자동 실행 시작...')
                 try {
                     const { MomentumAnalystAgent } = await import('./v2_agents/MomentumAnalystAgent')
@@ -291,10 +383,10 @@ export class SchedulerService {
                 } catch (e: any) {
                     console.error('[Scheduler] 수급 AI 오류:', e.message)
                 }
-            }), { timezone: 'Asia/Seoul' })
+            }))
 
             // [Step 2] 09:41 리포트 AI: 증권사 리포트 기반 펀더멘탈 우량주 발굴 (스웜 AI 충돌 회피로 1분 지연)
-            const fundamentalJob = cron.schedule('41 09 * * 1-5', async () => {
+            const fundamentalJob = this.createMorningWatchdogCron('fundamentalJob', '41 09 * * 1-5', '09:59', async () => {
                 console.log('[Scheduler] 📄 리포트 AI (FundamentalAnalyst) 자동 실행 시작...')
                 try {
                     const { FundamentalAnalystAgent } = await import('./v2_agents/FundamentalAnalystAgent')
@@ -302,10 +394,10 @@ export class SchedulerService {
                 } catch (e: any) {
                     console.error('[Scheduler] 리포트 AI 오류:', e.message)
                 }
-            }, { timezone: 'Asia/Seoul' })
+            })
 
             // [Step 2-B] 09:42 눈림목 스캐너: Alpha 상위 주도주 중 조정 구간 진입 후보 발굴
-            const pullbackJob = cron.schedule('42 09 * * 1-5', async () => {
+            const pullbackJob = this.createMorningWatchdogCron('pullbackJob', '42 09 * * 1-5', '09:59', async () => {
                 console.log('[Scheduler] 🔍 눈림목 스캐너 (PullbackScanner) 자동 실행 시작...')
                 try {
                     const { PullbackScannerAgent } = await import('./v2_agents/PullbackScannerAgent')
@@ -313,14 +405,19 @@ export class SchedulerService {
                 } catch (e: any) {
                     console.error('[Scheduler] 눈림목 스캐너 오류:', e.message)
                 }
-            }, { timezone: 'Asia/Seoul' })
+            })
 
             // [Step 3+4 통합] 09:45 PM 통합 리뷰 (PM1 루키 오디션 → PM2 리밸런싱 즉시 체인 실행)
             // ★ BUG FIX: phase1Job + phase2Job을 runDailyReview() 하나로 통합
             //   이전에는 09:45(PM1)과 09:48(PM2)이 별개 크론으로 실행되어
             //   PM1의 신규 픽(newPicks) 반환값이 PM2로 전달되지 않는 데이터 체인 단절 버그가 있었음.
             //   runDailyReview()는 내부에서 PM1→PM2를 순서대로 실행하며 결과를 직접 전달함.
-            const pmDailyJob = cron.schedule('45 09 * * 1-5', this.withRetryOnTimeout('PM통합리뷰-09:45', async () => {
+            const pmDailyJob = this.createMorningWatchdogCron('pmDailyJob', '45 09 * * 1-5', '09:59', this.withRetryOnTimeout('PM통합리뷰-09:45', async () => {
+                if (this.isPmDailyReviewRunning) {
+                    console.log('[Scheduler] 🧑‍💼 이미 PM 통합 리뷰가 실행 중입니다. 중복 실행을 방지합니다.');
+                    return;
+                }
+                this.isPmDailyReviewRunning = true;
                 console.log('[Scheduler] 🧑‍💼 포트폴리오 매니저 (PM1→PM2 통합 리뷰) 실행 시작...')
                 try {
                     const { PortfolioManagerAgent } = await import('./v2_agents/PortfolioManagerAgent')
@@ -331,8 +428,10 @@ export class SchedulerService {
                         const { TelegramService } = await import('./TelegramService');
                         TelegramService.getInstance().sendMessage(`❌ [09:45] PM 통합 리뷰 전체 실패\n오류: ${e.message}`);
                     } catch (_) { }
+                } finally {
+                    this.isPmDailyReviewRunning = false;
                 }
-            }), { timezone: 'Asia/Seoul' })
+            }))
 
             // [Step 4-B] 14:05 PM 장중 2차 미니 리뷰 (포트폴리오 중간 점검 및 리밸런싱) - 잦은 매매 방지를 위해 비활성화
             /*
@@ -348,7 +447,7 @@ export class SchedulerService {
             */
 
             // [Step 4] 15:41 장마감 채점: 종가 기준 수익률·수명 심사
-            const portfolioJudgeJob = cron.schedule('41 15 * * 1-5', async () => {
+            const portfolioJudgeJob = this.createWatchdogCron('portfolioJudgeJob', '41 15 * * 1-5', async () => {
                 const isReady = await this.waitForOhlcv();
                 if (!isReady) {
                     console.log('[Scheduler] 장마감 채점 취소: OHLCV 선행 작업 미완료');
@@ -394,7 +493,7 @@ export class SchedulerService {
             }, { timezone: 'Asia/Seoul' })
 
             // [Step 5] 인큐베이터 스캔: Pool B neglect_score 갱신 (15:43)
-            const incubatorScanJob = cron.schedule('43 15 * * 1-5', async () => {
+            const incubatorScanJob = this.createWatchdogCron('incubatorScanJob', '43 15 * * 1-5', async () => {
                 const isReady = await this.waitForOhlcv();
                 if (!isReady) {
                     console.log('[Scheduler] 인큐베이터 스캔 취소: OHLCV 선행 작업 미완료');
@@ -417,7 +516,7 @@ export class SchedulerService {
             // 수집 데이터: 장 마감 약 15~25분 전 가격 (오늘 종가와 오차 < 1%)
             // CrossPeriodAnalyzer는 이 오늘 데이터를 포함한 60봉을 기반으로 분석
             // 진입가 최종 보정은 15:32에 실제 동시호가 확정 종가로 덮어쓰기
-            const marketDailyJob = cron.schedule('05 15 * * 1-5', this.withRetryOnTimeout('OHLCV수집+모의매매-15:05', async () => {
+            const marketDailyJob = this.createWatchdogCron('marketDailyJob', '05 15 * * 1-5', this.withRetryOnTimeout('OHLCV수집+모의매매-15:05', async () => {
                 this.ohlcvCollectionStatus = 'RUNNING';
                 const startTime = new Date()
                 const fmt = (d: Date) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
@@ -539,15 +638,16 @@ export class SchedulerService {
                                             const kstH = (now.getUTCHours() + 9) % 24;
                                             const kstM = now.getUTCMinutes();
                                             
-                                            // 현재 시간이 15:00 ~ 15:19 사이라면 무조건 15:20까지 대기
+                                            // 현재 시간이 15:00 ~ 15:19 사이라면 무조건 15:20:20 (20초 버퍼)까지 대기
                                             if (kstH === 15 && kstM < 20) {
-                                                const targetTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 20, 0);
+                                                // 거래소와의 미세한 시간 오차로 인해 정규장에 즉시 체결되는 것을 막기 위해 20초 버퍼 추가
+                                                const targetTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 20, 20);
                                                 const diffMs = targetTime.getTime() - now.getTime();
                                                 
-                                                console.log(`[Scheduler] 15:20 동시호가 대기 옵션 활성화됨. ${Math.round(diffMs/1000)}초 대기...`);
-                                                this.telegram.sendMessage(`⏳ [15:20 동시호가 대기]\nAI 모의매매 분석이 일찍 완료되었습니다.\n실전매수 '동시호가 강제 대기' 옵션에 따라 15:20 정각까지 매수 발송을 대기합니다. (${Math.round(diffMs/1000)}초)`);
+                                                console.log(`[Scheduler] 15:20 동시호가 대기 옵션 활성화됨. 15:20:20까지 ${Math.round(diffMs/1000)}초 대기...`);
+                                                this.telegram.sendMessage(`⏳ [15:20 동시호가 대기]\nAI 모의매매 분석이 완료되었습니다.\n실전매수 '동시호가 강제 대기' 옵션 및 거래소 시간 오차 방지를 위해 15:20:20초까지 매수 발송을 대기합니다. (${Math.round(diffMs/1000)}초)`);
                                                 await new Promise(resolve => setTimeout(resolve, diffMs));
-                                                console.log(`[Scheduler] 대기 종료. 매수 프로세스 재개`);
+                                                console.log(`[Scheduler] 대기 종료. 동시호가 매수 프로세스 재개`);
                                             }
                                         }
 
@@ -614,7 +714,7 @@ export class SchedulerService {
             // [Track A, B, C, D, E] 15:32 진입가 최종 보정 (동시호가 종료 2분 후)
             // ① 오늘 PENDING 종목의 종가를 Kiwoom API로 재수집 (동시호가 확정 종가 반영)
             // ② 갱신된 market_ohlcv_history.close를 읽어 entry_price 확정 (PENDING → ACTIVE)
-            const trackEntryJob = cron.schedule('32 15 * * 1-5', this.withRetryOnTimeout('진입가확정-15:32', async () => {
+            const trackEntryJob = this.createWatchdogCron('trackEntryJob', '32 15 * * 1-5', this.withRetryOnTimeout('진입가확정-15:32', async () => {
                 const isReady = await this.waitForOhlcv();
                 if (!isReady) {
                     console.log('[Scheduler] 💰 진입가 확정 취소: OHLCV 선행 작업 미완료');
@@ -665,6 +765,13 @@ export class SchedulerService {
                     if (updatedB > 0 || updatedA > 0 || updatedC > 0 || updatedD > 0 || updatedE > 0) {
                         this.telegram.sendMessage(`💰 [15:32] 모의매매 진입가 최종 확정\nTrack A: ${updatedA}개\nTrack B: ${updatedB}개\nTrack C: ${updatedC}개\nTrack D: ${updatedD}개\nTrack E: ${updatedE}개\n→ 동시호가 확정 종가로 진입가 기록 (ACTIVE)`)
                     }
+                    
+                    // JSON 어댑터 및 CLI 파이프라인 연동 (tracker.py)
+                    try {
+                        await this.exportToTrackerAndIngest(today);
+                    } catch (err: any) {
+                        console.error('[Scheduler] tracker.py 연동 오류:', err);
+                    }
                 } catch (e: any) {
                     console.error('[Scheduler] Track 진입가 확정 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:32] 진입가 확정 실패\n오류: ${e.message}`)
@@ -687,7 +794,7 @@ export class SchedulerService {
 
             // [Step 6.5] 14:55 테마 AI (ThemeIntelligence) 종가 베팅을 위한 전용 크론
             // 장 마감 직전(14:55) 당일 테마/섹터 랭킹을 수집하고 AI 추천 종목을 발굴
-            const themeAiJob = cron.schedule('55 14 * * 1-5', async () => {
+            const themeAiJob = this.createWatchdogCron('themeAiJob', '55 14 * * 1-5', async () => {
                 console.log(`[SchedulerService] 🤖 14:55 테마주 AI (종가 베팅용) 일괄 분석 시작`)
                 try {
                     // 테마 AI 실행 전, 최신 테마/섹터 순위를 확보하기 위해 NaverFlow 수집 파이프라인 1회 강제 실행
@@ -708,43 +815,11 @@ export class SchedulerService {
                     const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService');
                     await LiveTradeExecutionService.getInstance().monitorTakeProfit();
 
-                    // --- 지연 캐치업 로직 (09:00 ~ 09:15 사이) ---
                     const now = new Date();
                     const kstH = (now.getUTCHours() + 9) % 24;
                     const kstM = now.getUTCMinutes();
-                    
-                    if (kstH === 9 && kstM >= 0 && kstM <= 15) {
-                        if (!this.isReportRebalanceRunning) {
-                            const { DatabaseService } = await import('./DatabaseService');
-                            const db = DatabaseService.getInstance() as any;
-                            const todayStr = (await import('../utils/DateUtils')).getKstDate();
-                            
-                            try {
-                                const todayLog = db.db.prepare("SELECT id FROM report_rebalance_logs WHERE run_date = ?").get(todayStr);
-                                if (!todayLog) {
-                                    this.isReportRebalanceRunning = true;
-                                    console.log('[Scheduler] ⏰ 지연 캐치업: 09:00 리포트 AI가 누락되어 보충 실행합니다.');
-                                    
-                                    const { ReportScoutAgent } = await import('./v2_agents/ReportScoutAgent');
-                                    const { ReportManagerAgent } = await import('./v2_agents/ReportManagerAgent');
 
-                                    const scoutResult = await ReportScoutAgent.getInstance().run();
-                                    if (!scoutResult.success) {
-                                        this.telegram.sendMessage(`⚠️ [09:00 캐치업] 리포트 Scout 실패\n사유: ${scoutResult.error ?? '알 수 없음'}`);
-                                    } else {
-                                        const managerResult = await ReportManagerAgent.getInstance().run(scoutResult);
-                                        if (!managerResult.success) {
-                                            this.telegram.sendMessage(`❌ [09:00 캐치업] 리포트 Manager 실패\n오류: ${managerResult.error}`);
-                                        }
-                                    }
-                                }
-                            } catch (e: any) {
-                                console.error('[Scheduler] 캐치업 검사/실행 오류:', e.message);
-                            } finally {
-                                this.isReportRebalanceRunning = false;
-                            }
-                        }
-                    }
+                    // (Watchdog 통합으로 인해 레거시 PM 지연 캐치업 로직 삭제)
                 } catch (e: any) {
                     // Ignore background errors or log them silently
                 }
@@ -758,42 +833,77 @@ export class SchedulerService {
                 } catch (e: any) {}
             }, { timezone: 'Asia/Seoul' });
 
-            const liveTradeMonitorJob15 = cron.schedule('0-30 15 * * 1-5', async () => {
-                try {
-                    const { LiveTradeExecutionService } = await import('./LiveTradeExecutionService');
-                    await LiveTradeExecutionService.getInstance().monitorTakeProfit();
-                } catch (e: any) {
-                    // Ignore background errors
+            // ─── [장 마감 파수꾼] 백그라운드 타이머 스킵 자가 치유(Auto-Healing) ───
+            const postMarketWatchdog = cron.schedule('* 14-15 * * 1-5', async () => {
+                const { getKstDate } = await import('../utils/DateUtils');
+                const today = getKstDate();
+                const now = new Date();
+                const kstH = (now.getUTCHours() + 9) % 24;
+                const kstM = now.getUTCMinutes();
+                const kstDOW = now.getDay();
+                const kstDOM = now.getDate();
+                const timeStr = `${kstH.toString().padStart(2, '0')}:${kstM.toString().padStart(2, '0')}`;
+
+                for (const job of this.watchdogTasks) {
+                    if (job.dow && job.dow !== '*' && job.dow !== '1-5') {
+                        if (job.dow === '5' && kstDOW !== 5) continue;
+                    }
+                    if (job.dom && job.dom !== '*') {
+                        if (parseInt(job.dom, 10) !== kstDOM) continue;
+                    }
+                    // 원래 스케줄 시간보다 1분 뒤(>)부터 누락 검사 (정각 중복 실행 방지)
+                    if (timeStr > job.triggerTime && timeStr <= '15:59') {
+                        const lastRun = this.dailyExecutionFlags.get(job.name);
+                        if (lastRun !== today) {
+                            console.log(`[Watchdog] ⏰ 지연/누락 감지: ${job.name} (${job.triggerTime}) -> 복구 실행!`);
+                            this.telegram.sendMessage(`🛡️ [Watchdog] 백그라운드 타이머 누락을 감지하여 보충 실행합니다: ${job.name}`);
+                            this.setWatchdogFlag(job.name, today);
+                            try {
+                                await job.fn();
+                            } catch (e: any) {
+                                console.error(`[Watchdog] ❌ 복구 실패: ${job.name}`, e);
+                            }
+                        }
+                    }
                 }
             }, { timezone: 'Asia/Seoul' });
-            // [Step 7] 09:00 리포트 AI 리밸런싱 (Scout → Manager 연계 실행 및 시가 진입)
-            // 개장 직후 당일 오전 리포트 분석 및 실시간 시가(현재가) 진입가 세팅
-            const reportTrackerJob = cron.schedule('0 9 * * 1-5', this.withRetryOnTimeout('리포트AI-09:00', async () => {
-                console.log('[Scheduler] 📑 리포트 AI (Scout → Manager) 개장 동시호가 리밸런싱 시작...')
-                try {
-                    const { ReportScoutAgent } = await import('./v2_agents/ReportScoutAgent')
-                    const { ReportManagerAgent } = await import('./v2_agents/ReportManagerAgent')
 
-                    // Phase 1: Scout — 리포트 기반 신규 후보 발굴
-                    const scoutResult = await ReportScoutAgent.getInstance().run()
-                    if (!scoutResult.success) {
-                        this.telegram.sendMessage(`⚠️ [09:00] 리포트 Scout 실패\n사유: ${scoutResult.error ?? '알 수 없음'}`)
-                        return;
-                    }
+            // ─── [장전 오전 파수꾼] 오전 스케줄 전용 자가 치유 ───
+            const morningWatchdog = cron.schedule('* 08-09 * * 1-5', async () => {
+                const { getKstDate } = await import('../utils/DateUtils');
+                const today = getKstDate();
+                const now = new Date();
+                const kstH = (now.getUTCHours() + 9) % 24;
+                const kstM = now.getUTCMinutes();
+                const kstDOW = now.getDay();
+                const kstDOM = now.getDate();
+                const timeStr = `${kstH.toString().padStart(2, '0')}:${kstM.toString().padStart(2, '0')}`;
 
-                    // Phase 2: Manager — 서바이벌 리밸런싱 및 실시간 가격 페치
-                    const managerResult = await ReportManagerAgent.getInstance().run(scoutResult)
-                    if (!managerResult.success) {
-                        this.telegram.sendMessage(`❌ [09:00] 리포트 Manager 실패\n오류: ${managerResult.error}`);
+                for (const job of this.morningWatchdogTasks) {
+                    if (job.dow && job.dow !== '*' && job.dow !== '1-5') {
+                        if (job.dow === '5' && kstDOW !== 5) continue;
                     }
-                    // 성공 시의 텔레그램 브리핑은 ReportManagerAgent.run 내부에서 발송함.
-                } catch (e: any) {
-                    console.error('[Scheduler] 리포트 AI 오류:', e.message)
-                    this.telegram.sendMessage(`❌ [09:00] 리포트 AI 실패\n오류: ${e.message}`)
+                    if (job.dom && job.dom !== '*') {
+                        if (parseInt(job.dom, 10) !== kstDOM) continue;
+                    }
+                    // 원래 스케줄 시간보다 1분 뒤(>)부터 누락 검사 (정각 중복 실행 방지)
+                    if (timeStr > job.triggerTime && timeStr <= job.maxRecoveryTime) {
+                        const lastRun = this.dailyExecutionFlags.get(job.name);
+                        if (lastRun !== today) {
+                            console.log(`[Watchdog] ⏰ 오전 지연/누락 감지: ${job.name} (${job.triggerTime} ~ ${job.maxRecoveryTime}) -> 복구 실행!`);
+                            this.telegram.sendMessage(`🛡️ [오전 Watchdog] 백그라운드 타이머 누락을 감지하여 보충 실행합니다: ${job.name}`);
+                            this.setWatchdogFlag(job.name, today);
+                            try {
+                                await job.fn();
+                            } catch (e: any) {
+                                console.error(`[Watchdog] ❌ 오전 복구 실패: ${job.name}`, e);
+                            }
+                        }
+                    }
                 }
-            }), { timezone: 'Asia/Seoul' })
+            }, { timezone: 'Asia/Seoul' });
 
-            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, themeAiJob, liveTradeMonitorJob, liveTradeChasingStartJob, liveTradeMonitorJob15, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob, reportTrackerJob)
+            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, themeAiJob, liveTradeMonitorJob, liveTradeChasingStartJob, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob, liveTradeMorningBriefingJob, postMarketWatchdog, morningWatchdog)
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)
@@ -857,7 +967,7 @@ export class SchedulerService {
                     const min = parseInt(minStr, 10);
                     if (!isNaN(hr) && !isNaN(min)) {
                         const cronExpr = `${min} ${hr} * * 1-5`;
-                        const scannerJob = cron.schedule(cronExpr, async () => {
+                        const scannerJob = this.createWatchdogCron('moonshotScannerJob', cronExpr, async () => {
                             console.log(`[SchedulerService] 🚀 Moonshot Scanner AI 자동 실행 시작...`);
                             this.telegram.sendMessage(`🚀 [Moonshot] 텐베거 자동 신규 발굴 스캐너(Scanner AI)가 백그라운드에서 실행되었습니다. 지정된 조건검색을 수집합니다.`);
                             
@@ -963,7 +1073,7 @@ export class SchedulerService {
                     const min = parseInt(minStr, 10);
                     if (!isNaN(hr) && !isNaN(min)) {
                         const cronExpr = `${min} ${hr} * * 1-5`;
-                        const trackerJob = cron.schedule(cronExpr, async () => {
+                        const trackerJob = this.createWatchdogCron('moonshotTrackerJob', cronExpr, async () => {
                             console.log(`[SchedulerService] 🚀 Moonshot Tracker AI 자동 실행 시작...`);
                             try {
                                 this.telegram.sendMessage(`🚀 [Moonshot] 액티브 트래킹 데일리 리뷰(Tracker AI) 자동 실행이 시작되었습니다.`);
@@ -1178,5 +1288,110 @@ export class SchedulerService {
             // if (label !== 'MANUAL') this.telegram.sendMessage(msg)
             return { success: false, error: error.message }
         }
+    }
+
+    private async exportToTrackerAndIngest(date: string) {
+        console.log(`[Scheduler] 📝 tracker.py 연동용 JSON 추출 시작 (${date})`);
+        const { DatabaseService } = await import('./DatabaseService');
+        const rawDb = (DatabaseService.getInstance() as any).db;
+        
+        const run_id = `auto_1532_${date.replace(/-/g, '')}`;
+        const recommendations: any[] = [];
+        
+        const trackMap = [
+            { table: 'track_a_buy_picks', track: 'stable' },
+            { table: 'track_b_buy_picks', track: 'stable' },
+            { table: 'track_c_buy_picks', track: 'mfe_attack' },
+            { table: 'track_d_buy_picks', track: 'mfe_attack' },
+            { table: 'track_e_buy_picks', track: 'overlap' },
+        ];
+        
+        for (const { table, track } of trackMap) {
+            try {
+                const picks = rawDb.prepare(`
+                    SELECT stock_code, stock_name, current_price, entry_price, reason, risk
+                    FROM ${table}
+                    WHERE pick_date = ? AND status = 'ACTIVE'
+                `).all(date) as any[];
+                
+                for (const pick of picks) {
+                    recommendations.push({
+                        strategy: "close_buy",
+                        track: track,
+                        source_track: "codex_1532",
+                        recommended_at: new Date().toISOString(),
+                        ticker: pick.stock_code,
+                        name: pick.stock_name,
+                        observation_price: pick.current_price,
+                        basis_price: pick.entry_price > 0 ? pick.entry_price : pick.current_price,
+                        basis_price_date: date,
+                        basis_price_source: "kiwoom_after_market",
+                        basis_quality: "needs-confirm",
+                        eval_due_date: null,
+                        status: "pending",
+                        rationale: pick.reason,
+                        invalidation_condition: pick.risk || "이탈 시 손절",
+                        source_report_path: null,
+                        source_url: null
+                    });
+                }
+            } catch (e) {
+                // Table might not exist or other error
+            }
+        }
+        
+        if (recommendations.length === 0) {
+            console.log('[Scheduler] tracker.py 연동: 오늘 ACTIVE 된 추천 종목이 없습니다.');
+            return;
+        }
+        
+        const payload = {
+            run: {
+                run_id,
+                run_type: "codex_cron",
+                created_at: new Date().toISOString()
+            },
+            recommendations
+        };
+        
+        const fs = require('fs');
+        const path = require('path');
+        const trackerDir = 'c:/Users/legna/OneDrive/문서/Obsidian Vault/Codex Wiki/투자/investment_tracker';
+        const inboxDir = path.join(trackerDir, 'data', 'inbox');
+        
+        if (!fs.existsSync(inboxDir)) {
+            fs.mkdirSync(inboxDir, { recursive: true });
+        }
+        
+        const fileName = `auto_${date}.json`;
+        const filePath = path.join(inboxDir, fileName);
+        
+        fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+        console.log(`[Scheduler] tracker.py JSON 추출 완료: ${filePath}`);
+        
+        // CLI 연동 (tracker.py ingest)
+        const { exec } = require('child_process');
+        
+        const pythonExe = fs.existsSync(path.join(trackerDir, 'venv', 'Scripts', 'python.exe'))
+            ? path.join(trackerDir, 'venv', 'Scripts', 'python.exe')
+            : 'C:\\Users\\legna\\AppData\\Local\\Programs\\Python\\Python310\\python.exe';
+            
+        const cmd = `"${pythonExe}" tracker.py process-inbox`;
+        
+        console.log(`[Scheduler] tracker.py process-inbox 명령어 실행: ${cmd}`);
+        exec(cmd, { cwd: trackerDir }, (error: any, stdout: string, stderr: string) => {
+            if (error) {
+                console.error(`[Scheduler] tracker.py process-inbox 에러: ${error.message}`);
+                return;
+            }
+            if (stderr) {
+                console.warn(`[Scheduler] tracker.py process-inbox 경고: ${stderr}`);
+            }
+            console.log(`[Scheduler] tracker.py process-inbox 성공:\n${stdout}`);
+            try {
+                const { TelegramService } = require('./TelegramService');
+                TelegramService.getInstance().sendMessage(`✅ [tracker.py 연동] 파이프라인 (ingest -> correct-basis -> evaluate -> render) 처리가 성공적으로 완료되었습니다.\n(파일: ${fileName})`);
+            } catch (_) {}
+        });
     }
 }

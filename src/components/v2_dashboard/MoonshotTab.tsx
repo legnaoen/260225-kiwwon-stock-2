@@ -102,6 +102,7 @@ export default function MoonshotTab() {
     ]
 
     const [viewMode, setViewMode] = useState<'scanner' | 'active' | 'archive'>('active') // active를 기본값으로
+    const [showPerformanceModal, setShowPerformanceModal] = useState(false);
     
     // Active Tracking 탭의 동적 상태 관리를 위한 State
     const [activeStocks, setActiveStocks] = useState<any[]>([])
@@ -113,7 +114,7 @@ export default function MoonshotTab() {
     const selectedArchive = archiveStocks.find(s => s.id === selectedArchiveId) || archiveStocks[0] || null
 
     useEffect(() => {
-        if (viewMode === 'archive') {
+        if (viewMode === 'archive' || showPerformanceModal) {
             const fetchArchive = async () => {
                 const { electronAPI } = window as any;
                 if (!electronAPI || !electronAPI.invoke) return;
@@ -124,7 +125,7 @@ export default function MoonshotTab() {
             }
             fetchArchive();
         }
-    }, [viewMode])
+    }, [viewMode, showPerformanceModal])
 
     useEffect(() => {
         if (viewMode === 'active') {
@@ -802,6 +803,56 @@ export default function MoonshotTab() {
         displayAvgDays = validDays > 0 ? (sumDays / validDays).toFixed(1) : "0.0";
     }
 
+    const trackPerformance = ['A', 'B', 'C'].map(track => {
+        const archStocks = archiveStocks.filter(a => a.tag?.includes(track + '안'));
+        const actStocks = activeStocks.filter(a => a.trackBadge?.includes(track + '안'));
+        
+        const total = archStocks.length + actStocks.length;
+        
+        const archWins = archStocks.filter(a => Number(a.return_rate) > 0).length;
+        const actWins = actStocks.filter(a => Number(a.returnRate) > 0).length;
+        const wins = archWins + actWins;
+        const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : "0.0";
+        
+        let sumR = 0;
+        let sumDays = 0;
+        let validDays = 0;
+        
+        archStocks.forEach(arc => {
+            sumR += Number(arc.return_rate) || 0;
+            if (arc.buy_date && arc.sell_date) {
+                try {
+                    const b = new Date(arc.buy_date.replace(/[./]/g, '-').split(' ')[0]);
+                    const s = new Date(arc.sell_date.replace(/[./]/g, '-').split(' ')[0]);
+                    if (!isNaN(b.getTime()) && !isNaN(s.getTime())) {
+                        sumDays += Math.max(0, Math.floor((s.getTime() - b.getTime()) / (1000 * 3600 * 24)));
+                        validDays++;
+                    }
+                } catch(e) {}
+            }
+        });
+        
+        const now = new Date();
+        actStocks.forEach(act => {
+            sumR += Number(act.returnRate) || 0;
+            if (act.entryDate) {
+                try {
+                    const b = new Date(act.entryDate.replace(/[./]/g, '-').split(' ')[0]);
+                    if (!isNaN(b.getTime())) {
+                        sumDays += Math.max(0, Math.floor((now.getTime() - b.getTime()) / (1000 * 3600 * 24)));
+                        validDays++;
+                    }
+                } catch(e) {}
+            }
+        });
+        
+        const avgR = total > 0 ? (sumR / total).toFixed(1) : "0.0";
+        const avgD = validDays > 0 ? (sumDays / validDays).toFixed(1) : "0.0";
+        
+        return { track, total, winRate, avgReturn: avgR, avgDays: avgD };
+    });
+
+
     const handleCopyAll = () => {
         if (!selectedDetail) return
         const textToCopy = `[종목 정보]
@@ -906,6 +957,13 @@ ${selectedDetail.rawResult}
                     </div>
 
                     {/* 설정 버튼 */}
+                    <button 
+                        onClick={() => setShowPerformanceModal(true)}
+                        className="p-2 hover:bg-muted rounded-xl transition-colors text-muted-foreground flex items-center justify-center border shadow-sm bg-background ml-2"
+                        title="트랙별 성과 측정"
+                    >
+                        <TrendingUp size={20} />
+                    </button>
                     <button 
                         onClick={() => setShowSettings(true)}
                         className="p-2 hover:bg-muted rounded-xl transition-colors text-muted-foreground flex items-center justify-center border shadow-sm bg-background ml-2"
@@ -1996,6 +2054,59 @@ ${selectedDetail.rawResult}
                             >
                                 저장 및 적용
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Performance Modal */}
+            {showPerformanceModal && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-card w-[800px] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-border/50">
+                        <div className="p-6 border-b flex items-center justify-between bg-muted/30">
+                            <h2 className="text-xl font-bold flex items-center gap-2">
+                                <TrendingUp className="text-primary" size={24} /> 
+                                A/B/C 트랙별 성과 측정
+                            </h2>
+                            <button onClick={() => setShowPerformanceModal(false)} className="p-2 hover:bg-muted hover:text-foreground rounded-full transition-colors text-muted-foreground">
+                                <XCircle size={24} />
+                            </button>
+                        </div>
+                        
+                        <div className="p-6 space-y-6 flex-1 bg-background">
+                            <div className="border rounded-xl overflow-hidden">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                                        <tr>
+                                            <th className="px-6 py-4 font-bold">트랙 구분</th>
+                                            <th className="px-6 py-4 font-bold text-center">총 거래 횟수</th>
+                                            <th className="px-6 py-4 font-bold text-center">평균 보유기간</th>
+                                            <th className="px-6 py-4 font-bold text-center">전체 승률</th>
+                                            <th className="px-6 py-4 font-bold text-right">평균 수익률</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/50">
+                                        {trackPerformance.map(perf => (
+                                            <tr key={perf.track} className="hover:bg-muted/30 transition-colors">
+                                                <td className="px-6 py-4">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold bg-gradient-to-br from-primary to-primary/60 shadow-sm">
+                                                            {perf.track}
+                                                        </div>
+                                                        <span className="font-bold text-base">{perf.track}안 트랙</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-center font-bold font-mono text-base">{perf.total}건</td>
+                                                <td className="px-6 py-4 text-center font-bold font-mono text-base">{perf.avgDays}일</td>
+                                                <td className="px-6 py-4 text-center font-bold font-mono text-primary text-base">{perf.winRate}%</td>
+                                                <td className={cn("px-6 py-4 text-right font-bold font-mono text-base", Number(perf.avgReturn) > 0 ? "text-red-500" : Number(perf.avgReturn) < 0 ? "text-blue-500" : "")}>
+                                                    {Number(perf.avgReturn) > 0 ? '+' : ''}{perf.avgReturn}%
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>

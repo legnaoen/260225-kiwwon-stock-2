@@ -1123,7 +1123,11 @@ export class LiveTradeExecutionService {
                         console.log(`[LiveTrade] 15:18 시장가 일괄 정정 발송: ${stkCd} (${mdfyQty}주)`);
                         this.logEvent('SELL', stkCd, `[매도정정 시도] 15:18 Market Sweep. 원주문:${origOrdNo}, 잔량:${mdfyQty}주 시장가(03) 정정 요청`);
                         
-                        await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, 0, '03'); // 시장가는 단가 0, trde_tp 03
+                        const res = await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, 0, '03'); // 시장가는 단가 0, trde_tp 03
+                        const data = res?.data || res;
+                        if (data && data.rt_cd !== '0' && data.rt_cd !== 0 && data.msg_cd) {
+                            throw new Error(data.msg1 || '알 수 없는 키움 API 오류');
+                        }
                         
                         this.logEvent('SELL', stkCd, `[매도정정 성공] 15:18 Market Sweep. 남은 ${mdfyQty}주 시장가 일괄 정정 완료`);
                         this.telegram.sendMessage(`🧹 **[Market Sweep: 시장가 일괄 청산]**\n- 종목: ${stkCd}\n- 미체결 잔량: ${mdfyQty}주\n- 시장가(03) 정정 발송됨.`);
@@ -1147,7 +1151,11 @@ export class LiveTradeExecutionService {
                             console.log(`[LiveTrade] 추적 지정가 정정 발송: ${stkCd} (${mdfyQty}주) -> 현재가 ${currentPrice}원, 정정가 ${chasePrice}원`);
                             this.logEvent('SELL', stkCd, `[매도정정 시도] 미체결 ${mdfyQty}주 추적 -> 현재가:${currentPrice}, 목표가:${chasePrice} (원주문:${origOrdNo})`);
                             
-                            await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, chasePrice, '00');
+                            const res = await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, chasePrice, '00');
+                            const data = res?.data || res;
+                            if (data && data.rt_cd !== '0' && data.rt_cd !== 0 && data.msg_cd) {
+                                throw new Error(data.msg1 || '알 수 없는 키움 API 오류');
+                            }
                             
                             this.logEvent('SELL', stkCd, `[매도정정 성공] 미체결 ${mdfyQty}주 -> 지정가 ${chasePrice}원 정정 완료`);
                         }

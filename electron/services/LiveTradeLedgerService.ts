@@ -143,7 +143,8 @@ export class LiveTradeLedgerService {
                 (
                     SELECT COUNT(DISTINCT m.date)
                     FROM market_ohlcv_history m
-                    WHERE m.date > date(t.entry_date)
+                    WHERE m.stock_code = '069500' 
+                      AND m.date > date(t.entry_date)
                       AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
                 ) as holding_days,
                 (
@@ -169,7 +170,8 @@ export class LiveTradeLedgerService {
                 (
                     SELECT COUNT(DISTINCT m.date)
                     FROM market_ohlcv_history m
-                    WHERE m.date > date(t.entry_date)
+                    WHERE m.stock_code = '069500' 
+                      AND m.date > date(t.entry_date)
                       AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
                 ) as holding_days,
                 (
@@ -196,7 +198,8 @@ export class LiveTradeLedgerService {
                 (
                     SELECT COUNT(DISTINCT m.date)
                     FROM market_ohlcv_history m
-                    WHERE m.date > date(t.entry_date)
+                    WHERE m.stock_code = '069500' 
+                      AND m.date > date(t.entry_date)
                       AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
                 ) as holding_days,
                 (
@@ -223,7 +226,8 @@ export class LiveTradeLedgerService {
                 (
                     SELECT COUNT(DISTINCT m.date)
                     FROM market_ohlcv_history m
-                    WHERE m.date > date(t.entry_date)
+                    WHERE m.stock_code = '069500' 
+                      AND m.date > date(t.entry_date)
                       AND (t.exit_date IS NULL OR m.date <= date(t.exit_date))
                 ) as holding_days,
                 (

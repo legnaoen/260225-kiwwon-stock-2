@@ -244,9 +244,9 @@ export class TrackCBuyAgent {
             if (pick.entry_date === today) {
                 rawDb.prepare(`
                     UPDATE track_c_buy_picks
-                    SET current_price = ?, updated_at = ?
+                    SET entry_price = ?, current_price = ?, updated_at = ?
                     WHERE id = ?
-                `).run(ohlcv.close, new Date().toISOString(), pick.id);
+                `).run(ohlcv.close, ohlcv.close, new Date().toISOString(), pick.id);
                 continue;
             }
 

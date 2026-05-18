@@ -271,15 +271,19 @@ export const LiveTradeTab: React.FC = () => {
     }, [isSettingsOpen]);
 
     // ─── 최적 파라미터 적용 ────────────────────────────────────────────────────
-    const applyOptimalParams = (type: 'profit' | 'efficiency') => {
+    const applyOptimalParams = (type: 'profit' | 'efficiency' | 'user') => {
         const result = gridSearchResults?.[activeStrategy];
         if (!result) return;
         if (type === 'profit') {
             setEditForm(prev => ({ ...prev, days: result.targetDays, tp: result.targetYield }));
-        } else {
+        } else if (type === 'efficiency') {
             const eff = result.bestEfficiencyCombo;
             if (!eff) return;
             setEditForm(prev => ({ ...prev, days: eff.targetDays, tp: eff.targetYield }));
+        } else if (type === 'user') {
+            const usr = result.bestUserDayCombo;
+            if (!usr) return;
+            setEditForm(prev => ({ ...prev, days: usr.targetDays, tp: usr.targetYield }));
         }
     };
 
@@ -1011,6 +1015,30 @@ export const LiveTradeTab: React.FC = () => {
                                                                 <button
                                                                     onClick={() => applyOptimalParams('efficiency')}
                                                                     className="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+                                                                >
+                                                                    적용
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })()}
+
+                                                    {/* 지정일 최적 — 모의매매에서 지정일 지정 시에만 표시 */}
+                                                    {(() => {
+                                                        const r = gridSearchResults[activeStrategy];
+                                                        const usr = r?.bestUserDayCombo;
+                                                        if (!usr) return null;
+                                                        return (
+                                                            <div className="flex items-center gap-2 bg-emerald-500/8 rounded-lg px-3 py-2 border border-emerald-500/15">
+                                                                <span className="text-[11px] font-black text-emerald-500 whitespace-nowrap w-16 shrink-0">🎯 지정일최적</span>
+                                                                <div className="flex-1 text-[11px] text-muted-foreground">
+                                                                    목표 <span className="font-bold text-foreground">{usr.targetYield}%</span> 익절 후
+                                                                    지정한 <span className="font-bold text-foreground">{usr.targetDays}일</span> 보유
+                                                                    <span className="ml-2 text-rose-500 font-bold">평균 +{usr.avgReturn?.toFixed(2)}%</span>
+                                                                    <span className="ml-1 text-orange-400 font-bold">연환산 {((usr.avgReturn / usr.targetDays) * 252) > 0 ? '+' : ''}{Math.round((usr.avgReturn / usr.targetDays) * 252)}%</span>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => applyOptimalParams('user')}
+                                                                    className="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
                                                                 >
                                                                     적용
                                                                 </button>

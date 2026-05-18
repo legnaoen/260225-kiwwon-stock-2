@@ -371,6 +371,9 @@ export function ThemePerformanceModal({ isOpen, onClose, mockData }: ThemePerfor
                                                                             <span className="text-muted-foreground border-r border-border/50 pr-2">
                                                                                 평균수익: <span className="font-bold text-red-500 font-mono">+{uCombo.avgReturn.toFixed(2)}%</span>
                                                                             </span>
+                                                                            <span className="text-muted-foreground border-r border-border/50 pr-2">
+                                                                                연환산: <span className="font-bold text-orange-400 font-mono">{((uCombo.avgReturn / uCombo.targetDays) * 252) > 0 ? '+' : ''}{Math.round((uCombo.avgReturn / uCombo.targetDays) * 252)}%</span>
+                                                                            </span>
                                                                             <span className="text-muted-foreground">
                                                                                 승률: <span className="font-bold text-emerald-500 font-mono">{uCombo.winRate.toFixed(1)}%</span>
                                                                             </span>

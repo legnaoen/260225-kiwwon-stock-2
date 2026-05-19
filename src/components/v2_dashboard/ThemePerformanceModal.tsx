@@ -312,7 +312,7 @@ export function ThemePerformanceModal({ isOpen, onClose, mockData }: ThemePerfor
                                                                 </span>
                                                                 <span className="ml-auto flex items-center gap-2">
                                                                     <span className="text-muted-foreground border-r border-border/50 pr-2">
-                                                                        평균수익: <span className="font-bold text-red-500 font-mono">+{optimizedResults.avgReturn.toFixed(2)}%</span>
+                                                                        평균수익: <span className={`font-bold font-mono ${optimizedResults.avgReturn >= 0 ? 'text-red-500' : 'text-blue-500'}`}>{optimizedResults.avgReturn > 0 ? '+' : ''}{optimizedResults.avgReturn.toFixed(2)}%</span>
                                                                     </span>
                                                                     <span className="text-muted-foreground">
                                                                         승률: <span className="font-bold text-emerald-500 font-mono">{optimizedResults.winRate.toFixed(1)}%</span>
@@ -337,13 +337,13 @@ export function ThemePerformanceModal({ isOpen, onClose, mockData }: ThemePerfor
                                                                         </span>
                                                                         <span className="ml-auto flex items-center gap-3">
                                                                             <span className="text-muted-foreground border-r border-border/50 pr-2">
-                                                                                평균수익: <span className="font-bold text-red-400 font-mono">+{eff.avgReturn.toFixed(2)}%</span>
+                                                                                평균수익: <span className={`font-bold font-mono ${eff.avgReturn >= 0 ? 'text-red-400' : 'text-blue-500'}`}>{eff.avgReturn > 0 ? '+' : ''}{eff.avgReturn.toFixed(2)}%</span>
                                                                             </span>
                                                                             <span className="text-muted-foreground border-r border-border/50 pr-2">
-                                                                                효율: <span className="font-bold text-amber-400 font-mono">+{eff.efficiencyScore.toFixed(2)}%/일</span>
+                                                                                효율: <span className={`font-bold font-mono ${eff.efficiencyScore >= 0 ? 'text-amber-400' : 'text-blue-500'}`}>{eff.efficiencyScore > 0 ? '+' : ''}{eff.efficiencyScore.toFixed(2)}%/일</span>
                                                                             </span>
                                                                             <span className="text-muted-foreground border-r border-border/50 pr-2">
-                                                                                연환산: <span className="font-bold text-orange-400 font-mono">+{Math.round(eff.annualizedReturn)}%</span>
+                                                                                연환산: <span className={`font-bold font-mono ${eff.annualizedReturn >= 0 ? 'text-orange-400' : 'text-blue-500'}`}>{eff.annualizedReturn > 0 ? '+' : ''}{Math.round(eff.annualizedReturn)}%</span>
                                                                             </span>
                                                                             <span className="text-muted-foreground">
                                                                                 종목당 <span className="font-bold text-foreground">{eff.capitalPerPos.toFixed(0)}%</span> 배분
@@ -369,10 +369,10 @@ export function ThemePerformanceModal({ isOpen, onClose, mockData }: ThemePerfor
                                                                         </span>
                                                                         <span className="ml-auto flex items-center gap-3">
                                                                             <span className="text-muted-foreground border-r border-border/50 pr-2">
-                                                                                평균수익: <span className="font-bold text-red-500 font-mono">+{uCombo.avgReturn.toFixed(2)}%</span>
+                                                                                평균수익: <span className={`font-bold font-mono ${uCombo.avgReturn >= 0 ? 'text-red-500' : 'text-blue-500'}`}>{uCombo.avgReturn > 0 ? '+' : ''}{uCombo.avgReturn.toFixed(2)}%</span>
                                                                             </span>
                                                                             <span className="text-muted-foreground border-r border-border/50 pr-2">
-                                                                                연환산: <span className="font-bold text-orange-400 font-mono">{((uCombo.avgReturn / uCombo.targetDays) * 252) > 0 ? '+' : ''}{Math.round((uCombo.avgReturn / uCombo.targetDays) * 252)}%</span>
+                                                                                연환산: <span className={`font-bold font-mono ${((uCombo.avgReturn / uCombo.targetDays) * 252) >= 0 ? 'text-orange-400' : 'text-blue-500'}`}>{((uCombo.avgReturn / uCombo.targetDays) * 252) > 0 ? '+' : ''}{Math.round((uCombo.avgReturn / uCombo.targetDays) * 252)}%</span>
                                                                             </span>
                                                                             <span className="text-muted-foreground">
                                                                                 승률: <span className="font-bold text-emerald-500 font-mono">{uCombo.winRate.toFixed(1)}%</span>

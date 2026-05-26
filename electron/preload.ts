@@ -155,7 +155,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncStrategyConfig: () => ipcRenderer.invoke('ai-trade:sync-strategy-config'),
     saveAiSettings: (settings: { geminiKey: string, modelName?: string, virtualInitialBalance?: number, buyStartTime?: string, buyEndTime?: string, portfolioLimits?: any }) => ipcRenderer.invoke('ai:save-settings', settings),
     getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
-    testAiConnection: (settings: { geminiKey: string, modelName: string, deepModelName?: string }) => ipcRenderer.invoke('ai:test-connection', settings),
+    testAiConnection: (settings: { geminiKey: string, modelName: string, deepModelName?: string, lightweightCloudModel?: string }) => ipcRenderer.invoke('ai:test-connection', settings),
 
     // Market Condition Agent V2
     getIntradayTechnicalDigest: () => ipcRenderer.invoke('mca:get-technical-digest'),
@@ -430,21 +430,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setMegaThemeAiConfig: (config: { targetType: 'gemini' | 'local' }) => ipcRenderer.invoke('mega-theme:set-ai-config', config),
     checkMegaThemeLocalAi: () => ipcRenderer.invoke('mega-theme:check-local-ai'),
 
-    // ── 조건검색 (MoonshotTab / TenBagger) ──
-    connectConditionWs: () => ipcRenderer.invoke('kiwoom:connect-condition-ws'),
-    getConditionList: () => ipcRenderer.invoke('kiwoom:get-condition-list'),
-    startConditionSearch: (seq: string) => ipcRenderer.invoke('kiwoom:start-condition-search', seq),
-    onConditionList: (callback: (conditions: any[]) => void) => {
-        const listener = (_event: any, conditions: any[]) => callback(conditions)
-        ipcRenderer.on('kiwoom:condition-list', listener)
-        return () => ipcRenderer.removeListener('kiwoom:condition-list', listener)
-    },
-    onConditionSearchMatched: (callback: (data: { seq: string, stocks: any[] }) => void) => {
-        const listener = (_event: any, data: { seq: string, stocks: any[] }) => callback(data)
-        ipcRenderer.on('kiwoom:condition-matched', listener)
-        return () => ipcRenderer.removeListener('kiwoom:condition-matched', listener)
-    },
-    
     // ── Moonshot 텐베거 발굴 전용 추가 API ──
     getSmartMoneyFlow: (stk_cd: string) => ipcRenderer.invoke('kiwoom:get-smart-money-flow', stk_cd),
     getFundamentalInfo: (stk_cd: string) => ipcRenderer.invoke('kiwoom:get-fundamental-info', stk_cd),

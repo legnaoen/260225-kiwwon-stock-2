@@ -106,18 +106,36 @@ export interface IElectronAPI {
     saveAiSettings: (settings: {
         geminiKey: string,
         modelName?: string,
+        deepModelName?: string,
+        deepModelAgents?: string[],
+        lightweightCloudAgents?: string[],
+        lightweightCloudModel?: string,
         virtualInitialBalance: number,
         buyStartTime?: string,
-        buyEndTime?: string
+        buyEndTime?: string,
+        phase1PassLimit?: number,
+        portfolioLimits?: {
+            buy: { THEME: number, MOMENTUM: number, PULLBACK: number, REPORT: number },
+            watchlist: { THEME: number, MOMENTUM: number, PULLBACK: number, REPORT: number }
+        }
     }) => Promise<{ success: boolean }>
     getAiSettings: () => Promise<{
         geminiKey: string,
         modelName?: string,
+        deepModelName?: string,
+        deepModelAgents?: string[],
+        lightweightCloudAgents?: string[],
+        lightweightCloudModel?: string,
         virtualInitialBalance?: number,
         buyStartTime?: string,
-        buyEndTime?: string
+        buyEndTime?: string,
+        phase1PassLimit?: number,
+        portfolioLimits?: {
+            buy: { THEME: number, MOMENTUM: number, PULLBACK: number, REPORT: number },
+            watchlist: { THEME: number, MOMENTUM: number, PULLBACK: number, REPORT: number }
+        }
     } | null>
-    testAiConnection: (settings: { geminiKey: string, modelName: string }) => Promise<{ success: boolean, response?: string, error?: string }>
+    testAiConnection: (settings: { geminiKey: string, modelName: string, deepModelName?: string, lightweightCloudModel?: string }) => Promise<{ success: boolean, response?: string, error?: string }>
     
     // Market Condition Agent V2
     getIntradayTechnicalDigest: () => Promise<string>

@@ -78,6 +78,67 @@ export class AiService {
             return '응답을 생성할 수 없습니다.';
         } catch (error: any) {
             console.error('[AiService] Gemini API Error:', error);
+
+            const errMsg = error.message || '';
+            const isModelDeprecated = errMsg.includes('is no longer available') || 
+                                     errMsg.includes('not found') || 
+                                     errMsg.includes('not_found') || 
+                                     errMsg.includes('invalid model') ||
+                                     errMsg.includes('models/');
+
+            const fallbackModel = 'gemini-3.5-flash';
+
+            if (isModelDeprecated && model !== fallbackModel) {
+                console.warn(`[AiService] ⚠️ Model "${model}" is deprecated or unavailable. Attempting graceful fallback to "${fallbackModel}"...`);
+
+                try {
+                    // 1. 대체 모델로 호출 재시도
+                    const fallbackText = await this.askGemini(prompt, systemInstruction, customKey, fallbackModel);
+
+                    // 2. 재시도 성공 시, 설정을 정식 모델로 영구 자동 마이그레이션
+                    try {
+                        const aiSettings = store.get('ai_settings') as any || {};
+                        let migrated = false;
+                        if (aiSettings.modelName === model) {
+                            aiSettings.modelName = fallbackModel;
+                            migrated = true;
+                        }
+                        if (aiSettings.deepModelName === model) {
+                            aiSettings.deepModelName = fallbackModel;
+                            migrated = true;
+                        }
+                        if (aiSettings.lightweightCloudModel === model) {
+                            aiSettings.lightweightCloudModel = fallbackModel;
+                            migrated = true;
+                        }
+                        if (migrated) {
+                            store.set('ai_settings', aiSettings);
+                            console.log(`[AiService] Electron store config auto-migrated: ${model} -> ${fallbackModel}`);
+                        }
+                    } catch (storeErr: any) {
+                        console.error('[AiService] Settings auto-migration failed:', storeErr.message);
+                    }
+
+                    // 3. 텔레그램 알림 발송
+                    try {
+                        const { TelegramService } = await import('./TelegramService');
+                        TelegramService.getInstance().sendMessage(
+                            `⚠️ **[AI 모델 자동 긴급 대체 및 마이그레이션]**\n` +
+                            `- 이전 모델: \`${model}\` (구글 지원 종료)\n` +
+                            `- 대체 모델: \`${fallbackModel}\`\n` +
+                            `- 설명: 기존 프리뷰 모델의 서비스가 종료되어 최신 정식 버전인 \`${fallbackModel}\`로 자동 롤백 및 마이그레이션을 수행했습니다.`
+                        );
+                    } catch (tgErr: any) {
+                        console.error('[AiService] Telegram alert failed:', tgErr.message);
+                    }
+
+                    return fallbackText;
+                } catch (retryErr: any) {
+                    console.error('[AiService] Graceful fallback retry failed:', retryErr.message);
+                    throw retryErr;
+                }
+            }
+
             throw error;
         }
     }

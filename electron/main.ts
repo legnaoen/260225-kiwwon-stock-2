@@ -3043,7 +3043,7 @@ ipcMain.handle('ai:get-settings', () => {
     return store.get('ai_settings') || null
 })
 
-ipcMain.handle('ai:test-connection', async (_event, { geminiKey, modelName, deepModelName }: { geminiKey: string, modelName: string, deepModelName?: string }) => {
+ipcMain.handle('ai:test-connection', async (_event, { geminiKey, modelName, deepModelName, lightweightCloudModel }: { geminiKey: string, modelName: string, deepModelName?: string, lightweightCloudModel?: string }) => {
     try {
         const response1 = await AiService.getInstance().askGemini(
             '연결 테스트입니다. "기본 모델 연결 정상"이라고 짧게 대답해주세요.',
@@ -3061,6 +3061,16 @@ ipcMain.handle('ai:test-connection', async (_event, { geminiKey, modelName, deep
                 deepModelName
             )
             finalResponse += `\n[심층 (${deepModelName})] ${response2}`;
+        }
+
+        if (lightweightCloudModel && lightweightCloudModel !== modelName && lightweightCloudModel !== deepModelName) {
+            const response3 = await AiService.getInstance().askGemini(
+                '연결 테스트입니다. "우회 모델 연결 정상"이라고 짧게 대답해주세요.',
+                undefined,
+                geminiKey,
+                lightweightCloudModel
+            )
+            finalResponse += `\n[우회 (${lightweightCloudModel})] ${response3}`;
         }
 
         return { success: true, response: finalResponse }

@@ -25,6 +25,8 @@ export class KiwoomService {
     private isCircuitHalted: boolean = false;
     private lastHaltTime: number = 0;
     private readonly HALT_DURATION = 60 * 1000; // 1분 (기존 5분에서 단축)
+    private overheatedStocks: Set<string> = new Set();
+
 
     private kiwoomAxios = axios.create({
         baseURL: BASE_URL,
@@ -427,10 +429,21 @@ export class KiwoomService {
             }
         }
 
+        // 단기과열 종목 추출 및 저장
+        this.overheatedStocks.clear();
+        for (const s of allStocks) {
+            const code = (s.stck_shrn_iscd || s.code || '').replace(/[^0-9A-Z]/g, '');
+            if (s.auditInfo === '단기과열' || s.orderWarning === '3') {
+                this.overheatedStocks.add(code);
+            }
+        }
+        console.log(`[KiwoomService] 단기과열 종목 리스트 갱신 완료: ${this.overheatedStocks.size}개 종목`);
+
         const result = allStocks.map(s => ({
             stock_code: (s.stck_shrn_iscd || s.code || '').replace(/[^0-9A-Z]/g, ''),
             stock_name: s.stck_nm || s.name || ''
         }));
+
 
         if (result.length > 0) {
             this.cacheStore.set(cacheKey, {
@@ -442,6 +455,15 @@ export class KiwoomService {
 
         return result;
     }
+
+    /**
+     * 특정 종목이 단기과열(과열방지) 상태인지 확인
+     */
+    public isOverheatedStock(stk_cd: string): boolean {
+        const cleanCode = (stk_cd || '').replace(/[^0-9]/g, '');
+        return this.overheatedStocks.has(cleanCode);
+    }
+
 
     // [LEGACY] 관심종목 조회 (V2 전환으로 비활성화)
     public async getWatchlist(symbols: string[]) {
@@ -659,7 +681,7 @@ export class KiwoomService {
                 'cont-yn': 'N',
                 'api-id': 'ka10001'
             }
-        }))
+        }), { cacheKey: `stkinfo:${stk_cd}`, ttl: 4 * 60 * 60 * 1000 })
         return response.data;
     }
 
@@ -822,13 +844,16 @@ export class KiwoomService {
                 'authorization': `Bearer ${token}`,
                 'api-id': 'kt10002', // 정정
             }
+            
+            // 시장가 정정(trde_tp가 '03' 또는 '3')인 경우 가격은 빈 문자열("")로 전송해야 오류 방지 가능
+            const isMarketOrder = trde_tp === '03' || trde_tp === '3';
             const body = {
                 acnt_no: accountNo,
                 dmst_stex_tp: 'KRX',
                 stk_cd: stk_cd,
                 orig_ord_no: orig_ord_no,
                 mdfy_qty: String(mdfy_qty),
-                mdfy_uv: String(mdfy_uv),
+                mdfy_uv: isMarketOrder ? '' : String(mdfy_uv),
                 trde_tp: trde_tp, // 지정가 '00', 시장가 '03' 등
                 cond_uv: ''
             }
@@ -836,6 +861,7 @@ export class KiwoomService {
             return response.data
         })
     }
+
 
     /**
      * 국내주식 취소 주문

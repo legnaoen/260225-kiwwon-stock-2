@@ -856,9 +856,8 @@ export class AutoTradeService {
                 // 즉시 시장가(03) 전송
                 try {
                     // 시장가는 호가(단가)가 0으로 전송되어야 함 (키움 API 규격)
-                    // Kiwoom API에서 시장가는 trde_tp 03을 직접 넣지못하면 직접 modifyOrder 시 trde_tp를 지정하도록 개선 필요. 
-                    // 현재는 편의상 0원으로 전송. (또는 KiwoomService.ts의 modifyOrder 내부 개선 필요)
-                    await this.kiwoomService.modifyOrder(accountNo, order.ord_no, stk_cd, totalQty, 0);
+                    // Kiwoom API에서 시장가는 trde_tp 03을 직접 넣어야 함.
+                    await this.kiwoomService.modifyOrder(accountNo, order.ord_no, stk_cd, totalQty, 0, '03');
                     this.broadcastLog(`[지정 마감시장] 시장가 15:20 청산 성공: ${stk_cd} (잔량 ${totalQty}주)`, 'SUCCESS');
                 } catch (e: any) {
                     const errMsg = e?.response?.data?.msg1 || e?.response?.data?.message || e.message;

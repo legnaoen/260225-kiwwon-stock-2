@@ -1292,7 +1292,7 @@ export const LiveTradeTab: React.FC = () => {
                                         };
                                         const isAck    = log.type === 'BUY_ACK';
                                         const isReject = log.type === 'BUY_REJECT';
-                                        const hasApiDetail = (isAck || isReject) && (log.order_no || log.rsp_cd || log.api_response);
+                                        const hasApiDetail = !!(log.order_no || log.rsp_cd || (log.api_response && log.api_response !== '{}'));
                                         return (
                                             <div key={log.id} className={cn(
                                                 "px-5 py-3 transition-colors flex gap-4 text-[13px]",

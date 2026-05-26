@@ -1,4 +1,4 @@
-import cron from 'node-cron'
+﻿import cron from 'node-cron'
 import { RisingStockAnalysisService } from './RisingStockAnalysisService'
 import { TelegramService } from './TelegramService'
 import { KiwoomService } from './KiwoomService'
@@ -768,7 +768,11 @@ export class SchedulerService {
                     
                     // JSON 어댑터 및 CLI 파이프라인 연동 (tracker.py)
                     try {
-                        await this.exportToTrackerAndIngest(today);
+                        if (process.env.KIWOOM_EXPORT_TO_TRACKER === '1') {
+                            await this.exportToTrackerAndIngest(today);
+                        } else {
+                            console.log('[Scheduler] tracker.py 자동 연동 건너뜀: Codex 15:15 자동화가 close_buy 추천 생성을 전담합니다.');
+                        }
                     } catch (err: any) {
                         console.error('[Scheduler] tracker.py 연동 오류:', err);
                     }
@@ -1395,3 +1399,4 @@ export class SchedulerService {
         });
     }
 }
+

@@ -277,6 +277,10 @@ function AppContent() {
 
     // Graph RAG: 탭 간 Cross-Reference 네비게이션
     const navigateTo = (tabId: string, entityId?: string) => {
+        if (tabId === 'theme-tracker' || tabId === 'moonshot') {
+            setActiveTab('holdings');
+            return;
+        }
         setActiveTab(tabId);
         if (entityId) setNavTarget({ tabId, entityId });
     };

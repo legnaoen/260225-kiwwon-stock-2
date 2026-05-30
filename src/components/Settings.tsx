@@ -1341,6 +1341,7 @@ export default function Settings() {
                                                                 { id: 'TRACK_D,TRACK_E', label: 'Track D/E (당일 급등)' }
                                                             ]
                                                         },
+                                                        /*
                                                         {
                                                             name: "🧬 테마 AI",
                                                             agents: [
@@ -1354,6 +1355,7 @@ export default function Settings() {
                                                                 { id: 'MOONSHOT_TRACKER', label: '액티브 트래킹 (일일 리뷰)' }
                                                             ]
                                                         },
+                                                        */
                                                         {
                                                             name: "💼 종목 AI (포트폴리오)",
                                                             agents: [
@@ -1444,6 +1446,7 @@ export default function Settings() {
                                                                 { id: 'TRACK_B_GEMMA_RESEARCH,TRACK_C_GEMMA_RESEARCH,TRACK_D_GEMMA_RESEARCH,TRACK_E_GEMMA_RESEARCH', label: 'Track B~E 심층 리서치 (병렬 권장)' }
                                                             ]
                                                         },
+                                                        /*
                                                         {
                                                             name: "🚀 텐배거 AI",
                                                             agents: [
@@ -1451,6 +1454,7 @@ export default function Settings() {
                                                                 { id: 'MOONSHOT_TRACKER', label: '액티브 트래킹 (일일 리뷰)' }
                                                             ]
                                                         },
+                                                        */
                                                         {
                                                             name: "🤖 관제 센터 (AI 스웜)",
                                                             agents: [

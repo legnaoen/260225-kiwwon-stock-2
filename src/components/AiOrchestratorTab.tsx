@@ -53,6 +53,7 @@ const AI_AGENTS = [
             { time: '15:35', label: '일일 성과 기록', description: '오전 예측 대비 실제 종가 비교' },
         ],
     },
+    /*
     {
         id: 'THEME', name: '테마 수명 분석기', fullName: 'Theme Intelligence Agent',
         description: '장중/장마감 주도 테마와 섹터를 수집(NaverFlow)하고 모멘텀의 수명(Lifespan)을 예측합니다.',
@@ -62,6 +63,7 @@ const AI_AGENTS = [
             { time: '15:45', label: '장마감 메가트렌드 요약', description: '15:45 최종 수집 시 연계 분석' },
         ],
     },
+    */
     {
         id: 'MOMENTUM_ANALYST', name: '수급/모멘텀 분석기', fullName: 'Momentum Analyst',
         description: '급등주 및 시장 주도주의 실시간 외인/기관 수급과 뉴스를 분석하여 단기 진입 타점을 포착합니다.',

@@ -796,10 +796,10 @@ export class SchedulerService {
             }, { timezone: 'Asia/Seoul' })
             */
 
-            // [Step 6.5] 14:55 테마 AI (ThemeIntelligence) 종가 베팅을 위한 전용 크론
-            // 장 마감 직전(14:55) 당일 테마/섹터 랭킹을 수집하고 AI 추천 종목을 발굴
+            // [Step 6.5] 14:55 테마 AI (ThemeIntelligence) 종가 베팅을 위한 전용 크론 (비활성화됨)
             const themeAiJob = this.createWatchdogCron('themeAiJob', '55 14 * * 1-5', async () => {
-                console.log(`[SchedulerService] 🤖 14:55 테마주 AI (종가 베팅용) 일괄 분석 시작`)
+                console.log(`[SchedulerService] 🤖 14:55 테마주 AI (종가 베팅용) 비활성화됨 (실행 건너뜀)`)
+                /*
                 try {
                     // 테마 AI 실행 전, 최신 테마/섹터 순위를 확보하기 위해 NaverFlow 수집 파이프라인 1회 강제 실행
                     const { V2PipelineManager } = await import('./v2_pipeline/V2PipelineManager')
@@ -811,6 +811,7 @@ export class SchedulerService {
                 } catch (e: any) {
                     console.error(`[SchedulerService] 테마 AI 전용 파이프라인 실패:`, e.message)
                 }
+                */
             }, { timezone: 'Asia/Seoul' })
 
             // [실전 매매] 1분 단위 미체결 주문 모니터링 및 익절 매도 모니터링 (09:00 ~ 15:30 장중)
@@ -941,12 +942,14 @@ export class SchedulerService {
                         const { V2PipelineManager } = await import('./v2_pipeline/V2PipelineManager')
                         await V2PipelineManager.getInstance().runPipeline('PL-NaverFlow', { forceFetch: true })
 
-                        // 성과 판독(ThemeMockTradingJudgeAgent) 가동
+                        // 성과 판독(ThemeMockTradingJudgeAgent) 가동 (비활성화됨)
                         try {
                             if (hr >= 15 && min >= 30) {
-                                console.log(`[SchedulerService] ⚖️ 장 마감 후 스케줄 감지(${hr}:${min}): Theme 판독기(종가 업데이트) 가동`)
+                                console.log(`[SchedulerService] ⚖️ 장 마감 후 스케줄 감지(${hr}:${min}): Theme 판독기 비활성화됨 (실행 건너뜀)`)
+                                /*
                                 const { ThemeMockTradingJudgeAgent } = await import('./v2_agents/ThemeMockTradingJudgeAgent')
                                 await ThemeMockTradingJudgeAgent.getInstance().evaluatePicks()
+                                */
                             }
                         } catch (aiErr: any) {
                             console.error(`[SchedulerService] 테마 연계 파이프라인 실패:`, aiErr.message)
@@ -960,9 +963,9 @@ export class SchedulerService {
             })
         }
 
-        // ═══ [Step 4] Moonshot AI 크론 등록 ═══
+        // ═══ [Step 4] Moonshot AI 크론 등록 (비활성화됨) ═══
         const moonshotSettings = store.get('moonshot_settings') as any;
-        if (moonshotSettings?.enabled) {
+        if (false && moonshotSettings?.enabled) {
             try {
                 // Scanner
                 if (moonshotSettings.scannerCronTime) {

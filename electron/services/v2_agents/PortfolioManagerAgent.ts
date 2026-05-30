@@ -52,8 +52,9 @@ export class PortfolioManagerAgent {
             log(`[2] getActivePortfolio() = ${activePortfolio.length}개 (${activePortfolio.map((p: any) => p.stock_code).join(',')})`);
 
             const activeCodeSet = new Set(activePortfolio.map((p: any) => p.stock_code));
-            const newPicks = todaysPicks.filter((p: any) => !activeCodeSet.has(p.stock_code));
-            log(`[3] newPicks(기존 제외 후) = ${newPicks.length}개`);
+            // PM1 신규 추천 하한선: 원본 확신도(confidence) 75점 이상만 허용
+            const newPicks = todaysPicks.filter((p: any) => !activeCodeSet.has(p.stock_code) && (p.confidence || 0) >= 75);
+            log(`[3] newPicks(기존 제외 후 및 75점 이상만) = ${newPicks.length}개`);
 
             if (newPicks.length === 0) {
                 log('[3-EARLY] 신규 종목 없음, 종료');
@@ -175,6 +176,17 @@ export class PortfolioManagerAgent {
         }
 
         const dateStr = targetDate || this.db.getKstDate();
+        const getDaysDiff = (d1: string, d2: string): number => {
+            try {
+                if (!d1 || !d2) return 999;
+                const date1 = new Date(d1);
+                const date2 = new Date(d2);
+                const diffTime = Math.abs(date1.getTime() - date2.getTime());
+                return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            } catch (_) {
+                return 999;
+            }
+        };
         console.log(`[PortfolioManager] 🧑‍💼 ${dateStr} 종목 관리 AI(펀드매니저) 리뷰 시작...`);
 
         try {
@@ -247,6 +259,7 @@ export class PortfolioManagerAgent {
                         status: p.status,
                         profit_rate: p.profit_rate,
                         conviction_score: p.conviction_score,
+                        entry_date: p.entry_date,
                         analysts: JSON.parse(p.analysts_json || '[]')
                     };
                 }
@@ -663,6 +676,26 @@ ${pm2MasterGuideline}
                             dec.conviction_score = Math.min(100, (dec.conviction_score || 50) + 5);
                         }
 
+                        // 우량주 추세 가산점 (+5점) 적용
+                        if (isHeld) {
+                            const profitRate = previousInfo.profit_rate || 0;
+                            const stockInPool = stockList.find((s: any) => s.stock_code === finalCode);
+                            const chartDigest = stockInPool?.chart_digest || '';
+                            const matchMa20 = chartDigest.match(/MA20:\s*[0-9,]+\s*\(이격\s*\+([0-9.]+)/);
+                            const isAboveMa20 = !!matchMa20;
+                            const isHighProfit = profitRate > 5;
+
+                            if (isHighProfit || isAboveMa20) {
+                                const bonusReason = isHighProfit && isAboveMa20 
+                                    ? '수익권(>+5%) 및 MA20 위 추세 우량주' 
+                                    : isHighProfit 
+                                        ? '수익권(>+5%) 우량주' 
+                                        : 'MA20 위 추세 우량주';
+                                dec.conviction_score = Math.min(100, (dec.conviction_score || 50) + 5);
+                                console.log(`[PortfolioManager] 📈 ${dec.stock_name} 추세 가산점 +5점 부여 (사유: ${bonusReason})`);
+                            }
+                        }
+
                         // primary_category 계산 (analysts_json 기반, ALPHA_TOP 제외 후 우선순위 적용)
                         const AGENT_PRIORITY = ['THEME', 'MOMENTUM', 'PULLBACK', 'REPORT'];
                         const filteredTags = decTags.map((t: string) => {
@@ -683,8 +716,16 @@ ${pm2MasterGuideline}
                             buysAndSells.push(dec);
                         } else {
                             if (dec.last_signal === 'BUY' || dec.last_signal === 'HELD') {
-                                dec.finalStatus = 'HELD';
-                                buysAndSells.push(dec);
+                                if ((dec.conviction_score || 0) >= 80) {
+                                    dec.finalStatus = 'HELD';
+                                    buysAndSells.push(dec);
+                                } else {
+                                    console.log(`[PortfolioManager] 🚫 ${dec.stock_name} 신규 매수 진입 시도 차단: conviction_score(${dec.conviction_score}) < 80 (현금 보유 유지)`);
+                                    dec.finalStatus = 'WATCHING';
+                                    const cat = dec.primaryCategory;
+                                    if (!groupedWatchlist[cat]) groupedWatchlist[cat] = [];
+                                    groupedWatchlist[cat].push(dec);
+                                }
                             } else if (dec.last_signal === 'SELL' || dec.last_signal === 'DROP') {
                                 dec.finalStatus = 'DROPPED';
                                 dec.conviction_score = -1;
@@ -702,7 +743,26 @@ ${pm2MasterGuideline}
                     // [Phase 4.5] HELD 절대 한도 적용 (사용자 요청: 매수 우선순위 정렬 후 초과분 자동 관심종목 강등)
                     // 기존 설정값과 무관하게 절대 캡을 15개로 강제 고정합니다.
                     const totalBuy = 15;
-                    buysAndSells.sort((a, b) => (b.conviction_score || 0) - (a.conviction_score || 0));
+
+                    // 각 종목의 Lock-up (최소 보유 기간 3일) 보호 여부 사전 판정
+                    buysAndSells.forEach((item: any) => {
+                        const previousInfo = activePortfolio.find(p => p.stock_code === item.finalCode);
+                        const isHeld = previousInfo && (previousInfo.status === 'HELD' || previousInfo.status === 'IMMEDIATE_BUY');
+                        const entryDate = previousInfo?.entry_date;
+                        const isLockedUp = isHeld && entryDate && getDaysDiff(dateStr, entryDate) <= 3;
+                        item.isLockedUp = isLockedUp;
+                        if (isLockedUp) {
+                            console.log(`[PortfolioManager] 🛡️ Lock-up 보호 활성화: ${item.stock_name} (진입일: ${entryDate}, 보호 잔여)`);
+                        }
+                    });
+
+                    buysAndSells.sort((a, b) => {
+                        // 1. Lock-up 보호 종목 최선순위 정렬
+                        if (a.isLockedUp && !b.isLockedUp) return -1;
+                        if (!a.isLockedUp && b.isLockedUp) return 1;
+                        // 2. 그 외에는 conviction_score 내림차순
+                        return (b.conviction_score || 0) - (a.conviction_score || 0);
+                    });
                     
                     const finalBuys: any[] = [];
                     for (let i = 0; i < buysAndSells.length; i++) {
@@ -710,12 +770,21 @@ ${pm2MasterGuideline}
                         if (i < totalBuy) {
                             finalBuys.push(item);
                         } else {
-                            // 캡 초과 시 WATCHING으로 강등
-                            console.log(`[PortfolioManager] ✂️ 매수 캡(${totalBuy}) 초과: ${item.stock_name} -> WATCHING 강등 (매력도 ${item.conviction_score})`);
-                            item.finalStatus = 'WATCHING';
-                            const cat = item.primaryCategory || 'MOMENTUM';
-                            if (!groupedWatchlist[cat]) groupedWatchlist[cat] = [];
-                            groupedWatchlist[cat].push(item);
+                            // 캡 초과 시 기존 보유 종목은 강제 강등 및 매도를 하지 않고 HELD 유지하여 PM3 심사로 전달!
+                            // 신규 추천 종목은 즉시 WATCHING으로 강등 처리.
+                            const previousInfo = activePortfolio.find(p => p.stock_code === item.finalCode);
+                            const wasHeld = previousInfo && (previousInfo.status === 'HELD' || previousInfo.status === 'IMMEDIATE_BUY');
+
+                            if (wasHeld) {
+                                console.log(`[PortfolioManager] ⚖️ 매수 캡(${totalBuy}) 초과 보유주 감지: ${item.stock_name} -> HELD 유지 (PM3 재심사 예정)`);
+                                item.finalStatus = 'HELD';
+                            } else {
+                                console.log(`[PortfolioManager] ✂️ 매수 캡(${totalBuy}) 초과 신규주: ${item.stock_name} -> WATCHING 강등 (매력도 ${item.conviction_score})`);
+                                item.finalStatus = 'WATCHING';
+                                const cat = item.primaryCategory || 'MOMENTUM';
+                                if (!groupedWatchlist[cat]) groupedWatchlist[cat] = [];
+                                groupedWatchlist[cat].push(item);
+                            }
                         }
                     }
 
@@ -884,6 +953,7 @@ ${pm2MasterGuideline}
                                 const challengers = watchingCandidates.map((w: any) => ({
                                     stock_code: w.stock_code,
                                     stock_name: w.stock_name,
+                                    conviction_score: w.conviction_score,
                                     dossier: dossiersMap[w.stock_name] || `[${w.stock_name}] 현재 관심종목 (매력도 ${w.conviction_score}점)`
                                 }));
 
@@ -891,6 +961,7 @@ ${pm2MasterGuideline}
                                     currentHeld: {
                                         stock_code: candidate.stock_code,
                                         stock_name: candidate.stock_name,
+                                        conviction_score: candidate.conviction_score,
                                         entry_reason: candidate.korean_summary || candidate.last_signal_reason || '이전 PM2 매수 판정',
                                         dossier: dossiersMap[candidate.stock_name] || `[${candidate.stock_name}] 현재 보유 중 (매력도 ${candidate.conviction_score}점)`
                                     },
@@ -1035,7 +1106,12 @@ ${pm2MasterGuideline}
 
                             // 이미 매수된 종목(HELD)이 아닌, 관심종목 중 가장 점수가 높은 대기 후보군을 찾음
                             const topCandidate = parsedDecisions
-                                .filter((d: any) => d.last_signal !== 'SELL' && d.last_signal !== 'BUY' && d.last_signal !== 'DROP')
+                                .filter((d: any) => {
+                                    if (d.last_signal === 'SELL' || d.last_signal === 'BUY' || d.last_signal === 'DROP') return false;
+                                    const code = d.finalCode || d.stock_code;
+                                    const isAlreadyHeld = activePortfolio.some(p => p.stock_code === code && (p.status === 'HELD' || p.status === 'IMMEDIATE_BUY'));
+                                    return !isAlreadyHeld;
+                                })
                                 .sort((a: any, b: any) => b.conviction_score - a.conviction_score)[0];
 
                             if (topCandidate) {
@@ -1148,16 +1224,34 @@ ${pm2MasterGuideline}
         currentHeld: {
             stock_code: string;
             stock_name: string;
+            conviction_score?: number;
             entry_reason: string;   // 최초 매수 시 근거
             dossier: string;        // 현재 팩트시트
         };
         challengers: Array<{
             stock_code: string;
             stock_name: string;
+            conviction_score?: number;
             dossier: string;
         }>;
         minUpsideDiffPct?: number;  // 기본값 15 (%p)
     }): Promise<{ decision: 'KEEP' | 'REPLACE'; winnerCode?: string; reason: string }> {
+        // 1. 도전자와의 점수 격차 하한선 검사 (Hysteresis Buffer)
+        // 도전자 중 가장 높은 점수가 기존 보유 종목 점수보다 최소 10점 이상 높은지 확인
+        const currentScore = params.currentHeld.conviction_score ?? 50;
+        const maxChallengerScore = params.challengers.reduce((max, c) => {
+            const score = c.conviction_score ?? 0;
+            return score > max ? score : max;
+        }, 0);
+
+        if (maxChallengerScore - currentScore < 10) {
+            console.log(`[PM3] 🛡️ 교체 거부 (Hysteresis): 도전자 최고 점수(${maxChallengerScore})와 보유 종목 점수(${currentScore}) 격차가 10점 미만입니다. 보유 유지(KEEP)합니다.`);
+            return {
+                decision: 'KEEP',
+                reason: `보유 종목 점수(${currentScore}) 대비 도전자 최고 점수(${maxChallengerScore})의 격차가 충분하지 않아 (+10점 장벽 미만) 교체 매매를 생략하고 보유를 유지합니다.`
+            };
+        }
+
         const minDiff = params.minUpsideDiffPct ?? 15;
 
         const PM3_SYSTEM_PROMPT = `당신은 포트폴리오 안정성을 최우선으로 하는 리스크 관리자입니다.

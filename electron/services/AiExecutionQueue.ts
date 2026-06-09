@@ -316,6 +316,19 @@ export class AiExecutionQueue {
             return `${nd.getFullYear()}-${pad(nd.getMonth()+1)}-${pad(nd.getDate())} ${pad(nd.getHours())}:${pad(nd.getMinutes())}:${pad(nd.getSeconds())}`;
         };
 
+        let logModelName = job.customModel;
+        if (!logModelName) {
+            if (job.targetType === 'local') {
+                try {
+                    logModelName = this.localAi.getActiveModelName();
+                } catch {
+                    logModelName = 'local-default';
+                }
+            } else {
+                logModelName = 'gemini-default';
+            }
+        }
+
         const logEntry = {
             id: job.id,
             agentId: job.agentId,
@@ -331,7 +344,7 @@ export class AiExecutionQueue {
             prompt: job.prompt,
             systemInstruction: job.systemInstruction,
             result: job.result,
-            modelName: job.isCloudBypass ? `${job.customModel} (☁️ 우회)` : job.customModel,
+            modelName: job.isCloudBypass ? `${logModelName} (☁️ 우회)` : logModelName,
         }
 
         this.executionLog.unshift(logEntry)

@@ -489,7 +489,7 @@ export class TrackCBuyAgent {
         const Store = require('electron-store');
         const store = new Store();
         const aiSettings = store.get('ai_settings') || {};
-        const isBypass = Array.isArray(aiSettings.lightweightCloudAgents) && aiSettings.lightweightCloudAgents.some((id: string) => 'TRACK_B_GEMMA_RESEARCH'.includes(id) || 'TRACK_B_GEMMA_RESEARCH'.startsWith(id));
+        const isBypass = Array.isArray(aiSettings.lightweightCloudAgents) && aiSettings.lightweightCloudAgents.some((id: string) => 'TRACK_C_GEMMA_RESEARCH'.includes(id) || 'TRACK_C_GEMMA_RESEARCH'.startsWith(id));
 
         const processCandidate = async (c: any) => {
             // 종목별 뉴스 조회 (Phase 2에서 수집된 것 포함)
@@ -583,7 +583,7 @@ ${marketContext}
 
             try {
                 const rawResponse = await AiExecutionQueue.getInstance().enqueue({
-                    agentId: 'TRACK_B_GEMMA_RESEARCH',
+                    agentId: 'TRACK_C_GEMMA_RESEARCH',
                     agentName: `모의매매 Gemma 리서치 (${c.stockName})`,
                     triggerType: 'CRON',
                     targetType: 'local',

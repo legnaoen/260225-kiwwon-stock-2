@@ -33,6 +33,10 @@ export class LocalAiService {
         };
     }
 
+    public getActiveModelName(): string {
+        return this.getSettings().modelName;
+    }
+
     /**
      * 로컬 AI (LM Studio 등 OpenAI 호환 서버)를 호출하여 답변을 생성합니다.
      */

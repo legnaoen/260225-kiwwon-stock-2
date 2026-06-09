@@ -124,7 +124,7 @@ ${contextData}
                 agentId: 'INTRADAY_MONITOR',
                 agentName: '장중 스마트 모니터',
                 triggerType: 'CRON',
-                targetType: 'gemini',
+                targetType: 'local',
                 prompt: prompt,
                 systemInstruction: "You are a professional market maker AI."
             });
@@ -246,7 +246,7 @@ ${contextData}
                 agentId: 'SWARM_MONITOR',
                 agentName: '장중 스마트 모니터 (부연설명)',
                 triggerType: 'MANUAL',
-                targetType: 'gemini',
+                targetType: 'local',
                 prompt: prompt,
                 systemInstruction: "You are a professional market analyzer AI."
             });

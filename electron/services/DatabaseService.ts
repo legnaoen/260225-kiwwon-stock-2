@@ -1485,35 +1485,7 @@ export class DatabaseService {
             }
         } catch (e) { }
 
-        const createAiExecutionLogsTable = `
-            CREATE TABLE IF NOT EXISTS ai_execution_logs (
-                id TEXT PRIMARY KEY,
-                agentId TEXT NOT NULL,
-                agentName TEXT NOT NULL,
-                triggerType TEXT NOT NULL,
-                targetType TEXT NOT NULL,
-                status TEXT NOT NULL,
-                queuedAt TEXT NOT NULL,
-                startedAt TEXT,
-                finishedAt TEXT,
-                durationMs INTEGER,
-                error TEXT,
-                prompt TEXT,
-                systemInstruction TEXT,
-                result TEXT,
-                modelName TEXT
-            );
-        `
-        this.db.exec(createAiExecutionLogsTable)
 
-        try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN prompt TEXT;"); } catch { }
-        try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN systemInstruction TEXT;"); } catch { }
-        try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN result TEXT;"); } catch { }
-        try { this.db.exec("ALTER TABLE ai_execution_logs ADD COLUMN modelName TEXT;"); } catch { }
-
-        // [HOTFIX] SQLite의 문자열 정렬(DESC) 시 '오전/오후' 한글 문자열로 인해 정렬 오작동이 발생했음.
-        // 이를 수정하기 위해 이전 포맷을 사용한 로그들을 삭제하여 테이블 포맷을 초기화합니다.
-        try { this.db.exec("DELETE FROM ai_execution_logs WHERE queuedAt LIKE '% %';"); } catch { }
 
         // ═══ P3-1: Incubator (Pool B) ═══
         this.db.exec(`

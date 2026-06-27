@@ -513,15 +513,15 @@ export class PortfolioManagerAgent {
             // 5-C. Load Dynamic Limits from Store
             const aiSettings: any = store.get('ai_settings') || {};
             let limits = aiSettings.portfolioLimits || {
-                buy: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
-                watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+                buy: { THEME: 1, MOMENTUM: 2, PULLBACK: 1, REPORT: 1 },
+                watchlist: { THEME: 2, MOMENTUM: 3, PULLBACK: 2, REPORT: 3 }
             };
 
             // 구버전 키(SWING/VALUE) 감지 → 새 기준으로 자동 마이그레이션 적용
             if (limits.watchlist && ('SWING' in limits.watchlist || 'VALUE' in limits.watchlist)) {
                 limits = {
-                    buy: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
-                    watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+                    buy: { THEME: 1, MOMENTUM: 2, PULLBACK: 1, REPORT: 1 },
+                    watchlist: { THEME: 2, MOMENTUM: 3, PULLBACK: 2, REPORT: 3 }
                 };
             }
 
@@ -741,8 +741,8 @@ ${pm2MasterGuideline}
                     }
 
                     // [Phase 4.5] HELD 절대 한도 적용 (사용자 요청: 매수 우선순위 정렬 후 초과분 자동 관심종목 강등)
-                    // 기존 설정값과 무관하게 절대 캡을 15개로 강제 고정합니다.
-                    const totalBuy = 15;
+                    // 기존 설정값과 무관하게 절대 캡을 5개로 강제 고정합니다.
+                    const totalBuy = 5;
 
                     // 각 종목의 Lock-up (최소 보유 기간 3일) 보호 여부 사전 판정
                     buysAndSells.forEach((item: any) => {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
-import { TrendingUp, RefreshCw, Target, BarChart2, Award, Clock, ArrowUpRight, ArrowDownRight, Minus, Trash2, Settings, X, Save, MoreHorizontal, Database, Play, Zap } from 'lucide-react'
+import { TrendingUp, RefreshCw, Target, BarChart2, Award, Clock, ArrowUpRight, ArrowDownRight, Minus, Trash2, Settings, X, Save, MoreHorizontal, Database, Play, Zap, Bot, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import { StockDetailModal } from '../common/StockDetailModal'
@@ -136,6 +136,7 @@ function getDateLabel(dateStr: string): string {
 import { PerformanceModal } from './PerformanceModal'
 
 export const SimTradeTab: React.FC = () => {
+    const [activeView, setActiveView] = useState<'list' | 'settings'>('list')
     const [picks, setPicks] = useState<SimTradePick[]>([])
     const [loading, setLoading] = useState(false)
     const [selectedStock, setSelectedStock] = useState<{ stockCode: string; stockName: string; aiReason?: string; aiRisk?: string } | null>(null)
@@ -305,17 +306,41 @@ export const SimTradeTab: React.FC = () => {
             {/* ── 상단 요약 바 ── */}
             <div className="shrink-0 px-4 py-3 border-b border-border/50 bg-muted/10">
                 <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                        <Target className="w-4 h-4 text-amber-400" />
-                        <span className="font-bold text-sm">모의매매</span>
+                    <div className="flex items-center gap-0 border-b border-border/40 mr-4">
                         <button
-                            onClick={() => setIsPerformanceModalOpen(true)}
-                            className="text-xs font-bold text-foreground bg-accent border border-border hover:bg-accent/80 px-2.5 py-1 rounded transition-colors shadow-sm ml-2 flex items-center gap-1"
+                            onClick={() => setActiveView('list')}
+                            className={cn(
+                                'px-4 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5',
+                                activeView === 'list'
+                                    ? 'border-amber-500 text-amber-500 font-extrabold'
+                                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                            )}
                         >
-                            📉 성과 측정
+                            <Target className="w-3.5 h-3.5" />
+                            모의매매 종목
+                        </button>
+                        <button
+                            onClick={() => setActiveView('settings')}
+                            className={cn(
+                                'px-4 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5',
+                                activeView === 'settings'
+                                    ? 'border-indigo-500 text-indigo-500 font-extrabold'
+                                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                            )}
+                        >
+                            <Settings className="w-3.5 h-3.5" />
+                            설정 및 자가학습
                         </button>
                     </div>
-                    <div className="flex items-center gap-2">
+                    
+                    {activeView === 'list' ? (
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setIsPerformanceModalOpen(true)}
+                                className="text-xs font-bold text-foreground bg-accent border border-border hover:bg-accent/80 px-2.5 py-1.5 rounded transition-colors shadow-sm mr-2 flex items-center gap-1"
+                            >
+                                📉 성과 측정
+                            </button>
                         {/* ── 카테고리 드롭다운 필터 ── */}
                         <select
                             value={filterCategory}
@@ -638,9 +663,11 @@ export const SimTradeTab: React.FC = () => {
                             )}
                         </div>
                     </div>
+                    ) : null}
                 </div>
 
                 {/* Stats Bar */}
+                {activeView === 'list' && (
                 <div className="grid grid-cols-5 gap-3">
                     {[
                         {
@@ -681,9 +708,11 @@ export const SimTradeTab: React.FC = () => {
                         </div>
                     ))}
                 </div>
+                )}
             </div>
 
-            {/* ── 메인 테이블 ── */}
+            {/* ── 메인 테이블 또는 설정 뷰 ── */}
+            {activeView === 'list' ? (
             <div className="flex-1 overflow-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
 
                 {loading ? (
@@ -922,6 +951,11 @@ export const SimTradeTab: React.FC = () => {
                     </table>
                 )}
             </div>
+            ) : (
+                <div className="flex-1 overflow-auto p-5">
+                    <TrackSelfLearningSettingsView />
+                </div>
+            )}
 
             {/* ── 종목 상세 모달 ── */}
             {selectedStock && (
@@ -1009,3 +1043,345 @@ export const SimTradeTab: React.FC = () => {
         </div>
     )
 }
+
+// ─── 주도주 AI 통합 자가학습 및 설정 뷰 ───────────────────
+const TrackSelfLearningSettingsView: React.FC = () => {
+    const [aiSettings, setAiSettings] = useState<any>(null);
+    const [isSaving, setIsSaving] = useState(false);
+    
+    // 수동 자가학습 상태
+    const [selectedRange, setSelectedRange] = useState<number>(30);
+    const [isManualRunning, setIsManualRunning] = useState(false);
+    const [manualLog, setManualLog] = useState<string>('');
+
+    useEffect(() => {
+        loadSettings();
+    }, []);
+
+    const loadSettings = async () => {
+        try {
+            const api = window.electronAPI as any;
+            if (api.getAiSettings) {
+                const res = await api.getAiSettings();
+                if (res) {
+                    // 레거시 5개 트랙 오브젝트 또는 누락 시 단일 통합 오브젝트로 보정
+                    if (!res.trackLearningSettings || res.trackLearningSettings.trackA !== undefined) {
+                        res.trackLearningSettings = {
+                            enabled: false,
+                            interval: 'WEEKLY',
+                            dayOfWeek: [5],
+                            dayOfMonth: 1,
+                            time: '16:00',
+                            holidayOption: 'NEXT_OPEN'
+                        };
+                    }
+                    setAiSettings(res);
+                }
+            }
+        } catch (e) {
+            console.error('설정 로드 실패:', e);
+        }
+    };
+
+    const handleSaveSettings = async () => {
+        if (!aiSettings) return;
+        setIsSaving(true);
+        try {
+            const api = window.electronAPI as any;
+            if (api.saveAiSettings) {
+                const res = await api.saveAiSettings(aiSettings);
+                if (res.success) {
+                    alert('주도주 AI 통합 자가학습 설정이 성공적으로 저장되었습니다.');
+                } else {
+                    alert('설정 저장 실패: ' + res.error);
+                }
+            }
+        } catch (e: any) {
+            alert('오류 발생: ' + e.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleRunManual = async () => {
+        setIsManualRunning(true);
+        setManualLog('⏳ 주도주 AI 전체 트랙(Track A~E) 일괄 자가학습 가동 중...\n각 트랙별 매매 타점 성적 복기 및 지침서 오답노트 갱신을 순차 진행합니다. (약 1분~2분 소요)');
+        try {
+            const api = window.electronAPI as any;
+            if (api.runTrackSelfLearning) {
+                const res = await api.runTrackSelfLearning('ALL', selectedRange);
+                if (res.success && res.isAll) {
+                    let logResult = `✅ [일괄 자가학습 완료]\n${res.summary}\n\n상세 내역:\n`;
+                    res.results.forEach((r: any) => {
+                        if (r.skipped) {
+                            logResult += `- Track ${r.track}: 학습 유보 (사유: ${r.reason})\n`;
+                        } else if (r.success) {
+                            logResult += `- Track ${r.track}: 성공 (지침서 guidelines/track_${r.track.toLowerCase()}_phase2.md 갱신 완료)\n`;
+                        } else {
+                            logResult += `- Track ${r.track}: 실패 (오류: ${r.error || '알 수 없는 오류'})\n`;
+                        }
+                    });
+                    setManualLog(logResult);
+                } else {
+                    setManualLog(`❌ [자가학습 실패]\n오류: ${res.error || '일괄 실행 중 에러가 발생했습니다.'}`);
+                }
+            } else {
+                setManualLog('❌ [오류] 백엔드 자가학습 API 연결이 지원되지 않습니다.');
+            }
+        } catch (e: any) {
+            setManualLog(`❌ [시스템 에러]\n오류: ${e.message}`);
+        } finally {
+            setIsManualRunning(false);
+        }
+    };
+
+    const updateSetting = (field: string, value: any) => {
+        setAiSettings((prev: any) => {
+            if (!prev) return prev;
+            const currentSettings = prev.trackLearningSettings || {};
+            return {
+                ...prev,
+                trackLearningSettings: {
+                    ...currentSettings,
+                    [field]: value
+                }
+            };
+        });
+    };
+
+    if (!aiSettings) {
+        return (
+            <div className="flex items-center justify-center p-12 text-muted-foreground text-xs">
+                설정을 불러오는 중입니다...
+            </div>
+        );
+    }
+
+    const config = aiSettings.trackLearningSettings || {
+        enabled: false,
+        interval: 'WEEKLY',
+        dayOfWeek: [5],
+        dayOfMonth: 1,
+        time: '16:00',
+        holidayOption: 'NEXT_OPEN'
+    };
+
+    return (
+        <div className="space-y-6 max-w-4xl mx-auto pb-10">
+            {/* 1. 수동 자가학습 섹션 */}
+            <div className="p-6 bg-indigo-500/5 border border-indigo-500/20 rounded-2xl space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 text-indigo-600">
+                    <Bot size={18} />
+                    <h3 className="text-sm font-bold">주도주 AI 수동(메뉴얼) 자가학습 실행기</h3>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                    성과가 종료된 모의매매 종목들의 타점 성적을 복기하여, 지침서 오답노트(절대 규칙)를 일괄 순차 업데이트합니다.
+                </p>
+
+                <div className="grid grid-cols-2 gap-6 pt-2">
+                    {/* 컨트롤러 */}
+                    <div className="space-y-4 flex flex-col justify-between">
+                        <div className="space-y-3">
+                            <div className="space-y-1.5">
+                                <label className="text-[11px] font-bold text-muted-foreground">대상 파이프라인</label>
+                                <div className="p-2 border rounded-lg bg-background text-xs font-semibold text-foreground/80">
+                                    주도주 AI 전체 (Track A ~ E) 일괄 순차 실행
+                                </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <label className="text-[11px] font-bold text-muted-foreground">학습 데이터 분석 범위</label>
+                                <select
+                                    value={selectedRange}
+                                    onChange={(e) => setSelectedRange(parseInt(e.target.value, 10))}
+                                    className="w-full text-xs bg-background border border-border/50 rounded-lg p-2 focus:border-indigo-500 outline-none font-medium"
+                                >
+                                    <option value={7}>최근 7일 간 청산 완료된 종목</option>
+                                    <option value={15}>최근 15일 간 청산 완료된 종목</option>
+                                    <option value={30}>최근 30일 간 청산 완료된 종목 (권장)</option>
+                                    <option value={90}>최근 90일 간 청산 완료된 종목</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={handleRunManual}
+                            disabled={isManualRunning}
+                            className="w-full py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            {isManualRunning ? (
+                                <>
+                                    <RefreshCw size={13} className="animate-spin" />
+                                    일괄 자가학습 진행 중...
+                                </>
+                            ) : (
+                                <>
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    전체 Track 일괄 자가학습 즉시 실행
+                                </>
+                            )}
+                        </button>
+                    </div>
+
+                    {/* 로그 모니터 */}
+                    <div className="flex flex-col border rounded-lg bg-black/40 p-4 h-[190px] overflow-hidden">
+                        <div className="text-[9px] text-muted-foreground font-mono mb-2 shrink-0">EXECUTION LOG CONSOLE</div>
+                        <pre className="flex-1 text-[11px] font-mono whitespace-pre-wrap break-all overflow-y-auto text-indigo-200">
+                            {manualLog || '대기 중...'}
+                        </pre>
+                    </div>
+                </div>
+            </div>
+
+            {/* 2. 통합 정기 스케줄 섹션 */}
+            <div className="p-6 bg-card border border-border/50 rounded-2xl space-y-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-foreground">
+                        <Settings size={18} className="text-muted-foreground" />
+                        <h3 className="text-sm font-bold">주도주 AI 통합 정기 자가학습 스케줄</h3>
+                    </div>
+                    <button
+                        onClick={handleSaveSettings}
+                        disabled={isSaving}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50 shadow-sm"
+                    >
+                        <Save size={13} />
+                        설정 저장
+                    </button>
+                </div>
+
+                <div className="border rounded-xl bg-muted/5 p-5 space-y-5">
+                    <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                            <span className="text-xs font-bold text-foreground">통합 정기 자가학습 활성화</span>
+                            <p className="text-[10px] text-muted-foreground">지정된 스케줄 시간에 AI가 5개 트랙(Track A~E)의 매매 성적을 순차적으로 자동 학습합니다.</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                className="sr-only peer"
+                                checked={config.enabled}
+                                onChange={(e) => updateSetting('enabled', e.target.checked)}
+                            />
+                            <div className="w-9 h-5 bg-muted rounded-full peer peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+
+                    {config.enabled && (
+                        <div className="space-y-4 pt-4 border-t border-border/30 animate-in fade-in duration-200">
+                            {/* 주기 */}
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-muted-foreground">자가학습 실행 주기</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {(['DAILY', 'WEEKLY', 'MONTHLY'] as const).map(interval => (
+                                        <button
+                                            key={interval}
+                                            type="button"
+                                            onClick={() => updateSetting('interval', interval)}
+                                            className={cn(
+                                                'py-1.5 text-xs font-bold rounded-lg border transition-all',
+                                                config.interval === interval
+                                                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                                    : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+                                            )}
+                                        >
+                                            {interval === 'DAILY' && '매일 (장마감 후)'}
+                                            {interval === 'WEEKLY' && '매주 (지정 요일)'}
+                                            {interval === 'MONTHLY' && '매월 (지정 일자)'}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* 요일 (WEEKLY) */}
+                            {config.interval === 'WEEKLY' && (
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-muted-foreground">실행 요일 (복수 선택 가능)</label>
+                                    <div className="grid grid-cols-5 gap-2">
+                                        {[
+                                            { value: 1, label: '월' },
+                                            { value: 2, label: '화' },
+                                            { value: 3, label: '수' },
+                                            { value: 4, label: '목' },
+                                            { value: 5, label: '금' }
+                                        ].map(day => {
+                                            const days = config.dayOfWeek || [];
+                                            const isSelected = days.includes(day.value);
+                                            return (
+                                                <button
+                                                    key={day.value}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const newDays = isSelected
+                                                            ? days.filter((d: number) => d !== day.value)
+                                                            : [...days, day.value].sort();
+                                                        updateSetting('dayOfWeek', newDays.length > 0 ? newDays : [5]);
+                                                    }}
+                                                    className={cn(
+                                                        'py-1 px-2 text-xs font-medium rounded-md border transition-all',
+                                                        isSelected
+                                                            ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 font-bold'
+                                                            : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                                                    )}
+                                                >
+                                                    {day.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 일자 (MONTHLY) */}
+                            {config.interval === 'MONTHLY' && (
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-muted-foreground">실행 일자 지정 (1 ~ 31일)</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="31"
+                                            value={config.dayOfMonth || 1}
+                                            onChange={(e) => {
+                                                const val = Math.max(1, Math.min(31, parseInt(e.target.value, 10) || 1));
+                                                updateSetting('dayOfMonth', val);
+                                            }}
+                                            className="flex h-8 w-20 rounded-md border border-input bg-background px-3 text-xs outline-none"
+                                        />
+                                        <span className="text-[11px] text-muted-foreground">일에 자가학습을 수행합니다.</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 시간 & 휴장일 */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-muted-foreground">실행 시간 설정</label>
+                                    <input
+                                        type="time"
+                                        value={config.time || '16:00'}
+                                        onChange={(e) => updateSetting('time', e.target.value)}
+                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs outline-none"
+                                    />
+                                    <span className="text-[9px] text-muted-foreground block">※ 15:30 이후 장외 시간 지정을 권장합니다.</span>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-muted-foreground">휴장일(주말/공휴일) 동작</label>
+                                    <select
+                                        value={config.holidayOption || 'NEXT_OPEN'}
+                                        onChange={(e) => updateSetting('holidayOption', e.target.value)}
+                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs outline-none"
+                                    >
+                                        <option value="SKIP">해당 스케줄 건너뛰기 (SKIP)</option>
+                                        <option value="NEXT_OPEN">다음 개장일 장마감 후 소급 실행 (NEXT_OPEN)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};

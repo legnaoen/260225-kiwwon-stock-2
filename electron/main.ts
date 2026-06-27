@@ -3034,13 +3034,50 @@ ipcMain.handle('ai-trade:sync-strategy-config', () => {
     AiDecisionService.getInstance().syncRuntimeConfigWithActiveStrategy()
     return { success: true }
 })
-ipcMain.handle('ai:save-settings', (_event, settings: any) => {
+ipcMain.handle('ai:save-settings', async (_event, settings: any) => {
     store.set('ai_settings', settings)
     console.log(`[Settings] ⚙️ AI 설정 저장 완료 | 기본모델: ${settings.modelName} | 클라우드 우회: ${settings.lightweightCloudAgents?.length || 0}건 (${settings.lightweightCloudModel})`)
+    try {
+        const { SchedulerService } = await import('./services/SchedulerService')
+        await SchedulerService.getInstance().initSchedules()
+        console.log('[Settings] ⚙️ AI 설정 변경에 따른 크론 스케줄 재동기화 완료')
+    } catch (err: any) {
+        console.error('[Settings] 크론 스케줄 동기화 실패:', err.message)
+    }
     return { success: true }
 })
 ipcMain.handle('ai:get-settings', () => {
     return store.get('ai_settings') || null
+})
+ipcMain.handle('ai:run-track-self-learning', async (_event, { track, rangeDays }: { track: 'A' | 'B' | 'C' | 'D' | 'E' | 'ALL', rangeDays: number }) => {
+    try {
+        const { TrackRetrospectiveAgent } = await import('./services/v2_agents/TrackRetrospectiveAgent')
+        if (track === 'ALL') {
+            const tracks: ('A' | 'B' | 'C' | 'D' | 'E')[] = ['A', 'B', 'C', 'D', 'E'];
+            const results: any[] = [];
+            for (const t of tracks) {
+                console.log(`[Main] Track ${t} 수동 자가학습 실행 시작...`);
+                const res = await TrackRetrospectiveAgent.getInstance().runRetrospective(t, rangeDays);
+                results.push({ track: t, ...res });
+            }
+            const successCount = results.filter(r => r.success && !r.skipped).length;
+            const skippedCount = results.filter(r => r.skipped).length;
+            const failedCount = results.filter(r => !r.success && !r.skipped).length;
+            
+            return {
+                success: true,
+                isAll: true,
+                results,
+                summary: `일괄 자가학습 완료: 성공 ${successCount}개, 유보(스킵) ${skippedCount}개, 실패 ${failedCount}개`
+            };
+        } else {
+            const result = await TrackRetrospectiveAgent.getInstance().runRetrospective(track, rangeDays)
+            return { success: result.success, skipped: result.skipped, reason: result.reason, error: result.error }
+        }
+    } catch (err: any) {
+        console.error(`[Main] 수동 자가학습 실패:`, err.message)
+        return { success: false, skipped: false, error: err.message }
+    }
 })
 
 ipcMain.handle('ai:test-connection', async (_event, { geminiKey, modelName, deepModelName, lightweightCloudModel }: { geminiKey: string, modelName: string, deepModelName?: string, lightweightCloudModel?: string }) => {

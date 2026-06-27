@@ -32,6 +32,7 @@ import { AiExecutionQueue } from '../AiExecutionQueue';
 import { NaverSearchCollector } from '../v2_pipeline/collectors/NaverSearchCollector';
 import { DEFAULT_PEAKOUT_SETTINGS } from '../v2_pipeline/MarketLeaderDiscoveryService';
 import { getKstDate } from '../../utils/DateUtils';
+import { getDynamicCutoffConfig } from './types/AgentTypes';
 
 // ── 상수 ───────────────────────────────────────────────────────
 const BUY_CATEGORIES = ['EMERGING_STAR'];
@@ -611,7 +612,7 @@ ${marketContext}
                     };
                     reports.push(fallback);
                     this.db.saveStockResearchReport({
-                        date, stock_code: c.stockCode, stock_name: c.stockName,
+                        date,
                         ...fallback,
                         injected_context_json: userPrompt,
                         system_prompt: systemPrompt,
@@ -747,13 +748,21 @@ ${marketContext}
     ): Promise<AiBuyPick[]> {
         const reportMap = new Map(gemmaReports.map(r => [r.stock_code, r]));
 
-        // Gemma 점수 컷오프 적용 (40점 미만 자동 제외)
+        // 시황 리스크 점수 로딩 & Null 폴백 세이프티 가드
+        const { IssueLedgerDB } = await import('./IssueLedgerDB');
+        const briefing = IssueLedgerDB.getInstance().getLatestBriefing();
+        const riskScore = briefing ? briefing.risk_score : 30;
+        const cutoffConfig = getDynamicCutoffConfig(riskScore);
+
+        console.log(`[TrackBBuyAgent] ⚖️ 동적 컷오프 적용: 리스크 ${riskScore}점 -> ${cutoffConfig.description}`);
+
+        // Gemma 점수 컷오프 적용 (시황 리스크에 맞춰 격상됨)
         const eligibleCandidates = candidates.filter(c => {
             const r = reportMap.get(c.stockCode);
-            return !r || (r.buy_score >= GEMMA_MIN_SCORE_CUTOFF);
+            return !r || (r.buy_score >= cutoffConfig.gemmaMinScore);
         });
 
-        console.log(`[TrackBBuyAgent] Phase4 대상: ${eligibleCandidates.length}개 (컷오프 ${GEMMA_MIN_SCORE_CUTOFF}점 미만 제외)`);
+        console.log(`[TrackBBuyAgent] Phase4 대상: ${eligibleCandidates.length}개 (Gemma 1차 컷오프 ${cutoffConfig.gemmaMinScore}점 미만 제외)`);
 
         // 테마 밀집도(Tally) 산출 (Track B: 기존 시장 주도 테마 회피 목적)
         const themeTally = new Map<string, number>();
@@ -797,6 +806,12 @@ ${marketContext}
 Gemma AI가 종목별로 작성한 팩트시트와 1차 판단을 검토하여 최종 Top ${targetPicks}개를 선발합니다.
 
 ${phase2Guideline || '[추가 판단 기준]\n1. 촉매 타이밍\n2. 포트폴리오 분산\n3. 리스크 필터링'}
+
+[최종 BUY 판정 커트라인]
+오늘의 시장 리스크 점수는 ${riskScore}/100 점입니다.
+따라서 오늘 최종 'BUY' 판정을 내리기 위한 종합 합격 점수 커트라인은 **${cutoffConfig.geminiPassScore}점 이상**입니다.
+- 팩트시트를 검토하여 이 기준 점수를 넘지 못하는 종목은 고민하지 말고 무조건 'decision': 'WATCH'로 분류하십시오.
+- 모든 후보 종목이 커트라인에 미달할 경우, 단 하나의 종목도 BUY로 추천하지 않고 전부 WATCH로 처리(0개 추천)하는 것이 올바른 결정입니다.
 
 [응답 형식] 반드시 다음 JSON 배열만 출력하십시오. 설명 없이 JSON만:
 [
@@ -862,13 +877,23 @@ ${themeDensityText}${factSheets}
                 const picks = JSON.parse(jsonMatch[0]);
                 allPicks.push(...picks);
 
-            } catch (err) {
+            } catch (err: any) {
                 console.error(`[TrackBBuyAgent] Phase4 AI 분석 오류 (그룹 ${chunkIndex + 1}):`, err.message);
             }
         }));
 
         console.log(`[TrackBBuyAgent] Phase4 통합 결과: BUY ${allPicks.filter(p => p.decision === 'BUY').length}개, WATCH ${allPicks.filter(p => p.decision === 'WATCH').length}개`);
-        return allPicks;
+
+        // 최종 2차 코드 세이프티 필터: Gemini가 지침을 위반하고 합격선 미달인 종목에 BUY 판정을 내린 경우 기계적으로 WATCH로 격하 처리
+        const filteredPicks = allPicks.map(p => {
+            if (p.decision === 'BUY' && p.buy_score < cutoffConfig.geminiPassScore) {
+                console.log(`[TrackBBuyAgent] 🚨 AI 오작동 필터링: ${p.stock_name}(${p.stock_code}) 점수 ${p.buy_score}점이 합격선 ${cutoffConfig.geminiPassScore}점 미만이므로 WATCH로 격하 처리.`);
+                return { ...p, decision: 'WATCH' as const };
+            }
+            return p;
+        });
+
+        return filteredPicks;
     }
 
     // ─────────────────────────────────────────────────────────

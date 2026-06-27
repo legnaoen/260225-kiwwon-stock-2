@@ -2811,18 +2811,23 @@ export class DatabaseService {
             // 구버전 키(SWING/VALUE) 감지 → 새 기준(THEME/PULLBACK/MOMENTUM/REPORT)으로 자동 재설정
             const storedLimits = aiSettings.portfolioLimits || {};
             const hasLegacyKeys = storedLimits.buy && ('SWING' in storedLimits.buy || 'VALUE' in storedLimits.buy);
-            const limits = hasLegacyKeys ? {
-                buy:       { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
-                watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+            
+            // 기존 저장된 buy 한도의 합이 5를 초과하는 경우에도 마이그레이션 강제 적용
+            const currentBuySum = storedLimits.buy ? Object.values(storedLimits.buy).reduce((a: number, b: any) => a + Number(b), 0) : 0;
+            const needsMigrationTo5Limit = currentBuySum > 5;
+
+            const limits = (hasLegacyKeys || needsMigrationTo5Limit) ? {
+                buy:       { THEME: 1, MOMENTUM: 2, PULLBACK: 1, REPORT: 1 },
+                watchlist: { THEME: 2, MOMENTUM: 3, PULLBACK: 2, REPORT: 3 }
             } : (aiSettings.portfolioLimits || {
-                buy:       { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
-                watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+                buy:       { THEME: 1, MOMENTUM: 2, PULLBACK: 1, REPORT: 1 },
+                watchlist: { THEME: 2, MOMENTUM: 3, PULLBACK: 2, REPORT: 3 }
             });
 
-            // 구버전 키 감지 시 electron-store 자동 업데이트
-            if (hasLegacyKeys) {
+            // 구버전 키 혹은 5개 제한 초과 감지 시 electron-store 자동 업데이트
+            if (hasLegacyKeys || needsMigrationTo5Limit) {
                 store.set('ai_settings', { ...aiSettings, portfolioLimits: limits });
-                console.log('[DatabaseService] ♻️ portfolioLimits 구버전 키(SWING/VALUE) 감지 → THEME/MOMENTUM/PULLBACK/REPORT로 자동 재설정');
+                console.log(`[DatabaseService] ♻️ portfolioLimits 5개 매수제한 초과(${currentBuySum}개) 또는 구버전 감지 → 자동 마이그레이션 적용`);
             }
 
             const types = ['HELD', 'WATCHING'];
@@ -2870,7 +2875,7 @@ export class DatabaseService {
 
                 // 3. 남은 슬롯이 있다면 Failed 목록에서 높은 점수순으로 생존(Flexible Quota)
                 let dropItems = failed;
-                const ABSOLUTE_MAX_HELD = Math.max(15, totalLimit);
+                const ABSOLUTE_MAX_HELD = Math.max(5, totalLimit);
                 const activeTotalLimit = type === 'HELD' ? ABSOLUTE_MAX_HELD : totalLimit;
 
                 if (type === 'HELD') {
@@ -2898,7 +2903,7 @@ export class DatabaseService {
 
                 // [Phase 3] HELD 종목은 즉시 DROP 대신 PM3 재심사 후보로 반환하되, 절대 한도(15개) 초과분은 즉시 강제 컷오프
                 if (type === 'HELD' && dropItems.length > 0) {
-                    const ABSOLUTE_MAX_HELD = Math.max(15, totalLimit);
+                    const ABSOLUTE_MAX_HELD = Math.max(5, totalLimit);
                     const definitelySurvivingCount = allItems.length - dropItems.length;
                     const allowedPm3Count = Math.max(0, ABSOLUTE_MAX_HELD - definitelySurvivingCount);
 

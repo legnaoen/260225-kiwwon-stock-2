@@ -1,4 +1,4 @@
-﻿import cron from 'node-cron'
+import cron from 'node-cron'
 import { RisingStockAnalysisService } from './RisingStockAnalysisService'
 import { TelegramService } from './TelegramService'
 import { KiwoomService } from './KiwoomService'
@@ -486,6 +486,28 @@ export class SchedulerService {
                         : trackAResult.updated > 0 ? `\n👑 Track A: ${trackAResult.updated}개 보유중 갱신` : ''
 
                     this.telegram.sendMessage(`⚖️ [15:41] 장마감 포트폴리오 채점 완료\n종가 기준 수익률·수명 심사 정상 완료\n확인: 종목AI 탭 > 포트폴리오 리스트${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}`)
+
+                    // [소급 실행 검사] 휴장일로 인해 이월된 정기 자가학습이 있으면 즉시 실행
+                    const pendingRun = store.get('pending_self_learning_run') || false;
+                    if (pendingRun) {
+                        console.log('[Scheduler] 🔄 이월된 자가학습(pending_self_learning_run) 감지. 소급 실행을 가동합니다...');
+                        const aiSettings = store.get('ai_settings') as any || {};
+                        const selfLearning = aiSettings.selfLearningSettings || {};
+                        this.runSelfLearningPipeline(selfLearning.holidayOption).catch(e => {
+                            console.error('[Scheduler] 이월 자가학습 소급 실행 실패:', e);
+                        });
+                    }
+
+                    // [주도주 AI 통합 소급 실행 검사]
+                    const pendingTracksRun = store.get('pending_tracks_learning_run') || false;
+                    if (pendingTracksRun) {
+                        console.log('[Scheduler] 🔄 이월된 주도주 AI 통합 자가학습(pending_tracks_learning_run) 감지. 소급 실행을 가동합니다...');
+                        const aiSettings = store.get('ai_settings') as any || {};
+                        const trackSettings = aiSettings.trackLearningSettings || {};
+                        this.runAllTracksSelfLearningPipeline(trackSettings.holidayOption).catch(e => {
+                            console.error('[Scheduler] 이월 주도주 AI 통합 자가학습 소급 실행 실패:', e);
+                        });
+                    }
                 } catch (e: any) {
                     console.error('[Scheduler] 장마감 채점 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:41] 장마감 채점 실패\n오류: ${e.message}`)
@@ -908,7 +930,52 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' });
 
+            // ═══ [Step 7] AI 자가학습 및 오답노트 작성 스케줄 ═══
+            let selfLearningJob: cron.ScheduledTask | null = null;
+            const aiSettings = store.get('ai_settings') as any || {};
+            const selfLearning = aiSettings.selfLearningSettings || {
+                enabled: false,
+                interval: 'WEEKLY',
+                dayOfWeek: [5],
+                dayOfMonth: 1,
+                time: '16:00',
+                holidayOption: 'NEXT_OPEN'
+            };
+
+            if (selfLearning.enabled) {
+                const selfLearningCronExpr = this.buildSelfLearningCron(selfLearning);
+                console.log(`[SchedulerService] 🤖 AI 자가학습 크론 등록: expression='${selfLearningCronExpr}', holidayOption='${selfLearning.holidayOption}'`);
+                selfLearningJob = this.createWatchdogCron('selfLearningJob', selfLearningCronExpr, async () => {
+                    await this.runSelfLearningPipeline(selfLearning.holidayOption);
+                }, { timezone: 'Asia/Seoul' });
+            }
+
+            // ═══ [Step 8] 주도주 AI 통합 자가학습 크론 등록 ═══
+            let trackLearningJob: cron.ScheduledTask | null = null;
+            const trackSettings = aiSettings.trackLearningSettings || {
+                enabled: false,
+                interval: 'WEEKLY',
+                dayOfWeek: [5],
+                dayOfMonth: 1,
+                time: '16:00',
+                holidayOption: 'NEXT_OPEN'
+            };
+
+            if (trackSettings.enabled) {
+                const cronExpr = this.buildSelfLearningCron(trackSettings);
+                console.log(`[SchedulerService] 🤖 주도주 AI 통합 자가학습 크론 등록: expression='${cronExpr}', holidayOption='${trackSettings.holidayOption}'`);
+                trackLearningJob = this.createWatchdogCron('trackLearningJob', cronExpr, async () => {
+                    await this.runAllTracksSelfLearningPipeline(trackSettings.holidayOption);
+                }, { timezone: 'Asia/Seoul' });
+            }
+
             this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, themeAiJob, liveTradeMonitorJob, liveTradeChasingStartJob, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob, liveTradeMorningBriefingJob, postMarketWatchdog, morningWatchdog)
+            if (selfLearningJob) {
+                this.scheduledJobs.push(selfLearningJob);
+            }
+            if (trackLearningJob) {
+                this.scheduledJobs.push(trackLearningJob);
+            }
 
             console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, Swarms, Retros)`)
             console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)
@@ -1400,6 +1467,242 @@ export class SchedulerService {
                 TelegramService.getInstance().sendMessage(`✅ [tracker.py 연동] 파이프라인 (ingest -> correct-basis -> evaluate -> render) 처리가 성공적으로 완료되었습니다.\n(파일: ${fileName})`);
             } catch (_) {}
         });
+    }
+
+    /**
+     * 자가학습 설정 기반 크론 표현식 생성
+     */
+    private buildSelfLearningCron(settings: any): string {
+        const time = settings.time || '16:00';
+        const [hourStr, minStr] = time.split(':');
+        const hour = parseInt(hourStr, 10) || 16;
+        const min = parseInt(minStr, 10) || 0;
+
+        if (settings.interval === 'DAILY') {
+            return `${min} ${hour} * * 1-5`;
+        } else if (settings.interval === 'WEEKLY') {
+            const days = Array.isArray(settings.dayOfWeek) 
+                ? settings.dayOfWeek.join(',') 
+                : (settings.dayOfWeek !== undefined ? settings.dayOfWeek : 5);
+            return `${min} ${hour} * * ${days}`;
+        } else if (settings.interval === 'MONTHLY') {
+            const dom = settings.dayOfMonth || 1;
+            return `${min} ${hour} ${dom} * *`;
+        }
+        return `${min} ${hour} * * 5`; 
+    }
+
+    /**
+     * 자가학습 파이프라인 통합 실행
+     */
+    public async runSelfLearningPipeline(holidayOption: 'SKIP' | 'NEXT_OPEN' = 'NEXT_OPEN'): Promise<void> {
+        console.log('[SchedulerService] 🤖 AI 정기 자가학습 파이프라인 가동...');
+        const { getKstDate } = await import('../utils/DateUtils');
+        const todayStr = getKstDate();
+        
+        const today = new Date();
+        const dow = today.getDay();
+        const isWeekend = dow === 0 || dow === 6;
+        
+        let isMarketOpenDay = !isWeekend;
+        try {
+            const dbInstance = DatabaseService.getInstance();
+            const rawDb = (dbInstance as any).db;
+            const row = rawDb.prepare(`
+                SELECT COUNT(*) as cnt FROM market_ohlcv_history 
+                WHERE stock_code = '069500' AND date = ?
+            `).get(todayStr.replace(/-/g, ''));
+            
+            if (row && row.cnt === 0) {
+                isMarketOpenDay = false; 
+            }
+        } catch (e) {
+            console.warn('[Scheduler] 개장일 판단 DB 체크 오류:', e);
+        }
+
+        if (!isMarketOpenDay) {
+            console.log(`[Scheduler] 🤖 오늘은 휴장일(주말/공휴일)입니다. (날짜: ${todayStr})`);
+            if (holidayOption === 'SKIP') {
+                console.log('[Scheduler] 🤖 휴장일 건너뛰기(SKIP) 정책에 따라 오늘 학습을 중단합니다.');
+                this.telegram.sendMessage(`🤖 **[정기 자가학습 건너뜀]**\n- 날짜: ${todayStr} (휴장일)\n- 건너뛰기(SKIP) 정책이 적용되었습니다.`);
+                return;
+            } else if (holidayOption === 'NEXT_OPEN') {
+                console.log('[Scheduler] 🤖 휴장일 소급 실행(NEXT_OPEN) 정책에 따라 이월 플래그를 설정합니다.');
+                store.set('pending_self_learning_run', true);
+                this.telegram.sendMessage(`🤖 **[정기 자가학습 이월]**\n- 날짜: ${todayStr} (휴장일)\n- 다음 개장일 장마감 후 소급 실행 예정입니다.`);
+                return;
+            }
+        }
+
+        try {
+            this.telegram.sendMessage('🤖 **[정기 AI 자가학습 시작]**\n- 애널리스트 및 PM2 성과 회고와 오답노트 자동 업데이트를 시작합니다.');
+            
+            const { RetrospectiveAgent } = await import('./v2_agents/RetrospectiveAgent');
+            const retrospectiveAgent = new RetrospectiveAgent(this.kiwoom);
+            
+            console.log('[Scheduler] 자가학습 Step 1: 애널리스트 과거 추천 종목 채점...');
+            const evalCount = await retrospectiveAgent.evaluatePastPicks(); 
+            
+            console.log('[Scheduler] 자가학습 Step 2: 애널리스트 회고 및 오답노트(SKILL.md) 갱신...');
+            await retrospectiveAgent.runRetrospectiveLogic(); 
+
+            console.log('[Scheduler] 자가학습 Step 3: PM2 포트폴리오 매매 복기 및 마스터 가이드 갱신...');
+            const { PortfolioRetrospectiveAgent } = await import('./v2_agents/PortfolioRetrospectiveAgent');
+            await PortfolioRetrospectiveAgent.getInstance().run(); 
+
+            store.set('pending_self_learning_run', false);
+
+            this.telegram.sendMessage(`✅ **[정기 AI 자가학습 완료]**\n- 애널리스트 채점 완료: ${evalCount}건\n- PM2 마스터 가이드 및 서브 AI 지침서(SKILL.md)가 성공적으로 업데이트되었습니다.`);
+        } catch (err: any) {
+            console.error('[Scheduler] 정기 자가학습 오류:', err.message);
+            this.telegram.sendMessage(`🚨 **[정기 AI 자가학습 실패]**\n- 오류: ${err.message}`);
+        }
+    }
+
+    /**
+     * 주도주 AI 특정 트랙(Track A ~ E)의 자가학습 파이프라인 실행
+     */
+    public async runTrackSelfLearningPipeline(track: 'A' | 'B' | 'C' | 'D' | 'E', holidayOption: 'SKIP' | 'NEXT_OPEN' = 'NEXT_OPEN'): Promise<void> {
+        console.log(`[SchedulerService] 🤖 Track ${track} 정기 자가학습 파이프라인 가동...`);
+        const { getKstDate } = await import('../utils/DateUtils');
+        const todayStr = getKstDate();
+        
+        const today = new Date();
+        const dow = today.getDay();
+        const isWeekend = dow === 0 || dow === 6;
+        
+        let isMarketOpenDay = !isWeekend;
+        try {
+            const dbInstance = DatabaseService.getInstance();
+            const rawDb = (dbInstance as any).db;
+            const row = rawDb.prepare(`
+                SELECT COUNT(*) as cnt FROM market_ohlcv_history 
+                WHERE stock_code = '069500' AND date = ?
+            `).get(todayStr.replace(/-/g, ''));
+            
+            if (row && row.cnt === 0) {
+                isMarketOpenDay = false; 
+            }
+        } catch (e) {
+            console.warn('[Scheduler] 개장일 판단 DB 체크 오류:', e);
+        }
+
+        const pendingKey = `pending_track_${track.toLowerCase()}_learning`;
+
+        if (!isMarketOpenDay) {
+            console.log(`[Scheduler] 🤖 오늘은 휴장일입니다. Track ${track} 학습 유보 (날짜: ${todayStr})`);
+            if (holidayOption === 'SKIP') {
+                console.log(`[Scheduler] 🤖 SKIP 정책에 따라 Track ${track} 오늘 학습을 건너뜁니다.`);
+                this.telegram.sendMessage(`🤖 **[Track ${track} 자가학습 건너뜀]**\n- 날짜: ${todayStr} (휴장일)\n- SKIP 정책이 적용되었습니다.`);
+                return;
+            } else if (holidayOption === 'NEXT_OPEN') {
+                console.log(`[Scheduler] 🤖 NEXT_OPEN 정책에 따라 Track ${track} 이월 플래그를 설정합니다.`);
+                store.set(pendingKey, true);
+                this.telegram.sendMessage(`🤖 **[Track ${track} 자가학습 이월]**\n- 날짜: ${todayStr} (휴장일)\n- 다음 개장일 장마감 후 소급 실행 예정입니다.`);
+                return;
+            }
+        }
+
+        try {
+            this.telegram.sendMessage(`🤖 **[Track ${track} AI 자가학습 시작]**\n- 최근 매매 타점 성적 복기 및 지침서(track_${track.toLowerCase()}_phase2.md) 증분 학습을 시작합니다.`);
+            
+            const { TrackRetrospectiveAgent } = await import('./v2_agents/TrackRetrospectiveAgent');
+            const result = await TrackRetrospectiveAgent.getInstance().runRetrospective(track, 30); // 정기는 기본 30일 범위
+            
+            store.set(pendingKey, false);
+
+            if (result.skipped) {
+                this.telegram.sendMessage(`ℹ️ **[Track ${track} AI 자가학습 유보]**\n- 사유: ${result.reason}`);
+            } else if (result.success) {
+                this.telegram.sendMessage(`✅ **[Track ${track} AI 자가학습 완료]**\n- 주도주 지침서가 성공적으로 최적화 및 업데이트되었습니다.`);
+            } else {
+                throw new Error(result.error || '알 수 없는 오류');
+            }
+        } catch (err: any) {
+            console.error(`[Scheduler] Track ${track} 자가학습 오류:`, err.message);
+            this.telegram.sendMessage(`🚨 **[Track ${track} AI 자가학습 실패]**\n- 오류: ${err.message}`);
+        }
+    }
+
+    /**
+     * 주도주 AI 모든 트랙(Track A ~ E)의 자가학습 파이프라인 일괄 순차 실행
+     */
+    public async runAllTracksSelfLearningPipeline(holidayOption: 'SKIP' | 'NEXT_OPEN' = 'NEXT_OPEN'): Promise<void> {
+        console.log('[SchedulerService] 🤖 주도주 AI 모든 트랙 통합 정기 자가학습 파이프라인 가동...');
+        const { getKstDate } = await import('../utils/DateUtils');
+        const todayStr = getKstDate();
+        
+        const today = new Date();
+        const dow = today.getDay();
+        const isWeekend = dow === 0 || dow === 6;
+        
+        let isMarketOpenDay = !isWeekend;
+        try {
+            const dbInstance = DatabaseService.getInstance();
+            const rawDb = (dbInstance as any).db;
+            const row = rawDb.prepare(`
+                SELECT COUNT(*) as cnt FROM market_ohlcv_history 
+                WHERE stock_code = '069500' AND date = ?
+            `).get(todayStr.replace(/-/g, ''));
+            
+            if (row && row.cnt === 0) {
+                isMarketOpenDay = false; 
+            }
+        } catch (e) {
+            console.warn('[Scheduler] 개장일 판단 DB 체크 오류:', e);
+        }
+
+        if (!isMarketOpenDay) {
+            console.log(`[Scheduler] 🤖 오늘은 휴장일입니다. 주도주 AI 자가학습 유보 (날짜: ${todayStr})`);
+            if (holidayOption === 'SKIP') {
+                console.log('[Scheduler] 🤖 SKIP 정책에 따라 오늘 학습을 건너뜁니다.');
+                this.telegram.sendMessage(`🤖 **[주도주 자가학습 건너뜀]**\n- 날짜: ${todayStr} (휴장일)\n- SKIP 정책이 적용되었습니다.`);
+                return;
+            } else if (holidayOption === 'NEXT_OPEN') {
+                console.log('[Scheduler] 🤖 NEXT_OPEN 정책에 따라 이월 플래그를 설정합니다.');
+                store.set('pending_tracks_learning_run', true);
+                this.telegram.sendMessage(`🤖 **[주도주 자가학습 이월]**\n- 날짜: ${todayStr} (휴장일)\n- 다음 개장일 장마감 후 소급 실행 예정입니다.`);
+                return;
+            }
+        }
+
+        try {
+            this.telegram.sendMessage(`🤖 **[주도주 AI 통합 자가학습 시작]**\n- Track A ~ E 전체의 최근 매매 타점 성적 복기 및 지침서 증분 학습을 순차 실행합니다.`);
+            
+            const tracks: ('A' | 'B' | 'C' | 'D' | 'E')[] = ['A', 'B', 'C', 'D', 'E'];
+            const { TrackRetrospectiveAgent } = await import('./v2_agents/TrackRetrospectiveAgent');
+            
+            let successCount = 0;
+            let skippedCount = 0;
+            let failedCount = 0;
+
+            for (const track of tracks) {
+                try {
+                    const result = await TrackRetrospectiveAgent.getInstance().runRetrospective(track, 30);
+                    if (result.skipped) {
+                        skippedCount++;
+                    } else if (result.success) {
+                        successCount++;
+                    } else {
+                        failedCount++;
+                    }
+                } catch (err: any) {
+                    console.error(`[Scheduler] Track ${track} 자가학습 실패:`, err.message);
+                    failedCount++;
+                }
+            }
+
+            store.set('pending_tracks_learning_run', false);
+
+            this.telegram.sendMessage(
+                `✅ **[주도주 AI 통합 자가학습 완료]**\n` +
+                `- 대상: Track A ~ E (총 5개 트랙)\n` +
+                `- 결과: 성공 ${successCount}개, 유보(스킵) ${skippedCount}개, 실패 ${failedCount}개`
+            );
+        } catch (err: any) {
+            console.error('[Scheduler] 통합 자가학습 오류:', err.message);
+            this.telegram.sendMessage(`🚨 **[주도주 AI 통합 자가학습 실패]**\n- 오류: ${err.message}`);
+        }
     }
 }
 

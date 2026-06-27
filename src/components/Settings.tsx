@@ -55,8 +55,16 @@ export default function Settings() {
         buyEndTime: '15:00',
         phase1PassLimit: 10,
         portfolioLimits: {
-            buy:       { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
-            watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+            buy:       { THEME: 1, MOMENTUM: 2, PULLBACK: 1, REPORT: 1 },
+            watchlist: { THEME: 2, MOMENTUM: 3, PULLBACK: 2, REPORT: 3 }
+        },
+        selfLearningSettings: {
+            enabled: false,
+            interval: 'WEEKLY' as 'DAILY' | 'WEEKLY' | 'MONTHLY',
+            dayOfWeek: [5] as number[],
+            dayOfMonth: 1,
+            time: '16:00',
+            holidayOption: 'NEXT_OPEN' as 'SKIP' | 'NEXT_OPEN'
         }
     })
     const [isSavingTg, setIsSavingTg] = useState(false)
@@ -184,13 +192,21 @@ export default function Settings() {
                             const pl = savedAiSettings.portfolioLimits;
                             if (pl.buy && ('SWING' in pl.buy || 'VALUE' in pl.buy)) {
                                 return {
-                                    buy:       { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 },
-                                    watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }
+                                    buy:       { THEME: 1, MOMENTUM: 2, PULLBACK: 1, REPORT: 1 },
+                                    watchlist: { THEME: 2, MOMENTUM: 3, PULLBACK: 2, REPORT: 3 }
                                 };
                             }
                             return pl;
                         })()
-                        : { buy: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 }, watchlist: { THEME: 3, MOMENTUM: 3, PULLBACK: 2, REPORT: 2 } }
+                        : { buy: { THEME: 1, MOMENTUM: 2, PULLBACK: 1, REPORT: 1 }, watchlist: { THEME: 2, MOMENTUM: 3, PULLBACK: 2, REPORT: 3 } },
+                    selfLearningSettings: savedAiSettings.selfLearningSettings || {
+                        enabled: false,
+                        interval: 'WEEKLY',
+                        dayOfWeek: [5],
+                        dayOfMonth: 1,
+                        time: '16:00',
+                        holidayOption: 'NEXT_OPEN'
+                    }
                 })
             }
 
@@ -399,6 +415,24 @@ export default function Settings() {
         setIsSavingAi(true)
         setStatusAi('idle')
         setMessageAi('AI 설정 저장 중...')
+
+        // 장중 시간대 유효성 검사 (09:00 ~ 15:30)
+        const selfLearning = aiSettings.selfLearningSettings;
+        if (selfLearning && selfLearning.enabled) {
+            const time = selfLearning.time || '16:00';
+            const [hStr, mStr] = time.split(':');
+            const h = parseInt(hStr, 10) || 0;
+            const m = parseInt(mStr, 10) || 0;
+            const totalMinutes = h * 60 + m;
+
+            if (totalMinutes >= 540 && totalMinutes <= 930) {
+                setStatusAi('error')
+                setMessageAi('⚠️ 저장 불가: 장중 시간대(09:00 ~ 15:30)에는 자가학습을 수행할 수 없습니다.\n자동매매 안정성을 위해 장 마감 이후 시간으로 설정해 주세요.')
+                setIsSavingAi(false)
+                return
+            }
+        }
+
         try {
             await window.electronAPI.saveAiSettings(aiSettings)
             setStatusAi('success')
@@ -1515,7 +1549,187 @@ export default function Settings() {
                                                 </div>
                                             </div>
 
+                                            {/* AI 정기 자가학습 설정 */}
+                                            <div className="p-6 bg-indigo-500/5 border border-indigo-500/20 rounded-2xl space-y-6">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="space-y-1">
+                                                        <h4 className="text-sm font-bold text-indigo-600 flex items-center gap-2">
+                                                            <Bot size={16} />
+                                                            AI 정기 자가학습 & 오답노트 자동화
+                                                        </h4>
+                                                        <p className="text-[11px] text-muted-foreground">
+                                                            수집된 매매 성적을 정기적으로 복기하여 PM2 마스터 가이드와 서브 AI 지침(SKILL)을 자동 업데이트합니다.
+                                                        </p>
+                                                    </div>
+                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="sr-only peer"
+                                                            checked={aiSettings.selfLearningSettings?.enabled || false}
+                                                            onChange={(e) => {
+                                                                const checked = e.target.checked;
+                                                                setAiSettings(prev => ({
+                                                                    ...prev,
+                                                                    selfLearningSettings: {
+                                                                        ...(prev.selfLearningSettings || {
+                                                                            interval: 'WEEKLY',
+                                                                            dayOfWeek: [5],
+                                                                            dayOfMonth: 1,
+                                                                            time: '16:00',
+                                                                            holidayOption: 'NEXT_OPEN'
+                                                                        }),
+                                                                        enabled: checked
+                                                                    }
+                                                                }))
+                                                            }}
+                                                        />
+                                                        <div className="w-11 h-6 bg-muted rounded-full peer peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                                                    </label>
+                                                </div>
 
+                                                {(aiSettings.selfLearningSettings?.enabled) && (
+                                                    <div className="space-y-4 pt-4 border-t border-indigo-500/10 animate-in fade-in duration-200">
+                                                        {/* 1. 반복 주기 */}
+                                                        <div className="space-y-2">
+                                                            <label className="text-xs font-bold text-muted-foreground">자가학습 주기</label>
+                                                            <div className="grid grid-cols-3 gap-2">
+                                                                {(['DAILY', 'WEEKLY', 'MONTHLY'] as const).map(interval => (
+                                                                    <button
+                                                                        key={interval}
+                                                                        type="button"
+                                                                        onClick={() => setAiSettings(prev => ({
+                                                                            ...prev,
+                                                                            selfLearningSettings: {
+                                                                                ...prev.selfLearningSettings!,
+                                                                                interval
+                                                                            }
+                                                                        }))}
+                                                                        className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
+                                                                            aiSettings.selfLearningSettings?.interval === interval
+                                                                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                                                                : 'border-border bg-background hover:bg-muted/50 text-muted-foreground'
+                                                                        }`}
+                                                                    >
+                                                                        {interval === 'DAILY' && '매일 (장마감 후)'}
+                                                                        {interval === 'WEEKLY' && '매주 (지정 요일)'}
+                                                                        {interval === 'MONTHLY' && '매월 (지정 일자)'}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* 2. 주기에 따른 상세 스케줄 지정 */}
+                                                        {aiSettings.selfLearningSettings?.interval === 'WEEKLY' && (
+                                                            <div className="space-y-2">
+                                                                <label className="text-xs font-bold text-muted-foreground">실행 요일 (복수 선택 가능)</label>
+                                                                <div className="grid grid-cols-5 gap-2">
+                                                                    {[
+                                                                        { value: 1, label: '월' },
+                                                                        { value: 2, label: '화' },
+                                                                        { value: 3, label: '수' },
+                                                                        { value: 4, label: '목' },
+                                                                        { value: 5, label: '금' }
+                                                                    ].map(day => {
+                                                                        const isSelected = aiSettings.selfLearningSettings?.dayOfWeek?.includes(day.value) || false;
+                                                                        return (
+                                                                            <button
+                                                                                key={day.value}
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    setAiSettings(prev => {
+                                                                                        const currentDays = prev.selfLearningSettings?.dayOfWeek || [];
+                                                                                        const newDays = currentDays.includes(day.value)
+                                                                                            ? currentDays.filter(d => d !== day.value)
+                                                                                            : [...currentDays, day.value].sort();
+                                                                                        return {
+                                                                                            ...prev,
+                                                                                            selfLearningSettings: {
+                                                                                                ...prev.selfLearningSettings!,
+                                                                                                dayOfWeek: newDays.length > 0 ? newDays : [5] // 최소 하나 선택 강제
+                                                                                            }
+                                                                                        }
+                                                                                    })
+                                                                                }}
+                                                                                className={`py-1.5 px-2 text-xs font-medium rounded-md border transition-all ${
+                                                                                    isSelected
+                                                                                        ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 font-bold'
+                                                                                        : 'border-border bg-background hover:bg-muted text-muted-foreground'
+                                                                                }`}
+                                                                            >
+                                                                                {day.label}
+                                                                            </button>
+                                                                        )
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {aiSettings.selfLearningSettings?.interval === 'MONTHLY' && (
+                                                            <div className="space-y-2">
+                                                                <label className="text-xs font-bold text-muted-foreground">실행 일자 지정 (1 ~ 31일)</label>
+                                                                <div className="flex items-center gap-3">
+                                                                    <input
+                                                                        type="number"
+                                                                        min="1"
+                                                                        max="31"
+                                                                        value={aiSettings.selfLearningSettings?.dayOfMonth || 1}
+                                                                        onChange={(e) => {
+                                                                            const val = Math.max(1, Math.min(31, parseInt(e.target.value, 10) || 1));
+                                                                            setAiSettings(prev => ({
+                                                                                ...prev,
+                                                                                selfLearningSettings: {
+                                                                                    ...prev.selfLearningSettings!,
+                                                                                    dayOfMonth: val
+                                                                                }
+                                                                            }))
+                                                                        }}
+                                                                        className="flex h-10 w-24 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                    />
+                                                                    <span className="text-xs text-muted-foreground">일에 자가학습을 수행합니다.</span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* 3. 실행 시간 & 휴장일 예외 처리 */}
+                                                        <div className="grid grid-cols-2 gap-4">
+                                                            <div className="space-y-2">
+                                                                <label className="text-xs font-bold text-muted-foreground">실행 시간 설정</label>
+                                                                <input
+                                                                    type="time"
+                                                                    value={aiSettings.selfLearningSettings?.time || '16:00'}
+                                                                    onChange={(e) => setAiSettings(prev => ({
+                                                                        ...prev,
+                                                                        selfLearningSettings: {
+                                                                            ...prev.selfLearningSettings!,
+                                                                            time: e.target.value
+                                                                        }
+                                                                    }))}
+                                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                />
+                                                                <span className="text-[10px] text-muted-foreground/80 block mt-1">※ 15:30 이후 장외 시간대 지정을 권장합니다.</span>
+                                                            </div>
+
+                                                            <div className="space-y-2">
+                                                                <label className="text-xs font-bold text-muted-foreground">휴장일(주말/공휴일) 동작</label>
+                                                                <select
+                                                                    value={aiSettings.selfLearningSettings?.holidayOption || 'NEXT_OPEN'}
+                                                                    onChange={(e) => setAiSettings(prev => ({
+                                                                        ...prev,
+                                                                        selfLearningSettings: {
+                                                                            ...prev.selfLearningSettings!,
+                                                                            holidayOption: e.target.value as 'SKIP' | 'NEXT_OPEN'
+                                                                        }
+                                                                    }))}
+                                                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors font-medium"
+                                                                >
+                                                                    <option value="SKIP">해당 스케줄 건너뛰기 (SKIP)</option>
+                                                                    <option value="NEXT_OPEN">다음 개장일 장마감 후 소급 실행 (NEXT_OPEN)</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
 
                                         </div>
 

@@ -79,7 +79,36 @@ export class RetrospectiveAgent {
 
             try {
                 // 키움증권에서 해당 기간 동안의 일봉 데이터 수집 (최대 diffDays+5 개)
-                const chartData = await this.kiwoomSvc.getOhlcvDaily(pick.stock_code, diffDays + 5);
+                let chartData = null;
+                try {
+                    chartData = await this.kiwoomSvc.getOhlcvDaily(pick.stock_code, diffDays + 5);
+                } catch (e: any) {
+                    console.warn(`[RetrospectiveAgent] 키움 API 조회 실패 (${pick.stock_name}), 로컬 DB 캐시 조회로 전환합니다. error: ${e.message}`);
+                }
+
+                if (!chartData || chartData.length === 0) {
+                    const targetDateStr = pick.date.replace(/-/g, '');
+                    const rows = this.db.db.prepare(`
+                        SELECT date, open, high, low, close, volume 
+                        FROM market_ohlcv_history 
+                        WHERE stock_code = ? AND date >= ? 
+                        ORDER BY date DESC 
+                        LIMIT ?
+                    `).all(pick.stock_code, targetDateStr, diffDays + 5) as any[];
+
+                    if (rows && rows.length > 0) {
+                        chartData = rows.map(r => ({
+                            date: String(r.date),
+                            open: Number(r.open),
+                            high: Number(r.high),
+                            low: Number(r.low),
+                            close: Number(r.close),
+                            volume: Number(r.volume)
+                        }));
+                        console.log(`[RetrospectiveAgent] 💾 로컬 DB 캐시에서 일봉 ${chartData.length}건 로드 성공 (${pick.stock_name})`);
+                    }
+                }
+
                 if (!chartData || chartData.length === 0) continue;
 
                 // entry_date 이후의 봉만 필터링 (가장 최신 봉이 index 0)
@@ -220,12 +249,28 @@ description: ${agentType}의 독립적인 매매 지침 및 오답노트 (시스
 `;
         }
 
-        // 기존에 오답노트 최신판이 있으면 덮어쓰거나 누적
-        // 간단하게 하단에 계속 붙여나가되 최대 길이를 제한 (최근 3개만 유지 등)
         const dateStr = new Date().toISOString().substring(0, 10);
         const resolvedRules = newRules.replace('{날짜}', dateStr);
 
-        fileContent += `\n\n${resolvedRules}\n`;
+        // 오답노트 무한 누적 방지 트리밍 로직 (최대 5개 유지)
+        const delimiter = '### 🚨 [AI 자동 오답노트 & 회피 패턴]';
+        if (fileContent.includes(delimiter)) {
+            const parts = fileContent.split(delimiter);
+            const header = parts[0]; 
+            const existingNotes = parts.slice(1).map(p => p.trim());
+            
+            // 새로운 규칙을 추가
+            const cleanNewRule = resolvedRules.replace(delimiter, '').trim();
+            existingNotes.push(cleanNewRule);
+
+            // 최근 5개만 슬라이싱 (뒤에서부터 5개)
+            const keptNotes = existingNotes.slice(-5);
+            
+            fileContent = header.trim() + '\n\n' + keptNotes.map(n => delimiter + '\n' + n).join('\n\n') + '\n';
+        } else {
+            fileContent = fileContent.trim() + `\n\n${resolvedRules}\n`;
+        }
+
         fs.writeFileSync(filePath, fileContent, 'utf-8');
         
         console.log(`[RetrospectiveAgent] 💾 ${agentType}의 오답노트를 ${filePath} 에 영구 기록했습니다.`);

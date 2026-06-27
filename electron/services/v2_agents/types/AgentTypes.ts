@@ -99,3 +99,30 @@ export interface PipelineSlot {
     required: boolean
     cycles: AgentCycle[]
 }
+
+export interface DynamicCutoffConfig {
+    gemmaMinScore: number;    // 1차 Gemma 컷오프
+    geminiPassScore: number;  // 2차 Gemini 심사 합격선
+    description: string;
+}
+
+export function getDynamicCutoffConfig(riskScore: number): DynamicCutoffConfig {
+    if (riskScore <= 30) {
+        return { gemmaMinScore: 40, geminiPassScore: 60, description: '안정 장세 (기본 합격선)' };
+    } else if (riskScore <= 50) {
+        return { gemmaMinScore: 55, geminiPassScore: 70, description: '주의 장세 (합격선 상향)' };
+    } else if (riskScore <= 70) {
+        return { gemmaMinScore: 70, geminiPassScore: 80, description: '경계 장세 (합격선 대폭 상향)' };
+    } else {
+        return { gemmaMinScore: 85, geminiPassScore: 90, description: '위기 장세 (극단적 장벽 - 관망 유도)' };
+    }
+}
+
+export interface PipelineSelfLearningSettings {
+    enabled: boolean;
+    interval: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+    dayOfWeek?: number[];
+    dayOfMonth?: number;
+    time: string;
+    holidayOption: 'SKIP' | 'NEXT_OPEN';
+}

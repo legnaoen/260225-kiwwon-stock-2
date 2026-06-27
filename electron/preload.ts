@@ -488,6 +488,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     dropReportItem: (stockCode: string, exitReason: string) => ipcRenderer.invoke('report-tracker:drop-item', { stockCode, exitReason }),
     clearReportPortfolio: () => ipcRenderer.invoke('report-tracker:clear-portfolio'),
     refreshReportPrices: () => ipcRenderer.invoke('report-tracker:refresh-prices'),
+    runTrackSelfLearning: (track: 'A' | 'B' | 'C' | 'D' | 'E' | 'ALL', rangeDays: number) => ipcRenderer.invoke('ai:run-track-self-learning', { track, rangeDays }),
 })
 
 

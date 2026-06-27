@@ -117,6 +117,21 @@ export interface IElectronAPI {
         portfolioLimits?: {
             buy: { THEME: number, MOMENTUM: number, PULLBACK: number, REPORT: number },
             watchlist: { THEME: number, MOMENTUM: number, PULLBACK: number, REPORT: number }
+        },
+        selfLearningSettings?: {
+            enabled: boolean,
+            interval: 'DAILY' | 'WEEKLY' | 'MONTHLY',
+            dayOfWeek: number[],
+            dayOfMonth: number,
+            time: string,
+            holidayOption: 'SKIP' | 'NEXT_OPEN'
+        },
+        trackLearningSettings?: {
+            trackA: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' },
+            trackB: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' },
+            trackC: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' },
+            trackD: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' },
+            trackE: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' }
         }
     }) => Promise<{ success: boolean }>
     getAiSettings: () => Promise<{
@@ -133,6 +148,21 @@ export interface IElectronAPI {
         portfolioLimits?: {
             buy: { THEME: number, MOMENTUM: number, PULLBACK: number, REPORT: number },
             watchlist: { THEME: number, MOMENTUM: number, PULLBACK: number, REPORT: number }
+        },
+        selfLearningSettings?: {
+            enabled: boolean,
+            interval: 'DAILY' | 'WEEKLY' | 'MONTHLY',
+            dayOfWeek: number[],
+            dayOfMonth: number,
+            time: string,
+            holidayOption: 'SKIP' | 'NEXT_OPEN'
+        },
+        trackLearningSettings?: {
+            trackA: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' },
+            trackB: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' },
+            trackC: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' },
+            trackD: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' },
+            trackE: { enabled: boolean, interval: 'DAILY' | 'WEEKLY' | 'MONTHLY', dayOfWeek: number[], dayOfMonth: number, time: string, holidayOption: 'SKIP' | 'NEXT_OPEN' }
         }
     } | null>
     testAiConnection: (settings: { geminiKey: string, modelName: string, deepModelName?: string, lightweightCloudModel?: string }) => Promise<{ success: boolean, response?: string, error?: string }>

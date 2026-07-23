@@ -35,7 +35,7 @@ import { getKstDate } from '../../utils/DateUtils';
 import { getDynamicCutoffConfig } from './types/AgentTypes';
 
 // ── 상수 ───────────────────────────────────────────────────────
-const BUY_CATEGORIES = ['PULLBACK_REBOUND', 'PULLBACK_DIP'];
+const BUY_CATEGORIES = ['PULLBACK_REBOUND', 'PULLBACK_DIP']; // 눌림 반등, 눌림목 모두 운용
 const MAX_PICKS = 5; // 선발 상한 캡
 const TARGET_DAYS = 10;
 const TARGET_RETURN_PCT = 15.0;

@@ -1004,11 +1004,12 @@ ipcMain.handle('v2:get-cross-period-profile', async (_event, { topN, peakoutSett
     }
 })
 
-// ═══ Track B: 모의매매 데이터 조회 ═══
-ipcMain.handle('v2:get-sim-trade-picks', async () => {
+// ═══ Track B: 모의매매 데이터 조회 (최대 1년치/3000건까지 시뮬레이션 지원) ═══
+ipcMain.handle('v2:get-sim-trade-picks', async (_event, options?: { limit?: number }) => {
     try {
         const { DatabaseService } = await import('./services/DatabaseService');
         const db = DatabaseService.getInstance().getDb();
+        const limitVal = (options?.limit && options.limit > 0) ? options.limit : 3000;
         
         // --- 1. 누락된 진입가(PENDING) 자동 보정 로직 (Retroactive Fix) ---
         // 어제 OHLCV 누락으로 진입을 못 한 항목 중, 오늘 OHLCV가 업데이트된 경우 해당일 종가로 자동 진입 처리
@@ -1100,8 +1101,9 @@ ipcMain.handle('v2:get-sim-trade-picks', async () => {
                     ELSE 7
                 END ASC,
                 pick_rank ASC
-            LIMIT 500
-        `).all();
+            LIMIT ?
+        `).all(limitVal);
+        return { picks };
         return { picks };
     } catch (error: any) {
         console.error('[SimTrade] get-sim-trade-picks error:', error);

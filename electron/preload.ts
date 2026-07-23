@@ -268,7 +268,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     searchLiveNews: (keyword: string) => ipcRenderer.invoke('naverflow:search-live-news', keyword),
     getMarketLeaders: (days: number, topN: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-market-leaders', { days, topN, peakoutSettings }),
     getCrossPeriodProfile: (topN?: number, peakoutSettings?: any) => ipcRenderer.invoke('v2:get-cross-period-profile', { topN, peakoutSettings }),
-    getSimTradePicks: () => ipcRenderer.invoke('v2:get-sim-trade-picks'),
+    getSimTradePicks: (options?: any) => ipcRenderer.invoke('v2:get-sim-trade-picks', options),
     getPerformanceStats: (picks: any[], targetReturn: number) => ipcRenderer.invoke('v2:get-performance-stats', { picks, targetReturn }),
     forceRefreshSimTradePrices: () => ipcRenderer.invoke('v2:force-refresh-sim-trade-prices'),
     runOhlcvCollection: () => ipcRenderer.invoke('v2:run-ohlcv-collection'),

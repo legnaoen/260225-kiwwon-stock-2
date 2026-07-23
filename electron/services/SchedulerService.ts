@@ -571,34 +571,32 @@ export class SchedulerService {
                     const elapsed = Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60)
                     this.telegram.sendMessage(`✅ [${fmt(endTime)}] OHLCV 전 종목 수집 완료\n소요 시간: 약 ${elapsed}분\n→ AI 모의매매 매수 선정 시작...`)
 
-                    // ─── 수집 완료 직후 TrackA, TrackB, TrackC, TrackD, TrackE 모의매매 AI 선정 연계 실행 ───
-                    console.log('[Scheduler] 🎯 수집 완료 → Track A, B, C, D, E 모의매매 AI 매수 선정 연계 실행...')
+                    // ─── 수집 완료 직후 활성 전략(Track A, B, C, E) 모의매매 AI 선정 연계 실행 (Track D 당일급등 제외) ───
+                    console.log('[Scheduler] 🎯 수집 완료 → Track A, B, C, E 모의매매 AI 매수 선정 연계 실행...')
                     const { TrackEBuyAgent } = await import('./v2_agents/TrackEBuyAgent')
-                    const { TrackDBuyAgent } = await import('./v2_agents/TrackDBuyAgent')
                     const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
                     const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
                     const { TrackABuyAgent } = await import('./v2_agents/TrackABuyAgent')
                     const pickResultE = await TrackEBuyAgent.getInstance().run()
-                    const pickResultD = await TrackDBuyAgent.getInstance().run()
                     const pickResultC = await TrackCBuyAgent.getInstance().run()
                     const pickResultB = await TrackBBuyAgent.getInstance().run()
                     const pickResultA = await TrackABuyAgent.getInstance().run()
 
                     let trackAMsg = pickResultA.success 
-                        ? `Track A (대장주): 매수 후보 ${pickResultA.saved}개 저장, 제외 ${pickResultA.skipped}개\n`
+                        ? `Track A (진성대장): 매수 후보 ${pickResultA.saved}개 저장, 제외 ${pickResultA.skipped}개\n`
                         : `Track A 오류: ${pickResultA.error ?? '후보 없음'}\n`
                     let trackBMsg = pickResultB.success 
-                        ? `Track B (신흥주): 매수 후보 ${pickResultB.saved}개 저장, 제외 ${pickResultB.skipped}개\n`
+                        ? `Track B (신흥급부상): 매수 후보 ${pickResultB.saved}개 저장, 제외 ${pickResultB.skipped}개\n`
                         : `Track B 오류: ${pickResultB.error ?? '후보 없음'}\n`
                     let trackCMsg = pickResultC.success 
-                        ? `Track C (눌림목): 매수 후보 ${pickResultC.saved}개 저장, 제외 ${pickResultC.skipped}개\n`
+                        ? `Track C (눌림/반등): 매수 후보 ${pickResultC.saved}개 저장, 제외 ${pickResultC.skipped}개\n`
                         : `Track C 오류: ${pickResultC.error ?? '후보 없음'}\n`
-                    let trackDMsg = pickResultD.success 
-                        ? `Track D (당일급등): 매수 후보 ${pickResultD.saved}개 저장, 제외 ${pickResultD.skipped}개\n`
-                        : `Track D 오류: ${pickResultD.error ?? '후보 없음'}\n`
                     let trackEMsg = pickResultE.success 
                         ? `Track E (단기눌림): 매수 후보 ${pickResultE.saved}개 저장, 제외 ${pickResultE.skipped}개`
                         : `Track E 오류: ${pickResultE.error ?? '후보 없음'}`
+
+                    const telegramReport = `📊 [AI 모의매매 매수 선정 완료]\n${trackAMsg}${trackBMsg}${trackCMsg}${trackEMsg}`
+                    this.telegram.sendMessage(telegramReport)
 
                     // ─────────────────────────────────────────────────────────────────
                     // 🔥 [실전 매매 연동] 모의매매 선정 완료 직후

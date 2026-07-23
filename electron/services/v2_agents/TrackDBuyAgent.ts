@@ -109,6 +109,10 @@ export class TrackDBuyAgent {
     // PUBLIC: 메인 실행 진입점 (4단계 파이프라인)
     // ─────────────────────────────────────────────────────────
     public async run(pickDate?: string): Promise<{ success: boolean; saved: number; skipped: number; error?: string }> {
+        // ── [전략 운용 중단] ─────────────────────────────────────
+        console.log('[TrackDBuyAgent] ⚠️ 전략 운용이 일시 중지 상태입니다. (신규 종목 선정 안 함)');
+        return { success: false, saved: 0, skipped: 0, error: 'Strategy paused (운영 중지됨)' };
+
         if (this.isRunning) {
             console.log('[TrackDBuyAgent] 이미 실행 중. 중복 실행 방지.');
             return { success: false, saved: 0, skipped: 0, error: 'Already running' };

@@ -151,7 +151,7 @@ export const SimTradeTab: React.FC = () => {
     const fetchPicks = async () => {
         setLoading(true)
         try {
-            const data = await (window as any).electronAPI.getSimTradePicks()
+            const data = await (window as any).electronAPI.getSimTradePicks({ limit: 3000 })
             if (data?.picks) {
                 // ── Source-level dedup ──
                 // UNION ALL SQL로 같은 종목이 여러 Track 테이블에 중복 저장될 수 있음.

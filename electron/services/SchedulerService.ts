@@ -571,32 +571,43 @@ export class SchedulerService {
                     const elapsed = Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60)
                     this.telegram.sendMessage(`✅ [${fmt(endTime)}] OHLCV 전 종목 수집 완료\n소요 시간: 약 ${elapsed}분\n→ AI 모의매매 매수 선정 시작...`)
 
-                    // ─── 수집 완료 직후 활성 전략(Track A, B, C, E) 모의매매 AI 선정 연계 실행 (Track D 당일급등 제외) ───
-                    console.log('[Scheduler] 🎯 수집 완료 → Track A, B, C, E 모의매매 AI 매수 선정 연계 실행...')
-                    const { TrackEBuyAgent } = await import('./v2_agents/TrackEBuyAgent')
-                    const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
-                    const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
-                    const { TrackABuyAgent } = await import('./v2_agents/TrackABuyAgent')
-                    const pickResultE = await TrackEBuyAgent.getInstance().run()
-                    const pickResultC = await TrackCBuyAgent.getInstance().run()
-                    const pickResultB = await TrackBBuyAgent.getInstance().run()
-                    const pickResultA = await TrackABuyAgent.getInstance().run()
+                    // ─── 수집 완료 직후 모의매매 AI 선정 연계 실행 (동적 레지스트리 루프 방식) ───
+                    console.log('[Scheduler] 🎯 수집 완료 → 모의매매 AI 매수 선정 연계 실행...')
 
-                    let trackAMsg = pickResultA.success 
-                        ? `Track A (진성대장): 매수 후보 ${pickResultA.saved}개 저장, 제외 ${pickResultA.skipped}개\n`
-                        : `Track A 오류: ${pickResultA.error ?? '후보 없음'}\n`
-                    let trackBMsg = pickResultB.success 
-                        ? `Track B (신흥급부상): 매수 후보 ${pickResultB.saved}개 저장, 제외 ${pickResultB.skipped}개\n`
-                        : `Track B 오류: ${pickResultB.error ?? '후보 없음'}\n`
-                    let trackCMsg = pickResultC.success 
-                        ? `Track C (눌림/반등): 매수 후보 ${pickResultC.saved}개 저장, 제외 ${pickResultC.skipped}개\n`
-                        : `Track C 오류: ${pickResultC.error ?? '후보 없음'}\n`
-                    let trackEMsg = pickResultE.success 
-                        ? `Track E (단기눌림): 매수 후보 ${pickResultE.saved}개 저장, 제외 ${pickResultE.skipped}개`
-                        : `Track E 오류: ${pickResultE.error ?? '후보 없음'}`
+                    const trackPipelines = [
+                        { id: 'A', name: '진성대장',   getAgent: async () => (await import('./v2_agents/TrackABuyAgent')).TrackABuyAgent.getInstance() },
+                        { id: 'B', name: '신흥급부상', getAgent: async () => (await import('./v2_agents/TrackBBuyAgent')).TrackBBuyAgent.getInstance() },
+                        { id: 'C', name: '눌림/반등',  getAgent: async () => (await import('./v2_agents/TrackCBuyAgent')).TrackCBuyAgent.getInstance() },
+                        { id: 'D', name: '당일급등',   getAgent: async () => (await import('./v2_agents/TrackDBuyAgent')).TrackDBuyAgent.getInstance() },
+                        { id: 'E', name: '단기눌림',   getAgent: async () => (await import('./v2_agents/TrackEBuyAgent')).TrackEBuyAgent.getInstance() },
+                    ];
 
-                    const telegramReport = `📊 [AI 모의매매 매수 선정 완료]\n${trackAMsg}${trackBMsg}${trackCMsg}${trackEMsg}`
-                    this.telegram.sendMessage(telegramReport)
+                    const reportLines: string[] = [];
+
+                    for (const tp of trackPipelines) {
+                        try {
+                            const agent = await tp.getAgent();
+                            const result = await agent.run();
+                            
+                            // 전략이 일시 정지(Pause) 상태인 경우 리포트에서 자동 스킵
+                            if (result.error && (result.error.includes('paused') || result.error.includes('중지'))) {
+                                continue;
+                            }
+                            
+                            if (result.success) {
+                                reportLines.push(`Track ${tp.id} (${tp.name}): 매수 후보 ${result.saved}개 저장, 제외 ${result.skipped}개`);
+                            } else {
+                                reportLines.push(`Track ${tp.id} (${tp.name}) 오류: ${result.error ?? '후보 없음'}`);
+                            }
+                        } catch (err: any) {
+                            console.error(`[Scheduler] Track ${tp.id} 실행 중 오류:`, err.message);
+                            reportLines.push(`Track ${tp.id} (${tp.name}) 오류: ${err.message}`);
+                        }
+                    }
+
+                    const trackReportText = reportLines.join('\n');
+                    const telegramReport = `📊 [AI 모의매매 매수 선정 완료]\n${trackReportText}`;
+                    this.telegram.sendMessage(telegramReport);
 
                     // ─────────────────────────────────────────────────────────────────
                     // 🔥 [실전 매매 연동] 모의매매 선정 완료 직후
@@ -714,7 +725,7 @@ export class SchedulerService {
                             }
 
                             if (hasLiveTradeAction) {
-                                this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정${totalLiveTradeLog}`)
+                                this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackReportText}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정${totalLiveTradeLog}`)
                                 return; // 실전매매 연동 시 텔레그램 중복 발송 방지
                             }
                         }
@@ -723,7 +734,7 @@ export class SchedulerService {
                         this.telegram.sendMessage(`⚠️ [실전 매매 연동 오류]\n모의매매 선정은 완료되었으나 실전 매수 연동 중 오류가 발생했습니다.\n오류: ${liveTradeConnErr.message}`)
                     }
 
-                    this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정`)
+                    this.telegram.sendMessage(`🎯 [${fmt(new Date())}] 모의매매 AI 선정 완료\n${trackReportText}\n→ 15:32 동시호가 확정 종가로 진입가 최종 보정 예정`)
                 } catch (e: any) {
                     this.ohlcvCollectionStatus = 'FAILED';
                     console.error('[Scheduler] 데이터 수집 / 모의매매 선정 오류:', e.message)
@@ -1508,8 +1519,8 @@ export class SchedulerService {
             const rawDb = (dbInstance as any).db;
             const row = rawDb.prepare(`
                 SELECT COUNT(*) as cnt FROM market_ohlcv_history 
-                WHERE stock_code = '069500' AND date = ?
-            `).get(todayStr.replace(/-/g, ''));
+                WHERE stock_code = '069500' AND (date = ? OR date = ?)
+            `).get(todayStr, todayStr.replace(/-/g, ''));
             
             if (row && row.cnt === 0) {
                 isMarketOpenDay = false; 
@@ -1575,8 +1586,8 @@ export class SchedulerService {
             const rawDb = (dbInstance as any).db;
             const row = rawDb.prepare(`
                 SELECT COUNT(*) as cnt FROM market_ohlcv_history 
-                WHERE stock_code = '069500' AND date = ?
-            `).get(todayStr.replace(/-/g, ''));
+                WHERE stock_code = '069500' AND (date = ? OR date = ?)
+            `).get(todayStr, todayStr.replace(/-/g, ''));
             
             if (row && row.cnt === 0) {
                 isMarketOpenDay = false; 
@@ -1640,8 +1651,8 @@ export class SchedulerService {
             const rawDb = (dbInstance as any).db;
             const row = rawDb.prepare(`
                 SELECT COUNT(*) as cnt FROM market_ohlcv_history 
-                WHERE stock_code = '069500' AND date = ?
-            `).get(todayStr.replace(/-/g, ''));
+                WHERE stock_code = '069500' AND (date = ? OR date = ?)
+            `).get(todayStr, todayStr.replace(/-/g, ''));
             
             if (row && row.cnt === 0) {
                 isMarketOpenDay = false; 

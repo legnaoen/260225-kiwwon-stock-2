@@ -25,7 +25,7 @@ export class AiService {
     public async askGemini(prompt: string, systemInstruction?: string, customKey?: string, customModel?: string): Promise<string> {
         const settings = this.getSettings();
         const key = customKey || settings?.geminiKey;
-        const model = customModel || settings?.modelName || 'gemini-2.5-flash';
+        const model = customModel || settings?.modelName || 'gemini-3.5-flash-lite';
 
         if (!key) {
             throw new Error('Gemini API 키가 설정되지 않았습니다. 설정 메뉴에서 키를 입력해주세요.');
@@ -86,7 +86,7 @@ export class AiService {
                                      errMsg.includes('invalid model') ||
                                      errMsg.includes('models/');
 
-            const fallbackModel = 'gemini-3.5-flash';
+            const fallbackModel = 'gemini-3.5-flash-lite';
 
             if (isModelDeprecated && model !== fallbackModel) {
                 console.warn(`[AiService] ⚠️ Model "${model}" is deprecated or unavailable. Attempting graceful fallback to "${fallbackModel}"...`);

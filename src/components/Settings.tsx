@@ -45,11 +45,11 @@ export default function Settings() {
     })
     const [aiSettings, setAiSettings] = useState({
         geminiKey: '',
-        modelName: 'gemini-3.5-flash',
-        deepModelName: 'gemini-3.5-flash',
+        modelName: 'gemini-3.5-flash-lite',
+        deepModelName: 'gemini-3.5-flash-lite',
         deepModelAgents: [] as string[],
         lightweightCloudAgents: [] as string[],
-        lightweightCloudModel: 'gemini-3.5-flash',
+        lightweightCloudModel: 'gemini-3.5-flash-lite',
         virtualInitialBalance: 1000000,
         buyStartTime: '09:10',
         buyEndTime: '15:00',
@@ -171,17 +171,17 @@ export default function Settings() {
 
             const savedAiSettings = await window.electronAPI.getAiSettings()
             if (savedAiSettings) {
-                const validModels = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+                const validModels = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
                 const sanitizeModel = (model: string | undefined, fallback: string) => 
                     (model && validModels.includes(model)) ? model : fallback;
 
                 setAiSettings({
                     geminiKey: savedAiSettings.geminiKey || '',
-                    modelName: sanitizeModel(savedAiSettings.modelName, 'gemini-3.5-flash'),
-                    deepModelName: sanitizeModel(savedAiSettings.deepModelName, 'gemini-3.5-flash'),
+                    modelName: sanitizeModel(savedAiSettings.modelName, 'gemini-3.5-flash-lite'),
+                    deepModelName: sanitizeModel(savedAiSettings.deepModelName, 'gemini-3.5-flash-lite'),
                     deepModelAgents: savedAiSettings.deepModelAgents || [],
                     lightweightCloudAgents: savedAiSettings.lightweightCloudAgents || [],
-                    lightweightCloudModel: sanitizeModel(savedAiSettings.lightweightCloudModel, 'gemini-3.5-flash'),
+                    lightweightCloudModel: sanitizeModel(savedAiSettings.lightweightCloudModel, 'gemini-3.5-flash-lite'),
                     virtualInitialBalance: savedAiSettings.virtualInitialBalance ?? 1000000,
                     buyStartTime: savedAiSettings.buyStartTime || '09:10',
                     buyEndTime: savedAiSettings.buyEndTime || '15:00',
@@ -1320,10 +1320,12 @@ export default function Settings() {
                                                         onChange={(e) => setAiSettings({ ...aiSettings, modelName: e.target.value })}
                                                         className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors font-medium"
                                                     >
-                                                        <optgroup label="Gemini 3 / 3.5 최신 라인업 (GA / Preview)">
-                                                            <option value="gemini-3.5-flash">Gemini 3.5 Flash (에이전트 특화 및 초고속 - 권장)</option>
-                                                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (초경량 초고속 - GA)</option>
-                                                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 및 에이전트 특화 - Preview)</option>
+                                                        <optgroup label="Gemini 3 / 3.5 / 3.6 최신 라인업 (GA / Preview)">
+                                                            <option value="gemini-3.6-flash">Gemini 3.6 Flash (최신 에이전트 & 멀티모달 - 최상위 성능)</option>
+                                                            <option value="gemini-3.5-flash">Gemini 3.5 Flash (에이전트 특화 및 고지능)</option>
+                                                            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (초고속/고처리량 - 기본 권장)</option>
+                                                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (초경량 가성비 - GA)</option>
+                                                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 - Preview)</option>
                                                         </optgroup>
                                                         <optgroup label="Gemini 2.5 안정화 버전 (GA)">
                                                             <option value="gemini-2.5-pro">Gemini 2.5 Pro (안정적 추천)</option>
@@ -1341,10 +1343,12 @@ export default function Settings() {
                                                         onChange={(e) => setAiSettings({ ...aiSettings, deepModelName: e.target.value })}
                                                         className="flex h-10 w-full rounded-md border border-primary/50 bg-primary/5 px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 transition-colors font-medium"
                                                     >
-                                                        <optgroup label="Gemini 3 / 3.5 최신 라인업 (GA / Preview)">
-                                                            <option value="gemini-3.5-flash">Gemini 3.5 Flash (에이전트 특화 및 초고속 - 권장)</option>
-                                                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (초경량 초고속 - GA)</option>
-                                                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 및 에이전트 특화 - Preview)</option>
+                                                        <optgroup label="Gemini 3 / 3.5 / 3.6 최신 라인업 (GA / Preview)">
+                                                            <option value="gemini-3.6-flash">Gemini 3.6 Flash (최신 에이전트 & 멀티모달 - 최상위 성능)</option>
+                                                            <option value="gemini-3.5-flash">Gemini 3.5 Flash (에이전트 특화 및 고지능)</option>
+                                                            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (초고속/고처리량 - 기본 권장)</option>
+                                                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (초경량 가성비 - GA)</option>
+                                                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 - Preview)</option>
                                                         </optgroup>
                                                         <optgroup label="Gemini 2.5 안정화 버전 (GA)">
                                                             <option value="gemini-2.5-pro">Gemini 2.5 Pro (안정적 추천)</option>
@@ -1447,14 +1451,16 @@ export default function Settings() {
                                                 <div className="flex items-center gap-3 bg-teal-500/10 p-3 rounded-lg border border-teal-500/20">
                                                     <label className="text-xs font-bold text-teal-800 shrink-0">적용할 클라우드 모델 :</label>
                                                     <select
-                                                        value={(aiSettings as any).lightweightCloudModel || 'gemini-3.1-flash-lite'}
+                                                        value={(aiSettings as any).lightweightCloudModel || 'gemini-3.5-flash-lite'}
                                                         onChange={(e) => setAiSettings({ ...aiSettings, lightweightCloudModel: e.target.value })}
                                                         className="flex h-8 w-full max-w-[280px] rounded-md border border-teal-500/30 bg-background px-3 py-1 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 transition-colors font-medium"
                                                     >
-                                                        <optgroup label="Gemini 3 / 3.5 최신 라인업 (GA / Preview)">
-                                                            <option value="gemini-3.5-flash">Gemini 3.5 Flash (에이전트 특화 및 초고속 - 권장)</option>
-                                                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (초경량 초고속 - GA)</option>
-                                                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 및 에이전트 특화 - Preview)</option>
+                                                        <optgroup label="Gemini 3 / 3.5 / 3.6 최신 라인업 (GA / Preview)">
+                                                            <option value="gemini-3.6-flash">Gemini 3.6 Flash (최신 에이전트 & 멀티모달 - 최상위 성능)</option>
+                                                            <option value="gemini-3.5-flash">Gemini 3.5 Flash (에이전트 특화 및 고지능)</option>
+                                                            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (초고속/고처리량 - 기본 권장)</option>
+                                                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (초경량 가성비 - GA)</option>
+                                                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (고급 지능 - Preview)</option>
                                                         </optgroup>
                                                         <optgroup label="Gemini 2.5 안정화 버전 (GA)">
                                                             <option value="gemini-2.5-pro">Gemini 2.5 Pro (안정적 추천)</option>

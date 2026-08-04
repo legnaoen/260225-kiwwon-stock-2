@@ -117,12 +117,12 @@ export class AiExecutionQueue {
                     if (isBypass) {
                         if (jobTarget === 'local') {
                             isCloudBypass = true;
-                            console.log(`[AiQueue] ☁️ 로컬 크론 클라우드 우회됨: ${params.agentName} -> ${aiSettings.lightweightCloudModel || 'gemini-1.5-flash'}`);
+                            console.log(`[AiQueue] ☁️ 로컬 크론 클라우드 우회됨: ${params.agentName} -> ${aiSettings.lightweightCloudModel || 'gemini-3.5-flash-lite'}`);
                         } else {
-                            console.log(`[AiQueue] ⚡ 경량 모델(우회 설정) 적용됨: ${params.agentName} -> ${aiSettings.lightweightCloudModel || 'gemini-1.5-flash'}`);
+                            console.log(`[AiQueue] ⚡ 경량 모델(우회 설정) 적용됨: ${params.agentName} -> ${aiSettings.lightweightCloudModel || 'gemini-3.5-flash-lite'}`);
                         }
                         jobTarget = 'gemini'; // 무조건 클라우드로 타겟 설정
-                        finalCustomModel = aiSettings.lightweightCloudModel || 'gemini-1.5-flash';
+                        finalCustomModel = aiSettings.lightweightCloudModel || 'gemini-3.5-flash-lite';
                     }
                 }
 

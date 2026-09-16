@@ -1,0 +1,519 @@
+{
+  "ai_strategies": [
+    {
+      "id": "d90d7fd8-d288-4ab1-a172-ad5c5db4bef5",
+      "version": "v1.1.0305",
+      "name": "Momentum Alpha [v1.1.0305]",
+      "created_at": "2026-03-05T09:00:57.609Z",
+      "reasonToPropose": "오늘 매매 데이터를 분석한 결과, 승률 33.3%로 진입 시점의 변동성 대응이 미흡한 것으로 판단됩니다. 오후장 역추세 매매에서 손실이 누적되고 있으므로, **09:00~10:00 주도주 전략 외의 진입은 엄격히 제한하고, 손절 기준을 기존 대비 -0.5%p 하향 조정하여 리스크를 관리하십시오.** 또한, 익절 구간에서는 수익 극대화를 위해 분할 매도 로직을 적용하여 실현 손익의 안정성을 높일 것을 권장합니다.",
+      "is_active": 1,
+      "win_rate": 33.3,
+      "avg_hold_time": "15m",
+      "target_profit": 3.0,
+      "stop_loss": -2.0,
+      "min_ai_score": 60,
+      "max_positions": 2,
+      "scoring_weights": null,
+      "master_prompt": null
+    },
+    {
+      "id": "factory-v1-uuid",
+      "version": "v1",
+      "name": "Factory Default (v1)",
+      "created_at": "2026-02-24T00:00:00Z",
+      "reasonToPropose": "",
+      "is_active": 0,
+      "win_rate": 0.0,
+      "avg_hold_time": "0m",
+      "target_profit": 3.0,
+      "stop_loss": -2.0,
+      "min_ai_score": 60,
+      "max_positions": 2,
+      "scoring_weights": "{\"vwap\":30,\"velocity\":25,\"trend\":20,\"gap\":10,\"leader\":15}",
+      "master_prompt": "당신은 대한민국 코스피/코스닥 시장의 실시간 단타 및 스캘핑 전문가입니다. 아래 제공된 지표와 최근 20일 일봉 및 15분 분봉 데이터를 분석하여 '강력한 수급이 동반된 눌림목' 자리인지 판단하세요.\n\n[분석 지침]\n1. 거래대금이 상위권인 '시장 주도주' 여부와 VWAP(당일평균단가) 지지 여부를 최우선으로 분석하십시오.\n2. [최근 20일 일봉] 데이터를 통해 오늘의 위치가 주요 저항선을 돌파하는 자리인지, 혹은 매물대 상단인지 파악하십시오.\n3. 매수 승인(BUY) 시, 일봉 맥락을 고려하여 3% 이상의 높은 수익이 가능한 구간이라면 그에 맞는 target_price(익절가)를, 단기 고점이라면 타이트한 stop_price(손절가)를 반드시 구체적인 숫자로 제안하십시오.\n4. 다음 형식을 지켜 100% JSON으로 응답해야 합니다."
+    }
+  ],
+  "ai_strategy_history": [
+    {
+      "strategy_id": "d90d7fd8-d288-4ab1-a172-ad5c5db4bef5",
+      "date": "2026-03-05",
+      "daily_return": 0.15
+    },
+    {
+      "strategy_id": "d90d7fd8-d288-4ab1-a172-ad5c5db4bef5",
+      "date": "2026-03-04",
+      "daily_return": 2.1
+    },
+    {
+      "strategy_id": "d90d7fd8-d288-4ab1-a172-ad5c5db4bef5",
+      "date": "2026-03-03",
+      "daily_return": -0.5
+    },
+    {
+      "strategy_id": "d90d7fd8-d288-4ab1-a172-ad5c5db4bef5",
+      "date": "2026-03-02",
+      "daily_return": 1.2
+    }
+  ],
+  "skills_file_history": [
+    {
+      "id": 16,
+      "file_name": "prediction_track_record.md",
+      "version": 14,
+      "diff_summary": "AI 학습 교훈 추가: 오전 예측인 '지정학적 리스크에 따른 에너지·해운 강세'는 적중했으나, 티엠씨의 실적 기반 급등이 예상보다 강력하게 시장을 주도함. 한텍과 같은...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-23",
+      "changed_at": "2026-03-23T06:56:53.234Z"
+    },
+    {
+      "id": 15,
+      "file_name": "prediction_track_record.md",
+      "version": 13,
+      "diff_summary": "AI 학습 교훈 추가: 오전 예측인 '지정학적 리스크에 따른 에너지·해운 강세'는 적중했으나, 티엠씨의 실적 기반 급등이 예상보다 강력하게 시장을 주도함. 한텍과 같은...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-23",
+      "changed_at": "2026-03-23T06:56:47.512Z"
+    },
+    {
+      "id": 14,
+      "file_name": "prediction_track_record.md",
+      "version": 12,
+      "diff_summary": "AI 학습 교훈 추가: 신재생에너지 섹터가 에너지 안보 이슈를 타고 주도주로 부상할 것이라는 분석은 적중했으나, 메지온과 같은 재무 리스크 종목의 변동성이 예상보다 거...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-19",
+      "changed_at": "2026-03-19T12:36:18.647Z"
+    },
+    {
+      "id": 13,
+      "file_name": "prediction_track_record.md",
+      "version": 11,
+      "diff_summary": "AI 학습 교훈 추가: 신재생에너지 섹터가 지정학적 리스크의 최대 수혜처로 부상할 것이라는 점은 적중했으나, 메지온과 같은 재무 리스크 종목의 변동성이 예상보다 거셌음...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-19",
+      "changed_at": "2026-03-19T11:42:16.800Z"
+    },
+    {
+      "id": 12,
+      "file_name": "prediction_track_record.md",
+      "version": 10,
+      "diff_summary": "AI 학습 교훈 추가: 데이터센터 전력난과 방산 테마의 확산은 예상 범위 내였으나, 신재생에너지 섹터(SK이터닉스 등)가 에너지 안보 이슈를 타고 시장 주도주로 급부상...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-19",
+      "changed_at": "2026-03-19T11:42:10.538Z"
+    },
+    {
+      "id": 11,
+      "file_name": "prediction_track_record.md",
+      "version": 9,
+      "diff_summary": "AI 학습 교훈 추가: 데이터센터 전력난과 AI 반도체 밸류체인의 동반 강세는 예측대로 적중했으나, 건설 섹터(대우건설)의 정책 기반 급등세는 예상치를 상회함. 실적과...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-18",
+      "changed_at": "2026-03-18T06:41:33.928Z"
+    },
+    {
+      "id": 10,
+      "file_name": "prediction_track_record.md",
+      "version": 8,
+      "diff_summary": "AI 학습 교훈 추가: 오전 예측인 'AI 반도체 생태계 주도'는 적중했으나, 건설 섹터(대우건설)의 정책 기반 급등은 예상보다 파급력이 컸음. 반면, 오전 추천 종목...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-18",
+      "changed_at": "2026-03-18T06:41:27.572Z"
+    },
+    {
+      "id": 9,
+      "file_name": "prediction_track_record.md",
+      "version": 7,
+      "diff_summary": "AI 학습 교훈 추가: 엔비디아-현대차 협력 모멘텀은 예상대로 시장 체력을 강화하는 핵심 트리거로 작용했음. 건설/건자재(삼화페인트)의 예상치 못한 강세는 규제 수혜주...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-17",
+      "changed_at": "2026-03-17T06:41:34.929Z"
+    },
+    {
+      "id": 8,
+      "file_name": "prediction_track_record.md",
+      "version": 6,
+      "diff_summary": "AI 학습 교훈 추가: 오전 예측인 '반도체 밸류체인 주도'는 적중했으나, 현대차그룹과 엔비디아의 협력 이슈가 대형주 수급을 강력하게 견인하며 시장 체력을 강화시킨 점...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-17",
+      "changed_at": "2026-03-17T06:41:28.971Z"
+    },
+    {
+      "id": 7,
+      "file_name": "prediction_track_record.md",
+      "version": 5,
+      "diff_summary": "AI 학습 교훈 추가: 데이터센터 전력난에 이어 AI 반도체 실적 개선 기대감이 시장 전체의 상승 동력으로 작용하는 패턴을 확인했습니다. 지정학적 리스크에 따른 해운 ...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-16",
+      "changed_at": "2026-03-16T08:18:15.205Z"
+    },
+    {
+      "id": 6,
+      "file_name": "prediction_track_record.md",
+      "version": 4,
+      "diff_summary": "AI 학습 교훈 추가: 지정학적 리스크(호르무즈 해협)가 해운 섹터의 수급을 강력하게 견인할 것을 포착했으나, 테마주의 변동성 확대 속도가 예상보다 빨라 리스크 관리 ...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-16",
+      "changed_at": "2026-03-16T08:18:09.929Z"
+    },
+    {
+      "id": 5,
+      "file_name": "prediction_track_record.md",
+      "version": 3,
+      "diff_summary": "AI 학습 교훈 추가: 데이터센터 전력난 관련 원전 밸류체인(LS머트리얼즈, 두산에너빌리티)의 강세는 예측 범위 내 적중했으나, 건설 섹터의 원전 테마 편입에 따른 동...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-15",
+      "changed_at": "2026-03-15T06:41:52.567Z"
+    },
+    {
+      "id": 4,
+      "file_name": "prediction_track_record.md",
+      "version": 2,
+      "diff_summary": "AI 학습 교훈 추가: 데이터센터 전력난과 원전 르네상스라는 거시적 흐름이 수급을 견인하는 패턴이 재확인됨. 특히 LS머트리얼즈와 같은 기술적 차별화 종목의 탄력도가 ...",
+      "change_type": "AI_LESSON",
+      "trigger_context": "Analyze date: 2026-03-15",
+      "changed_at": "2026-03-15T06:41:47.377Z"
+    },
+    {
+      "id": 3,
+      "file_name": "prediction_track_record.md",
+      "version": 1,
+      "diff_summary": "초기 스냅샷 (앱 시작)",
+      "change_type": "SYSTEM",
+      "trigger_context": null,
+      "changed_at": "2026-03-10T11:10:59.136Z"
+    },
+    {
+      "id": 2,
+      "file_name": "market_knowledge.md",
+      "version": 1,
+      "diff_summary": "초기 스냅샷 (앱 시작)",
+      "change_type": "SYSTEM",
+      "trigger_context": null,
+      "changed_at": "2026-03-10T11:10:59.126Z"
+    },
+    {
+      "id": 1,
+      "file_name": "rising_stock_skill.md",
+      "version": 1,
+      "diff_summary": "초기 스냅샷 (앱 시작)",
+      "change_type": "SYSTEM",
+      "trigger_context": null,
+      "changed_at": "2026-03-10T11:10:59.115Z"
+    }
+  ],
+  "ai_learning_log": [
+    {
+      "id": 13,
+      "original_report_id": 267,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 25.89,
+      "learning_point": "오전 예측인 '지정학적 리스크에 따른 에너지·해운 강세'는 적중했으나, 티엠씨의 실적 기반 급등이 예상보다 강력하게 시장을 주도함. 한텍과 같은 정책 테마주가 공시 없이 수급만으로 급등하는 패턴을 확인했으며, 이벤트 기반 테마주와 실적 기반 주도주의 수익률 양극화가 심화되고 있음을 재학습함. 내일은 실적 뒷받침 없는 테마주의 급락 가능성에 대비한 리스크 관리가 최우선임.",
+      "sector": "건설/플랜트"
+    },
+    {
+      "id": 12,
+      "original_report_id": 267,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 25.89,
+      "learning_point": "오전 예측인 '지정학적 리스크에 따른 에너지·해운 강세'는 적중했으나, 티엠씨의 실적 기반 급등이 예상보다 강력하게 시장을 주도함. 한텍과 같은 정책 테마주가 공시 없이 수급만으로 급등하는 패턴을 확인했으며, 이벤트 기반 테마주와 실적 기반 주도주의 수익률 양극화가 심화되고 있음을 재학습함. 내일은 실적 뒷받침 없는 테마주의 급락 가능성에 대비한 리스크 관리가 최우선임.",
+      "sector": "건설/플랜트"
+    },
+    {
+      "id": 11,
+      "original_report_id": 242,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 28.4,
+      "learning_point": "신재생에너지 섹터가 에너지 안보 이슈를 타고 주도주로 부상할 것이라는 분석은 적중했으나, 메지온과 같은 재무 리스크 종목의 변동성이 예상보다 거셌음. 이벤트 기반 테마주와 실적 기반 주도주를 명확히 구분하여 대응하는 전략의 중요성을 재확인함.",
+      "sector": "신재생에너지"
+    },
+    {
+      "id": 10,
+      "original_report_id": 242,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 28.4,
+      "learning_point": "신재생에너지 섹터가 지정학적 리스크의 최대 수혜처로 부상할 것이라는 점은 적중했으나, 메지온과 같은 재무 리스크 종목의 변동성이 예상보다 거셌음. 이벤트 기반 테마주와 실적 기반 주도주를 명확히 구분하여 대응하는 전략의 중요성을 재확인함.",
+      "sector": "신재생에너지"
+    },
+    {
+      "id": 9,
+      "original_report_id": 242,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 28.4,
+      "learning_point": "데이터센터 전력난과 방산 테마의 확산은 예상 범위 내였으나, 신재생에너지 섹터(SK이터닉스 등)가 에너지 안보 이슈를 타고 시장 주도주로 급부상한 점은 정책적 대안에 대한 시장의 높은 민감도를 확인시켜줌. 메지온과 같은 재무 리스크 종목의 급등락 패턴을 통해 실적과 무관한 이벤트 기반 테마주에 대한 경계심을 재학습함.",
+      "sector": "신재생에너지"
+    },
+    {
+      "id": 8,
+      "original_report_id": 223,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 7.53,
+      "learning_point": "데이터센터 전력난과 AI 반도체 밸류체인의 동반 강세는 예측대로 적중했으나, 건설 섹터(대우건설)의 정책 기반 급등세는 예상치를 상회함. 실적과 수급이 결합된 대형주 위주의 장세가 지속되고 있음을 확인했으며, 단순 테마주보다는 엔비디아 협력 모멘텀과 같은 실질적 트리거 보유주 위주의 선별적 접근이 유효했음.",
+      "sector": "반도체"
+    },
+    {
+      "id": 7,
+      "original_report_id": 223,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 7.53,
+      "learning_point": "오전 예측인 'AI 반도체 생태계 주도'는 적중했으나, 건설 섹터(대우건설)의 정책 기반 급등은 예상보다 파급력이 컸음. 반면, 오전 추천 종목들의 기술적 탄력도보다 시장 전체의 대형주(삼성전자, 기아) 수급 쏠림이 강했던 점을 확인. 대형주 중심의 포트폴리오 재편이 실적 장세에서 더욱 유리함을 재학습함.",
+      "sector": "반도체"
+    },
+    {
+      "id": 6,
+      "original_report_id": 181,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 0.33,
+      "learning_point": "엔비디아-현대차 협력 모멘텀은 예상대로 시장 체력을 강화하는 핵심 트리거로 작용했음. 건설/건자재(삼화페인트)의 예상치 못한 강세는 규제 수혜주에 대한 시장의 높은 관심을 확인시켜줌. 다만, 지정학적 리스크 기반 테마주(흥아해운, 보성파워텍)의 변동성이 극대화되고 있어 내일은 실적 기반주 위주의 포트폴리오 재편이 필요함.",
+      "sector": "반도체 장비"
+    },
+    {
+      "id": 5,
+      "original_report_id": 181,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 0.33,
+      "learning_point": "오전 예측인 '반도체 밸류체인 주도'는 적중했으나, 현대차그룹과 엔비디아의 협력 이슈가 대형주 수급을 강력하게 견인하며 시장 체력을 강화시킨 점이 예상보다 긍정적이었음. 특히 건설/건자재 테마의 실적 기반 급등은 예상치를 상회한 변수였으며, 테마주의 수급 쏠림은 리스크 관리 메시지대로 변동성이 극대화되고 있어 주의가 요구됨.",
+      "sector": "반도체 장비"
+    },
+    {
+      "id": 4,
+      "original_report_id": 114,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 6.26,
+      "learning_point": "데이터센터 전력난에 이어 AI 반도체 실적 개선 기대감이 시장 전체의 상승 동력으로 작용하는 패턴을 확인했습니다. 지정학적 리스크에 따른 해운 섹터의 급등은 예상 범위 내였으나, 변동성 확대 속도가 빨라 단기 트레이딩 주의를 요하는 구간임을 재확인했습니다.",
+      "sector": "반도체"
+    },
+    {
+      "id": 3,
+      "original_report_id": 114,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 6.26,
+      "learning_point": "지정학적 리스크(호르무즈 해협)가 해운 섹터의 수급을 강력하게 견인할 것을 포착했으나, 테마주의 변동성 확대 속도가 예상보다 빨라 리스크 관리 메시지 강화가 필요했음. 반면, 데이터센터 관련 전력난과 원전 밸류체인의 흐름이 방산·반도체로 확산되는 연쇄 효과를 확인한 점은 유효했음.",
+      "sector": "반도체"
+    },
+    {
+      "id": 2,
+      "original_report_id": 92,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 22.13,
+      "learning_point": "데이터센터 전력난 관련 원전 밸류체인(LS머트리얼즈, 두산에너빌리티)의 강세는 예측 범위 내 적중했으나, 건설 섹터의 원전 테마 편입에 따른 동반 급등은 예상보다 탄력도가 높았음. 수급 테마(흥아해운)의 거래량 쏠림 현상을 사전에 포착하여 변동성 주의 메시지를 전달한 점이 유효했음.",
+      "sector": "2차전지/AI인프라"
+    },
+    {
+      "id": 1,
+      "original_report_id": 92,
+      "prediction_accuracy": "종합 판단",
+      "actual_performance": 22.13,
+      "learning_point": "데이터센터 전력난과 원전 르네상스라는 거시적 흐름이 수급을 견인하는 패턴이 재확인됨. 특히 LS머트리얼즈와 같은 기술적 차별화 종목의 탄력도가 높았음. 해운 섹터의 거래량 쏠림은 수급 테마성으로 판단되어 추격 매수보다는 변동성 주의가 필요함을 확인.",
+      "sector": "2차전지/AI인프라"
+    }
+  ],
+  "daily_rising_stocks_summary": [
+    {
+      "date": "2026-04-02",
+      "timing": "MANUAL",
+      "cnt": 15,
+      "avg_score": 50.0,
+      "avg_rate": 21.125999999999998
+    },
+    {
+      "date": "2026-04-01",
+      "timing": "MANUAL",
+      "cnt": 15,
+      "avg_score": 50.0,
+      "avg_rate": 21.439333333333334
+    },
+    {
+      "date": "2026-03-23",
+      "timing": "EVENING",
+      "cnt": 5,
+      "avg_score": 32.2,
+      "avg_rate": 15.372
+    },
+    {
+      "date": "2026-03-23",
+      "timing": "MORNING",
+      "cnt": 4,
+      "avg_score": 24.0,
+      "avg_rate": 8.0125
+    },
+    {
+      "date": "2026-03-19",
+      "timing": "EVENING",
+      "cnt": 17,
+      "avg_score": 80.0,
+      "avg_rate": 7.591176470588236
+    },
+    {
+      "date": "2026-03-18",
+      "timing": "EVENING",
+      "cnt": 30,
+      "avg_score": 83.3,
+      "avg_rate": 7.219333333333334
+    },
+    {
+      "date": "2026-03-18",
+      "timing": "MORNING",
+      "cnt": 6,
+      "avg_score": 84.0,
+      "avg_rate": 9.058333333333332
+    },
+    {
+      "date": "2026-03-17",
+      "timing": "EVENING",
+      "cnt": 28,
+      "avg_score": 81.07142857142857,
+      "avg_rate": 6.9817857142857145
+    },
+    {
+      "date": "2026-03-17",
+      "timing": "MORNING",
+      "cnt": 8,
+      "avg_score": 74.0,
+      "avg_rate": 10.891250000000001
+    },
+    {
+      "date": "2026-03-16",
+      "timing": "EVENING",
+      "cnt": 17,
+      "avg_score": 79.88235294117646,
+      "avg_rate": 18.37
+    },
+    {
+      "date": "2026-03-15",
+      "timing": "EVENING",
+      "cnt": 15,
+      "avg_score": 82.66666666666667,
+      "avg_rate": 7.3693333333333335
+    },
+    {
+      "date": "2026-03-13",
+      "timing": "EVENING",
+      "cnt": 15,
+      "avg_score": 81.0,
+      "avg_rate": 7.811333333333333
+    },
+    {
+      "date": "2026-03-12",
+      "timing": "EVENING",
+      "cnt": 29,
+      "avg_score": 79.44827586206897,
+      "avg_rate": 6.369655172413793
+    },
+    {
+      "date": "2026-03-11",
+      "timing": "EVENING",
+      "cnt": 26,
+      "avg_score": 77.03846153846153,
+      "avg_rate": 1.2230769230769232
+    },
+    {
+      "date": "2026-03-10",
+      "timing": "EVENING",
+      "cnt": 21,
+      "avg_score": 71.28571428571429,
+      "avg_rate": 6.053809523809524
+    }
+  ],
+  "themes": [
+    {
+      "theme_sector": "반도체",
+      "cnt": 8,
+      "avg_rate": 4.5775
+    },
+    {
+      "theme_sector": "방산",
+      "cnt": 7,
+      "avg_rate": -0.3314285714285715
+    },
+    {
+      "theme_sector": "해운/물류",
+      "cnt": 5,
+      "avg_rate": 17.052
+    },
+    {
+      "theme_sector": "신재생에너지",
+      "cnt": 5,
+      "avg_rate": 9.132000000000001
+    },
+    {
+      "theme_sector": "방산/우주항공",
+      "cnt": 5,
+      "avg_rate": 6.508
+    },
+    {
+      "theme_sector": "반도체 장비",
+      "cnt": 5,
+      "avg_rate": 4.904
+    },
+    {
+      "theme_sector": "조선",
+      "cnt": 4,
+      "avg_rate": 4.0633333333333335
+    },
+    {
+      "theme_sector": "자동차/자율주행",
+      "cnt": 4,
+      "avg_rate": 3.4974999999999996
+    },
+    {
+      "theme_sector": "바이오(ADC)",
+      "cnt": 4,
+      "avg_rate": 7.3525
+    },
+    {
+      "theme_sector": "2차전지",
+      "cnt": 4,
+      "avg_rate": 1.315
+    },
+    {
+      "theme_sector": "증권",
+      "cnt": 3,
+      "avg_rate": 4.446666666666666
+    },
+    {
+      "theme_sector": "제약/바이오",
+      "cnt": 3,
+      "avg_rate": 11.166666666666666
+    },
+    {
+      "theme_sector": "자동차/모빌리티",
+      "cnt": 3,
+      "avg_rate": 4.933333333333334
+    },
+    {
+      "theme_sector": "원전/에너지",
+      "cnt": 3,
+      "avg_rate": 2.2133333333333334
+    },
+    {
+      "theme_sector": "반도체/HBM",
+      "cnt": 3,
+      "avg_rate": 3.91
+    },
+    {
+      "theme_sector": "바이오(RNA)",
+      "cnt": 3,
+      "avg_rate": 6.1000000000000005
+    },
+    {
+      "theme_sector": "물류자동화/로봇",
+      "cnt": 3,
+      "avg_rate": 8.18
+    },
+    {
+      "theme_sector": "금융/증권",
+      "cnt": 3,
+      "avg_rate": 8.596666666666666
+    },
+    {
+      "theme_sector": "광통신/네트워크",
+      "cnt": 3,
+      "avg_rate": 26.25
+    },
+    {
+      "theme_sector": "건설/원전",
+      "cnt": 3,
+      "avg_rate": 13.479999999999999
+    }
+  ]
+}

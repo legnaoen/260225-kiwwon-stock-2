@@ -22,15 +22,16 @@ export class AiDecisionService {
     private isEvaluating = false;
 
     private constructor() {
-        this.isAutoPilot = store.get('ai_trade_autopilot', false) as boolean;
+        this.isAutoPilot = false;
+        store.set('ai_trade_autopilot', false);
 
         // Ensure runtime config is initialized if empty
         if (!store.get('ai_runtime_config')) {
             this.syncRuntimeConfigWithActiveStrategy();
         }
 
-        // Listen for internal AI analysis cycles (every 5 seconds)
-        setInterval(() => this.analyzeMarket(), 5000);
+        // [DEPRECATED] 5초 주기 AI 단타 자동분석 루프 영구 중단
+        // setInterval(() => this.analyzeMarket(), 5000);
     }
 
     public getActiveConfig() {
@@ -92,21 +93,19 @@ export class AiDecisionService {
     }
 
     public setAutoPilot(active: boolean) {
-        this.isAutoPilot = active;
-        store.set('ai_trade_autopilot', active);
-        const statusMsg = active ? '▶ AI 자동매매 시스템이 시작되었습니다 (ENGAGED)' : '■ AI 자동매매 시스템이 중단되었습니다 (STOPPED)';
-        const logType = active ? 'trade' : 'info';
-
+        this.isAutoPilot = false; // Always force disabled
+        store.set('ai_trade_autopilot', false);
+        const statusMsg = '■ AI 자동매매 시스템은 영구 폐기 및 중단되었습니다 (DEPRECATED)';
         console.log(`[AiDecisionService] ${statusMsg}`);
-        this.logToDashboard(statusMsg, logType);
+        this.logToDashboard(statusMsg, 'info');
     }
 
     public getIsAutoPilot() {
-        return this.isAutoPilot;
+        return false;
     }
 
     /**
-     * The Core AI Logic: Decision Loop
+     * The Core AI Logic: Decision Loop (DEPRECATED)
      */
     private aiTargets = new Map<string, { target: number, stop: number, high: number, entryTime: number }>();
     private aiCooldowns = new Map<string, number>();
@@ -114,141 +113,11 @@ export class AiDecisionService {
     // API 요청 한도 (Rate Limiting)
     private hourlyApiRequests: number = 0;
     private lastApiResetTime: number = Date.now();
-    private static readonly MAX_HOURLY_API_REQUESTS = 60; // 시간당 60회 (1분에 1번꼴)
+    private static readonly MAX_HOURLY_API_REQUESTS = 60;
 
     private analyzeMarket() {
-        if (!this.isAutoPilot || this.isEvaluating) return;
-
-        const now = new Date();
-        const hour = now.getHours();
-        const minute = now.getMinutes();
-        const currentTimeVal = hour * 100 + minute;
-
-        // [시간 제한 설정]
-        // 1. 매수 가능 시작 시간 (기본값: 09:10, 장 초반 노이즈 여과)
-        // 2. 매수 종료 시간 (기본값: 15:00, 장 마감 전 급락 및 오버나잇 방지)
-        const aiSettings = store.get('ai_settings', {}) as any;
-        const buyStartTimeStr = aiSettings.buyStartTime || '09:10';
-        const buyEndTimeStr = aiSettings.buyEndTime || '15:00';
-
-        // '09:10' -> 910
-        const buyStartTime = parseInt(buyStartTimeStr.replace(':', ''), 10);
-        const buyEndTime = parseInt(buyEndTimeStr.replace(':', ''), 10);
-
-        // Reset API Request Counter every hour
-        if (Date.now() - this.lastApiResetTime > 3600000) {
-            this.hourlyApiRequests = 0;
-            this.lastApiResetTime = Date.now();
-        }
-
-        // Check Rate Limit
-        if (this.hourlyApiRequests >= AiDecisionService.MAX_HOURLY_API_REQUESTS) {
-            this.logToDashboard(`[SYSTEM] 시간당 AI 허가 요청 횟수(${AiDecisionService.MAX_HOURLY_API_REQUESTS}회) 초과. 엔진 임시 대기 전환.`, "alert");
-            return;
-        }
-
-        // 1. Get current market states from scanner
-        const holdings = this.account.getAccountState().holdings;
-
-        // 2. Logic: Should we SELL anything? (Exit Strategy using AI guidelines & Trailing Stop)
-        const config = this.getActiveConfig();
-
-        holdings.forEach(h => {
-            const targets = this.aiTargets.get(h.code);
-            const now = Date.now();
-
-            if (targets) {
-                // Update running high
-                if (h.currentPrice > targets.high) {
-                    targets.high = h.currentPrice;
-                }
-
-                const elapsedMins = (now - targets.entryTime) / (1000 * 60);
-
-                // A. Trailing Stop (최고점 대비 -1% 빠지면 익절, 단 수익률이 config.targetProfit 이상일 때 발동)
-                // If it's very profitable, we tighten the trail.
-                if (h.pnlRate >= config.targetProfit && h.currentPrice <= targets.high * 0.99) {
-                    this.executeSell(h.code, h.name, `트레일링 스탑 발동 (최고가 ${targets.high} 대비 하락). 수익 확정(+${h.pnlRate.toFixed(2)}%)`);
-                    return;
-                }
-
-                // B. AI Target & Stop
-                if (h.currentPrice >= targets.target) {
-                    this.executeSell(h.code, h.name, `AI 목표가(${targets.target}원) 도달 익절 완료 (+${h.pnlRate.toFixed(2)}%)`);
-                    return;
-                }
-                if (h.currentPrice <= targets.stop) {
-                    this.executeSell(h.code, h.name, `AI 손절선(${targets.stop}원) 이탈 방어 손절 (${h.pnlRate.toFixed(2)}%)`);
-                    return;
-                }
-
-                // C. Time Decay (15분이 지났는데도 1% 미만 수익이면 탈출)
-                if (elapsedMins >= 15 && h.pnlRate < 1.0) {
-                    this.executeSell(h.code, h.name, `타임 디케이 초과(15분). 탄력 부족으로 기회비용 확보 탈출 (${h.pnlRate.toFixed(2)}%)`);
-                    return;
-                }
-            } else {
-                // Fallback for manual or legacy trades using current strategy config
-                if (h.pnlRate >= config.targetProfit) this.executeSell(h.code, h.name, `전략 익절 목표(+${config.targetProfit}%) 도달`);
-                else if (h.pnlRate <= config.stopLoss) this.executeSell(h.code, h.name, `전략 손절폭(${config.stopLoss}%) 도달`);
-            }
-        });
-
-        // 3. Logic: Should we BUY anything? (Entry Strategy - HUNTING MODE)
-        if (holdings.length >= config.maxPositions) {
-            // [Defense & Exit Mode] - Full Slot
-            return;
-        }
-
-        // [HUNTING MODE 시간 체크]
-        if (currentTimeVal < buyStartTime || currentTimeVal >= buyEndTime) {
-            // 매수 가능 시간이 아니면 진입 로직 수행 안함
-            return;
-        }
-
-        // 4. Radar Stock Check (Only for Buying)
-        const radarCodes = (this.scanner as any).radarStocks as string[];
-        if (radarCodes.length === 0) {
-            // 정규장 마감 이후 스캐너가 멈췄을 때는 로그를 남기지 않음
-            if (currentTimeVal < 1535) {
-                this.logToDashboard("현재 레이더에 포착된 유효 종목이 없습니다. 스캔 대기 중...", "info");
-            }
-            return;
-        }
-
-        // 5. Hunt for candidates using minAiScore
-        let anyCandidate = false;
-        const sortedRadar = [...radarCodes].sort((a, b) => {
-            const scoreA = (this.scanner as any).monitoredStocks.get(a)?.aiScore || 0;
-            const scoreB = (this.scanner as any).monitoredStocks.get(b)?.aiScore || 0;
-            return scoreB - scoreA;
-        });
-
-        for (const code of sortedRadar) {
-            const state = (this.scanner as any).monitoredStocks.get(code);
-            if (!state) continue;
-            if (holdings.find(h => h.code === code)) continue;
-            if (state.vwap === 0) continue;
-
-            const aiScore = typeof state.aiScore === 'number' ? state.aiScore : 0;
-
-            // Cooldown check (5 minutes = 300,000 ms)
-            if (this.aiCooldowns.has(code) && Date.now() - this.aiCooldowns.get(code)! < 300000) {
-                continue;
-            }
-
-            // Use dynamic minAiScore from config
-            if (aiScore >= config.minAiScore) {
-                anyCandidate = true;
-                this.aiCooldowns.set(code, Date.now());
-                this.evaluateCandidateAndExecuteBuy(state);
-                break;
-            }
-        }
-
-        if (!anyCandidate) {
-            this.logToDashboard(`AI 채점 커트라인(${config.minAiScore}점) 통과 종목 대기 중...`, "info");
-        }
+        // [DEPRECATED] 종목 AI 단타 의사결정 루프 영구 중단
+        return;
     }
 
     public calculateAiScore(state: any): number {
@@ -296,9 +165,8 @@ export class AiDecisionService {
     }
 
     private async evaluateCandidateAndExecuteBuy(state: any) {
-        this.isEvaluating = true;
-        const config = this.getActiveConfig();
-        eventBus.emit(SystemEvent.AI_EVALUATION_UPDATE, { isEvaluating: true, stock: { code: state.code, name: state.name } });
+        // [DEPRECATED] 종목 AI 매수 평가 및 주문 집행 영구 중단
+        return;
         try {
             this.logToDashboard(`[AI 분석 개시] ${state.name} 분석 중... (지침: ${config.version || 'Active Strategy'})`, "info");
             const minuteData = await this.kiwoom.getMinuteChartData(state.code);

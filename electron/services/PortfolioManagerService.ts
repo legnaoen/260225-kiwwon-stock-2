@@ -50,26 +50,26 @@ export class PortfolioManagerService {
         })
 
         try {
-            // 1. 현재 포트폴리오 현황
-            const currentPortfolio = this.db.getPortfolio()
-            console.log(`[PortfolioManager] 현재 포트폴리오: ${currentPortfolio.length}건`)
+            // 1. 현재 포트폴리오 현황 (닫히지 않은 유효 종목만)
+            const currentPortfolio = this.db.getPortfolio().filter(p => p.status !== 'CLOSED' && p.status !== 'DROPPED')
+            console.log(`[PortfolioManager] 현재 유효 포트폴리오: ${currentPortfolio.length}건`)
 
-            // 2. 오늘의 rising stocks (후보 풀)
-            const today = new Date().toISOString().slice(0, 10)
-            let candidates = this.db.getRisingStocksByDate(today, 'EVENING')
-            if (candidates.length === 0) candidates = this.db.getRisingStocksByDate(today, 'MORNING')
-            if (candidates.length === 0) candidates = this.db.getRisingStocksByDate(today, 'MANUAL')
-            
-            // 최근 날짜 폴백
-            if (candidates.length === 0) {
-                const latestRow = this.db.getDb().prepare(
-                    'SELECT date, timing FROM daily_rising_stocks ORDER BY date DESC, timing DESC LIMIT 1'
-                ).get() as any
-                if (latestRow) {
-                    candidates = this.db.getRisingStocksByDate(latestRow.date, latestRow.timing)
+            // [DEPRECATED] 종목 AI 신규 편입 기능 폐기: 감시 중인 종목이 없으면 불필요한 LLM 호출 없이 안전 통과
+            if (currentPortfolio.length === 0) {
+                console.log('[PortfolioManager] 종목 AI 신규 편입 폐기 모드 — 감시 대상 없음, 파이프라인 안전 통과')
+                eventBus.emit(SystemEvent.AUTO_TRADE_LOG, {
+                    time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+                    message: '[PM AI] 종목 AI 신규 편입 폐기 모드 — 감시 대상 없음 (파이프라인 정상 완료)',
+                    level: 'SUCCESS'
+                })
+                return {
+                    success: true,
+                    data: { updated: 0, newEntries: 0, buySignals: 0, sellSignals: 0 }
                 }
             }
-            console.log(`[PortfolioManager] 후보 종목: ${candidates.length}건`)
+
+            // 2. 신규 후보 종목 풀 (신규 매수 중단으로 빈 목록 유지)
+            const candidates: any[] = []
 
             // 3. 마스터 AI thesis
             const compactDate = today.replace(/-/g, '')
@@ -313,45 +313,11 @@ ${candidateSummary}
             let entryDate = existing?.entry_date || ''
 
             if (action === 'BUY') {
-                buySignals++
-                // CLOSED 상태 종목은 재진입 불가 (새 레코드로 처리해야 하므로 skip)
-                if (existing?.status === 'CLOSED') continue
-
-                // 이미 보유중이면 HOLDING 유지
-                if (existing && (existing.status === 'HOLDING' || existing.status === 'BUY_SIGNAL') && existing.entry_shares > 0) {
-                    newStatus = 'HOLDING'
-                } else {
-                    // 신규 매수
-                    let price = decision.current_price || decision.entry_price || 0
-                    if (price <= 0) {
-                        try {
-                            const { KiwoomService } = await import('./KiwoomService')
-                            const pData = await KiwoomService.getInstance().getCurrentPrice(decision.stock_code)
-                            const rawPrice = pData?.cur_prc || pData?.stck_prpr || pData?.Body?.cur_prc || 0
-                            price = Math.abs(Number(rawPrice))
-                        } catch (e) {
-                            console.warn(`[PM] 가격 조회 실패: ${decision.stock_code}`)
-                        }
-                    }
-                    const buyResult = vpe.executeBuy(decision.stock_code, decision.stock_name, price, isMarketOpen)
-
-                    if (buyResult.success) {
-                        if (buyResult.pending) {
-                            newStatus = 'BUY_SIGNAL'  // pending이면 아직 확정 아님
-                            entryPending = 1
-                            entryDate = today
-                        } else {
-                            newStatus = 'HOLDING'
-                            entryShares = buyResult.shares
-                            investedAmount = buyResult.investedAmount
-                            actualEntryPrice = price
-                            entryPending = 0
-                            entryDate = today
-                        }
-                    } else {
-                        newStatus = 'WATCHLIST'  // 현금 부족 등
-                    }
+                // [DEPRECATED] 종목 AI 신규 편입 중단: 신규 매수는 일체 스킵
+                if (!existing || existing.entry_shares <= 0) {
+                    continue;
                 }
+                newStatus = 'HOLDING';
             } else if (action === 'HOLD') {
                 newStatus = existing?.status === 'HOLDING' ? 'HOLDING' : (existing?.status || 'WATCHLIST')
             } else if (action === 'REDUCE') {

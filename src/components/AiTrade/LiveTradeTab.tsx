@@ -145,11 +145,8 @@ export default function LiveTradeTab() {
     };
 
     const handleToggleAutoPilot = async () => {
-        const newState = !isAutoPilot;
-        const res = await window.electronAPI.setAiAutoPilot(newState);
-        if (res.success) {
-            setIsAutoPilot(newState);
-        }
+        alert('종목 AI 자동매매 엔진은 전수 백테스트 및 리스크 검증 결과에 따라 공식 폐기되었습니다. 신규 엔진 가동이 차단되었습니다.');
+        setIsAutoPilot(false);
     };
 
     const handleSaveConfig = async () => {

@@ -2,21 +2,30 @@ import React, { useState } from 'react'
 import LiveTradeTab from './LiveTradeTab'
 import StrategyReviewTab from './StrategyReviewTab'
 import HistoryTab from './HistoryTab'
-import { Activity, Brain, LineChart } from 'lucide-react'
+import { Activity, Brain, LineChart, AlertTriangle } from 'lucide-react'
 
 export default function AiTradeDashboard() {
-    const [activeTab, setActiveTab] = useState<'live' | 'strategy' | 'history'>('live')
+    const [activeTab, setActiveTab] = useState<'live' | 'strategy' | 'history'>('history')
 
     return (
         <div className="flex flex-col h-full bg-background pt-6 px-6 overflow-hidden">
+            {/* Deprecation Warning Banner */}
+            <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-3 mb-3 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2 text-destructive font-semibold text-sm">
+                    <AlertTriangle size={18} />
+                    <span>[시스템 공지] 종목 AI 자동매매 엔진이 공식 폐기되었습니다. (과거 거래 이력 및 차트 조회 전용)</span>
+                </div>
+                <span className="text-xs text-muted-foreground">백테스트 손익비 미달 및 상투 진입 리스크로 인한 영구 비활성화</span>
+            </div>
+
             {/* Header */}
             <div className="flex items-center justify-between pb-4 shrink-0 border-b border-border">
                 <div>
                     <h1 className="text-2xl font-bold flex items-center gap-2">
-                        <Brain className="text-primary" />
-                        AI Trade Dashboard
+                        <Brain className="text-muted-foreground" />
+                        AI Trade Dashboard <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/20">폐기됨 (Deprecated)</span>
                     </h1>
-                    <p className="text-sm text-muted-foreground mt-1">AI 자동매매(데이트레이딩) 가상 샌드박스 및 리더보드</p>
+                    <p className="text-sm text-muted-foreground mt-1">AI 자동매매 엔진 폐기 완료 — 과거 기록 및 리더보드 아카이브</p>
                 </div>
 
                 {/* Sub-Tabs Navigation */}

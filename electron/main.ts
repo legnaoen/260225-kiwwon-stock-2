@@ -883,9 +883,9 @@ ipcMain.handle('open-external', async (_event, url: string) => {
     }
 })
 
-ipcMain.handle('ai-trade:set-autopilot', (_event, active: boolean) => {
-    AiDecisionService.getInstance().setAutoPilot(active)
-    return { success: true }
+ipcMain.handle('ai-trade:set-autopilot', (_event, _active: boolean) => {
+    AiDecisionService.getInstance().setAutoPilot(false)
+    return { success: false, message: '종목 AI 자동매매 엔진은 공식 폐기되었습니다.' }
 })
 
 ipcMain.handle('ai-trade:get-autopilot', () => {

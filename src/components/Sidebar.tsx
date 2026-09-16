@@ -18,7 +18,7 @@ export const menuItems = [
     { id: 'narrative-insight', name: '내러티브', icon: Brain },
     { id: 'schedule', name: '일정', icon: Calendar },
     { id: 'auto-trade', name: '자동매매', icon: Bot },
-    { id: 'ai-trade', name: 'AI Trade', icon: Brain },
+    { id: 'ai-trade', name: 'AI(종료)', icon: Brain },
     { id: 'settings', name: '설정', icon: Settings },
 ]
 

@@ -1,0 +1,562 @@
+{
+  "live_trades_by_category": [
+    {
+      "strategy_category": "EMERGING_STAR",
+      "total": 72,
+      "wins": 25,
+      "losses": 47,
+      "avg_return": -0.47004173573030567,
+      "max_loss": -13.88,
+      "max_gain": 10.7,
+      "total_return": -33.84300497258201
+    },
+    {
+      "strategy_category": "INTRADAY_SURGE",
+      "total": 2,
+      "wins": 0,
+      "losses": 2,
+      "avg_return": -7.890000000000001,
+      "max_loss": -9.5,
+      "max_gain": -6.28,
+      "total_return": -15.780000000000001
+    },
+    {
+      "strategy_category": "PULLBACK_DIP",
+      "total": 36,
+      "wins": 8,
+      "losses": 28,
+      "avg_return": -1.457222222222222,
+      "max_loss": -13.2,
+      "max_gain": 9.23,
+      "total_return": -52.459999999999994
+    },
+    {
+      "strategy_category": "PULLBACK_REBOUND",
+      "total": 3,
+      "wins": 0,
+      "losses": 3,
+      "avg_return": -4.836666666666667,
+      "max_loss": -8.7,
+      "max_gain": -0.66,
+      "total_return": -14.51
+    },
+    {
+      "strategy_category": "TRUE_LEADER",
+      "total": 98,
+      "wins": 33,
+      "losses": 65,
+      "avg_return": -1.7995918367346946,
+      "max_loss": -23.37,
+      "max_gain": 29.85,
+      "total_return": -176.36000000000007
+    }
+  ],
+  "live_trades_overall": {
+    "total": 211,
+    "wins": 66,
+    "losses": 145,
+    "avg_return": -1.388402867168635,
+    "max_loss": -23.37,
+    "max_gain": 29.85,
+    "total_return": -292.953004972582
+  },
+  "maiis_trades_overall": {
+    "total": 155,
+    "wins": 45,
+    "losses": 110,
+    "avg_return": -3.6249114484503457,
+    "max_loss": -45.33,
+    "max_gain": 64.52205882352942
+  },
+  "maiis_trades_by_strategy": [
+    {
+      "strategy": "MOMENTUM",
+      "total": 117,
+      "wins": 34,
+      "avg_return": -3.465993799229094
+    },
+    {
+      "strategy": "PULLBACK",
+      "total": 10,
+      "wins": 5,
+      "avg_return": -6.390000000000001
+    },
+    {
+      "strategy": "REPORT",
+      "total": 22,
+      "wins": 4,
+      "avg_return": -3.5399999999999996
+    },
+    {
+      "strategy": "THEME",
+      "total": 6,
+      "wins": 2,
+      "avg_return": -2.4266666666666663
+    }
+  ],
+  "tracks": {
+    "track_a_buy_picks": {
+      "total": 392,
+      "closed": 392,
+      "wins": 123,
+      "losses": 269,
+      "avg_return": -10.929190072831972,
+      "avg_peak": 23.168719920980255,
+      "max_loss": -79.62732919254658,
+      "max_gain": 116.03563474387528
+    },
+    "track_b_buy_picks": {
+      "total": 203,
+      "closed": 203,
+      "wins": 57,
+      "losses": 146,
+      "avg_return": -6.576688899373789,
+      "avg_peak": 22.901445111116335,
+      "max_loss": -55.38461538461539,
+      "max_gain": 117.60391198044009
+    },
+    "track_c_buy_picks": {
+      "total": 364,
+      "closed": 364,
+      "wins": 111,
+      "losses": 253,
+      "avg_return": -6.4871001592108914,
+      "avg_peak": 14.60819490618192,
+      "max_loss": -63.30935251798561,
+      "max_gain": 52.930402930402934
+    },
+    "track_d_buy_picks": {
+      "total": 229,
+      "closed": 229,
+      "wins": 57,
+      "losses": 172,
+      "avg_return": -11.465507663605113,
+      "avg_peak": 15.005528931988025,
+      "max_loss": -76.5142857142857,
+      "max_gain": 130.65134099616859
+    },
+    "track_e_buy_picks": {
+      "total": 270,
+      "closed": 270,
+      "wins": 95,
+      "losses": 175,
+      "avg_return": -1.451865505513111,
+      "avg_peak": 18.596458580915158,
+      "max_loss": -63.07381193124368,
+      "max_gain": 253.6121673003802
+    }
+  },
+  "persona_performance": [
+    {
+      "persona_id": "BREAKOUT_PIRATE",
+      "total": 31,
+      "hits": 10,
+      "hit_rate": 32.25806451612903
+    },
+    {
+      "persona_id": "CONTRARIAN",
+      "total": 31,
+      "hits": 14,
+      "hit_rate": 45.16129032258064
+    },
+    {
+      "persona_id": "DAY_QUANT",
+      "total": 31,
+      "hits": 11,
+      "hit_rate": 35.483870967741936
+    },
+    {
+      "persona_id": "DEALER",
+      "total": 31,
+      "hits": 11,
+      "hit_rate": 35.483870967741936
+    },
+    {
+      "persona_id": "DOOM_SAYER",
+      "total": 31,
+      "hits": 9,
+      "hit_rate": 29.03225806451613
+    },
+    {
+      "persona_id": "MOMENTUM",
+      "total": 31,
+      "hits": 10,
+      "hit_rate": 32.25806451612903
+    },
+    {
+      "persona_id": "OSCILLATOR_FANATIC",
+      "total": 31,
+      "hits": 11,
+      "hit_rate": 35.483870967741936
+    },
+    {
+      "persona_id": "PRICE_ACTION",
+      "total": 31,
+      "hits": 10,
+      "hit_rate": 32.25806451612903
+    },
+    {
+      "persona_id": "SYSTEM_CONTEXT",
+      "total": 31,
+      "hits": 0,
+      "hit_rate": 0.0
+    }
+  ],
+  "latest_retrospectives": [
+    {
+      "id": 10,
+      "created_date": "2026-09-11",
+      "total_trades": 20,
+      "win_rate": 0.0,
+      "avg_return": 0.0,
+      "diagnoses_json": "[{\"stock_name\":\"대원전선\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"역배열 상태에서 과도한 이격도로 진입하여 반등 없이 조기 종료됨.\",\"root_cause_tag\":\"WRONG_THESIS\"},{\"stock_name\":\"SK스퀘어\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"전략적 가치 판단은 유효했으나 보유 기간 대비 결과가 미흡함.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"서울바이오시스\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"50% 이상의 과열된 이격도에서 추격 매수하여 모멘텀 소진 후 조기 매도됨.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"SK하이닉스\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"장기 하락 추세에서 기술적 반등을 노렸으나 보유 계획 대비 성과 부재.\",\"root_cause_tag\":\"WRONG_THESIS\"},{\"stock_name\":\"주성엔지니어링\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"시장 주도주였으나 짧은 보유 기간으로 인해 수익 실현 실패.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"STX그린로지스\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"과열된 구간에서의 추격 매수로 인해 단기 조정 시 조기 이탈함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"프로이천\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"풀백 전략임에도 이격도가 100%를 상회하는 고점에서 진입함.\",\"root_cause_tag\":\"WRONG_THESIS\"},{\"stock_name\":\"현대차\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"상승세의 극단적 이격도에서 진입하여 조정 국면을 견디지 못함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"팸텍\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도 120% 이상의 초과열 국면에서 진입하여 단기 급락을 초래함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"SK텔레콤\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"강한 모멘텀을 포착했으나 보유 기간 부족으로 수익화 실패.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"LIG넥스원_TEST\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"시장 주도주에 대한 적절한 진입이었으나 조기 매도로 기회비용 발생.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"SK이터닉스\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"기술적 돌파 시점은 좋았으나 너무 짧은 보유 기간이 문제임.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"로보티즈\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"섹터 리더 종목이나 변동성을 이기지 못하고 조기 손절함.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"데이타솔루션\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"재료 노출 이후 과열권에서 진입하여 추격 매수 성격이 강함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"LG이노텍\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도 129%의 초과열 상태에서 진입하여 기술적 반등 실패.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"케이엔알시스템\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"기술적 반등 지점은 적절했으나 보유 기간이 너무 짧음.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"노타\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도 119%의 과열 구간 추격 매수로 단기 조정에 노출됨.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"현대오토에버\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"상승 추세의 고점에서 진입하여 변동성을 견디지 못하고 이탈함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"두산로보틱스\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"재료 기반 진입은 좋았으나 조기 매도로 수익 기회를 놓침.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"LG이노텍\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"이전 실패를 만회하려 했으나 보유 기간 미달로 성과 없음.\",\"root_cause_tag\":\"EARLY_STOP\"}]",
+      "failure_patterns_json": "[{\"pattern_name\":\"고이격 추격 매수 (Chasing High)\",\"frequency\":\"7건/15건 (46.7%)\",\"description\":\"5일선 이격도가 5%를 초과하는 과열 구간에서 진입하여 단기 조정 시 즉각 손실로 이어지는 패턴.\",\"severity\":\"HIGH\"},{\"pattern_name\":\"조기 매도 (Early Stop)\",\"frequency\":\"6건/15건 (40.0%)\",\"description\":\"적절한 진입 이후에도 변동성을 견디지 못하거나 보유 기간을 충분히 확보하지 못해 수익 실현 기회를 스스로 차단함.\",\"severity\":\"HIGH\"},{\"pattern_name\":\"부적절한 테제 (Wrong Thesis)\",\"frequency\":\"2건/15건 (13.3%)\",\"description\":\"역배열 혹은 장기 하락 추세 등 기술적으로 반등 가능성이 낮은 구간에서 진입하여 전략적 실패를 초래함.\",\"severity\":\"MEDIUM\"}]",
+      "success_patterns_json": "[]",
+      "pm1_improvements_json": "[{\"target\":\"스크리닝 필터링 로직\",\"problem\":\"5일 이동평균선 이격도 5% 초과 종목이 필터링 없이 통과됨\",\"proposed_change\":\"기술적 지표 사전 검증 단계 추가: 5일 이격도 5% 초과 종목은 confidence 점수와 무관하게 스크리닝 단계에서 즉시 배제(Hard Filter)\",\"expected_impact\":\"고이격 추격 매수 패턴의 원천 차단\",\"priority\":\"HIGH\"},{\"target\":\"종목 선정 기준\",\"problem\":\"역배열/하락 추세 종목이 매수 리스트에 포함됨\",\"proposed_change\":\"이동평균선 정배열 상태(5일 > 20일 > 60일) 확인 절차 의무화\",\"expected_impact\":\"Wrong Thesis 패턴 방지 및 승률 개선\",\"priority\":\"HIGH\"}]"
+    },
+    {
+      "id": 9,
+      "created_date": "2026-09-04",
+      "total_trades": 20,
+      "win_rate": 0.0,
+      "avg_return": 0.0,
+      "diagnoses_json": "[{\"stock_name\":\"대원전선\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"역배열 상태에서 과도하게 이격된 하락 종목을 매수했으나 모멘텀 부재로 즉시 정리됨.\",\"root_cause_tag\":\"WRONG_THESIS\"},{\"stock_name\":\"SK스퀘어\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"기술적 지표가 양호한 시점에 진입했으나, 보유 기간을 채우지 못하고 조기 매도함.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"서울바이오시스\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"5일/20일선 이격도가 50%에 육박하는 과열 구간에서 추격 매수함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"SK하이닉스\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"장기 하락 추세에서 반등을 노렸으나 모멘텀이 실리지 않아 보유 기간 대비 성과 없이 종결됨.\",\"root_cause_tag\":\"WRONG_THESIS\"},{\"stock_name\":\"주성엔지니어링\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"기관 수급이 확인되는 우량주에 진입했으나, 보유 기간 미달로 조기 청산됨.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"STX그린로지스\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"급등 후 이격도가 크게 벌어진 상태에서 진입하여 추격 매수의 위험을 노출함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"프로이천\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도 100%가 넘는 극단적 과열 구간에서 풀백 전략을 오적용함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"현대차\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"단기 급등에 따른 과열 구간에서 진입하여 기술적 조정 압력을 견디지 못함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"팸텍\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도 130% 상회하는 과열 구간에서 추격 매수 후 단기 이탈.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"SK텔레콤\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"강한 모멘텀에 올라탔으나 보유 기간을 충분히 활용하지 못하고 매도함.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"LIG넥스원_TEST\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"강한 수급주에 진입했으나 보유 기간 미달로 조기 매도함.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"SK이터닉스\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"기술적 돌파 시점은 좋았으나 보유 기간을 채우지 못하고 매도함.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"로보티즈\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"과열된 이격도 상태에서 진입하여 단기 조정에 대응하지 못함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"데이타솔루션\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"상승세가 가파른 구간에서 추격 매수하여 보유 기간 미달로 종료.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"LG이노텍\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"110% 이상의 이격도에서 진입한 것은 전략적 오류임.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"케이엔알시스템\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"기술적 반등 시점 포착은 양호했으나 보유 기간 미달로 조기 매도.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"노타\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도 114%의 과열 구간에서 진입하여 추격 매수 위험 노출.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"현대오토에버\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"단기 급등에 따른 과열 구간 진입으로 기술적 조정에 취약함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"두산로보틱스\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"상승 추세가 이미 상당 부분 진행된 구간에서의 추격 매수.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"LG이노텍\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"기술적 지표는 양호했으나 보유 기간 미달로 성과 없이 매도함.\",\"root_cause_tag\":\"EARLY_STOP\"}]",
+      "failure_patterns_json": "[{\"pattern_name\":\"추격 매수(Chasing High)\",\"frequency\":\"8건/20건 (40%)\",\"description\":\"이격도 50%~130% 수준의 과열 구간에서 기술적 조정 가능성을 무시하고 진입하여 즉각적인 손실 발생.\",\"severity\":\"HIGH\"},{\"pattern_name\":\"조기 청산(Early Stop)\",\"frequency\":\"5건/20건 (25%)\",\"description\":\"진입 품질은 양호했으나, 전략적 보유 기간을 지키지 못하고 단기 변동성에 흔들려 조기 매도함.\",\"severity\":\"HIGH\"},{\"pattern_name\":\"잘못된 논리(Wrong Thesis)\",\"frequency\":\"2건/20건 (10%)\",\"description\":\"역배열 하락 추세나 모멘텀이 부재한 상황을 반등 구간으로 오판하여 진입함.\",\"severity\":\"MEDIUM\"}]",
+      "success_patterns_json": "[{\"pattern_name\":\"없음\",\"frequency\":\"0건\",\"description\":\"현재 모든 매매가 승률 0%를 기록하고 있으며, 수익을 창출하는 유효한 패턴이 확인되지 않음.\"}]",
+      "pm1_improvements_json": "[{\"target\":\"스크리닝 필터링 로직\",\"problem\":\"이격도가 높은 과열 종목이 상위권으로 진입하여 추격 매수 유도\",\"proposed_change\":\"이격도(Disparity) 110% 초과 종목은 confidence 점수와 무관하게 스크리닝 단계에서 원천 차단(Hard Filter) 적용\",\"expected_impact\":\"추격 매수 패턴(40%)의 즉각적 제거 및 리스크 노출 최소화\",\"priority\":\"HIGH\"},{\"target\":\"종목 정렬 가중치\",\"problem\":\"모멘텀 지표에만 의존하여 하락 추세 종목을 반등 구간으로 오판\",\"proposed_change\":\"추세 가중치 산정 시 이동평균선 역배열 여부를 체크하여 역배열 종목은 매수 후보군에서 제외\",\"expected_impact\":\"잘못된 논리(10%)에 의한 진입 방지\",\"priority\":\"HIGH\"}]"
+    },
+    {
+      "id": 8,
+      "created_date": "2026-08-28",
+      "total_trades": 20,
+      "win_rate": 0.0,
+      "avg_return": 0.0,
+      "diagnoses_json": "[{\"stock_name\":\"대원전선\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"역배열 상태에서 과도한 이격도 하락 시 진입하여 반등 없이 조기 종료됨.\",\"root_cause_tag\":\"WRONG_THESIS\"},{\"stock_name\":\"SK스퀘어\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"기술적 지표가 양호한 시점에 진입했으나, 보유 기간을 채우지 못하고 조기 매도함.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"서울바이오시스\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도가 과열된 고점에서 추격 매수하여 전략적 실패를 보임.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"SK하이닉스\",\"entry_quality\":\"FAIR\",\"exit_quality\":\"POOR\",\"one_line\":\"펀더멘탈은 우수하나 이격도가 낮을 때 진입 후 보유 기간 관리 실패.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"주성엔지니어링\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"수급이 확인된 우량주 진입이나 보유 계획을 준수하지 못함.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"STX그린로지스\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"과열된 이격도에서 추격 매수하였으며, 단기 변동성 대응 미흡.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"프로이천\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"풀백 전략임에도 이격도가 100%를 상회하는 고점에서 진입하여 논리 오류 발생.\",\"root_cause_tag\":\"WRONG_THESIS\"},{\"stock_name\":\"현대차\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"상승 추세가 이미 극도로 과열된 구간에서 진입하여 조기 이탈.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"팸텍\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"극단적인 이격도 상황에서의 추격 매수로 인해 리스크 관리 실패.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"SK텔레콤\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"기술적 브레이크아웃 시점은 좋았으나 보유 기간 미준수.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"LIG넥스원_TEST\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"강한 모멘텀주 진입은 적절했으나 조기 매도로 수익 기회 상실.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"SK이터닉스\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도와 수급이 완벽한 시점이었으나 단기 보유 후 매도.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"로보티즈\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이미 고점 구간에서 진입하여 추격 매수 성격이 강함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"데이타솔루션\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"상승폭이 큰 과열 구간에서의 진입으로 단기 차익 실현 실패.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"LG이노텍\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도 115%를 넘어선 과열권 진입은 전략적으로 부적절함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"케이엔알시스템\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"적절한 기술적 지표 진입이나 보유 기간 관리 실패.\",\"root_cause_tag\":\"EARLY_STOP\"},{\"stock_name\":\"노타\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"이격도 100% 이상의 과열권에서 추격 매수.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"현대오토에버\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"단기 급등 구간에서 진입하여 조정 국면을 견디지 못함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"두산로보틱스\",\"entry_quality\":\"POOR\",\"exit_quality\":\"POOR\",\"one_line\":\"과열된 이격도에서 진입하여 모멘텀 유지에 실패함.\",\"root_cause_tag\":\"CHASING_HIGH\"},{\"stock_name\":\"LG이노텍\",\"entry_quality\":\"GOOD\",\"exit_quality\":\"POOR\",\"one_line\":\"적절한 진입 타이밍을 잡았으나 보유 기간을 전혀 채우지 못함.\",\"root_cause_tag\":\"EARLY_STOP\"}]",
+      "failure_patterns_json": "[{\"pattern_name\":\"추격 매수 (Chasing High)\",\"frequency\":\"7건/15건 (46.7%)\",\"description\":\"이격도가 5% 이상인 과열 구간에서 진입하여 단기 변동성에 취약한 구조를 보임.\",\"severity\":\"HIGH\"},{\"pattern_name\":\"조기 매도 (Early Stop)\",\"frequency\":\"6건/15건 (40.0%)\",\"description\":\"기술적 진입점은 양호했으나, 전략적 보유 기간을 준수하지 못하고 심리적 불안으로 조기 이탈함.\",\"severity\":\"HIGH\"},{\"pattern_name\":\"전략 논리 오류 (Wrong Thesis)\",\"frequency\":\"2건/15건 (13.3%)\",\"description\":\"역배열 상황이거나 풀백 전략임에도 고점에서 진입하는 등 전략적 기본 가정을 위반함.\",\"severity\":\"MEDIUM\"}]",
+      "success_patterns_json": "[]",
+      "pm1_improvements_json": "[{\"target\":\"종목 필터링 로직\",\"problem\":\"이격도 5% 이상의 과열 종목을 여과 없이 상위 N개로 전달함\",\"proposed_change\":\"진입 전 필수 필터로 '이격도 5% 이하' 조건을 강제 적용하고, 역배열 종목을 제외하는 '추세 필터' 알고리즘 추가\",\"expected_impact\":\"추격 매수(Chasing High) 빈도 80% 이상 감소 및 승률 개선\",\"priority\":\"HIGH\"},{\"target\":\"Confidence 점수 산정\",\"problem\":\"현재 수급/테마 위주의 점수 산정으로 기술적 위치(Technical Position)가 배제됨\",\"proposed_change\":\"기술적 지표(이동평균선, 이격도)를 점수 산정의 가중치 변수로 포함하여 과열 종목의 점수를 하향 조정\",\"expected_impact\":\"진입 시점의 기술적 안정성 확보\",\"priority\":\"MEDIUM\"}]"
+    }
+  ],
+  "maiis_exit_reasons": [
+    {
+      "exit_reason": "20일선 이탈 및 단기 추세 약화로 포트폴리오 제외",
+      "count(*)": 1,
+      "avg(profit_rate)": -6.94
+    },
+    {
+      "exit_reason": "20일선 이탈 및 단기 추세 훼손에 따른 차익실현",
+      "count(*)": 1,
+      "avg(profit_rate)": 21.78
+    },
+    {
+      "exit_reason": "20일선 이탈에 따른 단기 추세 약화로 관망",
+      "count(*)": 1,
+      "avg(profit_rate)": -5.28
+    },
+    {
+      "exit_reason": "AI 검사장비 실적 기반 우상향 추세 유지",
+      "count(*)": 1,
+      "avg(profit_rate)": -2.3
+    },
+    {
+      "exit_reason": "AI 광학 소재 기업으로의 체질 개선 및 바닥 돌파",
+      "count(*)": 1,
+      "avg(profit_rate)": 10.61
+    },
+    {
+      "exit_reason": "AI 심사 결과 SELL 판정 - ESS 배터리 불확실성",
+      "count(*)": 1,
+      "avg(profit_rate)": 0.28
+    },
+    {
+      "exit_reason": "AI 심사 결과 SELL 판정 - 과거 급등 이후 조정 국면",
+      "count(*)": 1,
+      "avg(profit_rate)": -1.36
+    },
+    {
+      "exit_reason": "AI 심사 결과 SELL 판정 - 상단 저항 및 모멘텀 약화",
+      "count(*)": 1,
+      "avg(profit_rate)": -1.69
+    },
+    {
+      "exit_reason": "ALD 기술력 기반 반도체 업황 반등 시 탄력 기대",
+      "count(*)": 1,
+      "avg(profit_rate)": 13.75
+    },
+    {
+      "exit_reason": "Alpha 상위권이나 고신용 및 추세 훼손으로 관망",
+      "count(*)": 1,
+      "avg(profit_rate)": -12.17
+    },
+    {
+      "exit_reason": "HBM 대장주이나 기술적 추세 훼손으로 전량 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -16.71
+    },
+    {
+      "exit_reason": "K뷰티 수출 모멘텀 및 거래량 폭증으로 홀딩 유지",
+      "count(*)": 1,
+      "avg(profit_rate)": -3.12
+    },
+    {
+      "exit_reason": "MA20 이탈 및 단기 수급 약화에 따른 포트폴리오 리스크 관리 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -16.12
+    },
+    {
+      "exit_reason": "SMR 및 가스터빈 수주 잔고 기반 안정적 흐름",
+      "count(*)": 1,
+      "avg(profit_rate)": -0.93
+    },
+    {
+      "exit_reason": "mRNA 백신 국산화 과제 선정, 바닥권 대량 거래 반등",
+      "count(*)": 1,
+      "avg(profit_rate)": -11.48
+    },
+    {
+      "exit_reason": "거래량 급감하며 매도세 진정된 눌림목 타점",
+      "count(*)": 1,
+      "avg(profit_rate)": -5.1
+    },
+    {
+      "exit_reason": "공개매수가 기반 강력한 하방 경직성",
+      "count(*)": 1,
+      "avg(profit_rate)": -2.08
+    },
+    {
+      "exit_reason": "관심/매수 종목 한도 초과(Cap)에 따른 서바이벌 탈락",
+      "count(*)": 78,
+      "avg(profit_rate)": -3.6022812971342386
+    },
+    {
+      "exit_reason": "광통신 재료 소멸 및 단기 추세 이탈로 청산",
+      "count(*)": 1,
+      "avg(profit_rate)": -16.06
+    },
+    {
+      "exit_reason": "글로벌 수출 견조, 단기 조정 인내",
+      "count(*)": 1,
+      "avg(profit_rate)": -7.17
+    },
+    {
+      "exit_reason": "기술적 추세 이탈, 리스크 관리 차원 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -9.333333333333334
+    },
+    {
+      "exit_reason": "기술적 추세 하향 전환, 리스크 관리 매도.",
+      "count(*)": 1,
+      "avg(profit_rate)": -5.6
+    },
+    {
+      "exit_reason": "기술적 추세 훼손 및 반등 탄력 부족으로 매도.",
+      "count(*)": 1,
+      "avg(profit_rate)": -21.74
+    },
+    {
+      "exit_reason": "기술적 하락 추세 전환, 주도주 교체 차원에서 매도.",
+      "count(*)": 1,
+      "avg(profit_rate)": -17.97
+    },
+    {
+      "exit_reason": "단기 과열 심화에 따른 수익 실현",
+      "count(*)": 1,
+      "avg(profit_rate)": 33.94
+    },
+    {
+      "exit_reason": "단기 모멘텀 이탈 및 추세 붕괴, 손실 확정 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -13.13
+    },
+    {
+      "exit_reason": "단기 추세 약화 및 20일선 하회로 포트 제외",
+      "count(*)": 1,
+      "avg(profit_rate)": -17.89
+    },
+    {
+      "exit_reason": "단기 추세 약화 및 데드크로스 발생, 리스크 관리 차원 매도.",
+      "count(*)": 1,
+      "avg(profit_rate)": -8.28
+    },
+    {
+      "exit_reason": "단기 추세 약화 및 이평선 이탈로 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -1.56
+    },
+    {
+      "exit_reason": "대규모 수주에도 불구하고 차익매물 출회 및 이탈",
+      "count(*)": 1,
+      "avg(profit_rate)": -14.87
+    },
+    {
+      "exit_reason": "데이터센터 엔진 신성장 동력 유효",
+      "count(*)": 1,
+      "avg(profit_rate)": -3.4
+    },
+    {
+      "exit_reason": "매수 포지션 이탈 (WATCHING 강등)",
+      "count(*)": 1,
+      "avg(profit_rate)": 4.32
+    },
+    {
+      "exit_reason": "모멘텀 부족 및 기술적 약세, 매도 후 교체.",
+      "count(*)": 1,
+      "avg(profit_rate)": -24.94
+    },
+    {
+      "exit_reason": "바이오 섹터 투심 약화, 지지선 확인",
+      "count(*)": 1,
+      "avg(profit_rate)": -7.88
+    },
+    {
+      "exit_reason": "방산 및 스마트그리드 특수전지 수요 견조, 조정 시 홀딩",
+      "count(*)": 1,
+      "avg(profit_rate)": 1.83
+    },
+    {
+      "exit_reason": "배당 매력 및 구조적 이익 개선 기대",
+      "count(*)": 1,
+      "avg(profit_rate)": -0.42
+    },
+    {
+      "exit_reason": "변동성 과다 및 펀더멘털 불안정, 포트폴리오 교체 권고.",
+      "count(*)": 1,
+      "avg(profit_rate)": -1.88
+    },
+    {
+      "exit_reason": "변압기 쇼티지 유효하며 MA20 지지 확인 중",
+      "count(*)": 1,
+      "avg(profit_rate)": -11.93
+    },
+    {
+      "exit_reason": "수익권 유지 중이며 눌림목 구간 매물 소화 후 홀딩",
+      "count(*)": 1,
+      "avg(profit_rate)": 8.75
+    },
+    {
+      "exit_reason": "수익권 장악 중이며 거래량 급감한 눌림목 구간",
+      "count(*)": 1,
+      "avg(profit_rate)": 52.83
+    },
+    {
+      "exit_reason": "신작 기대감 대비 약한 수급 및 추세 부진으로 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -6.91
+    },
+    {
+      "exit_reason": "실적 기반 우상향 추세 유효하며 홀딩 유지",
+      "count(*)": 1,
+      "avg(profit_rate)": -2.31
+    },
+    {
+      "exit_reason": "아리바이오 기술수출 및 합병 모멘텀",
+      "count(*)": 1,
+      "avg(profit_rate)": -13.33
+    },
+    {
+      "exit_reason": "알파 1위였으나 현재 고점 대비 -57% 급락, 기술적 추세 완벽 붕괴. 매몰비용 무시하고 즉시 청산.",
+      "count(*)": 1,
+      "avg(profit_rate)": -10.19
+    },
+    {
+      "exit_reason": "엔비디아 협업 기대감, 지지선 확인 중",
+      "count(*)": 1,
+      "avg(profit_rate)": -11.23
+    },
+    {
+      "exit_reason": "역대 최대 실적, 안정적 추세 유지",
+      "count(*)": 1,
+      "avg(profit_rate)": 1.44
+    },
+    {
+      "exit_reason": "유리기판 기대감 소멸 및 기술적 지지선 붕괴로 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -13.34
+    },
+    {
+      "exit_reason": "유리기판 성장성 유효하며 하단 지지 확인",
+      "count(*)": 1,
+      "avg(profit_rate)": -15.98
+    },
+    {
+      "exit_reason": "유리기판 테마 순환 및 기술적 지지선 이탈",
+      "count(*)": 1,
+      "avg(profit_rate)": -4.04
+    },
+    {
+      "exit_reason": "이평선 데드크로스 및 단기 추세 이탈로 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -9.72
+    },
+    {
+      "exit_reason": "조선업황 개선 및 데이터센터 엔진 신성장 동력",
+      "count(*)": 1,
+      "avg(profit_rate)": -7.23
+    },
+    {
+      "exit_reason": "조정 구간 진입, 기술적 반등 대기",
+      "count(*)": 1,
+      "avg(profit_rate)": 2.41
+    },
+    {
+      "exit_reason": "주도 테마 이탈 및 수급 부재로 관망 전환",
+      "count(*)": 1,
+      "avg(profit_rate)": 2.24
+    },
+    {
+      "exit_reason": "주도주 집중을 위한 포트폴리오 교체 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -4.42
+    },
+    {
+      "exit_reason": "중동 재건 대장주. 거래량 다소 위축되었으나 정책 수혜주로서 시장 반등 시 탄력적인 상승 기대.",
+      "count(*)": 1,
+      "avg(profit_rate)": 19.5
+    },
+    {
+      "exit_reason": "추세 이탈 및 거래량 감소, 자금 효율을 위해 매도.",
+      "count(*)": 1,
+      "avg(profit_rate)": -21.82
+    },
+    {
+      "exit_reason": "추세 이탈 및 데드크로스 발생에 따른 손절",
+      "count(*)": 1,
+      "avg(profit_rate)": -15.78
+    },
+    {
+      "exit_reason": "추세 이탈 및 모멘텀 약화로 전량 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": 3.29
+    },
+    {
+      "exit_reason": "추세 이탈 및 섹터 부진에 따른 전량 매도",
+      "count(*)": 1,
+      "avg(profit_rate)": -12.42
+    },
+    {
+      "exit_reason": "추세 이탈 및 손실 확대로 전량 매도 청산",
+      "count(*)": 1,
+      "avg(profit_rate)": -22.79
+    },
+    {
+      "exit_reason": "추세 이탈 및 신용 부담으로 전량 매도.",
+      "count(*)": 1,
+      "avg(profit_rate)": -5.61
+    },
+    {
+      "exit_reason": "폴란드 K2 전차 수주 가시화 및 방산 수출 모멘텀 지속",
+      "count(*)": 1,
+      "avg(profit_rate)": -8.57
+    },
+    {
+      "exit_reason": "학회 재료 소멸 및 기술적 추세 이탈, 전량 매도.",
+      "count(*)": 1,
+      "avg(profit_rate)": -9.53
+    },
+    {
+      "exit_reason": "현대차그룹 스마트 물류 자동화 핵심 수혜 지속",
+      "count(*)": 1,
+      "avg(profit_rate)": 6.7
+    }
+  ]
+}

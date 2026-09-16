@@ -43,6 +43,9 @@ const TARGET_RETURN_PCT = 15.0;
 // 상한가 임계값 (코스피/코스닥 공통 30%)
 const UPPER_LIMIT_THRESHOLD = 29.5;
 
+// 당일 과열 컷오프 임계값 (+8.5% 초과 상투 종목 사전 선별 배제)
+const MAX_OVERHEAT_CHANGE_RATE = 8.5;
+
 // Phase 3 최소 점수 컷오프 (Gemini 자동 제외 기준)
 const GEMMA_MIN_SCORE_CUTOFF = 40;
 
@@ -366,6 +369,12 @@ export class TrackCBuyAgent {
 
                 if (isUpperLimit) {
                     console.log(`[TrackCBuyAgent] 상한가 제외: ${c.stockName}(${c.stockCode}) +${ohlcv.change_rate.toFixed(1)}%`);
+                    skipped.push(c);
+                    continue;
+                }
+
+                if (ohlcv.change_rate > MAX_OVERHEAT_CHANGE_RATE) {
+                    console.log(`[TrackCBuyAgent] 당일 과열(+${MAX_OVERHEAT_CHANGE_RATE}% 초과) 선별 제외: ${c.stockName}(${c.stockCode}) +${ohlcv.change_rate.toFixed(1)}%`);
                     skipped.push(c);
                     continue;
                 }

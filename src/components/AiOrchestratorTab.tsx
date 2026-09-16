@@ -1,124 +1,71 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Bot, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Timer, RefreshCw, Radio, Activity, ChevronRight, Copy, ScrollText } from 'lucide-react'
 
-// ═══ 에이전트 레지스트리 (프론트엔드 상수) ═══
+// ═══ 에이전트 레지스트리 (주도주 AI 단독 운용 체계) ═══
 const AI_AGENTS = [
     {
-        id: 'MCA', name: '시황 AI (하이브리드)', fullName: 'Market Condition Agent',
-        description: '매일 장전/장후 시장 상황을 분석하고, 장중 인트라데이 방향을 Gemini 마스터가 종합 예측합니다.',
+        id: 'TRACK_A', name: 'Track A (진성 대장 AI)', fullName: 'True Leader Buy Agent',
+        description: '당일 거래대금 및 등락률 최상위권의 절대적 시장 주도주를 선별하고 진입 타점을 심사합니다.',
         gemini: true, trigger: 'CRON' as const,
         schedules: [
-            { time: '08:50', label: 'Cycle A — 장전 분석', description: '글로벌 매크로, 뉴스, 수급 종합 판단' },
-            { time: '09:30', label: '베이지안 검증 (Pivot)', description: '개장 30분 실시간 수급 검증 및 장전 포지션 비상 궤도 수정' },
+            { time: '15:05', label: 'Track A 모의/실전매매 선발', description: '등락률 상위 15종목 중 절대 대장주 Gemma/Gemini 심사 및 매수' },
+            { time: '15:41', label: 'Track A 성과 채점', description: '종가 기준 목표가 달성 및 손익 판독' },
         ],
     },
     {
-        id: 'SWARM', name: '장중 스웜 AI', fullName: 'Intraday Swarm Agent',
-        description: '로컬 AI 4인방(모멘텀, 역발상, 퀀트, 딜러)이 장중 다수결 평가를 진행합니다.',
+        id: 'TRACK_B', name: 'Track B (신흥 급부상 AI)', fullName: 'Emerging Star Buy Agent',
+        description: '5일/10일/20일/60일 다기간 교차 분석을 통해 시장 대비 강력한 알파 역상관을 보이는 신흥 주도주를 발굴합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '15:05', label: 'Track B 모의/실전매매 선발', description: '다기간 알파 역상관 신흥주 Gemma/Gemini 심사 및 매수' },
+            { time: '15:41', label: 'Track B 성과 채점', description: '종가 기준 목표가 달성 및 손익 판독' },
+        ],
+    },
+    {
+        id: 'TRACK_C', name: 'Track C (눌림목/반등 AI)', fullName: 'Pullback Rebound Buy Agent',
+        description: '강력한 수급이 유입된 주도 테마군 중 20일선 및 VWAP 부근의 안정적 눌림목 반등 타점을 스나이핑합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '15:05', label: 'Track C 모의/실전매매 선발', description: '주도주 수급선 지지 확인 후 눌림목 타점 매수' },
+            { time: '15:41', label: 'Track C 성과 채점', description: '종가 기준 목표가 달성 및 손익 판독' },
+        ],
+    },
+    {
+        id: 'TRACK_D', name: 'Track D (당일 급등 AI)', fullName: 'Intraday Surge Buy Agent',
+        description: '당일 거래대금 폭발 및 강력한 급등 탄력 모멘텀을 형성한 장중 주도주를 추종합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '15:05', label: 'Track D 모의/실전매매 선발', description: '당일 거래량 폭발 및 5% 이상 솟구친 종목 발굴' },
+            { time: '15:41', label: 'Track D 성과 채점', description: '종가 기준 목표가 달성 및 손익 판독' },
+        ],
+    },
+    {
+        id: 'TRACK_E', name: 'Track E (단기 눌림 AI)', fullName: 'Short-term Consolidation Buy Agent',
+        description: '3~5일간의 단기 숨고르기 조정을 거치며 2차 파동 직전의 안정적 구간에 진입한 종목을 포착합니다.',
+        gemini: true, trigger: 'CRON' as const,
+        schedules: [
+            { time: '15:05', label: 'Track E 모의/실전매매 선발', description: '단기 숨고르기 구간 안정적 2차 파동 타점 매수' },
+            { time: '15:41', label: 'Track E 성과 채점', description: '종가 기준 목표가 달성 및 손익 판독' },
+        ],
+    },
+    {
+        id: 'LIVE_TRADER', name: '실전 자동매매 엔진', fullName: 'Live Trade Execution Engine',
+        description: '키움증권 OpenAPI와 직접 연동되어 동시호가 매수 집행, 장중 미체결 추적, 익절 감시, 보유기한 청산 및 일일 정산을 수행합니다.',
         gemini: false, trigger: 'CRON' as const,
-        schedules: [],
-    },
-    {
-        id: 'IMA', name: '이슈 AI (편집장)', fullName: 'Issue Management Agent',
-        description: '글로벌 매크로 이슈를 스캔하고 이슈 장부(Ledger)에 생명주기를 기록합니다.',
-        gemini: true, trigger: 'MANUAL' as const,
-        schedules: [],
-    },
-    {
-        id: 'ITA', name: '이슈 트래커 (전담 기자)', fullName: 'Issue Tracker Agent',
-        description: '08:50 MCA(Cycle A) 동작 시 호출되어 밤사이 뉴스를 긁어와 이슈 타임라인을 업데이트합니다.',
-        gemini: false, trigger: 'CRON' as const,
-        schedules: [],
-    },
-    {
-        id: 'COPILOT', name: '코파일럿', fullName: 'Co-Pilot Agent',
-        description: '사용자 채팅 기반 AI 어시스턴트. 실시간 데이터를 수집하여 답변합니다.',
-        gemini: false, trigger: 'CHAT' as const,
-        schedules: [],
-    },
-    {
-        id: 'MRA', name: '회고 AI', fullName: 'Market Review Agent',
-        description: '메인 예측 결과를 로컬 스웜이 매일 피드백(평가)하며, 메인 AI가 주/월 단위로 시스템 룰을 생성합니다.',
-        gemini: true, trigger: 'CRON' as const,
         schedules: [
-            { time: '16:00', label: '주간 회고 (금요일)', description: '반복되는 실패 감지 및 룰 추출 (Master)' },
-            { time: '16:30', label: '월간 회고 (말일)', description: '4주간 매매내역 거시 분석 체화 (Master)' },
+            { time: '08:50', label: '장전 계좌 잔고 동기화 (Sync Check)', description: '수동 주문 및 장외 체결분 사전 대조' },
+            { time: '09:10', label: '보유기한 청산 예고 브리핑', description: '오늘 목표 보유일 도달 종목 텔레그램 안내' },
+            { time: '15:00', label: '장 마감 기간청산 발송', description: '최대 보유일 만료 종목 15:20 동시호가 시장가 매도 집행' },
+            { time: '15:32', label: '동시호가 확정 종가 진입가 갱신', description: '동시호가 확정 가격으로 체결가 최종 갱신' },
+            { time: '15:35', label: '장 마감 실전 정산', description: '당일 매매 체결 결과 정산 및 잔고 대조' },
         ],
     },
     {
-        id: 'PERF', name: '성과 추적', fullName: 'Performance Tracker',
-        description: '일일 예측 vs 실제 결과를 비교 기록합니다. (AI 미사용)',
-        gemini: false, trigger: 'CRON' as const,
-        schedules: [
-            { time: '15:35', label: '일일 성과 기록', description: '오전 예측 대비 실제 종가 비교' },
-        ],
-    },
-    /*
-    {
-        id: 'THEME', name: '테마 수명 분석기', fullName: 'Theme Intelligence Agent',
-        description: '장중/장마감 주도 테마와 섹터를 수집(NaverFlow)하고 모멘텀의 수명(Lifespan)을 예측합니다.',
+        id: 'SELF_LEARNING', name: '주도주 자가학습 엔진', fullName: 'Track Retrospective Agent',
+        description: '주도주 AI 5대 트랙의 매매 타점 성적을 자동 복기하고 오답노트(SKILL.md 지침서)를 최적화 갱신합니다.',
         gemini: true, trigger: 'CRON' as const,
         schedules: [
-            { time: '09:40', label: '오전 주도테마 요약', description: '09:40 정규 수집 시 연계 분석' },
-            { time: '15:45', label: '장마감 메가트렌드 요약', description: '15:45 최종 수집 시 연계 분석' },
-        ],
-    },
-    */
-    {
-        id: 'MOMENTUM_ANALYST', name: '수급/모멘텀 분석기', fullName: 'Momentum Analyst',
-        description: '급등주 및 시장 주도주의 실시간 외인/기관 수급과 뉴스를 분석하여 단기 진입 타점을 포착합니다.',
-        gemini: true, trigger: 'CRON' as const,
-        schedules: [
-            { time: '09:35', label: '주도주 수급 스캔', description: '키움 실시간 Top 30 + 외인/기관 수급 교차 분석' },
-        ],
-    },
-    {
-        id: 'FUNDAMENTAL_ANALYST', name: '리포트/펀더멘털 분석기', fullName: 'Fundamental Analyst',
-        description: '매일 발행되는 리서치와 실적 속보를 분석해 구조적 증익주를 선별합니다.',
-        gemini: true, trigger: 'CRON' as const,
-        schedules: [
-            { time: '09:41', label: '핵심 실적/리포트 진단', description: '증권사 리서치 내용 및 실적 뉴스 필터링' },
-        ],
-    },
-    {
-        id: 'PULLBACK_SCANNER', name: '눌림목 스캐너', fullName: 'Pullback Scanner',
-        description: 'Alpha 상위 주도주 중 거래량을 소화하며 합리적 조정(MA20 지지)을 받는 종목을 스나이핑합니다.',
-        gemini: true, trigger: 'CRON' as const,
-        schedules: [
-            { time: '09:42', label: '주도주 눌림목 탐색', description: '10일 누적 Alpha 상위 종목 차트 교차 분석' },
-        ],
-    },
-    {
-        id: 'PORTFOLIO_MANAGER', name: '포트폴리오 매니저', fullName: 'Portfolio Manager',
-        description: '서브 AI들의 리포트를 종합하여 보유 포지션을 재평가하고 최종 포트폴리오 편입/방출을 지시합니다.',
-        gemini: true, trigger: 'CRON' as const,
-        schedules: [
-            { time: '09:45', label: '1차 평가 (루키 오디션)', description: '서브 AI + 인큐베이터 추천 새 후보 필터링' },
-            { time: '09:48', label: '2차 평가 (아침 리밸런싱)', description: '전체 포트폴리오 재평가 및 한도 내 매수 확정' },
-        ],
-    },
-    {
-        id: 'REPORT_AI', name: '리포트 매매 AI', fullName: 'Report Tracker AI',
-        description: '장 시작 직후 당일 최신 리포트를 스캔하여 1, 2차 서바이벌 분석 후 실시간 시가로 포트폴리오를 리밸런싱합니다.',
-        gemini: true, trigger: 'CRON' as const,
-        schedules: [
-            { time: '09:00', label: '오전 개장 동시호가 리밸런싱', description: 'Scout 1차 발굴 및 Manager 2차 심사 후 실시간 가격 편입' },
-        ],
-    },
-    {
-        id: 'PORTFOLIO_JUDGE', name: '장마감 포트폴리오 심판', fullName: 'Portfolio Judge Scheduler',
-        description: '장 마감 후 종가 기준으로 당일 포트폴리오의 생존 여부와 전략 수명을 엄격하게 채점합니다.',
-        gemini: true, trigger: 'CRON' as const,
-        schedules: [
-            { time: '15:41', label: '포트폴리오 일일 마감 채점', description: '차트 이격도/수명 및 누적 수익률 평가 (방출 판단)' },
-        ],
-    },
-    {
-        id: 'INCUBATOR', name: '인큐베이터 스캐너', fullName: 'Incubator Scan Engine',
-        description: 'MA200을 돌파한 장기 우상향 예비 후보들의 활력(Neglect Score)을 관리합니다.',
-        gemini: true, trigger: 'CRON' as const,
-        schedules: [
-            { time: '15:43', label: '관심종목 활력도 갱신', description: '일일 활성도 감소분 차감 및 IGNITE 승급 평가' },
+            { time: '16:00', label: '주도주 AI 통합 정기 자가학습', description: 'Track A~E 성적 복기 및 지침서 증분 학습' },
         ],
     },
 ] as const

@@ -13,7 +13,6 @@ const CATEGORY_META: Record<string, { icon: string; label: string; color: string
     PULLBACK_REBOUND:  { icon: '🔥', label: '눌림 반등',   color: 'text-red-500 bg-red-500/10 border-red-500/30' },
     PULLBACK_DIP:      { icon: '📉', label: '눌림목',      color: 'text-amber-500 bg-amber-500/10 border-amber-500/30' },
     TRUE_LEADER:       { icon: '👑', label: '진성 대장',   color: 'text-orange-500 bg-orange-500/10 border-orange-500/30' },
-    INTRADAY_SURGE:    { icon: '🔺', label: '당일 급등',      color: 'text-rose-500 bg-rose-500/10 border-rose-500/30' },
     SHORT_TERM_CONSOLIDATION: { icon: '🎯', label: '단기 눌림', color: 'text-green-500 bg-green-500/10 border-green-500/30' },
 }
 
@@ -846,7 +845,6 @@ export const LiveTradeTab: React.FC = () => {
                                     { cat: 'EMERGING_STAR', name: '🔥 신흥 급부상 (Track B)', amt: '1,000,000', days: 5, tp: '15.0', rec_days: 7, rec_tp: 20, expected_win_rate: '66.7', expected_avg_return: '7.54' },
                                     { cat: 'PULLBACK_REBOUND', name: '🔥 눌림 반등 (Track C)', amt: '1,000,000', days: 5, tp: '10.0', rec_days: 5, rec_tp: 10, expected_win_rate: '55.5', expected_avg_return: '4.20' },
                                     { cat: 'PULLBACK_DIP', name: '📉 눌림목 (Track C)', amt: '1,500,000', days: 10, tp: '10.0', rec_days: 7, rec_tp: 15, expected_win_rate: '41.2', expected_avg_return: '5.44' },
-                                    { cat: 'INTRADAY_SURGE', name: '🔺 당일 급등 (Track D)', amt: '500,000', days: 2, tp: '5.0', rec_days: 7, rec_tp: 10, expected_win_rate: '62.5', expected_avg_return: '3.66' },
                                     { cat: 'SHORT_TERM_CONSOLIDATION', name: '🎯 단기 눌림 (Track E)', amt: '1,000,000', days: 5, tp: '5.0', rec_days: 5, rec_tp: 8, expected_win_rate: '70.0', expected_avg_return: '2.50' },
                                 ];
                                 const selectedConfig = STRATEGIES.find(s => s.cat === activeStrategy) || STRATEGIES[0];

@@ -204,12 +204,12 @@ export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIs
                                     )}
                                 </div>
 
-                                {/* 연관 이슈 섹션 (하단 배치 & 최신 2개 표시 & 더보기) */}
-                                <div className="space-y-3 pt-4">
-                                    <h4 className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
-                                        <AlertCircle size={13} className="text-red-500" /> Issue
-                                    </h4>
-                                    {relatedIssues && relatedIssues.length > 0 ? (
+                                {/* 연관 이슈 섹션 (존재할 때만 표시) */}
+                                {relatedIssues && relatedIssues.length > 0 && (
+                                    <div className="space-y-3 pt-4">
+                                        <h4 className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                                            <AlertCircle size={13} className="text-red-500" /> Issue
+                                        </h4>
                                         <div className="flex flex-col gap-3">
                                             {relatedIssues.slice(0, showAllIssues ? undefined : 2).map((edge: any, i: number) => {
                                                 const chainNodes: string[] = edge.logical_path
@@ -251,12 +251,8 @@ export function StockDetailModal({ stockCode, stockName, relatedTheme, relatedIs
                                                 </button>
                                             )}
                                         </div>
-                                    ) : (
-                                        <div className="text-[12px] text-muted-foreground italic px-2 py-1 bg-muted/30 rounded border border-dashed border-border/60">
-                                            관련된 거시 이슈가 감지되지 않았습니다.
-                                        </div>
-                                    )}
-                                </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* AI Report (기존 종목 AI 리포트 및 통합 타임라인) */}

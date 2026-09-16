@@ -563,17 +563,19 @@ export const MarketLeadersTab: React.FC = () => {
                         ))}
                     </div>
 
-                    {/* Section: AI 브리핑 자리 */}
+                    {/* Section: 주도 테마 필터 가이드 */}
                     <div className="shrink-0 border-t border-border/30">
                         <div className="px-3 py-2.5 bg-muted/10 border-b border-border/20">
                             <div className="flex items-center gap-1.5">
                                 <Zap className="w-3.5 h-3.5 text-yellow-400" />
-                                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">AI 시황 브리핑</span>
+                                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">주도 테마 필터 안내</span>
                             </div>
                         </div>
                         <div className="px-3 py-3 min-h-[80px]">
                             <div className="p-3 bg-primary/5 border border-primary/15 rounded-xl text-[11px] text-muted-foreground leading-relaxed">
-                                (준비 중) 주도 테마와 이슈 레저 데이터를 결합하여 현 시황의 핵심 키워드를 보여주는 자리입니다.
+                                {selectedTheme
+                                    ? `현재 [${selectedTheme}] 테마에 속한 대장주만 우측 테이블에 필터링되어 표시 중입니다. (해제하려면 다시 클릭)`
+                                    : '위 테마 목록을 클릭하면 해당 주도 테마에 속한 대장주 종목들만 즉시 선별하여 우측 테이블에 표시합니다.'}
                             </div>
                         </div>
                     </div>

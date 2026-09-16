@@ -41,7 +41,6 @@ const CATEGORY_META: Record<string, { icon: string; label: string; color: string
     PULLBACK_REBOUND:  { icon: '🔥', label: '눌림 반등',   color: 'text-red-500 bg-red-500/10 border-red-500/30' },
     PULLBACK_DIP:      { icon: '📉', label: '눌림목',      color: 'text-amber-500 bg-amber-500/10 border-amber-500/30' },
     TRUE_LEADER:       { icon: '👑', label: '진성 대장',   color: 'text-orange-500 bg-orange-500/10 border-orange-500/30' },
-    INTRADAY_SURGE:    { icon: '🔺', label: '당일 급등',      color: 'text-rose-500 bg-rose-500/10 border-rose-500/30' },
     SHORT_TERM_CONSOLIDATION: { icon: '🎯', label: '단기 눌림', color: 'text-green-500 bg-green-500/10 border-green-500/30' },
 }
 
@@ -52,7 +51,6 @@ const CATEGORY_FILTER_OPTIONS: { key: string; label: string }[] = [
     { key: 'EMERGING_STAR',             label: '🔥 신흥 급부상 (Track B)' },
     { key: 'PULLBACK_REBOUND',          label: '🔥 눌림 반등 (Track C)' },
     { key: 'PULLBACK_DIP',              label: '📉 눌림목 (Track C)' },
-    { key: 'INTRADAY_SURGE',            label: '🔺 당일 급등 (Track D)' },
     { key: 'SHORT_TERM_CONSOLIDATION',  label: '🎯 단기 눌림 (Track E)' },
 ]
 
@@ -240,11 +238,10 @@ export const SimTradeTab: React.FC = () => {
             // 날짜 내에서는 카테고리(대장 > 급등 > 신흥 > 눌림)를 먼저, 그다음 순위순으로 정렬
             const catOrder: Record<string, number> = {
                 'TRUE_LEADER': 1,
-                'INTRADAY_SURGE': 2,
-                'SHORT_TERM_CONSOLIDATION': 3,
-                'EMERGING_STAR': 4,
-                'PULLBACK_REBOUND': 5,
-                'PULLBACK_DIP': 6
+                'SHORT_TERM_CONSOLIDATION': 2,
+                'EMERGING_STAR': 3,
+                'PULLBACK_REBOUND': 4,
+                'PULLBACK_DIP': 5
             }
             datePicks.sort((a, b) => {
                 const aCat = catOrder[a.category] || 99
@@ -393,11 +390,10 @@ export const SimTradeTab: React.FC = () => {
                                                 setIsAiMenuOpen(false);
                                                 setLoading(true);
                                                 try {
-                                                    alert('전 트랙(A~E) AI 종목 선정을 순차적으로 시작합니다. 약 1~2분 소요됩니다.');
+                                                    alert('전 트랙(A, B, C, E) AI 종목 선정을 순차적으로 시작합니다. 약 1~2분 소요됩니다.');
                                                     await (window as any).electronAPI.runTrackABuyAgent();
                                                     await (window as any).electronAPI.runTrackBBuyAgent();
                                                     await (window as any).electronAPI.runTrackCBuyAgent();
-                                                    await (window as any).electronAPI.runTrackDBuyAgent();
                                                     await (window as any).electronAPI.runTrackEBuyAgent();
                                                     alert('전 트랙 종목 선정이 완료되었습니다.');
                                                     await fetchPicks();
@@ -410,7 +406,7 @@ export const SimTradeTab: React.FC = () => {
                                             className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-muted transition-colors border-b border-border/30 text-indigo-400 flex items-center gap-2"
                                         >
                                             <Play className="w-3.5 h-3.5" />
-                                            전체 트랙 일괄 선정 (A~E)
+                                            전체 트랙 일괄 선정 (A, B, C, E)
                                         </button>
                                         <button 
                                             onClick={async () => {
@@ -474,25 +470,6 @@ export const SimTradeTab: React.FC = () => {
                                                 setIsAiMenuOpen(false);
                                                 setLoading(true);
                                                 try {
-                                                    alert('당일 급등주 종가베팅 파이프라인 (Track D)을 시작합니다. 약 10~20초 소요됩니다.');
-                                                    await (window as any).electronAPI.runTrackDBuyAgent();
-                                                    alert('당일 급등주 종가베팅 선정이 완료되었습니다.');
-                                                    await fetchPicks();
-                                                } catch(e: any) {
-                                                    alert('에러 발생: ' + e.message);
-                                                } finally {
-                                                    setLoading(false);
-                                                }
-                                            }}
-                                            className="w-full text-left px-4 py-2 text-xs font-medium hover:bg-muted transition-colors text-orange-400"
-                                        >
-                                            🔥 당일 급등주 종가베팅 (D)
-                                        </button>
-                                        <button 
-                                            onClick={async () => {
-                                                setIsAiMenuOpen(false);
-                                                setLoading(true);
-                                                try {
                                                     alert('단기 눌림목 종가베팅 파이프라인 (Track E)을 시작합니다. 약 10~20초 소요됩니다.');
                                                     await (window as any).electronAPI.runTrackEBuyAgent();
                                                     alert('단기 눌림목 선정이 완료되었습니다.');
@@ -543,10 +520,9 @@ export const SimTradeTab: React.FC = () => {
                                                         alert('OHLCV 수집 중단: ' + ohlcvRes.error);
                                                         return;
                                                     }
-                                                    // 2. 종목 선정 파이프라인 (Track A~E)
+                                                    // 2. 종목 선정 파이프라인 (Track A, B, C, E)
                                                     alert('OHLCV 수집 완료! 이제 각 트랙별 AI 종목 선정을 시작합니다.');
                                                     await (window as any).electronAPI.runTrackEBuyAgent();
-                                                    await (window as any).electronAPI.runTrackDBuyAgent();
                                                     await (window as any).electronAPI.runTrackCBuyAgent();
                                                     await (window as any).electronAPI.runTrackBBuyAgent();
                                                     await (window as any).electronAPI.runTrackABuyAgent();

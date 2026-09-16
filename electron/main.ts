@@ -1018,7 +1018,6 @@ ipcMain.handle('v2:get-sim-trade-picks', async (_event, options?: { limit?: numb
                 'track_a_buy_picks',
                 'track_b_buy_picks',
                 'track_c_buy_picks',
-                'track_d_buy_picks',
                 'track_e_buy_picks'
             ];
             for (const table of tables) {
@@ -1048,7 +1047,7 @@ ipcMain.handle('v2:get-sim-trade-picks', async (_event, options?: { limit?: numb
             console.error('[SimTrade Fix] PENDING 보정 중 에러:', fixErr);
         }
 
-        // --- 2. 통합 조회 ---
+        // --- 2. 통합 조회 (Track A, B, C, E 4대 트랙) ---
         // ROW_NUMBER() 윈도우 함수로 (stock_code, pick_date) 파티션 내 1위 레코드만 선택
         // 동일 종목이 여러 Track 테이블에 중복 저장되어도 DB 레벨에서 완전 dedup
         const picks = db.prepare(`
@@ -1058,8 +1057,6 @@ ipcMain.handle('v2:get-sim-trade-picks', async (_event, options?: { limit?: numb
                 SELECT * FROM track_b_buy_picks
                 UNION ALL
                 SELECT * FROM track_c_buy_picks
-                UNION ALL
-                SELECT * FROM track_d_buy_picks
                 UNION ALL
                 SELECT * FROM track_e_buy_picks
             ),

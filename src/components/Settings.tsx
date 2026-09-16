@@ -1365,46 +1365,11 @@ export default function Settings() {
                                                 <div className="space-y-3">
                                                     {[
                                                         {
-                                                            name: "📈 시황 AI",
-                                                            agents: [
-                                                                { id: 'MCA', label: '시장 상황 판단' },
-                                                                { id: 'MRA', label: '시장 회고 작성' }
-                                                            ]
-                                                        },
-                                                        {
-                                                            name: "🔥 주도주 AI",
+                                                            name: "🔥 주도주 AI (단독 운용)",
                                                             agents: [
                                                                 { id: 'TRACK_A', label: 'Track A (진성 대장)' },
-                                                                { id: 'TRACK_B,TRACK_C', label: 'Track B/C (알파 역상관)' },
-                                                                { id: 'TRACK_D,TRACK_E', label: 'Track D/E (당일 급등)' }
-                                                            ]
-                                                        },
-                                                        /*
-                                                        {
-                                                            name: "🧬 테마 AI",
-                                                            agents: [
-                                                                { id: 'THEME', label: '테마 AI' }
-                                                            ]
-                                                        },
-                                                        {
-                                                            name: "🚀 텐배거 AI",
-                                                            agents: [
-                                                                { id: 'MOONSHOT_VALIDATION', label: '텐배거 스캐너 (1차 심사)' },
-                                                                { id: 'MOONSHOT_TRACKER', label: '액티브 트래킹 (일일 리뷰)' }
-                                                            ]
-                                                        },
-                                                        */
-                                                        {
-                                                            name: "💼 종목 AI (포트폴리오)",
-                                                            agents: [
-                                                                { id: 'PORTFOLIO_MANAGER', label: 'PM2 리밸런싱' },
-                                                                { id: 'PM3_SWAP_REVIEW', label: 'PM3 교체 스왑 심사' }
-                                                            ]
-                                                        },
-                                                        {
-                                                            name: "💬 기타 도구",
-                                                            agents: [
-                                                                { id: 'COPILOT', label: 'AI 코파일럿' }
+                                                                { id: 'TRACK_B,TRACK_C', label: 'Track B/C (알파 역상관 / 눌림목)' },
+                                                                { id: 'TRACK_D,TRACK_E', label: 'Track D/E (당일 급등 / 단기 눌림)' }
                                                             ]
                                                         }
                                                     ].map((category, idx) => (
@@ -1473,44 +1438,10 @@ export default function Settings() {
                                                 <div className="space-y-3">
                                                     {[
                                                         {
-                                                            name: "📈 시황 AI",
-                                                            agents: [
-                                                                { id: 'ANALYST_CHART,ANALYST_NEWS', label: '시황 판단 보조 (차트/뉴스)' },
-                                                                { id: 'MRA_DAILY_FEEDBACK,MRA_DAILY_RETRO', label: '시장 회고 보조 (피드백)' }
-                                                            ]
-                                                        },
-                                                        {
-                                                            name: "🔥 주도주 AI",
+                                                            name: "🔥 주도주 AI 심층 리서치",
                                                             agents: [
                                                                 { id: 'TRACK_A_GEMMA_RESEARCH', label: 'Track A 심층 리서치 (병렬 권장)' },
                                                                 { id: 'TRACK_B_GEMMA_RESEARCH,TRACK_C_GEMMA_RESEARCH,TRACK_D_GEMMA_RESEARCH,TRACK_E_GEMMA_RESEARCH', label: 'Track B~E 심층 리서치 (병렬 권장)' }
-                                                            ]
-                                                        },
-                                                        /*
-                                                        {
-                                                            name: "🚀 텐배거 AI",
-                                                            agents: [
-                                                                { id: 'MOONSHOT_VALIDATION', label: '텐배거 스캐너 (1차 심사)' },
-                                                                { id: 'MOONSHOT_TRACKER', label: '액티브 트래킹 (일일 리뷰)' }
-                                                            ]
-                                                        },
-                                                        */
-                                                        {
-                                                            name: "🤖 관제 센터 (AI 스웜)",
-                                                            agents: [
-                                                                { id: 'SWARM_MONITOR,INTRADAY_MONITOR', label: '장중 스웜 패널 (다중 투표)' }
-                                                            ]
-                                                        },
-                                                        {
-                                                            name: "📰 뉴스 허브",
-                                                            agents: [
-                                                                { id: 'ITA', label: '이슈 트래커 (뉴스/공시 전처리)' }
-                                                            ]
-                                                        },
-                                                        {
-                                                            name: "💬 기타 도구",
-                                                            agents: [
-                                                                { id: 'COPILOT', label: 'AI 코파일럿 (로컬 백업)' }
                                                             ]
                                                         }
                                                     ].map((category, idx) => (

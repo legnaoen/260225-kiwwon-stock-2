@@ -459,12 +459,10 @@ export class SchedulerService {
                     await PortfolioJudgeScheduler.getInstance().runDailyJudgement()
 
                     const { TrackEBuyAgent } = await import('./v2_agents/TrackEBuyAgent')
-                    const { TrackDBuyAgent } = await import('./v2_agents/TrackDBuyAgent')
                     const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
                     const { TrackBBuyAgent } = await import('./v2_agents/TrackBBuyAgent')
                     const { TrackABuyAgent } = await import('./v2_agents/TrackABuyAgent')
                     const trackEResult = TrackEBuyAgent.getInstance().scoreDailyPerformance()
-                    const trackDResult = TrackDBuyAgent.getInstance().scoreDailyPerformance()
                     const trackCResult = TrackCBuyAgent.getInstance().scoreDailyPerformance()
                     const trackBResult = TrackBBuyAgent.getInstance().scoreDailyPerformance()
                     const trackAResult = TrackABuyAgent.getInstance().scoreDailyPerformance()
@@ -472,9 +470,6 @@ export class SchedulerService {
                     const trackEMsg = trackEResult.closed > 0
                         ? `\n🎯 Track E (단기눌림): ${trackEResult.updated}개 갱신, ${trackEResult.closed}개 청산`
                         : trackEResult.updated > 0 ? `\n🎯 Track E: ${trackEResult.updated}개 보유중 갱신` : ''
-                    const trackDMsg = trackDResult.closed > 0
-                        ? `\n⚡ Track D (당일급등): ${trackDResult.updated}개 갱신, ${trackDResult.closed}개 청산`
-                        : trackDResult.updated > 0 ? `\n⚡ Track D: ${trackDResult.updated}개 보유중 갱신` : ''
                     const trackCMsg = trackCResult.closed > 0
                         ? `\n🎣 Track C (눌림목): ${trackCResult.updated}개 갱신, ${trackCResult.closed}개 청산`
                         : trackCResult.updated > 0 ? `\n🎣 Track C: ${trackCResult.updated}개 보유중 갱신` : ''
@@ -485,7 +480,7 @@ export class SchedulerService {
                         ? `\n👑 Track A (대장주): ${trackAResult.updated}개 갱신, ${trackAResult.closed}개 청산`
                         : trackAResult.updated > 0 ? `\n👑 Track A: ${trackAResult.updated}개 보유중 갱신` : ''
 
-                    this.telegram.sendMessage(`⚖️ [15:41] 장마감 포트폴리오 채점 완료\n종가 기준 수익률·수명 심사 정상 완료\n확인: 종목AI 탭 > 포트폴리오 리스트${trackAMsg}${trackBMsg}${trackCMsg}${trackDMsg}${trackEMsg}`)
+                    this.telegram.sendMessage(`⚖️ [15:41] 주도주 AI 일일 성과 채점 완료 (Track A, B, C, E)\n종가 기준 모의매매 수익률 및 수명 심사 정상 완료\n확인: 주도주 AI 탭 > 모의매매 리스트${trackAMsg}${trackBMsg}${trackCMsg}${trackEMsg}`)
 
                     // [소급 실행 검사] 휴장일로 인해 이월된 정기 자가학습이 있으면 즉시 실행
                     const pendingRun = store.get('pending_self_learning_run') || false;
@@ -578,7 +573,6 @@ export class SchedulerService {
                         { id: 'A', name: '진성대장',   getAgent: async () => (await import('./v2_agents/TrackABuyAgent')).TrackABuyAgent.getInstance() },
                         { id: 'B', name: '신흥급부상', getAgent: async () => (await import('./v2_agents/TrackBBuyAgent')).TrackBBuyAgent.getInstance() },
                         { id: 'C', name: '눌림/반등',  getAgent: async () => (await import('./v2_agents/TrackCBuyAgent')).TrackCBuyAgent.getInstance() },
-                        { id: 'D', name: '당일급등',   getAgent: async () => (await import('./v2_agents/TrackDBuyAgent')).TrackDBuyAgent.getInstance() },
                         { id: 'E', name: '단기눌림',   getAgent: async () => (await import('./v2_agents/TrackEBuyAgent')).TrackEBuyAgent.getInstance() },
                     ];
 
@@ -636,7 +630,6 @@ export class SchedulerService {
                                     'EMERGING_STAR':           'track_b_buy_picks',
                                     'PULLBACK_REBOUND':        'track_c_buy_picks',
                                     'PULLBACK_DIP':            'track_c_buy_picks',
-                                    'INTRADAY_SURGE':          'track_d_buy_picks',
                                     'SHORT_TERM_CONSOLIDATION':'track_e_buy_picks',
                                 };
 
@@ -1385,7 +1378,6 @@ export class SchedulerService {
             { table: 'track_a_buy_picks', track: 'stable' },
             { table: 'track_b_buy_picks', track: 'stable' },
             { table: 'track_c_buy_picks', track: 'mfe_attack' },
-            { table: 'track_d_buy_picks', track: 'mfe_attack' },
             { table: 'track_e_buy_picks', track: 'overlap' },
         ];
         
@@ -1571,7 +1563,7 @@ export class SchedulerService {
     /**
      * 주도주 AI 특정 트랙(Track A ~ E)의 자가학습 파이프라인 실행
      */
-    public async runTrackSelfLearningPipeline(track: 'A' | 'B' | 'C' | 'D' | 'E', holidayOption: 'SKIP' | 'NEXT_OPEN' = 'NEXT_OPEN'): Promise<void> {
+    public async runTrackSelfLearningPipeline(track: 'A' | 'B' | 'C' | 'E', holidayOption: 'SKIP' | 'NEXT_OPEN' = 'NEXT_OPEN'): Promise<void> {
         console.log(`[SchedulerService] 🤖 Track ${track} 정기 자가학습 파이프라인 가동...`);
         const { getKstDate } = await import('../utils/DateUtils');
         const todayStr = getKstDate();
@@ -1676,9 +1668,9 @@ export class SchedulerService {
         }
 
         try {
-            this.telegram.sendMessage(`🤖 **[주도주 AI 통합 자가학습 시작]**\n- Track A ~ E 전체의 최근 매매 타점 성적 복기 및 지침서 증분 학습을 순차 실행합니다.`);
+            this.telegram.sendMessage(`🤖 **[주도주 AI 통합 자가학습 시작]**\n- Track A, B, C, E 전체의 최근 매매 타점 성적 복기 및 지침서 증분 학습을 순차 실행합니다.`);
             
-            const tracks: ('A' | 'B' | 'C' | 'D' | 'E')[] = ['A', 'B', 'C', 'D', 'E'];
+            const tracks: ('A' | 'B' | 'C' | 'E')[] = ['A', 'B', 'C', 'E'];
             const { TrackRetrospectiveAgent } = await import('./v2_agents/TrackRetrospectiveAgent');
             
             let successCount = 0;
@@ -1705,7 +1697,7 @@ export class SchedulerService {
 
             this.telegram.sendMessage(
                 `✅ **[주도주 AI 통합 자가학습 완료]**\n` +
-                `- 대상: Track A ~ E (총 5개 트랙)\n` +
+                `- 대상: Track A, B, C, E (총 4개 트랙)\n` +
                 `- 결과: 성공 ${successCount}개, 유보(스킵) ${skippedCount}개, 실패 ${failedCount}개`
             );
         } catch (err: any) {

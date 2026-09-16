@@ -18,8 +18,7 @@ import { PortfolioManagerTab } from './components/v2_dashboard/PortfolioManagerT
 // import { IncubatorLabTab } from './components/v2_dashboard/IncubatorLabTab'
 import { MarketLeadersTab } from './components/v2_dashboard/MarketLeadersTab'
 import MoonshotTab from './components/v2_dashboard/MoonshotTab'
-import ReportDashboardTab from './components/v2_dashboard/ReportDashboardTab'
-import CoPilotDrawer from './components/common/CoPilotDrawer'
+// import CoPilotDrawer from './components/common/CoPilotDrawer'
 
 // ─── V2 Hooks & Stores ───────────────────────────────────────────────────────
 import { useScheduleNotifier } from './hooks/useScheduleNotifier'
@@ -378,35 +377,32 @@ function AppContent() {
                         {/* ── V2 Active Routes ── */}
                         {/* {activeTab === 'dashboard' && <Dashboard />} */}
                         {activeTab === 'holdings' && <Holdings />}
-                        {activeTab === 'settings' && <Settings />}
-                        {/* {activeTab === 'maiis-command' && <MaiisCommandCenter />} */}
-                        {/* {activeTab === 'macro-dashboard' && <MacroDashboard />} */}
-                        {activeTab === 'pipeline-monitor' && <PipelineMonitorTab />}
-                        {activeTab === 'market-agent' && <MarketAgentTab onNavigate={navigateTo} />}
-                        {activeTab === 'issue-agent' && <IssueManagementTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'issue-agent' ? navTarget.entityId : undefined} />}
-                        {activeTab === 'theme-tracker' && <ThemeTrackerTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'theme-tracker' ? navTarget.entityId : undefined} />}
-                        {/* {activeTab === 'incubator-lab' && <IncubatorLabTab />} */}
-                        {activeTab === 'portfolio-manager' && <PortfolioManagerTab />}
                         {activeTab === 'market-leaders' && <MarketLeadersTab />}
-                        {activeTab === 'moonshot' && <MoonshotTab />}
-                        {activeTab === 'report-dashboard' && <ReportDashboardTab />}
+                        {activeTab === 'pipeline-monitor' && <PipelineMonitorTab />}
+                        {activeTab === 'settings' && <Settings />}
+                        {/* {activeTab === 'market-agent' && <MarketAgentTab onNavigate={navigateTo} />} */}
+                        {/* {activeTab === 'issue-agent' && <IssueManagementTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'issue-agent' ? navTarget.entityId : undefined} />} */}
+                        {/* {activeTab === 'portfolio-manager' && <PortfolioManagerTab />} */}
+                        {/* {activeTab === 'theme-tracker' && <ThemeTrackerTab onNavigate={navigateTo} initialSelection={navTarget?.tabId === 'theme-tracker' ? navTarget.entityId : undefined} />} */}
+                        {/* {activeTab === 'moonshot' && <MoonshotTab />} */}
+                        {/* {activeTab === 'report-dashboard' && <ReportDashboardTab />} */}
 
                         {/* 등록된 탭이 아닌 경우 폴백 화면 */}
-                        {(['dashboard', 'holdings', 'settings', 'macro-dashboard', 'pipeline-monitor', 'market-agent', 'issue-agent', 'theme-tracker', 'portfolio-manager', 'market-leaders', 'moonshot', 'report-dashboard'].indexOf(activeTab) === -1) && (
+                        {(['holdings', 'market-leaders', 'pipeline-monitor', 'settings'].indexOf(activeTab) === -1) && (
                             <div className="flex flex-col items-center justify-center py-20 opacity-50 space-y-4">
                                 <div className="p-6 bg-muted rounded-full">
                                     <SettingsIcon size={48} className="text-muted-foreground animate-pulse" />
                                 </div>
-                                <h2 className="text-xl font-semibold">{menuItems.find(i => i.id === activeTab)?.name || 'V1 레거시'} 화면 접근 대기</h2>
-                                <p className="text-sm">현재 Phase 1 개발 진행 중입니다.</p>
+                                <h2 className="text-xl font-semibold">{menuItems.find(i => i.id === activeTab)?.name || '주도주 AI'} 화면으로 이동</h2>
+                                <p className="text-sm">주도주 AI 단독 운용 모드입니다.</p>
                             </div>
                         )}
                     </div>
                 </main>
             </div>
 
-            {/* Global Chat AI */}
-            <CoPilotDrawer />
+            {/* Global Chat AI (비활성화됨) */}
+            {/* <CoPilotDrawer /> */}
 
             {/* Status Bar */}
             <footer className={cn(
@@ -477,7 +473,7 @@ function AppContent() {
                         {currentTime.toLocaleTimeString('ko-KR', { hour12: false })}
                     </div>
                     {status.connected && (
-                        <span className={cn("opacity-50", systemError && "text-white/70")}>v1.2.3</span>
+                        <span className={cn("opacity-50", systemError && "text-white/70")}>v1.2.5</span>
                     )}
                 </div>
             </footer>

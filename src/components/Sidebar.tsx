@@ -9,14 +9,14 @@ function cn(...inputs: ClassValue[]) {
 
 export const menuItems = [
     { id: 'holdings', name: '보유종목', icon: Wallet },
-    { id: 'market-agent', name: '시황 AI', icon: Sparkles },
     { id: 'market-leaders', name: '주도주 AI', icon: TrendingUp },
-    { id: 'portfolio-manager', name: '종목 AI', icon: Wallet },
-    // { id: 'moonshot', name: '텐베거 AI', icon: Rocket },
-    // { id: 'theme-tracker', name: '테마 AI', icon: Activity },
-    { id: 'issue-agent', name: '이슈 AI', icon: Brain },
     { id: 'pipeline-monitor', name: '데이터 관제', icon: Server },
     { id: 'settings', name: '설정', icon: Settings },
+    
+    // --- 주도주 AI 단독 운용 정책에 따라 비활성화된 항목들 ---
+    // { id: 'market-agent', name: '시황 AI', icon: Sparkles },
+    // { id: 'portfolio-manager', name: '종목 AI', icon: Wallet },
+    // { id: 'issue-agent', name: '이슈 AI', icon: Brain },
     
     // --- 주석 처리된 레거시 항목들 ---
     // { id: 'report-dashboard', name: '리포트', icon: FileText }, // ReportTrackerTab(리포트 매매)로 통합됨

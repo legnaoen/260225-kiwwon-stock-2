@@ -226,7 +226,8 @@ export class SchedulerService {
                 await MarketConditionAgent.getInstance().runPrediction('A')
             })
 
-            // PerformanceTracker 기록용 (15:35 T+1 / T+5 / T+20)
+            // PerformanceTracker 기록용 (15:35 T+1 / T+5 / T+20) - 종목 AI 종료로 비활성화
+            /*
             const mcaTrackerJob = this.createWatchdogCron('mcaTrackerJob', '35 15 * * 1-5', async () => {
                 const isReady = await this.waitForOhlcv();
                 if (!isReady) {
@@ -243,6 +244,7 @@ export class SchedulerService {
                     this.telegram.sendMessage(`❌ [15:35] 성과 추적 실패\n오류: ${e.message}`)
                 }
             }, { timezone: 'Asia/Seoul' })
+            */
 
             // 실전 매매 아침 보유기한 브리핑 (09:10)
             const liveTradeMorningBriefingJob = this.createMorningWatchdogCron('liveTradeMorningBriefingJob', '10 09 * * 1-5', '09:59', async () => {
@@ -346,7 +348,9 @@ export class SchedulerService {
 
 
 
-            // 주간 회고 AI (금요일 15:44, 3분 텀 내 편성)
+            // ─── [종목 AI 파이프라인 비활성화] 08:50 장전 시장예측 외 스웜/PM/회고 전체 종료 ───
+            /*
+            // 주간 회고 AI (금요일 15:44)
             const weeklyReviewJob = this.createWatchdogCron('weeklyReviewJob', '44 15 * * 5', async () => {
                 try {
                     const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
@@ -358,7 +362,7 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // 월간 회고 AI (매월 28일 15:47, 3분 텀 내 편성)
+            // 월간 회고 AI (매월 28일 15:47)
             const monthlyReviewJob = this.createWatchdogCron('monthlyReviewJob', '47 15 28 * *', async () => {
                 try {
                     const { MarketReviewAgent } = await import('./v2_agents/MarketReviewAgent')
@@ -370,11 +374,7 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // Option 1: Pre-Close 일간 피드백 (로컬 감시 스웜) (15:00) - 사용 안함
-            // Option 2: Post-Market 일간 회고 AI (15:38) - 사용 안함
-
-            // ─── 종목 AI 파이프라인 (3단계, 5분 간격) ───────────────────────
-            // [Step 1] 09:35 수급 AI: NaverFlow(09:26) 데이터 확보 후 급등/거래대금 교차 분석
+            // [Step 1] 09:35 수급 AI
             const momentumJob = this.createMorningWatchdogCron('momentumJob', '35 09 * * 1-5', '09:59', this.withRetryOnTimeout('수급AI-09:35', async () => {
                 console.log('[Scheduler] 📈 수급 AI (MomentumAnalyst) 자동 실행 시작...')
                 try {
@@ -385,7 +385,7 @@ export class SchedulerService {
                 }
             }))
 
-            // [Step 2] 09:41 리포트 AI: 증권사 리포트 기반 펀더멘탈 우량주 발굴 (스웜 AI 충돌 회피로 1분 지연)
+            // [Step 2] 09:41 리포트 AI
             const fundamentalJob = this.createMorningWatchdogCron('fundamentalJob', '41 09 * * 1-5', '09:59', async () => {
                 console.log('[Scheduler] 📄 리포트 AI (FundamentalAnalyst) 자동 실행 시작...')
                 try {
@@ -396,7 +396,7 @@ export class SchedulerService {
                 }
             })
 
-            // [Step 2-B] 09:42 눈림목 스캐너: Alpha 상위 주도주 중 조정 구간 진입 후보 발굴
+            // [Step 2-B] 09:42 눈림목 스캐너
             const pullbackJob = this.createMorningWatchdogCron('pullbackJob', '42 09 * * 1-5', '09:59', async () => {
                 console.log('[Scheduler] 🔍 눈림목 스캐너 (PullbackScanner) 자동 실행 시작...')
                 try {
@@ -407,11 +407,7 @@ export class SchedulerService {
                 }
             })
 
-            // [Step 3+4 통합] 09:45 PM 통합 리뷰 (PM1 루키 오디션 → PM2 리밸런싱 즉시 체인 실행)
-            // ★ BUG FIX: phase1Job + phase2Job을 runDailyReview() 하나로 통합
-            //   이전에는 09:45(PM1)과 09:48(PM2)이 별개 크론으로 실행되어
-            //   PM1의 신규 픽(newPicks) 반환값이 PM2로 전달되지 않는 데이터 체인 단절 버그가 있었음.
-            //   runDailyReview()는 내부에서 PM1→PM2를 순서대로 실행하며 결과를 직접 전달함.
+            // [Step 3+4 통합] 09:45 PM 통합 리뷰
             const pmDailyJob = this.createMorningWatchdogCron('pmDailyJob', '45 09 * * 1-5', '09:59', this.withRetryOnTimeout('PM통합리뷰-09:45', async () => {
                 if (this.isPmDailyReviewRunning) {
                     console.log('[Scheduler] 🧑‍💼 이미 PM 통합 리뷰가 실행 중입니다. 중복 실행을 방지합니다.');
@@ -432,6 +428,7 @@ export class SchedulerService {
                     this.isPmDailyReviewRunning = false;
                 }
             }))
+            */
 
             // [Step 4-B] 14:05 PM 장중 2차 미니 리뷰 (포트폴리오 중간 점검 및 리밸런싱) - 잦은 매매 방지를 위해 비활성화
             /*
@@ -453,10 +450,11 @@ export class SchedulerService {
                     console.log('[Scheduler] 장마감 채점 취소: OHLCV 선행 작업 미완료');
                     return;
                 }
-                console.log('[Scheduler] ⚖️ 포트폴리오 장마감 채점 자동 실행 시작...')
+                console.log('[Scheduler] ⚖️ 주도주 AI 장마감 채점 자동 실행 시작...')
                 try {
-                    const { PortfolioJudgeScheduler } = await import('./v2_pipeline/PortfolioJudgeScheduler')
-                    await PortfolioJudgeScheduler.getInstance().runDailyJudgement()
+                    // 레거시 종목 AI 포트폴리오 채점 비활성화
+                    // const { PortfolioJudgeScheduler } = await import('./v2_pipeline/PortfolioJudgeScheduler')
+                    // await PortfolioJudgeScheduler.getInstance().runDailyJudgement()
 
                     const { TrackEBuyAgent } = await import('./v2_agents/TrackEBuyAgent')
                     const { TrackCBuyAgent } = await import('./v2_agents/TrackCBuyAgent')
@@ -509,7 +507,8 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' })
 
-            // [Step 5] 인큐베이터 스캔: Pool B neglect_score 갱신 (15:43)
+            // [Step 5] 인큐베이터 스캔: Pool B neglect_score 갱신 (15:43) - 종목 AI 종료로 비활성화
+            /*
             const incubatorScanJob = this.createWatchdogCron('incubatorScanJob', '43 15 * * 1-5', async () => {
                 const isReady = await this.waitForOhlcv();
                 if (!isReady) {
@@ -525,6 +524,7 @@ export class SchedulerService {
                     console.error('[Scheduler] 인큐베이터 스캔 오류:', e.message)
                 }
             }, { timezone: 'Asia/Seoul' })
+            */
 
             // ─────────────────────────────────────────────────────────────────
             // [Step 6 + Track B 통합] 15:05 전 종목 60봉 수집 → 즉시 모의매매 AI 선정
@@ -809,34 +809,23 @@ export class SchedulerService {
             // [비활성화] 메가 테마 관리: 매매와 무관한 단순 브리핑용이므로 스케줄 제외 (사용자 요청)
             /*
             const megaThemeJob = cron.schedule('43 09 * * 1-5', async () => {
-                console.log('[Scheduler] 🔥 ThemeContextBuilder 메가 테마 집계 시작...')
+                console.log('[SchedulerService] 🔥 ThemeContextBuilder 메가 테마 집계 시작...')
                 try {
                     const { ThemeContextBuilder } = await import('./v2_agents/ThemeContextBuilder')
                     await ThemeContextBuilder.getInstance().runDaily()
-                    console.log('[Scheduler] ✅ ThemeContextBuilder 집계 완료')
+                    console.log('[SchedulerService] ✅ ThemeContextBuilder 집계 완료')
                 } catch (e: any) {
-                    console.error('[Scheduler] ThemeContextBuilder 오류:', e.message)
+                    console.error('[SchedulerService] ThemeContextBuilder 오류:', e.message)
                 }
             }, { timezone: 'Asia/Seoul' })
             */
 
-            // [Step 6.5] 14:55 테마 AI (ThemeIntelligence) 종가 베팅을 위한 전용 크론 (비활성화됨)
+            // [Step 6.5] 14:55 테마 AI (ThemeIntelligence) 종가 베팅을 위한 전용 크론 (종목 AI 종료로 비활성화)
+            /*
             const themeAiJob = this.createWatchdogCron('themeAiJob', '55 14 * * 1-5', async () => {
                 console.log(`[SchedulerService] 🤖 14:55 테마주 AI (종가 베팅용) 비활성화됨 (실행 건너뜀)`)
-                /*
-                try {
-                    // 테마 AI 실행 전, 최신 테마/섹터 순위를 확보하기 위해 NaverFlow 수집 파이프라인 1회 강제 실행
-                    const { V2PipelineManager } = await import('./v2_pipeline/V2PipelineManager')
-                    await V2PipelineManager.getInstance().runPipeline('PL-NaverFlow', { forceFetch: true })
-                    
-                    // 수집된 데이터를 바탕으로 테마 AI 분석 실행
-                    const { ThemeIntelligenceAgent } = await import('./v2_agents/ThemeIntelligenceAgent')
-                    await ThemeIntelligenceAgent.getInstance().runBatchAnalysis()
-                } catch (e: any) {
-                    console.error(`[SchedulerService] 테마 AI 전용 파이프라인 실패:`, e.message)
-                }
-                */
             }, { timezone: 'Asia/Seoul' })
+            */
 
             // [실전 매매] 1분 단위 미체결 주문 모니터링 및 익절 매도 모니터링 (09:00 ~ 15:30 장중)
             const liveTradeMonitorJob = cron.schedule('* 09-14 * * 1-5', async () => {
@@ -971,7 +960,20 @@ export class SchedulerService {
                 }, { timezone: 'Asia/Seoul' });
             }
 
-            this.scheduledJobs.push(mcaJobA, mcaTrackerJob, weeklyReviewJob, monthlyReviewJob, momentumJob, fundamentalJob, pullbackJob, pmDailyJob, portfolioJudgeJob, incubatorScanJob, marketDailyJob, trackEntryJob, themeAiJob, liveTradeMonitorJob, liveTradeChasingStartJob, liveTradeReconJob, liveTradeTimeStopJob, liveTradeSyncCheckJob, liveTradeMorningBriefingJob, postMarketWatchdog, morningWatchdog)
+            this.scheduledJobs.push(
+                mcaJobA,
+                portfolioJudgeJob,
+                marketDailyJob,
+                trackEntryJob,
+                liveTradeMonitorJob,
+                liveTradeChasingStartJob,
+                liveTradeReconJob,
+                liveTradeTimeStopJob,
+                liveTradeSyncCheckJob,
+                liveTradeMorningBriefingJob,
+                postMarketWatchdog,
+                morningWatchdog
+            );
             if (selfLearningJob) {
                 this.scheduledJobs.push(selfLearningJob);
             }
@@ -979,11 +981,11 @@ export class SchedulerService {
                 this.scheduledJobs.push(trackLearningJob);
             }
 
-            console.log(`[SchedulerService] V2 AI schedules initialized (MCA: 08:50, Swarms, Retros)`)
-            console.log(`[SchedulerService] 🎨 종목 AI 파이프라인: 수급(09:35) → 리포트(09:41) → 눌림목(09:42) → 메가테마(09:43) → PM통합(09:45, PM1→PM2 체인)`)
-            console.log(`[SchedulerService] 📊 장중 파이프라인: OHLCV수집+모의매매선정(15:05) → 진입가확정(15:32)`)
-            console.log(`[SchedulerService] 📊 장마감 파이프라인: 성과추적(15:35) → 채점(15:41) → 인큐베이터(15:43) → 주간(15:44,금) → 월간(15:47,28일)`)
-            console.log(`[SchedulerService] 📈 실전 매매 미체결 루프 활성화 (장중 1분 단위)`)
+            console.log(`[SchedulerService] ✅ 스케줄 초기화 완료 (08:50 시장예측 + 주도주 A,B,C,E + 실전매매)`);
+            console.log(`[SchedulerService] 🤖 장전 파이프라인: MCA 시장상황 예측(08:50) → 실전매매 잔고대조(08:50) → 보유기한 브리핑(09:10)`);
+            console.log(`[SchedulerService] 📊 장중 파이프라인: OHLCV수집+주도주 모의매매선정(15:05) → 진입가확정(15:32)`);
+            console.log(`[SchedulerService] 📊 장마감 파이프라인: 실전매매 장마감 정산(15:35) → 주도주 모의매매 일일 채점(15:41)`);
+            console.log(`[SchedulerService] 📈 실전 매매 미체결/익절 감시 루프 활성화 (장중 1분 단위)`);
         }
 
         // ═══ [Step 3] NaverFlow 크론 등록 ═══

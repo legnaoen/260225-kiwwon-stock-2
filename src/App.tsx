@@ -473,7 +473,7 @@ function AppContent() {
                         {currentTime.toLocaleTimeString('ko-KR', { hour12: false })}
                     </div>
                     {status.connected && (
-                        <span className={cn("opacity-50", systemError && "text-white/70")}>v1.2.5</span>
+                        <span className={cn("opacity-50", systemError && "text-white/70")}>v1.2.6</span>
                     )}
                 </div>
             </footer>

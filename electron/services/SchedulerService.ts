@@ -480,7 +480,8 @@ export class SchedulerService {
 
                     this.telegram.sendMessage(`⚖️ [15:41] 주도주 AI 일일 성과 채점 완료 (Track A, B, C, E)\n종가 기준 모의매매 수익률 및 수명 심사 정상 완료\n확인: 주도주 AI 탭 > 모의매매 리스트${trackAMsg}${trackBMsg}${trackCMsg}${trackEMsg}`)
 
-                    // [소급 실행 검사] 휴장일로 인해 이월된 정기 자가학습이 있으면 즉시 실행
+                    // [자가학습 크론 비활성화] 소급 실행 블록 완전 종료
+                    /*
                     const pendingRun = store.get('pending_self_learning_run') || false;
                     if (pendingRun) {
                         console.log('[Scheduler] 🔄 이월된 자가학습(pending_self_learning_run) 감지. 소급 실행을 가동합니다...');
@@ -491,7 +492,6 @@ export class SchedulerService {
                         });
                     }
 
-                    // [주도주 AI 통합 소급 실행 검사]
                     const pendingTracksRun = store.get('pending_tracks_learning_run') || false;
                     if (pendingTracksRun) {
                         console.log('[Scheduler] 🔄 이월된 주도주 AI 통합 자가학습(pending_tracks_learning_run) 감지. 소급 실행을 가동합니다...');
@@ -501,6 +501,7 @@ export class SchedulerService {
                             console.error('[Scheduler] 이월 주도주 AI 통합 자가학습 소급 실행 실패:', e);
                         });
                     }
+                    */
                 } catch (e: any) {
                     console.error('[Scheduler] 장마감 채점 오류:', e.message)
                     this.telegram.sendMessage(`❌ [15:41] 장마감 채점 실패\n오류: ${e.message}`)
@@ -921,7 +922,8 @@ export class SchedulerService {
                 }
             }, { timezone: 'Asia/Seoul' });
 
-            // ═══ [Step 7] AI 자가학습 및 오답노트 작성 스케줄 ═══
+            // ═══ [Step 7] 레거시 종목 AI 자가학습 크론 (완전 비활성화) ═══
+            /*
             let selfLearningJob: cron.ScheduledTask | null = null;
             const aiSettings = store.get('ai_settings') as any || {};
             const selfLearning = aiSettings.selfLearningSettings || {
@@ -940,9 +942,11 @@ export class SchedulerService {
                     await this.runSelfLearningPipeline(selfLearning.holidayOption);
                 }, { timezone: 'Asia/Seoul' });
             }
+            */
 
-            // ═══ [Step 8] 주도주 AI 통합 자가학습 크론 등록 ═══
+            // ═══ [Step 8] 주도주 AI 통합 자가학습 크론 등록 (수동 전용으로 기본 OFF) ═══
             let trackLearningJob: cron.ScheduledTask | null = null;
+            const aiSettings = store.get('ai_settings') as any || {};
             const trackSettings = aiSettings.trackLearningSettings || {
                 enabled: false,
                 interval: 'WEEKLY',
@@ -974,9 +978,6 @@ export class SchedulerService {
                 postMarketWatchdog,
                 morningWatchdog
             );
-            if (selfLearningJob) {
-                this.scheduledJobs.push(selfLearningJob);
-            }
             if (trackLearningJob) {
                 this.scheduledJobs.push(trackLearningJob);
             }

@@ -823,7 +823,7 @@ export class KiwoomService {
                 dmst_stex_tp: 'KRX',
                 stk_cd: stk_cd,
                 ord_qty: String(qty),
-                ord_uv: String(price),
+                ord_uv: (normalizedTrdeType === '3' || normalizedTrdeType === '03') ? '' : String(price), // 시장가는 단가 생략(공식 명세: ord_uv 선택)
                 trde_tp: normalizedTrdeType,
             }
 
@@ -846,20 +846,51 @@ export class KiwoomService {
             }
             
             // 시장가 정정(trde_tp가 '03' 또는 '3')인 경우 가격은 빈 문자열("")로 전송해야 오류 방지 가능
-            const isMarketOrder = trde_tp === '03' || trde_tp === '3';
+            // 공식 명세(kt10002): 정정은 단가(mdfy_uv)가 필수라 시장가 전환 불가 → convertToMarketSell() 사용
+            if (trde_tp === '03' || trde_tp === '3') {
+                throw new Error('정정(kt10002)으로는 시장가 전환이 불가합니다. convertToMarketSell()을 사용하세요.');
+            }
             const body = {
-                acnt_no: accountNo,
                 dmst_stex_tp: 'KRX',
                 stk_cd: stk_cd,
                 orig_ord_no: orig_ord_no,
                 mdfy_qty: String(mdfy_qty),
-                mdfy_uv: isMarketOrder ? '' : String(mdfy_uv),
-                trde_tp: trde_tp, // 지정가 '00', 시장가 '03' 등
-                cond_uv: ''
+                mdfy_uv: String(mdfy_uv),
+                mdfy_cond_uv: ''
             }
             const response = await this.kiwoomAxios.post(url, body, { headers })
             return response.data
         })
+    }
+
+    /**
+     * 미체결 매도를 시장가로 전환: 취소(kt10003) → 취소수량만큼 시장가 재주문(kt10001, trde_tp '3').
+     * 정정으로는 시장가 전환이 불가하므로(공식 명세) 2단계로 처리한다.
+     * 취소 성공 후 재주문이 실패하면 error.cancelled=true 로 던져 호출부가 미청산 상태를 알리게 한다.
+     */
+    public async convertToMarketSell(accountNo: string, orig_ord_no: string, stk_cd: string, qty: number): Promise<any> {
+        const cancelRes: any = await this.cancelOrder(accountNo, orig_ord_no, stk_cd, qty);
+        const cancelData = cancelRes?.data || cancelRes;
+        if (!cancelData || (cancelData.return_code !== 0 && cancelData.return_code !== '0')) {
+            throw new Error(`시장가 전환 취소 실패: ${cancelData?.return_msg || '알 수 없는 오류'}`);
+        }
+        const cancelledQty = parseInt(String(cancelData.cncl_qty || '').replace(/[^0-9]/g, ''), 10) || qty;
+
+        let lastErr: any = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            await new Promise(r => setTimeout(r, attempt === 0 ? 300 : 1000)); // 거래소 취소 반영 대기
+            try {
+                const sellRes: any = await this.sendSellOrder(accountNo, stk_cd, cancelledQty, 0, '3');
+                const sellData = sellRes?.data || sellRes;
+                if (sellData && (sellData.return_code === 0 || sellData.return_code === '0')) return sellData;
+                lastErr = new Error(sellData?.return_msg || '시장가 재주문 거절');
+            } catch (e: any) {
+                lastErr = e;
+            }
+        }
+        const err: any = new Error(`취소는 완료됐으나 시장가 재주문 실패(${stk_cd} ${cancelledQty}주): ${lastErr?.message || lastErr}`);
+        err.cancelled = true;
+        throw err;
     }
 
 
@@ -874,13 +905,12 @@ export class KiwoomService {
                 'authorization': `Bearer ${token}`,
                 'api-id': 'kt10003', // 취소
             }
+            // 공식 명세(kt10003): cncl_qty 사용, '0'이면 잔량 전부. trde_tp 없음
             const body = {
-                acnt_no: accountNo,
                 dmst_stex_tp: 'KRX',
                 stk_cd: stk_cd,
                 orig_ord_no: orig_ord_no,
-                mdfy_qty: String(mdfy_qty),
-                trde_tp: '00'
+                cncl_qty: String(mdfy_qty)
             }
             const response = await this.kiwoomAxios.post(url, body, { headers })
             return response.data
@@ -912,16 +942,19 @@ export class KiwoomService {
                     'authorization': `Bearer ${token}`,
                     'api-id': 'ka10075' 
                 };
+                // 공식 명세(ka10075): all_stk_tp 0:전체/1:종목, trde_tp 0:전체/1:매도/2:매수, stex_tp 필수(0:통합)
                 const body = {
-                    acnt_no: accountNo,
-                    all_stk_tp: all_stk_tp,
+                    all_stk_tp: stk_cd ? '1' : '0',
                     trde_tp: trde_tp,
                     stk_cd: stk_cd,
+                    stex_tp: '0',
                 };
                 const response = await this.kiwoomAxios.post(url, body, { headers });
-                // Check if response has Body or similar list
+                // 공식 응답 배열 키는 oso
                 let orderList = [];
-                if (response.data && response.data.Body) {
+                if (response.data && Array.isArray(response.data.oso)) {
+                    orderList = response.data.oso;
+                } else if (response.data && response.data.Body) {
                     orderList = Array.isArray(response.data.Body) ? response.data.Body : [response.data.Body];
                 } else if (response.data && response.data.list) {
                     orderList = response.data.list;

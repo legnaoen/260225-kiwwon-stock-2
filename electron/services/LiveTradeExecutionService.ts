@@ -1211,9 +1211,10 @@ export class LiveTradeExecutionService {
                         const stockName = targetTicket?.stock_name || stkCd;
                         // [Step 3] Market Sweep (시장가 일괄 청산)
                         console.log(`[LiveTrade] 15:18 시장가 일괄 정정 발송: ${stockName}(${stkCd}) (${mdfyQty}주)`);
-                        this.logEvent('SELL', stkCd, `[매도정정 시도] 15:18 Market Sweep. 원주문:${origOrdNo}, 잔량:${mdfyQty}주 시장가(03) 정정 요청`);
-                        
-                        const res = await this.kiwoom.modifyOrder(account, origOrdNo, stkCd, mdfyQty, 0, '03'); // 시장가는 단가 0, trde_tp 03
+                        this.logEvent('SELL', stkCd, `[매도정정 시도] 15:18 Market Sweep. 원주문:${origOrdNo}, 잔량:${mdfyQty}주 취소 후 시장가 재주문 요청`);
+
+                        // 정정(kt10002)으로는 시장가 전환 불가 → 취소 후 시장가 재주문
+                        const res = await this.kiwoom.convertToMarketSell(account, origOrdNo, stkCd, mdfyQty);
                         const data = res?.data || res;
                         const isSuccess = data && (data.return_code === 0 || data.return_code === '0');
                         if (!isSuccess) {
@@ -1226,12 +1227,12 @@ export class LiveTradeExecutionService {
                         const ordNo = String(data?.ord_no || data?.odno || data?.order_no || '');
                         const rspCd = data?.return_code !== undefined ? String(data.return_code) : '';
                         const apiResponseStr = JSON.stringify(data || {}).substring(0, 512);
-                        this.logEvent('SELL', stkCd, `[매도정정 성공] 15:18 Market Sweep. 남은 ${mdfyQty}주 시장가 일괄 정정 완료`, {
+                        this.logEvent('SELL', stkCd, `[매도정정 성공] 15:18 Market Sweep. 남은 ${mdfyQty}주 취소 후 시장가 재주문 완료`, {
                             order_no: ordNo,
                             rsp_cd: rspCd,
                             api_response: apiResponseStr
                         });
-                        this.telegram.sendMessage(`🧹 **[Market Sweep: 시장가 일괄 청산]**\n- 종목: ${stockName}\n- 미체결 잔량: ${mdfyQty}주\n- 시장가(03) 정정 발송됨.`);
+                        this.telegram.sendMessage(`🧹 **[Market Sweep: 시장가 일괄 청산]**\n- 종목: ${stockName}\n- 미체결 잔량: ${mdfyQty}주\n- 취소 후 시장가 재주문 발송됨.`);
                     } else {
                         // [Step 2] 일반 지정가 추적 (현재가 - 1틱)
                         const priceInfo = await this.kiwoom.getStockBasicInfo(stkCd);

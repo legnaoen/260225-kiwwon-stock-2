@@ -4939,8 +4939,21 @@ export class DatabaseService {
             avgPeakDays: number;
             avgTargetHitDays: number;
             targetHitRate: number;
-            alpha: number;
+            alpha: number; // [주의] 시장 대비 초과수익이 아님(= avgClose). 하위 호환용으로만 유지, UI에서는 사용하지 않음
+            /** 아래는 모두 읽기 전용 검증용 추가 필드 (기존 필드 의미는 변경 없음) */
+            realCloseAvg?: number;      // 목표 치환 없는 실제 종가수익 평균
+            closeWinRate?: number;      // 종가 > 0 비율
+            provisionalCount?: number;  // 오늘 장중 미완성 캔들이 계산에 포함된 픽 수
         };
+        integrity?: {
+            checkedPicks: number;
+            flaggedCount: number;
+            entryMismatchCount: number;  // 진입가 vs 진입일 OHLCV 종가 괴리 > 5%
+            returnMismatchCount: number; // 저장 최종수익률 vs OHLCV 재계산 괴리 > 20%p
+            clean: { totalPicks: number; winRate: number; avgPeak: number; avgClose: number; realCloseAvg: number; closeWinRate: number; targetHitRate: number };
+            flagged: Array<{ id: any; stock_code: string; stock_name: string; category: string; pick_date: string; entry_price: number; ohlcv_entry_close: number | null; entry_gap_pct: number | null; stored_final_return: number | null; recomputed_final_return: number; return_gap_pp: number | null; reasons: string[] }>;
+        };
+        stored?: { closedCount: number; avgFinalReturn: number }; // 앱이 저장한 CLOSED 픽의 실제 평균 최종수익률
         byCategory: Record<string, {
             count: number;
             winRate: number;
@@ -4994,6 +5007,19 @@ export class DatabaseService {
             let picksWithPeakDays = 0;
             let totalTargetHitDays = 0;
             let targetHitCount = 0;
+
+            // ── 읽기 전용 검증 집계 (기존 지표에 영향 없음) ──
+            let sumRealClose = 0;
+            let closeWins = 0;
+            let provisionalCount = 0;
+            let storedSum = 0;
+            let storedCnt = 0;
+            const kstMinutes = kstNow.getUTCHours() * 100 + kstNow.getUTCMinutes();
+            const marketOpenNow = kstMinutes < 1540; // 15:40 이전이면 오늘 캔들은 미완성(잠정)
+            const clean = { n: 0, hits: 0, sumPeak: 0, sumClose: 0, sumReal: 0, closeWins: 0, targetHits: 0 };
+            const flagged: NonNullable<ReturnType<DatabaseService['computePerformanceStats']>['integrity']>['flagged'] = [];
+            let entryMismatchCount = 0;
+            let returnMismatchCount = 0;
 
             const categoryStats: Record<string, {
                 count: number; hits: number;
@@ -5071,6 +5097,38 @@ export class DatabaseService {
                 const isHit = peakRet >= targetReturnPct || finalCloseRet >= 3.0;
                 if (isHit) hits++;
 
+                // ── 데이터 정합 검사 (제외하지 않고 표시만; 제외 시 값은 clean 에 별도 집계) ──
+                const entryCandle = (ohlcvMap[p.stock_code] || []).find(c => c.date === entryDate);
+                const entryGapPct = entryCandle && entryCandle.close > 0
+                    ? ((entryPrice - entryCandle.close) / entryCandle.close) * 100 : null;
+                const storedFinal = p.final_return != null ? Number(p.final_return) : null;
+                const returnGapPp = storedFinal !== null && candles.length > 0 ? Math.abs(storedFinal - finalCloseRet) : null;
+                const reasons: string[] = [];
+                if (entryGapPct !== null && Math.abs(entryGapPct) > 5) { reasons.push('진입가-OHLCV종가 괴리>5%'); entryMismatchCount++; }
+                if (returnGapPp !== null && returnGapPp > 20) { reasons.push('저장수익률-재계산 괴리>20%p'); returnMismatchCount++; }
+                if (candles.length > 0 && candles[candles.length - 1].date === today && marketOpenNow) provisionalCount++;
+                if (p.status === 'CLOSED' && storedFinal !== null && Number.isFinite(storedFinal)) { storedSum += storedFinal; storedCnt++; }
+                sumRealClose += finalCloseRet;
+                if (finalCloseRet > 0) closeWins++;
+                const isTargetHit = targetHitDayIndex > 0;
+                if (reasons.length > 0) {
+                    flagged.push({
+                        id: p.id, stock_code: p.stock_code, stock_name: p.stock_name || '', category: p.category || 'UNKNOWN',
+                        pick_date: String(p.pick_date || ''), entry_price: entryPrice,
+                        ohlcv_entry_close: entryCandle ? entryCandle.close : null,
+                        entry_gap_pct: entryGapPct, stored_final_return: storedFinal,
+                        recomputed_final_return: finalCloseRet, return_gap_pp: returnGapPp, reasons
+                    });
+                } else {
+                    clean.n++;
+                    if (isHit) clean.hits++;
+                    clean.sumPeak += peakRet;
+                    clean.sumClose += calculatedClose;
+                    clean.sumReal += finalCloseRet;
+                    if (finalCloseRet > 0) clean.closeWins++;
+                    if (isTargetHit) clean.targetHits++;
+                }
+
                 sumPeak += peakRet;
                 sumClose += calculatedClose;
 
@@ -5110,8 +5168,29 @@ export class DatabaseService {
                 avgPeakDays: picksWithPeakDays > 0 ? totalPeakDays / picksWithPeakDays : 0,
                 avgTargetHitDays: targetHitCount > 0 ? totalTargetHitDays / targetHitCount : 0,
                 targetHitRate: totalPicks > 0 ? (targetHitCount / totalPicks) * 100 : 0,
-                alpha: totalPicks > 0 ? sumClose / totalPicks : 0, // 시장 기준값은 추후 연동
+                alpha: totalPicks > 0 ? sumClose / totalPicks : 0, // [주의] 시장 대비가 아님(= avgClose). 하위 호환용
+                realCloseAvg: totalPicks > 0 ? sumRealClose / totalPicks : 0,
+                closeWinRate: totalPicks > 0 ? (closeWins / totalPicks) * 100 : 0,
+                provisionalCount,
             };
+
+            const integrity = {
+                checkedPicks: totalPicks,
+                flaggedCount: flagged.length,
+                entryMismatchCount,
+                returnMismatchCount,
+                clean: {
+                    totalPicks: clean.n,
+                    winRate: clean.n > 0 ? (clean.hits / clean.n) * 100 : 0,
+                    avgPeak: clean.n > 0 ? clean.sumPeak / clean.n : 0,
+                    avgClose: clean.n > 0 ? clean.sumClose / clean.n : 0,
+                    realCloseAvg: clean.n > 0 ? clean.sumReal / clean.n : 0,
+                    closeWinRate: clean.n > 0 ? (clean.closeWins / clean.n) * 100 : 0,
+                    targetHitRate: clean.n > 0 ? (clean.targetHits / clean.n) * 100 : 0,
+                },
+                flagged: flagged.slice(0, 300),
+            };
+            const stored = { closedCount: storedCnt, avgFinalReturn: storedCnt > 0 ? storedSum / storedCnt : 0 };
 
             const byCategory: Record<string, any> = {};
             for (const [cat, s] of Object.entries(categoryStats)) {
@@ -5125,7 +5204,7 @@ export class DatabaseService {
                 };
             }
 
-            return { overall, byCategory };
+            return { overall, byCategory, integrity, stored };
         } catch (e: any) {
             console.error('[DB] computePerformanceStats error:', e);
             return {

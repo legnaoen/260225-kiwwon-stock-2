@@ -15,8 +15,12 @@ export class KiwoomService {
     private wsManager: KiwoomWebSocketManager | null = null;
     private conditionWsManager: KiwoomConditionWebSocketManager | null = null;
     private apiLogs: any[] = [];
-    private requestQueue: Promise<any> = Promise.resolve();
-    private readonly MIN_REQUEST_INTERVAL = 150; // 150ms gap as per Kiwoom recommendations
+    // 우선순위 요청 큐: 주문(kt1000x)은 조회보다 먼저 처리한다 (청산 주문이 조회 뒤에 밀리지 않도록)
+    private orderQueue: Array<() => Promise<void>> = [];
+    private normalQueue: Array<() => Promise<void>> = [];
+    private queueRunning = false;
+    private readonly MIN_REQUEST_INTERVAL = 220; // 초당 5회 제한의 1초 경계 여유 (200ms 미만이면 1700 오류 위험)
+    private readonly RATE_LIMIT_BACKOFF = 1000; // 요청 제한(1700/429) 시 1초 쉬고 같은 요청 재시도
     private pendingRequestsCount = 0;
     private readonly MAX_PENDING_REQUESTS = 50; // 큐 최대 대기 수 (회로 차단 용)
     
@@ -176,9 +180,49 @@ export class KiwoomService {
         }
     }
 
+    /** 요청 제한 응답 여부: 오류코드 1700(허용 요청 개수 초과) 또는 HTTP 429 */
+    private isRateLimited(x: any): boolean {
+        if (!x) return false;
+        if (x.response?.status === 429) return true;
+        const body = x.response?.data ?? x;
+        if (body && typeof body === 'object') {
+            const rc = String(body.return_code ?? '');
+            if (rc === '1700') return true;
+            return String(body.return_msg || '').includes('1700');
+        }
+        return false;
+    }
+
+    private enqueue<T>(priority: 'order' | 'normal', task: () => Promise<T>): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const job = async () => {
+                try { resolve(await task()); } catch (e) { reject(e); }
+            };
+            (priority === 'order' ? this.orderQueue : this.normalQueue).push(job);
+            void this.pumpQueue();
+        });
+    }
+
+    /** 단일 워커: 주문 큐 → 일반 큐 순으로 하나씩 처리하고 요청 사이 간격을 둔다 */
+    private async pumpQueue() {
+        if (this.queueRunning) return;
+        this.queueRunning = true;
+        try {
+            for (;;) {
+                const job = this.orderQueue.shift() ?? this.normalQueue.shift();
+                if (!job) break;
+                await job();
+                await new Promise(resolve => setTimeout(resolve, this.MIN_REQUEST_INTERVAL));
+            }
+        } finally {
+            this.queueRunning = false;
+        }
+    }
+
     // Retry wrapper for API calls to handle token expiration (8005 errors)
     // 추후 이 곳에 Queue 및 Throttling 로직을 추가하여 속도 제한을 제어할 수 있습니다.
-    private async makeApiRequestWithRetry(apiCallFunc: (token: string) => Promise<any>, options: { cacheKey?: string, ttl?: number } = {}): Promise<any> {
+    private async makeApiRequestWithRetry(apiCallFunc: (token: string) => Promise<any>, options: { cacheKey?: string, ttl?: number, priority?: 'order' | 'normal' } = {}): Promise<any> {
+        const priority = options.priority ?? 'normal';
         // 1. 캐시 체크 (절대 원칙 9.2)
         if (options.cacheKey) {
             const cached = this.cacheStore.get(options.cacheKey);
@@ -189,7 +233,8 @@ export class KiwoomService {
         }
 
         // 2. 회로 차단 체크 (절대 원칙 9.4)
-        if (this.isCircuitHalted) {
+        // 주문(priority 'order')은 회로 차단·대기열 한도에서 제외한다 (청산/취소가 막히면 안 됨)
+        if (priority !== 'order' && this.isCircuitHalted) {
             if (Date.now() - this.lastHaltTime < this.HALT_DURATION) {
                 const remaining = Math.ceil((this.HALT_DURATION - (Date.now() - this.lastHaltTime)) / 1000);
                 throw new Error(`[Circuit Breaker] 키움 서버 과부하로 인해 통신이 일시 중단되었습니다. (${remaining}초 후 재개 또는 설정에서 초기화 가능)`);
@@ -200,20 +245,36 @@ export class KiwoomService {
         }
 
         // 3. 큐 대기 체크
-        if (this.pendingRequestsCount >= this.MAX_PENDING_REQUESTS) {
+        if (priority !== 'order' && this.pendingRequestsCount >= this.MAX_PENDING_REQUESTS) {
             console.error(`[KiwoomService] Circuit Breaker: Too many pending requests (${this.pendingRequestsCount})`);
             throw new Error('서버 요청이 너무 많아 잠시 차단되었습니다. 잠시 후 다시 시도해주세요.');
         }
 
         this.pendingRequestsCount++;
 
-        return this.requestQueue = this.requestQueue.catch(() => {}).then(async () => {
-            const now = Date.now();
-            await new Promise(resolve => setTimeout(resolve, this.MIN_REQUEST_INTERVAL));
-
+        return this.enqueue(priority, async () => {
             try {
                 let token = await this.tokenManager.getAccessToken();
-                let response = await apiCallFunc(token);
+                // 요청 제한(1700/429)은 1초 쉬고 같은 요청을 최대 2회 재시도 (큐 전체가 함께 대기하므로 연쇄 제한 방지)
+                let response: any;
+                for (let attempt = 0; ; attempt++) {
+                    try {
+                        response = await apiCallFunc(token);
+                    } catch (e: any) {
+                        if (attempt < 2 && this.isRateLimited(e)) {
+                            console.warn(`[KiwoomService] 요청 제한 감지 → ${this.RATE_LIMIT_BACKOFF}ms 대기 후 재시도 (${attempt + 1}/2)`);
+                            await new Promise(r => setTimeout(r, this.RATE_LIMIT_BACKOFF));
+                            continue;
+                        }
+                        throw e;
+                    }
+                    if (attempt < 2 && this.isRateLimited(response)) {
+                        console.warn(`[KiwoomService] 요청 제한 응답 → ${this.RATE_LIMIT_BACKOFF}ms 대기 후 재시도 (${attempt + 1}/2)`);
+                        await new Promise(r => setTimeout(r, this.RATE_LIMIT_BACKOFF));
+                        continue;
+                    }
+                    break;
+                }
 
                 // Kiwoom return_code 체크 (0: 성공, 그 외: 오류)
                 const apiData = response; 
@@ -299,8 +360,7 @@ export class KiwoomService {
     public async forceReconnect(): Promise<boolean> {
         console.log('[KiwoomService] 🔄 강제 재연결 시작 (requestQueue + 토큰 + 연결 풀 리셋)...');
         try {
-            // 1. requestQueue 리셋 — Promise 체인 오염 해소
-            this.requestQueue = Promise.resolve();
+            // 1. 대기 카운터 리셋 (큐는 요청별 타임아웃이 있어 체인 오염이 없으므로 대기 작업은 그대로 둔다)
             this.pendingRequestsCount = 0;
 
             // 2. Circuit Breaker 해제
@@ -796,7 +856,7 @@ export class KiwoomService {
             // 지정가 주문인 경우 cond_uv를 아예 포함하지 않아야 오류 방지 가능
             const response = await this.kiwoomAxios.post(url, body, { headers })
             return response.data
-        })
+        }, { priority: 'order' })
     }
 
     /**
@@ -830,7 +890,7 @@ export class KiwoomService {
             console.log(`[KiwoomService] sendSellOrder: code=${stk_cd}, qty=${qty}, price=${price}, trde_tp=${normalizedTrdeType}`);
             const response = await this.kiwoomAxios.post(url, body, { headers })
             return response.data
-        })
+        }, { priority: 'order' })
     }
 
     /**
@@ -860,7 +920,7 @@ export class KiwoomService {
             }
             const response = await this.kiwoomAxios.post(url, body, { headers })
             return response.data
-        })
+        }, { priority: 'order' })
     }
 
     /**
@@ -914,7 +974,7 @@ export class KiwoomService {
             }
             const response = await this.kiwoomAxios.post(url, body, { headers })
             return response.data
-        })
+        }, { priority: 'order' })
     }
 
     /**

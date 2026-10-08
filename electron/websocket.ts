@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron'
 import WebSocket from 'ws'
 import { PriceStore } from './services/PriceStore'
 import { eventBus, SystemEvent } from './utils/EventBus'
+import { KiwoomTokenManager } from './kiwoomApi'
 
 const SOCKET_URL = 'wss://api.kiwoom.com:10000/api/dostk/websocket'
 
@@ -13,6 +14,14 @@ export class KiwoomWebSocketManager {
     private isConnected = false
     private pingInterval: NodeJS.Timeout | null = null
 
+    // ── 자동 재접속 / 무수신 감시 ──
+    private intentionalClose = false
+    private reconnectAttempts = 0
+    private reconnectTimer: NodeJS.Timeout | null = null
+    private forceTokenRefresh = false
+    private lastMessageAt = Date.now()
+    private static readonly STALE_MS = 60 * 1000 // 장중 60초 무수신 시 강제 재접속
+
     constructor(mainWindow: BrowserWindow) {
         this.mainWindow = mainWindow
     }
@@ -20,17 +29,21 @@ export class KiwoomWebSocketManager {
     public async connect(token: string) {
         if (this.isConnected || (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN))) return
 
+        this.intentionalClose = false
         this.accessToken = token
-        this.ws = new WebSocket(SOCKET_URL)
+        const ws = new WebSocket(SOCKET_URL)
+        this.ws = ws
 
-        this.ws.on('open', () => {
+        ws.on('open', () => {
             console.log('WebSocket Connected to Kiwoom')
             this.isConnected = true
+            this.lastMessageAt = Date.now()
             this.login()
             this.startPing()
         })
 
-        this.ws.on('message', (data) => {
+        ws.on('message', (data) => {
+            this.lastMessageAt = Date.now()
             try {
                 const msgStr = data.toString()
                 const parsed = JSON.parse(msgStr)
@@ -40,15 +53,42 @@ export class KiwoomWebSocketManager {
             }
         })
 
-        this.ws.on('close', () => {
-            console.log('WebSocket Disconnected')
+        ws.on('close', (code: number, reason: Buffer) => {
+            console.log(`WebSocket Disconnected (code=${code}${reason?.length ? `, reason=${reason.toString()}` : ''})`)
+            // 이미 새 소켓으로 교체됐다면 낡은 소켓의 close 이벤트는 무시
+            if (this.ws !== ws) return
             this.isConnected = false
+            this.ws = null
             this.stopPing()
+            if (!this.intentionalClose) this.scheduleReconnect()
         })
 
-        this.ws.on('error', (error) => {
+        ws.on('error', (error) => {
             console.error('WebSocket Error:', error)
         })
+    }
+
+    /**
+     * 지수 백오프(1s→2s→…→30s)로 재접속. 매번 토큰을 다시 받아 만료/무효 토큰으로 인한 반복 실패를 막는다.
+     * 구독 목록(registeredItems)은 유지되므로 LOGIN 성공 시 자동 재등록된다.
+     */
+    private scheduleReconnect() {
+        if (this.reconnectTimer || this.intentionalClose) return
+        const delay = Math.min(30000, 1000 * Math.pow(2, this.reconnectAttempts))
+        this.reconnectAttempts++
+        console.log(`[WS] ${Math.round(delay / 1000)}초 후 재접속 시도 (#${this.reconnectAttempts})`)
+        this.reconnectTimer = setTimeout(async () => {
+            this.reconnectTimer = null
+            if (this.intentionalClose) return
+            try {
+                const token = await KiwoomTokenManager.getInstance().getAccessToken(this.forceTokenRefresh)
+                this.forceTokenRefresh = false
+                await this.connect(token)
+            } catch (e: any) {
+                console.error('[WS] 재접속 준비 실패:', e?.message || e)
+                this.scheduleReconnect()
+            }
+        }, delay)
     }
 
     private login() {
@@ -64,12 +104,22 @@ export class KiwoomWebSocketManager {
 
     private startPing() {
         this.stopPing()
+        // 서버 PING은 handleMessage에서 그대로 에코한다. 여기서는 장중 무수신(좀비 연결)만 감시한다.
         this.pingInterval = setInterval(() => {
-            if (this.ws && this.isConnected) {
-                // Send PING if required, or wait for server PING and respond
-                // Based on Python example, we respond to server PING with the same message
+            if (!this.ws || !this.isConnected) return
+            if (this.isMarketHours() && Date.now() - this.lastMessageAt > KiwoomWebSocketManager.STALE_MS) {
+                console.warn(`[WS] 장중 ${Math.round((Date.now() - this.lastMessageAt) / 1000)}초 무수신 → 강제 재접속`)
+                this.forceTokenRefresh = true
+                this.ws.terminate() // close 이벤트 → scheduleReconnect
             }
-        }, 30000)
+        }, 15000)
+    }
+
+    private isMarketHours(): boolean {
+        const kst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }))
+        const day = kst.getDay()
+        const t = kst.getHours() * 100 + kst.getMinutes()
+        return day >= 1 && day <= 5 && t >= 900 && t <= 1530
     }
 
     private stopPing() {
@@ -127,8 +177,12 @@ export class KiwoomWebSocketManager {
         if (data.trnm === 'LOGIN') {
             if (data.return_code !== '0' && data.return_code !== 0) {
                 console.error('WS Login Failed:', data.return_msg)
+                // 토큰 문제일 수 있으므로 다음 재접속 때 토큰을 새로 발급받는다
+                this.forceTokenRefresh = true
+                this.ws?.close()
             } else {
                 console.log('WS Login Success')
+                this.reconnectAttempts = 0
                 // Always register items to ensure 0s (market status) is active
                 this.registerItems(Array.from(this.registeredItems))
             }
@@ -294,6 +348,11 @@ export class KiwoomWebSocketManager {
     }
 
     public disconnect() {
+        this.intentionalClose = true
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer)
+            this.reconnectTimer = null
+        }
         this.ws?.close()
         this.stopPing()
         this.isConnected = false

@@ -1,3 +1,4 @@
+import './profileGuard' // 반드시 첫 import: userData 경로 분리·단일 인스턴스 잠금 (다른 모듈보다 먼저 평가되어야 함)
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'node:path'
 import { spawn, ChildProcess } from 'node:child_process'

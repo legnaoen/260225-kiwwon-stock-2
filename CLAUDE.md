@@ -32,3 +32,7 @@
 - `src/components/`: Reusable React components.
 - `docs/`: Technical manuals and API specifications (Local).
 
+## 🛡️ 실행 프로필 (운영 데이터 보호)
+- `npm run dev`(개발 실행)는 `%APPDATA%\kiwoom-trader-dev`를 사용한다. 운영 앱(`%APPDATA%\kiwoom-trader`)의 DB·API 키·실거래 설정과 분리되며, dev에는 키가 없어 주문이 나가지 않는다. 개발 중 키움 연동 시험이 필요하면 dev 설정 화면에 키를 직접 입력한다.
+- 운영 데이터로 개발 실행이 꼭 필요할 때만 `KIWOOM_PROFILE=prod`, 경로 지정은 `KIWOOM_USER_DATA=<경로>`.
+- 운영/custom 프로필은 단일 인스턴스 잠금(두 번째 실행은 즉시 종료 → 크론·주문 이중 실행 방지). 구현: `electron/profileGuard.ts` (main.ts 첫 import 유지 필수).
